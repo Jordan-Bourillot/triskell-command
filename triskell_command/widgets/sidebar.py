@@ -1,0 +1,298 @@
+"""Sidebar de navigation premium — logo Triskell + items avec indicateur or."""
+
+from __future__ import annotations
+
+import logging
+import sys
+from pathlib import Path
+from typing import Callable
+
+import customtkinter as ctk
+
+from .. import theme as T
+from . import icons as I
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_asset(filename: str) -> Path | None:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        p = Path(meipass) / "assets" / filename
+        if p.exists():
+            return p
+    here = Path(__file__).resolve()
+    for parent in (here.parent.parent.parent, here.parent.parent.parent.parent):
+        p = parent / "assets" / filename
+        if p.exists():
+            return p
+    return None
+
+
+# Définition statique des entrées de la sidebar
+SIDEBAR_SECTIONS = [
+    ("PILOTE AUTOMATIQUE", [
+        ("autopilot",  "sparkle",   "Auto-pilote"),
+        ("drafts",     "check",     "À valider"),
+    ]),
+    ("OUTILS MANUELS", [
+        ("prospects",  "search",    "Trouver"),
+        ("compose",    "pen",       "Rédiger"),
+        ("templates",  "doc",       "Modèles"),
+        ("campaigns",  "mail",      "Envoyer"),
+        ("publish",    "broadcast", "Publier"),
+        ("dashboard",  "chart",     "Tableau de bord"),
+    ]),
+]
+# Compat : on garde NAV_ITEMS comme la concat de toutes les sections
+NAV_ITEMS = [item for _label, items in SIDEBAR_SECTIONS for item in items]
+
+FOOTER_ITEMS = [
+    ("help",       "external",  "Aide"),
+    ("config",     "settings",  "Réglages"),
+]
+
+
+class SidebarItem(ctk.CTkFrame):
+    """Bouton de navigation avec indicateur latéral or quand actif."""
+
+    HEIGHT = 44
+
+    def __init__(
+        self,
+        master,
+        *,
+        view_id: str,
+        icon_name: str,
+        label: str,
+        on_click: Callable[[str], None],
+        colors: T.ThemeColors,
+        is_active: bool = False,
+    ):
+        super().__init__(master, fg_color="transparent",
+                          height=self.HEIGHT, corner_radius=0)
+        self.pack_propagate(False)
+        self.view_id = view_id
+        self._on_click = on_click
+        self._colors = colors
+        self._is_active = is_active
+        self._icon_name = icon_name
+
+        # Indicateur latéral (barre verticale or, 3px) — révélé si actif
+        self._indicator = ctk.CTkFrame(
+            self, fg_color="transparent", width=3, corner_radius=0,
+        )
+        self._indicator.pack(side="left", fill="y")
+        self._indicator.pack_propagate(False)
+
+        # Conteneur cliquable (icône + label)
+        self._row = ctk.CTkFrame(self, fg_color="transparent")
+        self._row.pack(side="left", fill="both", expand=True,
+                        padx=(T.SPACE_MD, T.SPACE_SM))
+
+        self._icon_label = ctk.CTkLabel(self._row, text="", width=24)
+        self._icon_label.pack(side="left", padx=(0, T.SPACE_MD))
+
+        self._label = ctk.CTkLabel(
+            self._row, text=label,
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY),
+            text_color=colors.sidebar_text,
+            anchor="w",
+        )
+        self._label.pack(side="left", fill="x", expand=True)
+
+        # Hover handlers (sur tous les widgets pour que la zone soit cliquable)
+        for w in (self, self._row, self._icon_label, self._label):
+            w.bind("<Button-1>", self._handle_click)
+            w.bind("<Enter>", self._on_enter)
+            w.bind("<Leave>", self._on_leave)
+
+        self.set_active(is_active)
+
+    def _handle_click(self, _event=None):
+        self._on_click(self.view_id)
+
+    def _on_enter(self, _event=None):
+        if not self._is_active:
+            self._row.configure(fg_color=self._colors.panel)
+            self._label.configure(text_color=self._colors.text_primary)
+            self._refresh_icon(self._colors.text_primary)
+
+    def _on_leave(self, _event=None):
+        if not self._is_active:
+            self._row.configure(fg_color="transparent")
+            self._label.configure(text_color=self._colors.sidebar_text)
+            self._refresh_icon(self._colors.sidebar_text)
+
+    def _refresh_icon(self, color_hex: str) -> None:
+        icon = I.get_icon(self._icon_name, color_hex, size=20)
+        if icon is not None:
+            self._icon_label.configure(image=icon)
+            # Garde une ref pour empêcher le GC
+            self._icon_label._icon_ref = icon  # type: ignore
+
+    def set_active(self, active: bool) -> None:
+        self._is_active = active
+        c = self._colors
+        if active:
+            # Fond panel subtil + indicateur or + texte clair + icône or
+            self._row.configure(fg_color=c.panel_elevated)
+            self._indicator.configure(fg_color=c.gold)
+            self._label.configure(
+                text_color=c.gold,
+                font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY, "bold"),
+            )
+            self._refresh_icon(c.gold)
+        else:
+            self._row.configure(fg_color="transparent")
+            self._indicator.configure(fg_color="transparent")
+            self._label.configure(
+                text_color=c.sidebar_text,
+                font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY, "normal"),
+            )
+            self._refresh_icon(c.sidebar_text)
+
+
+class Sidebar(ctk.CTkFrame):
+    """Sidebar gauche premium : logo Triskell + nav + footer signature."""
+
+    def __init__(
+        self,
+        master,
+        *,
+        colors: T.ThemeColors,
+        on_navigate: Callable[[str], None],
+        active_view: str = "prospects",
+    ):
+        super().__init__(
+            master,
+            width=T.SIDEBAR_WIDTH,
+            fg_color=colors.sidebar_bg,
+            corner_radius=0,
+        )
+        self.pack_propagate(False)
+        self._colors = colors
+        self._on_navigate = on_navigate
+        self._items: dict[str, SidebarItem] = {}
+        self._active = active_view
+
+        # ----- Header (logo + nom) -----
+        header = ctk.CTkFrame(self, fg_color="transparent", height=96)
+        header.pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_LG + 4, T.SPACE_LG))
+        header.pack_propagate(False)
+
+        # Logo
+        self._logo_image_ref = None
+        logo_path = _resolve_asset("triskell.png")
+        if logo_path is not None:
+            try:
+                from PIL import Image
+                pil_img = Image.open(logo_path).convert("RGBA")
+                ctk_img = ctk.CTkImage(
+                    light_image=pil_img, dark_image=pil_img, size=(56, 56),
+                )
+                self._logo_image_ref = ctk_img
+                ctk.CTkLabel(header, image=ctk_img, text="").pack(
+                    side="left", padx=(0, T.SPACE_MD),
+                )
+            except Exception as exc:
+                logger.debug("Échec chargement logo : %s", exc)
+                self._logo_image_ref = None
+
+        if self._logo_image_ref is None:
+            ctk.CTkLabel(
+                header, text="⛯",
+                font=(T.FONT_FAMILY_FALLBACK, 32, "bold"),
+                text_color=colors.gold,
+            ).pack(side="left", padx=(0, T.SPACE_MD))
+
+        text_block = ctk.CTkFrame(header, fg_color="transparent")
+        text_block.pack(side="left", fill="x", expand=True)
+
+        ctk.CTkLabel(
+            text_block, text=T.BRAND_NAME,
+            font=(T.FONT_FAMILY_DISPLAY, T.FONT_SIZE_TITLE, "bold"),
+            text_color=colors.text_primary, anchor="w",
+        ).pack(fill="x", anchor="w", pady=(8, 0))
+
+        ctk.CTkLabel(
+            text_block, text=T.BRAND_PRODUCT.upper(),
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+            text_color=colors.gold, anchor="w",
+        ).pack(fill="x", anchor="w", pady=(2, 0))
+
+        # Séparateur fin or sous le header
+        sep = ctk.CTkFrame(self, fg_color=colors.border, height=1, corner_radius=0)
+        sep.pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_LG))
+
+        # ----- Sections de navigation regroupées -----
+        for sec_idx, (section_label, items) in enumerate(SIDEBAR_SECTIONS):
+            # Espacement avant chaque section (sauf la 1re)
+            top_pad = T.SPACE_LG if sec_idx > 0 else 0
+            ctk.CTkLabel(
+                self, text=section_label,
+                font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+                text_color=colors.text_muted, anchor="w",
+            ).pack(fill="x", padx=T.SPACE_LG, pady=(top_pad, T.SPACE_SM))
+
+            for view_id, icon_name, label in items:
+                item = SidebarItem(
+                    self, view_id=view_id, icon_name=icon_name, label=label,
+                    on_click=self._handle_click, colors=colors,
+                    is_active=(view_id == active_view),
+                )
+                item.pack(fill="x", pady=1)
+                self._items[view_id] = item
+
+        # ----- Spacer -----
+        ctk.CTkFrame(self, fg_color="transparent").pack(fill="both", expand=True)
+
+        # ----- Section: système / réglages -----
+        ctk.CTkLabel(
+            self, text="SYSTÈME",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+            text_color=colors.text_muted, anchor="w",
+        ).pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_SM))
+
+        for view_id, icon_name, label in FOOTER_ITEMS:
+            item = SidebarItem(
+                self, view_id=view_id, icon_name=icon_name, label=label,
+                on_click=self._handle_click, colors=colors,
+                is_active=(view_id == active_view),
+            )
+            item.pack(fill="x", pady=1)
+            self._items[view_id] = item
+
+        # Séparateur fin avant footer
+        sep_bottom = ctk.CTkFrame(self, fg_color=colors.border,
+                                   height=1, corner_radius=0)
+        sep_bottom.pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_MD, T.SPACE_MD))
+
+        # Footer signature : "🌊 Bretagne · 100% français" + version
+        ctk.CTkLabel(
+            self, text=T.BRAND_LOCATION,
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY),
+            text_color=colors.text_muted,
+            wraplength=T.SIDEBAR_WIDTH - 32,
+            justify="center",
+        ).pack(fill="x", padx=T.SPACE_LG, pady=(0, 4))
+
+        ctk.CTkLabel(
+            self, text=T.APP_VERSION_LABEL,
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+            text_color=colors.gold,
+        ).pack(fill="x", pady=(0, T.SPACE_LG))
+
+    def _handle_click(self, view_id: str) -> None:
+        if view_id == self._active:
+            return
+        self.set_active(view_id)
+        self._on_navigate(view_id)
+
+    def set_active(self, view_id: str) -> None:
+        if view_id not in self._items:
+            return
+        if self._active in self._items:
+            self._items[self._active].set_active(False)
+        self._items[view_id].set_active(True)
+        self._active = view_id

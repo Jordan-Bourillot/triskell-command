@@ -1,0 +1,30 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ===== PyInstaller / Inno Setup =====
+build/
+dist/
+Output/
+*.exe
+*.zip
+*.spec.bak
+
+# ===== Secrets / local state =====
+.env
+.env.local
+.env.*.local
+~/.triskell-command/
+
+# ===== IDE / OS =====
+.vscode/
+.idea/
+desktop.ini
+Thumbs.db
+.DS_Store
+
+# ===== Logs =====
+*.log

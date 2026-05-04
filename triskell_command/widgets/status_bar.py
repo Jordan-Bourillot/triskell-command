@@ -1,0 +1,232 @@
+"""Status bar haute — état du système et KPIs en un coup d'œil."""
+
+from __future__ import annotations
+
+from typing import Callable
+
+import customtkinter as ctk
+
+from .. import theme as T
+
+
+class StatusPill(ctk.CTkFrame):
+    """Pastille d'état compacte : dot coloré + label + valeur, sur une seule ligne."""
+
+    def __init__(
+        self,
+        master,
+        *,
+        label: str,
+        ok: bool,
+        colors: T.ThemeColors,
+        on_click: Callable[[], None] | None = None,
+        ok_text: str = "OK",
+        ko_text: str = "à configurer",
+    ):
+        super().__init__(
+            master,
+            fg_color="transparent",
+            corner_radius=0,
+        )
+        c = colors
+
+        # Dot coloré (filled circle Unicode)
+        dot_color = c.success if ok else c.warning
+        dot = ctk.CTkLabel(
+            self, text="●",
+            font=(T.FONT_FAMILY_FALLBACK, 11),
+            text_color=dot_color,
+        )
+        dot.pack(side="left", padx=(0, 6))
+
+        # Label en caps subtle
+        ctk.CTkLabel(
+            self, text=label.upper(),
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+            text_color=c.text_muted,
+        ).pack(side="left", padx=(0, 6))
+
+        # Valeur (état) — couleur selon ok/ko
+        ctk.CTkLabel(
+            self,
+            text=ok_text if ok else ko_text,
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+            text_color=c.text_secondary if ok else c.warning,
+        ).pack(side="left")
+
+        if on_click:
+            for w in (self, dot):
+                w.bind("<Button-1>", lambda _e: on_click())
+                try:
+                    w.configure(cursor="hand2")
+                except Exception:
+                    pass
+            # Toute la pill devient cliquable
+            for child in self.winfo_children():
+                child.bind("<Button-1>", lambda _e: on_click())
+                try:
+                    child.configure(cursor="hand2")
+                except Exception:
+                    pass
+
+
+class StatusBar(ctk.CTkFrame):
+    """Barre d'état globale en haut de la window principale.
+
+    Affiche en temps réel :
+    - 🟢/🟠 Service IA (clé configurée ?)
+    - 🟢/🟠 Mail (SMTP configuré ?)
+    - 🟢/⚪ Pilote auto (activé ?)
+    - 📬 N drafts en attente
+    - 📊 N prospects, M envoyés aujourd'hui
+    """
+
+    HEIGHT = 36
+
+    def __init__(
+        self,
+        master,
+        *,
+        colors: T.ThemeColors,
+        app_state,
+        on_navigate: Callable[[str], None],
+    ):
+        super().__init__(
+            master,
+            fg_color=colors.bg_alt,
+            corner_radius=0,
+            height=self.HEIGHT,
+        )
+        self.pack_propagate(False)
+        self._colors = colors
+        self._app_state = app_state
+        self._on_navigate = on_navigate
+
+        # Container interne (padding horizontal)
+        self._inner = ctk.CTkFrame(self, fg_color="transparent")
+        self._inner.pack(fill="both", expand=True, padx=T.SPACE_LG, pady=4)
+
+        self.refresh()
+
+    def refresh(self) -> None:
+        """Recalcule l'état complet et reconstruit la barre."""
+        for w in self._inner.winfo_children():
+            w.destroy()
+
+        c = self._colors
+
+        # === État IA ===
+        ai_ok = self._has_ai_key()
+        StatusPill(
+            self._inner, label="IA",
+            ok=ai_ok, colors=c,
+            on_click=lambda: self._on_navigate("config"),
+            ok_text="prête", ko_text="clé manquante",
+        ).pack(side="left", padx=(0, T.SPACE_LG))
+
+        # === État Mail ===
+        mail_ok = self._has_smtp()
+        StatusPill(
+            self._inner, label="MAIL",
+            ok=mail_ok, colors=c,
+            on_click=lambda: self._on_navigate("config"),
+            ok_text="prêt", ko_text="à configurer",
+        ).pack(side="left", padx=(0, T.SPACE_LG))
+
+        # === Pilote auto ===
+        pilot_on = self._is_pilot_enabled()
+        StatusPill(
+            self._inner, label="PILOTE",
+            ok=pilot_on, colors=c,
+            on_click=lambda: self._on_navigate("autopilot"),
+            ok_text="activé", ko_text="désactivé",
+        ).pack(side="left", padx=(0, T.SPACE_LG))
+
+        # Spacer
+        spacer = ctk.CTkFrame(self._inner, fg_color="transparent")
+        spacer.pack(side="left", fill="x", expand=True)
+
+        # === Drafts en attente ===
+        n_drafts = self._count_pending_drafts()
+        if n_drafts > 0:
+            self._make_kpi_link(
+                self._inner,
+                f"{n_drafts} mail{'s' if n_drafts > 1 else ''} à valider",
+                color=c.gold,
+                on_click=lambda: self._on_navigate("drafts"),
+            )
+
+        # === Prospects total ===
+        n_prospects = self._count_prospects()
+        self._make_kpi_link(
+            self._inner,
+            f"{n_prospects} prospect{'s' if n_prospects > 1 else ''}",
+            color=c.text_secondary,
+            on_click=lambda: self._on_navigate("prospects"),
+        )
+
+        # === Envoyés aujourd'hui ===
+        n_today = self._count_today()
+        if n_today > 0:
+            self._make_kpi_link(
+                self._inner,
+                f"{n_today} envoyé{'s' if n_today > 1 else ''} aujourd'hui",
+                color=c.success,
+                on_click=lambda: self._on_navigate("dashboard"),
+            )
+
+    def _make_kpi_link(self, parent, text, *, color, on_click):
+        c = self._colors
+        lbl = ctk.CTkLabel(
+            parent, text=text,
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL, "bold"),
+            text_color=color,
+        )
+        lbl.pack(side="left", padx=(0, T.SPACE_LG))
+        if on_click:
+            try:
+                lbl.configure(cursor="hand2")
+            except Exception:
+                pass
+            lbl.bind("<Button-1>", lambda _e: on_click())
+
+    # ------------------------------------------------------------------
+    # Helpers : interroge l'état du système
+    # ------------------------------------------------------------------
+    def _has_ai_key(self) -> bool:
+        keys = self._app_state.get("ai", "api_keys", default={}) or {}
+        provider = self._app_state.get("ai", "selected_provider", default="anthropic")
+        return bool(keys.get(provider))
+
+    def _has_smtp(self) -> bool:
+        outreach = self._app_state.get("outreach", default={}) or {}
+        return all(outreach.get(k) for k in
+                   ("smtp_host", "smtp_port", "smtp_user", "smtp_password", "from_email"))
+
+    def _is_pilot_enabled(self) -> bool:
+        try:
+            from triskell_core.prospect.pipeline import PipelineConfig
+            return PipelineConfig.load().enabled
+        except Exception:
+            return False
+
+    def _count_prospects(self) -> int:
+        try:
+            from triskell_core.prospect.core.crm import CRM
+            return len(CRM().all())
+        except Exception:
+            return 0
+
+    def _count_pending_drafts(self) -> int:
+        try:
+            from triskell_core.prospect.pipeline import list_pending_drafts
+            return len(list_pending_drafts())
+        except Exception:
+            return 0
+
+    def _count_today(self) -> int:
+        try:
+            from triskell_core.prospect.outreach.smtp_sender import _load_today_count
+            return _load_today_count()
+        except Exception:
+            return 0
