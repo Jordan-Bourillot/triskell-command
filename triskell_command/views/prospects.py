@@ -23,7 +23,7 @@ from .base import BaseView
 
 class ProspectsView(BaseView):
     title = "Trouver tes prospects"
-    subtitle = "Toutes tes pistes : créateurs YouTube/Twitch/Reddit, entreprises FR, commerces locaux."
+    subtitle = "Toutes tes pistes : créateurs sur 9 plateformes, entreprises FR, commerces locaux."
 
     def build(self) -> None:
         c = self.colors
