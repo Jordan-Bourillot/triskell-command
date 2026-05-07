@@ -18,3 +18,7 @@ pypdf>=4.0        # PDF
 # l'intégration GSC est désactivée gracieusement, le reste tourne)
 # google-auth>=2.30
 # google-api-python-client>=2.130
+# Le Phare — Génération PDF des rapports clients (optionnel ; sans ces
+# paquets, le rapport est produit en HTML imprimable depuis le navigateur)
+# weasyprint>=60          # rendu fidèle HTML/CSS → PDF
+# reportlab>=4.0          # alternative basée layout (utilisé par bulletin_pdf.py)

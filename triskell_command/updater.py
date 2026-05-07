@@ -35,7 +35,15 @@ from typing import Callable, Optional
 logger = logging.getLogger("updater")
 
 # --- À configurer (modifie selon ton repo réel) ---
-APP_VERSION = "0.1.0"
+# La version est lue depuis theme.APP_VERSION_LABEL (single source of truth).
+# Si l'import échoue (par ex. en mode test isolé), on tombe sur le fallback.
+try:
+    from . import theme as _T
+    APP_VERSION = (_T.APP_VERSION_LABEL or "0.0.0").lstrip("vV")
+    if APP_VERSION.count(".") < 2:
+        APP_VERSION += ".0"  # "0.4" → "0.4.0" (semver)
+except Exception:
+    APP_VERSION = "0.4.0"
 GITHUB_OWNER = "Jordan-Bourillot"
 GITHUB_REPO = "triskell-command"
 UPDATE_INSTALLER_PATTERN = "TriskellCommand_Setup*.exe"

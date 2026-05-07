@@ -245,7 +245,7 @@ update public.shared_settings
 set value = value || jsonb_build_object(
     'outreach_smtp_from',           '',
     'outreach_max_per_day',         10,
-    'outreach_follow_up_days',      [7, 14],
+    'outreach_follow_up_days',      '[7, 14]'::jsonb,
     'outreach_auto_send',           false,
     'ab_test_min_duration_days',    14,
     'ab_test_min_impressions',      500,

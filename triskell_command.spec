@@ -6,6 +6,7 @@ Output: dist/Triskell Command/Triskell Command.exe
 """
 
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_all
 
 # Racine du projet
 ROOT = Path(SPECPATH).resolve()
@@ -19,6 +20,20 @@ datas = [
     (str(ROOT / "assets" / "triskell.png"), "assets"),
 ]
 
+# Collect ALL the supabase ecosystem (lazy imports + namespace packages)
+binaries_extra = []
+hiddenimports_extra = []
+for pkg in ("supabase", "gotrue", "postgrest", "realtime", "storage3",
+            "supafunc", "httpx", "httpcore", "h11", "h2", "websockets",
+            "deprecation", "strenum", "anyio"):
+    try:
+        d, b, h = collect_all(pkg)
+        datas += d
+        binaries_extra += b
+        hiddenimports_extra += h
+    except Exception:
+        pass  # package absent, skip
+
 # CustomTkinter packagé : ses assets sont auto-détectés par PyInstaller
 # si on l'importe normalement. On force juste les modules cachés.
 hiddenimports = [
@@ -29,6 +44,15 @@ hiddenimports = [
     "bs4",
     "lxml",
     "lxml.etree",
+    # Supabase SDK + ses dépendances (lazy imports → PyInstaller ne les détecte pas seul)
+    "supabase",
+    "gotrue",
+    "postgrest",
+    "realtime",
+    "storage3",
+    "supafunc",
+    "httpx",
+    "websockets",
     # triskell_core
     "triskell_core",
     "triskell_core.prospect",
@@ -67,9 +91,9 @@ hiddenimports = [
 a = Analysis(
     ["run.py"],
     pathex=[str(ROOT), str(CORE_ROOT)],
-    binaries=[],
+    binaries=binaries_extra,
     datas=datas,
-    hiddenimports=hiddenimports,
+    hiddenimports=hiddenimports + hiddenimports_extra,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -95,6 +95,87 @@ def deactivate_site(site_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# phare_clients (1:1 avec phare_sites, créé par migration 08)
+# ---------------------------------------------------------------------------
+def get_client_by_site(site_id: str) -> Optional[dict]:
+    """Renvoie la fiche client liée à un site, ou None s'il n'y en a pas."""
+    sb = _sb()
+    if sb is None:
+        return None
+    try:
+        rows = (sb.table("phare_clients").select("*")
+                .eq("site_id", site_id).limit(1).execute().data)
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("phare.get_client_by_site: %s", exc)
+        return None
+
+
+def upsert_client(client: dict) -> Optional[dict]:
+    """Crée ou met à jour la fiche client. La contrainte unique sur
+    `site_id` garantit le 1:1 avec phare_sites.
+    """
+    sb = _sb()
+    if sb is None:
+        return None
+    try:
+        client = dict(client)
+        client["updated_at"] = datetime.now(timezone.utc).isoformat()
+        rows = (sb.table("phare_clients")
+                .upsert(client, on_conflict="site_id").execute().data)
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("phare.upsert_client: %s", exc)
+        return None
+
+
+def delete_client(client_id: str) -> bool:
+    sb = _sb()
+    if sb is None:
+        return False
+    try:
+        sb.table("phare_clients").delete().eq("id", client_id).execute()
+        return True
+    except Exception as exc:
+        logger.warning("phare.delete_client: %s", exc)
+        return False
+
+
+def list_clients_with_cadence(cadence: str) -> list[dict]:
+    """Retourne toutes les fiches clients filtrées par cadence
+    ('auto_mensuel' ou 'manuel'). Utilisé par le scheduler.
+    """
+    sb = _sb()
+    if sb is None:
+        return []
+    try:
+        return (sb.table("phare_clients").select("*")
+                .eq("report_cadence", cadence).execute().data) or []
+    except Exception as exc:
+        logger.warning("phare.list_clients_with_cadence: %s", exc)
+        return []
+
+
+def mark_report_sent(client_id: str, pdf_path: str = "") -> bool:
+    """Met à jour `last_report_sent_at` après envoi réussi d'un rapport."""
+    sb = _sb()
+    if sb is None:
+        return False
+    try:
+        patch = {
+            "last_report_sent_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if pdf_path:
+            patch["last_report_pdf_path"] = pdf_path
+        sb.table("phare_clients").update(patch).eq("id", client_id).execute()
+        return True
+    except Exception as exc:
+        logger.warning("phare.mark_report_sent: %s", exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # phare_audits
 # ---------------------------------------------------------------------------
 def insert_audit(audit: dict) -> Optional[dict]:
