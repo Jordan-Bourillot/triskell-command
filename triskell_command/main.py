@@ -139,6 +139,26 @@ class TriskellCommandApp(ctk.CTk):
             logger.debug("Claude FAB non créé : %s", exc)
             self.claude_fab = None
 
+        # Bouton flottant Chat Thomas — juste au-dessus du FAB Claude.
+        # Même style, vert pour distinguer, badge avec compteur de non-lus.
+        try:
+            from .widgets.thomas_fab import ThomasFAB, SIZE as _THOMAS_SIZE
+            self.thomas_fab = ThomasFAB(
+                self, colors=self.colors,
+                on_click=lambda: self.show_view("thomas"),
+            )
+            # Position : 12 px de gap au-dessus du Claude FAB (lui à y=-32)
+            self.thomas_fab.place(relx=1.0, rely=1.0,
+                                    x=-32, y=-32 - _THOMAS_SIZE - 12,
+                                    anchor="se")
+            self.thomas_fab.lift()
+        except Exception as exc:
+            logger.debug("Thomas FAB non créé : %s", exc)
+            self.thomas_fab = None
+        # Le dialog est ouvert pour mark_read → on n'a pas besoin de garder
+        # une ref ; mais on suit son ouverture pour ne pas en empiler 2.
+        self._thomas_dialog = None
+
         # Affiche la dernière vue active (ou la Matinale par défaut)
         initial = self.app_state.get("active_view", default="morning")
         self.show_view(initial)
@@ -188,6 +208,39 @@ class TriskellCommandApp(ctk.CTk):
                 self, colors=self.colors, app_state=self.app_state,
                 on_navigate=self.show_view,
             )
+            self.sidebar.set_active(self.app_state.get(
+                "active_view", default="morning"))
+            return
+        # Cas spécial : "thomas" ouvre la modale de chat 1-à-1
+        if view_id == "thomas":
+            # Évite d'empiler 2 dialogs si l'utilisateur reclique
+            existing = getattr(self, "_thomas_dialog", None)
+            if existing is not None:
+                try:
+                    if existing.winfo_exists():
+                        existing.lift()
+                        existing.focus_force()
+                        return
+                except Exception:
+                    pass
+            from .widgets.thomas_dialog import ThomasDialog
+
+            def _on_closed():
+                self._thomas_dialog = None
+                # Refresh du compteur de non-lus après fermeture
+                self._refresh_unread_badge()
+
+            self._thomas_dialog = ThomasDialog(
+                self, colors=self.colors, app_state=self.app_state,
+                on_closed=_on_closed,
+            )
+            # Le dialog marque les reçus comme lus à l'ouverture → on
+            # éteint le badge tout de suite côté UI.
+            try:
+                if getattr(self, "thomas_fab", None) is not None:
+                    self.thomas_fab.set_unread(0)
+            except Exception:
+                pass
             self.sidebar.set_active(self.app_state.get(
                 "active_view", default="morning"))
             return
@@ -267,6 +320,8 @@ class TriskellCommandApp(ctk.CTk):
         self.bind("<Control-t>", lambda _e: self.cycle_theme())
         # F12 → Allô Claude
         self.bind("<F12>", lambda _e: self.show_view("claude"))
+        # F11 → Chat avec l'équipier (Thomas / Jordan)
+        self.bind("<F11>", lambda _e: self.show_view("thomas"))
 
     def _refresh_current(self) -> None:
         if self._current_view is not None:
@@ -347,7 +402,7 @@ class TriskellCommandApp(ctk.CTk):
         )
 
     def _rebuild_claude_fab(self) -> None:
-        """Recrée le FAB Claude avec la nouvelle palette."""
+        """Recrée les FABs Claude + Thomas avec la nouvelle palette."""
         had_attention = False
         try:
             if getattr(self, "claude_fab", None) is not None:
@@ -370,7 +425,216 @@ class TriskellCommandApp(ctk.CTk):
         except Exception as exc:
             logger.debug("rebuild claude_fab: %s", exc)
             self.claude_fab = None
+        # FAB Thomas (rebuild miroir)
+        prev_unread = 0
+        try:
+            if getattr(self, "thomas_fab", None) is not None:
+                prev_unread = int(getattr(self.thomas_fab, "_unread", 0))
+                self.thomas_fab.destroy()
+        except Exception:
+            pass
+        try:
+            from .widgets.thomas_fab import ThomasFAB, SIZE as _THOMAS_SIZE
+            self.thomas_fab = ThomasFAB(
+                self, colors=self.colors,
+                on_click=lambda: self.show_view("thomas"),
+            )
+            self.thomas_fab.place(relx=1.0, rely=1.0,
+                                    x=-32, y=-32 - _THOMAS_SIZE - 12,
+                                    anchor="se")
+            self.thomas_fab.lift()
+            if prev_unread > 0:
+                self.thomas_fab.set_unread(prev_unread)
+        except Exception as exc:
+            logger.debug("rebuild thomas_fab: %s", exc)
+            self.thomas_fab = None
         self.status_bar.grid(row=0, column=1, sticky="new")
+
+    # -----------------------------------------------------------------
+    def _refresh_unread_badge(self) -> None:
+        """Recalcule (async) le compteur de non-lus + l'aperçu du dernier
+        message, MAJ le FAB. Notifie aussi côté système si un nouveau
+        message reçu est arrivé pendant que l'app n'avait pas le focus.
+
+        Appelé au login Supabase, à la fermeture du chat et à chaque
+        notification 'messages' du SyncPoller."""
+        if getattr(self, "thomas_fab", None) is None:
+            return
+        import threading
+        from .integrations import messages as _M
+
+        def worker():
+            try:
+                n = _M.count_unread()
+            except Exception:
+                n = 0
+            try:
+                preview = _M.last_message_preview()
+            except Exception:
+                preview = None
+            try:
+                self.after(0, lambda v=n, p=preview:
+                           self._apply_unread_update(v, p))
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True,
+                         name="ChatUnreadCount").start()
+
+    def _apply_unread_update(self, n: int, preview: dict | None) -> None:
+        """Sur le mainloop : applique le compteur + l'aperçu, et déclenche
+        la notif système si on est passé de N à N+ avec un message reçu."""
+        if self.thomas_fab is None:
+            return
+        prev = int(getattr(self, "_last_unread_count", 0) or 0)
+        # Met à jour le FAB
+        try:
+            self.thomas_fab.set_unread(n)
+        except Exception:
+            pass
+        # Met à jour l'aperçu du tooltip
+        try:
+            if preview is not None:
+                self.thomas_fab.set_last_preview(
+                    preview.get("body"),
+                    is_from_me=bool(preview.get("is_from_me")),
+                )
+            else:
+                self.thomas_fab.set_last_preview(None)
+        except Exception:
+            pass
+        # Notif système : on a un nouveau message reçu
+        if n > prev and preview is not None and not preview.get("is_from_me"):
+            try:
+                self._notify_new_message(preview)
+            except Exception as exc:
+                logger.debug("notify_new_message: %s", exc)
+        self._last_unread_count = n
+
+    def _has_focus(self) -> bool:
+        """True si la fenêtre Tk a actuellement le focus système."""
+        try:
+            return self.focus_displayof() is not None
+        except Exception:
+            return True   # par défaut, on suppose focus pour ne pas spammer
+
+    def _notify_new_message(self, preview: dict) -> None:
+        """Beep système + flash taskbar (si pas focus) + toast in-app si
+        le dialog n'est pas déjà ouvert."""
+        focused = self._has_focus()
+        dialog_open = (getattr(self, "_thomas_dialog", None) is not None
+                       and self._thomas_dialog.winfo_exists())
+        # Pas de bruit si l'utilisateur est déjà dans le chat
+        if dialog_open:
+            return
+        # Beep + flash uniquement quand l'app n'a pas le focus
+        if not focused:
+            try:
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            except Exception:
+                try:
+                    self.bell()
+                except Exception:
+                    pass
+            try:
+                self._flash_taskbar()
+            except Exception:
+                pass
+        # Toast in-app : visible si la window est affichée mais le dialog non
+        try:
+            self._show_chat_toast(preview)
+        except Exception as exc:
+            logger.debug("chat toast: %s", exc)
+
+    def _flash_taskbar(self) -> None:
+        """Fait clignoter le bouton de la barre des tâches (Windows uniquement)."""
+        import sys
+        if not sys.platform.startswith("win"):
+            return
+        import ctypes
+        from ctypes import wintypes
+
+        class FLASHWINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize",    wintypes.UINT),
+                ("hwnd",      wintypes.HWND),
+                ("dwFlags",   wintypes.DWORD),
+                ("uCount",    wintypes.UINT),
+                ("dwTimeout", wintypes.DWORD),
+            ]
+
+        FLASHW_TRAY = 0x00000002
+        FLASHW_TIMERNOFG = 0x0000000C   # flash jusqu'à ce que la window ait le focus
+        try:
+            hwnd = self.winfo_id()
+        except Exception:
+            return
+        info = FLASHWINFO(
+            cbSize=ctypes.sizeof(FLASHWINFO),
+            hwnd=hwnd,
+            dwFlags=FLASHW_TRAY | FLASHW_TIMERNOFG,
+            uCount=5,
+            dwTimeout=0,
+        )
+        try:
+            ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
+        except Exception:
+            pass
+
+    def _show_chat_toast(self, preview: dict) -> None:
+        """Toast in-app cliquable en bas-droite, juste au-dessus des FABs."""
+        c = self.colors
+        peer = "Ton équipier"
+        try:
+            from .integrations import messages as _M
+            other = _M.other_user()
+            if other:
+                peer = other.get("display_name") or peer
+        except Exception:
+            pass
+        body = (preview.get("body") or "").strip()
+        if len(body) > 110:
+            body = body[:107] + "…"
+
+        toast = ctk.CTkFrame(self, fg_color=c.success, corner_radius=12)
+        ctk.CTkLabel(
+            toast, text=f"💬  {peer}",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+            text_color="#FFFFFF",
+        ).pack(anchor="w", padx=14, pady=(10, 0))
+        ctk.CTkLabel(
+            toast, text=body or "(message vide)",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL, "bold"),
+            text_color="#FFFFFF",
+            wraplength=320, justify="left",
+        ).pack(anchor="w", padx=14, pady=(2, 4))
+        ctk.CTkLabel(
+            toast, text="Cliquer pour répondre →",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY),
+            text_color="#FFFFFF",
+        ).pack(anchor="w", padx=14, pady=(0, 10))
+        # Au-dessus des deux FABs (Thomas est à -32 - 60 - 12 = -104,
+        # le toast lui-même fait ~80 px, on le place ~200 au-dessus du bas)
+        toast.place(relx=1.0, rely=1.0, x=-24, y=-200, anchor="se")
+
+        def _open(_evt=None):
+            try:
+                toast.destroy()
+            except Exception:
+                pass
+            self.show_view("thomas")
+
+        for w in (toast, *toast.winfo_children()):
+            w.bind("<Button-1>", _open)
+            try:
+                w.configure(cursor="hand2")
+            except Exception:
+                pass
+
+        # Auto-destroy après 8 s
+        self.after(8_000,
+                   lambda: toast.destroy() if toast.winfo_exists() else None)
 
     # -----------------------------------------------------------------
     def _init_supabase_session(self) -> None:
@@ -467,9 +731,25 @@ class TriskellCommandApp(ctk.CTk):
             logger.info("Veille Claude active (cycle 1 h).")
         except Exception as exc:
             logger.debug("Veille Claude non démarrée : %s", exc)
+        # Chat Thomas : compteur de non-lus initial
+        try:
+            self._refresh_unread_badge()
+        except Exception:
+            pass
 
     def _on_remote_change(self, table: str) -> None:
         """Appelée sur le mainloop Tk quand Supabase signale un changement."""
+        # Chat : nouveau message → MAJ badge FAB + refresh dialog si ouvert
+        if table == "messages":
+            self._refresh_unread_badge()
+            dlg = getattr(self, "_thomas_dialog", None)
+            if dlg is not None:
+                try:
+                    if dlg.winfo_exists():
+                        dlg._reload_async()
+                except Exception:
+                    pass
+            return
         # Status bar : toujours utile
         try:
             self.status_bar.refresh()

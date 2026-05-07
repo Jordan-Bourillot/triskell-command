@@ -31,6 +31,7 @@ WATCH_TABLES = {
     "convoy_campaigns": 30,
     "email_history": 30,
     "shared_settings": 60,
+    "messages": 10,                  # chat 1-à-1 — réactif
 }
 
 
@@ -107,9 +108,10 @@ class SyncPoller:
         if self._client is None:
             return None
         col = "updated_at"
-        # Les tables sans updated_at retombent sur created_at
-        if table in ("shared_settings",):
-            col = "updated_at"
+        # `messages` n'a pas d'updated_at — un message envoyé n'est pas
+        # modifié, on poll created_at pour détecter les nouveaux.
+        if table in ("messages",):
+            col = "created_at"
         try:
             res = (self._client.raw.table(table).select(col)
                    .order(col, desc=True).limit(1).execute())
