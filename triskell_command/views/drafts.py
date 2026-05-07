@@ -1,4 +1,5 @@
-"""Vue Drafts — valider / rejeter les mails IA en attente (mode SAS)."""
+"""Vue Brouillons à valider — l'utilisateur valide ou rejette les mails
+préparés par l'app (mode validation)."""
 
 from __future__ import annotations
 
@@ -18,21 +19,21 @@ from .base import BaseView
 
 
 class DraftsView(BaseView):
-    title = "À valider"
+    title = "Brouillons à valider"
     subtitle = (
-        "L'IA a préparé ces mails. Tu valides en 1 clic ou tu rejettes. "
-        "Ils ne partent que si tu approuves."
+        "Les mails préparés par l'app t'attendent ici. "
+        "Tu valides en 1 clic, tu corriges, ou tu rejettes."
     )
 
     def build(self) -> None:
         c = self.colors
         header = ViewHeader(self, title=self.title, subtitle=self.subtitle, colors=c)
-        header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_LG))
+        header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_MD))
 
         SecondaryButton(header.actions, colors=c, icon="refresh", text="Rafraîchir",
                         command=self._refresh).pack(side="left")
 
-        # Container principal scrollable (liste de cartes-drafts)
+        # Container principal scrollable (liste de cartes-brouillons)
         self._scroll = ctk.CTkScrollableFrame(
             self, fg_color="transparent",
             scrollbar_button_color=c.border_strong,
@@ -59,45 +60,45 @@ class DraftsView(BaseView):
 
         try:
             from triskell_core.prospect.pipeline import list_pending_drafts
-            drafts = list_pending_drafts()
+            pairs = list_pending_drafts()
         except Exception as e:
             self._status_var.set(f"⚠ {e}")
             return
 
-        if not drafts:
+        if not pairs:
             EmptyState(
                 self._scroll,
                 colors=self.colors,
                 icon="check",
-                title="Aucun mail à valider",
+                title="Tu es à jour.",
                 message=(
-                    "Quand l'IA aura préparé des mails (en mode validation), "
-                    "ils apparaîtront ici. Tu pourras les lire, les éditer "
-                    "puis les approuver d'un clic."
+                    "Aucun mail en attente. Quand l'auto-pilote ou les "
+                    "relances en prépareront en mode validation, ils "
+                    "atterriront ici."
                 ),
-                cta_text="Aller dans Auto-pilote",
+                cta_text="Lancer une recherche",
                 cta_command=lambda: self._navigate_to("autopilot"),
             ).pack(fill="both", expand=True)
             self._status_var.set("Aucun mail en attente.")
             return
 
-        for prospect, draft in drafts:
-            self._make_draft_card(prospect, draft)
+        for prospect, item in pairs:
+            self._make_card(prospect, item)
 
-        n_drafts = sum(len(p.pending_drafts) for p, _d in drafts)
-        n_unique = len({id(p) for p, _d in drafts})
+        n_total = sum(len(p.pending_drafts) for p, _d in pairs)
+        n_unique = len({id(p) for p, _d in pairs})
         self._status_var.set(
-            f"{n_drafts} draft(s) en attente sur {n_unique} prospect(s)."
+            f"{n_total} brouillon(s) en attente sur {n_unique} prospect(s)."
         )
 
-    def _make_draft_card(self, prospect, draft) -> None:
+    def _make_card(self, prospect, item) -> None:
         c = self.colors
         card = Card(self._scroll, colors=c)
-        card.pack(fill="x", pady=(0, T.SPACE_MD))
+        card.pack(fill="x", pady=(0, T.SPACE_LG))
 
-        # Header de la carte : nom + email + provider
+        # Header de la carte : nom + email + auteur du brouillon
         head = ctk.CTkFrame(card, fg_color="transparent")
-        head.pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_LG, T.SPACE_SM))
+        head.pack(fill="x", padx=T.SPACE_XL, pady=(T.SPACE_LG, T.SPACE_SM))
 
         name = prospect.name or prospect.legal_name or "(sans nom)"
         ctk.CTkLabel(
@@ -108,8 +109,8 @@ class DraftsView(BaseView):
 
         meta = (f"{prospect.emails[0] if prospect.emails else '—'}  ·  "
                 f"{prospect.city or '—'}  ·  "
-                f"généré {draft.get('ts', '?')[:16]} par "
-                f"{draft.get('provider', '?')}/{draft.get('model', '?')}")
+                f"généré {item.get('ts', '?')[:16]} par "
+                f"{item.get('provider', '?')}/{item.get('model', '?')}")
         ctk.CTkLabel(
             head, text=meta,
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL),
@@ -118,10 +119,10 @@ class DraftsView(BaseView):
 
         # Objet
         ctk.CTkLabel(
-            card, text=f"OBJET : {draft.get('subject', '')}",
+            card, text=f"OBJET : {item.get('subject', '')}",
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL, "bold"),
-            text_color=c.gold, anchor="w",
-        ).pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_SM, T.SPACE_XS))
+            text_color=c.accent, anchor="w",
+        ).pack(fill="x", padx=T.SPACE_XL, pady=(T.SPACE_SM, T.SPACE_XS))
 
         # Corps (textbox éditable)
         tb = ctk.CTkTextbox(
@@ -132,12 +133,12 @@ class DraftsView(BaseView):
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY),
             wrap="word",
         )
-        tb.insert("1.0", draft.get("body", ""))
-        tb.pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_MD))
+        tb.insert("1.0", item.get("body", ""))
+        tb.pack(fill="x", padx=T.SPACE_XL, pady=(0, T.SPACE_MD))
 
         # Boutons : Approuver, Rejeter
         btns = ctk.CTkFrame(card, fg_color="transparent")
-        btns.pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_LG))
+        btns.pack(fill="x", padx=T.SPACE_XL, pady=(0, T.SPACE_LG))
 
         SecondaryButton(
             btns, colors=c, icon="trash", text="Rejeter",
@@ -152,7 +153,7 @@ class DraftsView(BaseView):
     def _approve(self, prospect, body_textbox) -> None:
         # Récupère la version éventuellement éditée
         edited_body = body_textbox.get("1.0", "end").rstrip()
-        # Met à jour le 1er draft avant d'envoyer
+        # Met à jour le 1er brouillon avant d'envoyer
         if prospect.pending_drafts:
             prospect.pending_drafts[0]["body"] = edited_body
 
@@ -165,7 +166,7 @@ class DraftsView(BaseView):
                 crm = CRM()
                 crm._dirty = True  # noqa: SLF001
                 crm.save()
-                # Approuve le draft (envoie SMTP réel)
+                # Approuve le brouillon (envoie SMTP réel)
                 from triskell_core.prospect.pipeline import approve_draft
                 key = prospect.match_keys[0] if prospect.match_keys else ""
                 r = approve_draft(key, draft_index=0)
@@ -190,7 +191,7 @@ class DraftsView(BaseView):
         key = prospect.match_keys[0] if prospect.match_keys else ""
         r = reject_draft(key, draft_index=0)
         if r.get("ok"):
-            self._status_var.set(f"Draft rejeté pour {prospect.name}.")
+            self._status_var.set(f"Brouillon rejeté pour {prospect.name}.")
         else:
             self._status_var.set(f"⚠ {r.get('reason', 'échec')}")
         self._refresh()

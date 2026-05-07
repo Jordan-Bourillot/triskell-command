@@ -16,14 +16,17 @@ from .base import BaseView
 
 
 class TemplatesView(BaseView):
-    title = "Tes templates"
-    subtitle = "Gère tes modèles d'email — duplique, édite, crée les tiens."
+    title = "Modèles d'emails"
+    subtitle = (
+        "Tes modèles prêts à réutiliser. "
+        "Duplique-les, édite-les, ou crée les tiens."
+    )
 
     def build(self) -> None:
         c = self.colors
 
         header = ViewHeader(self, title=self.title, subtitle=self.subtitle, colors=c)
-        header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_LG))
+        header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_MD))
 
         SecondaryButton(header.actions, colors=c, icon="refresh", text="Recharger",
                         command=self._refresh).pack(side="left", padx=(0, T.SPACE_SM))
@@ -41,7 +44,7 @@ class TemplatesView(BaseView):
         left.pack_propagate(False)
 
         ctk.CTkLabel(
-            left, text="Templates disponibles",
+            left, text="Modèles disponibles",
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_HEADING, "bold"),
             text_color=c.text_primary, anchor="w",
         ).pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_LG, T.SPACE_SM))
@@ -114,7 +117,7 @@ class TemplatesView(BaseView):
         for key, tpl in all_tpl.items():
             self._make_list_item(key, tpl, is_user=(key in user_keys))
 
-        self._status_var.set(f"{len(all_tpl)} template(s) — "
+        self._status_var.set(f"{len(all_tpl)} modèle(s) — "
                              f"{len(user_keys)} personnel(s), "
                              f"{len(all_tpl) - len(user_keys)} par défaut.")
 
@@ -153,7 +156,7 @@ class TemplatesView(BaseView):
             w.destroy()
         ctk.CTkLabel(
             self._editor_frame,
-            text="← Choisis un template à gauche, ou clique « + Nouveau ».",
+            text="← Choisis un modèle à gauche, ou clique « + Nouveau ».",
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY),
             text_color=self.colors.text_muted,
         ).pack(expand=True)
@@ -176,7 +179,7 @@ class TemplatesView(BaseView):
             w.destroy()
 
         # Titre
-        title_text = "✏️ Nouveau template" if is_new else (
+        title_text = "✏️ Nouveau modèle" if is_new else (
             f"✏️ Éditer : {key}" if is_user else f"📄 Lire : {key} (par défaut)"
         )
         ctk.CTkLabel(
@@ -271,7 +274,7 @@ class TemplatesView(BaseView):
         else:
             ctk.CTkLabel(
                 actions,
-                text="Template par défaut — duplique-le si tu veux le modifier",
+                text="Modèle livré par défaut — duplique-le pour le modifier",
                 font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL),
                 text_color=c.text_muted,
             ).pack(side="left")
@@ -314,7 +317,7 @@ class TemplatesView(BaseView):
                 json.dumps(current, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
-            self._status_var.set(f"✓ Template '{key}' enregistré.")
+            self._status_var.set(f"✓ Modèle '{key}' enregistré.")
             self._refresh()
         except Exception as e:
             self._status_var.set(f"✗ Erreur : {e}")
@@ -333,7 +336,7 @@ class TemplatesView(BaseView):
                     json.dumps(data, indent=2, ensure_ascii=False),
                     encoding="utf-8",
                 )
-                self._status_var.set(f"✓ Template '{self._current_key}' supprimé.")
+                self._status_var.set(f"✓ Modèle '{self._current_key}' supprimé.")
                 self._current_key = None
                 self._show_empty()
                 self._refresh()

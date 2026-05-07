@@ -59,17 +59,41 @@ def _draw_search(d, s, color):
 
 
 def _draw_pen(d, s, color):
-    # crayon en diagonale
-    w = max(2, s // 12)
-    # corps
-    d.line((s * 0.20, s * 0.78, s * 0.74, s * 0.24), fill=color, width=w)
-    # pointe
-    d.polygon(
-        [(s * 0.18, s * 0.76), (s * 0.18, s * 0.84), (s * 0.26, s * 0.84)],
-        fill=color,
+    """Crayon diagonal — silhouette pleine, lisible dès 16-20 px."""
+    # Axe : pointe en bas-gauche → bout du capuchon en haut-droit.
+    SQRT2 = 1.41421356
+    half = s * 0.085                      # demi-épaisseur du corps
+    dx, dy = half / SQRT2, half / SQRT2   # offset perpendiculaire à l'axe
+
+    def axis(frac: float) -> tuple[float, float]:
+        x = s * 0.16 + frac * (s * 0.68)
+        y = s * 0.84 - frac * (s * 0.68)
+        return (x, y)
+
+    tip = axis(0.00)        # extrémité acérée (1 point)
+    tip_base = axis(0.18)   # corps commence
+    cap_base = axis(0.80)   # capuchon commence
+    cap_end = axis(1.00)    # extrémité arrière
+
+    # Polygone unique : pointe → corps → capuchon (sens horaire)
+    body = [
+        tip,
+        (tip_base[0] + dx, tip_base[1] + dy),
+        (cap_base[0] + dx, cap_base[1] + dy),
+        (cap_end[0] + dx, cap_end[1] + dy),
+        (cap_end[0] - dx, cap_end[1] - dy),
+        (cap_base[0] - dx, cap_base[1] - dy),
+        (tip_base[0] - dx, tip_base[1] - dy),
+    ]
+    d.polygon(body, fill=color)
+
+    # Trait de séparation corps/capuchon (visuellement = bague de la gomme)
+    w = max(1, s // 18)
+    d.line(
+        (cap_base[0] + dx, cap_base[1] + dy,
+         cap_base[0] - dx, cap_base[1] - dy),
+        fill="white" if color != "white" else "#000000", width=w,
     )
-    # gomme arrière
-    d.line((s * 0.74, s * 0.24, s * 0.86, s * 0.36), fill=color, width=w)
 
 
 def _draw_doc(d, s, color):
@@ -417,6 +441,24 @@ def _draw_play(d, s, color):
     ], outline=color, fill=color)
 
 
+def _draw_convoy(d, s, color):
+    """Convoi : 3 enveloppes décalées en cascade — symbolise un envoi groupé."""
+    w = max(2, s // 14)
+    # 3 rectangles "enveloppes" décalés en escalier
+    offsets = [(0.16, 0.30), (0.26, 0.40), (0.36, 0.50)]
+    width = s * 0.42
+    height = s * 0.30
+    for ox, oy in offsets:
+        x0, y0 = s * ox, s * oy
+        x1, y1 = x0 + width, y0 + height
+        d.rectangle((x0, y0, x1, y1), outline=color, width=w)
+        # Rabat de l'enveloppe (trait en V)
+        d.line((x0, y0, (x0 + x1) / 2, y0 + height * 0.55),
+               fill=color, width=w)
+        d.line(((x0 + x1) / 2, y0 + height * 0.55, x1, y0),
+               fill=color, width=w)
+
+
 _DRAWERS = {
     "search":     _draw_search,
     "pen":        _draw_pen,
@@ -442,6 +484,7 @@ _DRAWERS = {
     "arrow_right":_draw_arrow_right,
     "arrow_left": _draw_arrow_left,
     "play":       _draw_play,
+    "convoy":     _draw_convoy,
 }
 
 

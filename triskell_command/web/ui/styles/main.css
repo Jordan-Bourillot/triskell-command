@@ -1,0 +1,292 @@
+/* Triskell Command — UI web (post-Tailwind)
+ * Quelques classes utilitaires custom au-dessus de Tailwind pour
+ * les patterns qui reviennent souvent.
+ */
+
+* { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+html, body {
+  background: hsl(var(--bg));
+  color: hsl(var(--text));
+}
+
+/* Scrollbar discret façon macOS */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border-strong) / 0.6);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--text-muted) / 0.8);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+/* ============================
+ * Items de navigation sidebar
+ * ============================ */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 12px;
+  margin-bottom: 2px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: hsl(var(--text-secondary));
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+/* ============================
+ * Launcher Spotlight (Ctrl+K)
+ * ============================ */
+.launcher-cat {
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid hsl(var(--border-strong));
+  color: hsl(var(--text-secondary));
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+.launcher-cat:hover {
+  background: hsl(var(--surface-elevated));
+  color: hsl(var(--text));
+}
+.launcher-cat.active {
+  background: hsl(var(--accent));
+  color: white;
+  border-color: hsl(var(--accent));
+}
+.launcher-tile {
+  cursor: pointer;
+}
+.launcher-badge {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Logo produit dans la sidebar — petit avatar carré avec léger fond
+ * pour que les logos colorés ne mangent pas l'œil. */
+.nav-item-logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  object-fit: contain;
+  flex-shrink: 0;
+  background: hsl(var(--bg));
+  padding: 2px;
+  transition: all 160ms ease;
+}
+.nav-item:hover .nav-item-logo,
+.nav-item.active .nav-item-logo {
+  background: hsl(var(--surface-elevated));
+}
+.nav-item:hover {
+  background: hsl(var(--surface-elevated));
+  color: hsl(var(--text));
+}
+.nav-item.active {
+  background: hsl(var(--accent) / 0.12);
+  color: hsl(var(--accent));
+  font-weight: 600;
+}
+.nav-item.active svg { color: hsl(var(--accent)); }
+
+.nav-item-sm {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: hsl(var(--text-muted));
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+.nav-item-sm:hover {
+  background: hsl(var(--surface-elevated));
+  color: hsl(var(--text));
+}
+
+/* ============================
+ * Cards & blocs
+ * ============================ */
+.card {
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.04);
+}
+.card-hero {
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: 22px;
+  box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 8px 32px rgba(15,23,42,0.08);
+  position: relative;
+  overflow: hidden;
+}
+.card-hero::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 4px; height: 100%;
+  background: linear-gradient(180deg,
+    hsl(var(--accent)) 0%,
+    hsl(var(--accent-glow)) 100%);
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+.card-hero[data-accent="success"]::before {
+  background: hsl(var(--success));
+  opacity: 1;
+}
+.card-hero[data-accent="warning"]::before {
+  background: hsl(var(--warning));
+  opacity: 1;
+}
+.card-hero[data-accent="accent"]::before { opacity: 1; }
+
+/* ============================
+ * Stat cards (chiffre + label)
+ * ============================ */
+.stat-card {
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  padding: 20px 22px;
+  transition: all 200ms ease;
+}
+.stat-card:hover {
+  transform: translateY(-2px);
+  border-color: hsl(var(--border-strong));
+  box-shadow: 0 4px 12px rgba(15,23,42,0.06);
+}
+.stat-card .label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: hsl(var(--text-muted));
+}
+.stat-card .value {
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: hsl(var(--text));
+  margin-top: 4px;
+}
+.stat-card .delta {
+  font-size: 12px;
+  color: hsl(var(--text-muted));
+  margin-top: 6px;
+}
+.stat-card.accent-success .value { color: hsl(var(--success)); }
+.stat-card.accent-warning .value { color: hsl(var(--warning)); }
+.stat-card.accent-danger  .value { color: hsl(var(--danger)); }
+.stat-card.accent-accent  .value { color: hsl(var(--accent)); }
+
+/* ============================
+ * Boutons
+ * ============================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+.btn-primary {
+  background: hsl(var(--accent));
+  color: white;
+  box-shadow: 0 1px 2px rgba(15,23,42,0.06);
+}
+.btn-primary:hover {
+  background: hsl(var(--accent-hover));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px hsl(var(--accent) / 0.30);
+}
+.btn-secondary {
+  background: transparent;
+  color: hsl(var(--text-secondary));
+  border-color: hsl(var(--border-strong));
+}
+.btn-secondary:hover {
+  background: hsl(var(--surface-elevated));
+  color: hsl(var(--text));
+  border-color: hsl(var(--text-muted));
+}
+
+/* ============================
+ * Hero typo
+ * ============================ */
+.hero-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: hsl(var(--text-muted));
+}
+.hero-title {
+  font-family: 'Cinzel', serif;
+  font-weight: 700;
+  font-size: 44px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: hsl(var(--text));
+}
+.hero-subtitle {
+  font-size: 17px;
+  line-height: 1.5;
+  color: hsl(var(--text-secondary));
+}
+
+/* ============================
+ * Section labels
+ * ============================ */
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: hsl(var(--text-muted));
+  margin-bottom: 16px;
+}
+.section-label::before {
+  content: '';
+  width: 28px;
+  height: 2px;
+  background: hsl(var(--accent));
+  border-radius: 1px;
+}

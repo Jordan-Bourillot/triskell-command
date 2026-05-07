@@ -1,0 +1,20 @@
+# Configuration Netlify pour le projet Triskell Tracking.
+#
+# Déploiement :
+#   1. Crée un nouveau site Netlify (drag-drop ce dossier sur netlify.app/drop,
+#      ou push sur un repo Git connecté à Netlify).
+#   2. Site settings → Environment variables → ajoute :
+#        SUPABASE_URL          = https://xxx.supabase.co
+#        SUPABASE_SERVICE_KEY  = (clé service_role de Supabase)
+#   3. Récupère l'URL de la function :
+#        https://<ton-site>.netlify.app/.netlify/functions/track-pixel
+#        https://<ton-site>.netlify.app/.netlify/functions/appsumo-webhook
+#   4. Configure ces URLs dans Triskell Command → Réglages.
+
+[build]
+  functions = "."
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"

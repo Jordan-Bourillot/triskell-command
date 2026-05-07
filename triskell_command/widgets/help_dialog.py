@@ -75,7 +75,7 @@ SECTIONS = [
             "type de prompt :\n\n"
             "    [INSTRUCTIONS DES MÉGA-PROMPTS COCHÉS]\n"
             "    [CONTEXTE DU PROSPECT N°X : nom, ville, secteur, site...]\n"
-            "    [TON TEMPLATE-CADRE : la consigne que tu écris dans Auto-pilote]\n"
+            "    [TON MODÈLE DE CONSIGNE : la consigne que tu écris dans Auto-pilote]\n"
             "    DEMANDE : rédige un mail pour CE prospect.\n\n"
             "Résultat : un mail unique par prospect, mais TOUS suivent les mêmes "
             "règles comportementales que tu as choisies. Cohérence de ton garantie "
@@ -83,16 +83,16 @@ SECTIONS = [
         ),
     },
     {
-        "title": "Ton template-cadre : à quoi il sert ?",
+        "title": "Ton modèle de consigne : à quoi il sert ?",
         "body": (
-            "Le « template-cadre » dans Auto-pilote, ce n'est PAS un mail figé. "
+            "Le « modèle de consigne » dans Auto-pilote, ce n'est PAS un mail figé. "
             "C'est la consigne que tu donnes à l'IA pour qu'elle sache quel TYPE "
             "de mail produire.\n\n"
-            "Exemple de template-cadre :\n\n"
+            "Exemple de modèle de consigne :\n\n"
             "    « Génère un mail de prospection court (10 lignes max) pour proposer "
             "un site web premium à un artisan. Tutoiement chaleureux, pas de jargon. "
             "Format strict : OBJET : <objet>\\n\\n<corps>\\n\\nCordialement,\\n{mon_prenom} »\n\n"
-            "L'IA combine : ton template-cadre + le contexte du prospect + tes "
+            "L'IA combine : ton modèle de consigne + le contexte du prospect + tes "
             "méga-prompts → génère un mail UNIQUE. Pas de copier-coller mécanique."
         ),
     },
@@ -104,12 +104,12 @@ SECTIONS = [
             "2. RÉGLAGES → SMTP/IMAP Gmail avec mot de passe d'application "
             "(bouton ↗ pour la page Google).\n\n"
             "3. AUTO-PILOTE → mode = « validation » (sécurité), source Sirene avec "
-            "ton ICP (NAF + département), méga-prompts = 01,06,13, template-cadre "
+            "ton ICP (NAF + département), méga-prompts = 01,06,13, modèle de consigne "
             "adapté à ton offre.\n\n"
             "4. AUTO-PILOTE → « Lancer maintenant » → tu vois le log live.\n\n"
             "5. À VALIDER → tu vois les mails préparés. Tu valides ou rejettes.\n\n"
-            "6. Quand tu es à l'aise (90% des drafts sont bons) → bascule en mode "
-            "« auto » et active la Boucle nocturne dans Réglages."
+            "6. Quand tu es à l'aise (90% des brouillons sont bons) → bascule "
+            "en mode « auto » et active la boucle nocturne dans Réglages."
         ),
     },
     {
@@ -150,7 +150,7 @@ class HelpDialog(ctk.CTkToplevel):
         # Header
         header = ctk.CTkFrame(self, fg_color="transparent", height=80)
         header.pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_LG, T.SPACE_SM))
-        bar = ctk.CTkFrame(header, fg_color=c.gold, width=28, height=2,
+        bar = ctk.CTkFrame(header, fg_color=c.accent, width=32, height=3,
                            corner_radius=1)
         bar.pack(anchor="w", pady=(0, T.SPACE_XS))
         ctk.CTkLabel(
@@ -227,7 +227,7 @@ class HelpDialog(ctk.CTkToplevel):
         wrapper.pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_LG, T.SPACE_MD))
 
         # Bandeau or signature
-        bar = ctk.CTkFrame(wrapper, fg_color=c.gold, width=28, height=2,
+        bar = ctk.CTkFrame(wrapper, fg_color=c.accent, width=32, height=3,
                            corner_radius=1)
         bar.pack(anchor="w", pady=(0, T.SPACE_XS))
 

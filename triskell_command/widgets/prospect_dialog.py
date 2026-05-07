@@ -113,8 +113,8 @@ class ProspectDialog(ctk.CTkToplevel):
         self._make_textarea(scroll, "Description", "description",
                             self._prospect.description, height=70)
 
-        # CRM
-        self._make_section_label(scroll, "CRM")
+        # Suivi commercial
+        self._make_section_label(scroll, "Suivi commercial")
         self._make_select(scroll, "Statut", "status",
                           self._prospect.status or "new", STATUS_VALUES)
         self._make_input(scroll, "Tags (séparés par virgules)", "_tags_csv",
@@ -289,7 +289,7 @@ class ProspectDialog(ctk.CTkToplevel):
         confirm = ConfirmDialog(
             self,
             title="Supprimer ce prospect ?",
-            message=f"« {self._prospect.name} » sera retiré du CRM.\n"
+            message=f"« {self._prospect.name} » sera retiré de la liste.\n"
                     f"Cette action est irréversible.",
             colors=self._colors,
         )

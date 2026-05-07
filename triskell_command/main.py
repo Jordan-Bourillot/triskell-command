@@ -20,11 +20,17 @@ from .views.base import BaseView
 from .views.campaigns import CampaignsView
 from .views.compose import ComposeView
 from .views.config import ConfigView
+from .views.convoy import ConvoyView
 from .views.dashboard import DashboardView
 from .views.autopilot import AutopilotView
+from .views.clients import ClientsView
 from .views.drafts import DraftsView
+from .views.funnel import FunnelView
+from .views.morning import MorningView
+from .views.phare import PhareView
 from .views.prospects import ProspectsView
 from .views.publish import PublishView
+from .views.replies import RepliesView
 from .views.templates import TemplatesView
 from .widgets.sidebar import Sidebar
 from .widgets.splash import SplashScreen
@@ -36,14 +42,20 @@ logger = logging.getLogger("triskell.command")
 
 # Ordre = ordre dans la sidebar
 VIEW_REGISTRY: dict[str, type[BaseView]] = {
+    "morning":    MorningView,
     "autopilot":  AutopilotView,
+    "convoy":     ConvoyView,
     "drafts":     DraftsView,
+    "replies":    RepliesView,
     "prospects":  ProspectsView,
     "compose":    ComposeView,
     "templates":  TemplatesView,
     "campaigns":  CampaignsView,
     "publish":    PublishView,
+    "clients":    ClientsView,
+    "funnel":     FunnelView,
     "dashboard":  DashboardView,
+    "phare":      PhareView,
     "config":     ConfigView,
 }
 
@@ -53,10 +65,15 @@ class TriskellCommandApp(ctk.CTk):
         super().__init__()
         self.app_state = AppState()
 
-        # Apparence
-        appearance = self.app_state.get("appearance_mode", default="dark")
-        ctk.set_appearance_mode(appearance)
-        self.colors = T.DARK if appearance == "dark" else T.LIGHT
+        # Apparence — 3 modes : light / mid / dark. CustomTkinter gère
+        # 2 modes ('light' et 'dark') ; on map 'mid' → 'dark' pour les
+        # composants natifs CTk, et on applique nos propres couleurs.
+        appearance = T.normalize_mode(
+            self.app_state.get("appearance_mode", default="mid")
+        )
+        ctk.set_appearance_mode("light" if appearance == "light" else "dark")
+        self.colors = T.get_theme(appearance)
+        self.appearance_mode = appearance
 
         # Window
         self.title(f"{T.BRAND_NAME} {T.BRAND_PRODUCT} — {T.APP_VERSION_LABEL}")
@@ -106,8 +123,24 @@ class TriskellCommandApp(ctk.CTk):
         self._views: dict[str, BaseView] = {}
         self._current_view: BaseView | None = None
 
-        # Affiche la dernière vue active (ou prospects par défaut)
-        initial = self.app_state.get("active_view", default="prospects")
+        # Bouton flottant Claude — toujours visible, par-dessus tout.
+        # Placé sur self (la window) avec place(), donc indépendant des vues.
+        try:
+            from .widgets.claude_fab import ClaudeFAB
+            self.claude_fab = ClaudeFAB(
+                self, colors=self.colors,
+                on_click=lambda: self.show_view("claude"),
+            )
+            # Position : en bas à droite, marges généreuses
+            self.claude_fab.place(relx=1.0, rely=1.0, x=-32, y=-32, anchor="se")
+            # Lift par-dessus tout
+            self.claude_fab.lift()
+        except Exception as exc:
+            logger.debug("Claude FAB non créé : %s", exc)
+            self.claude_fab = None
+
+        # Affiche la dernière vue active (ou la Matinale par défaut)
+        initial = self.app_state.get("active_view", default="morning")
         self.show_view(initial)
 
         # Hooks fermeture
@@ -123,6 +156,10 @@ class TriskellCommandApp(ctk.CTk):
             self.after(2000, lambda: updater.check_for_updates(async_=True))
         except Exception as exc:
             logger.debug("Updater non lancé : %s", exc)
+
+        # Initialisation Supabase (passive : si configuré, restaure la session ;
+        # sinon on continue en mode local sans broncher).
+        self.after(800, self._init_supabase_session)
 
     # -----------------------------------------------------------------
     def _get_view(self, view_id: str) -> BaseView:
@@ -142,7 +179,45 @@ class TriskellCommandApp(ctk.CTk):
             HelpDialog(self, colors=self.colors)
             # Re-sélectionne la vue active dans la sidebar
             self.sidebar.set_active(self.app_state.get(
-                "active_view", default="autopilot"))
+                "active_view", default="morning"))
+            return
+        # Cas spécial : "tutorial" ouvre la visite guidée v0.3
+        if view_id == "tutorial":
+            from .widgets.tutorial_dialog import TutorialDialog
+            TutorialDialog(
+                self, colors=self.colors, app_state=self.app_state,
+                on_navigate=self.show_view,
+            )
+            self.sidebar.set_active(self.app_state.get(
+                "active_view", default="morning"))
+            return
+        # Cas spécial : "claude" ouvre la modale Allô Claude
+        if view_id == "claude":
+            from .widgets.claude_dialog import ClaudeDialog
+            # Récupère un éventuel conseil pré-calculé par la veille auto
+            prefilled = None
+            try:
+                from .integrations import claude_proactive
+                prefilled = claude_proactive.consume_pending_advice()
+            except Exception:
+                pass
+            ClaudeDialog(
+                self, colors=self.colors, app_state=self.app_state,
+                on_navigate=self.show_view,
+                prefilled_advice=prefilled,
+            )
+            self.sidebar.set_active(self.app_state.get(
+                "active_view", default="morning"))
+            # Réinitialise le badge "Claude veut te parler"
+            try:
+                self.sidebar.set_attention("claude", False)
+            except Exception:
+                pass
+            try:
+                if getattr(self, "claude_fab", None) is not None:
+                    self.claude_fab.set_attention(False)
+            except Exception:
+                pass
             return
 
         if view_id not in VIEW_REGISTRY:
@@ -170,11 +245,11 @@ class TriskellCommandApp(ctk.CTk):
     # -----------------------------------------------------------------
     def _bind_shortcuts(self) -> None:
         """Raccourcis clavier globaux."""
-        # Ctrl+1..8 → vues, en suivant l'ordre de la sidebar
+        # Ctrl+1..9 → vues, en suivant l'ordre de la sidebar
         ordered_views = [
-            "autopilot", "drafts",
+            "morning", "autopilot", "convoy", "drafts", "replies",
             "prospects", "compose", "templates",
-            "campaigns", "publish", "dashboard",
+            "funnel",
         ]
         for i, view_id in enumerate(ordered_views, 1):
             self.bind(
@@ -188,6 +263,10 @@ class TriskellCommandApp(ctk.CTk):
         self.bind("<Control-question>", lambda _e: self.show_view("help"))
         # Ctrl+R → rafraîchir vue courante + status bar
         self.bind("<Control-r>", lambda _e: self._refresh_current())
+        # Ctrl+T → cycle de thème (light → mid → dark → light)
+        self.bind("<Control-t>", lambda _e: self.cycle_theme())
+        # F12 → Allô Claude
+        self.bind("<F12>", lambda _e: self.show_view("claude"))
 
     def _refresh_current(self) -> None:
         if self._current_view is not None:
@@ -199,6 +278,294 @@ class TriskellCommandApp(ctk.CTk):
             self.status_bar.refresh()
         except Exception:
             pass
+
+    # -----------------------------------------------------------------
+    def cycle_theme(self) -> None:
+        """Bascule le thème : light → mid → dark → light."""
+        self.apply_theme(T.cycle_mode(self.appearance_mode))
+
+    def apply_theme(self, mode: str) -> None:
+        """Applique un thème (light / mid / dark) à chaud.
+
+        Note : le re-rendu propre des vues déjà construites n'est pas
+        instantané dans CTk (les widgets gardent leur fg_color). On force
+        une reconstruction des vues à la prochaine activation. La fenêtre
+        principale et la sidebar sont rebuilt immédiatement.
+        """
+        mode = T.normalize_mode(mode)
+        if mode == self.appearance_mode:
+            return
+        self.appearance_mode = mode
+        self.app_state.set("appearance_mode", value=mode)
+        self.app_state.save()
+        ctk.set_appearance_mode("light" if mode == "light" else "dark")
+        self.colors = T.get_theme(mode)
+        self.configure(fg_color=self.colors.bg)
+        try:
+            self.content.configure(fg_color=self.colors.bg)
+        except Exception:
+            pass
+        # Force la reconstruction des vues au prochain affichage
+        # (les widgets CTk ne rééchantillonnent pas leurs fg_color seuls).
+        try:
+            cur = self._current_view
+            self._views.clear()
+            self._current_view = None
+            # Rebuild la sidebar avec les nouvelles couleurs
+            self._rebuild_sidebar()
+            self._rebuild_status_bar()
+            self._rebuild_claude_fab()
+            # Réaffiche la vue active
+            active = self.app_state.get("active_view", default="morning")
+            self.show_view(active)
+        except Exception as exc:
+            logger.warning("apply_theme rebuild: %s", exc)
+
+    def _rebuild_sidebar(self) -> None:
+        try:
+            self.sidebar.destroy()
+        except Exception:
+            pass
+        self.sidebar = Sidebar(
+            self,
+            colors=self.colors,
+            on_navigate=self.show_view,
+            active_view=self.app_state.get("active_view", default="morning"),
+        )
+        self.sidebar.grid(row=0, column=0, rowspan=2, sticky="ns")
+
+    def _rebuild_status_bar(self) -> None:
+        try:
+            self.status_bar.destroy()
+        except Exception:
+            pass
+        self.status_bar = StatusBar(
+            self,
+            colors=self.colors,
+            app_state=self.app_state,
+            on_navigate=self.show_view,
+        )
+
+    def _rebuild_claude_fab(self) -> None:
+        """Recrée le FAB Claude avec la nouvelle palette."""
+        had_attention = False
+        try:
+            if getattr(self, "claude_fab", None) is not None:
+                had_attention = bool(getattr(self.claude_fab,
+                                              "_has_attention", False))
+                self.claude_fab.destroy()
+        except Exception:
+            pass
+        try:
+            from .widgets.claude_fab import ClaudeFAB
+            self.claude_fab = ClaudeFAB(
+                self, colors=self.colors,
+                on_click=lambda: self.show_view("claude"),
+            )
+            self.claude_fab.place(relx=1.0, rely=1.0,
+                                    x=-32, y=-32, anchor="se")
+            self.claude_fab.lift()
+            if had_attention:
+                self.claude_fab.set_attention(True)
+        except Exception as exc:
+            logger.debug("rebuild claude_fab: %s", exc)
+            self.claude_fab = None
+        self.status_bar.grid(row=0, column=1, sticky="new")
+
+    # -----------------------------------------------------------------
+    def _init_supabase_session(self) -> None:
+        """Tente de restaurer une session Supabase au démarrage.
+
+        - Si pas configuré : silencieux, l'app continue en mode local.
+        - Si configuré + token persisté valide : login transparent, refresh
+          de la status bar.
+        - Si configuré mais pas de session : ouvre le dialogue de login.
+        """
+        try:
+            from triskell_core.db import get_client, SupabaseNotConfigured
+            try:
+                client = get_client()
+            except SupabaseNotConfigured:
+                logger.info("Supabase non configuré → mode local.")
+                return
+            if client.is_authenticated:
+                logger.info("Supabase : session restaurée pour %s",
+                            client.user_display_name or client.user_id)
+                try:
+                    self.status_bar.refresh()
+                except Exception:
+                    pass
+                self._start_sync_poller()
+                return
+            # Pas de session → demande login
+            try:
+                from .widgets.login_dialog import LoginDialog
+                LoginDialog(self, colors=self.colors,
+                             on_done=lambda: (self.status_bar.refresh(),
+                                              self._start_sync_poller()))
+            except Exception as exc:
+                logger.warning("Login dialog échec : %s", exc)
+        except ImportError:
+            logger.debug("SDK Supabase absent → mode local.")
+        except Exception as exc:
+            logger.warning("Init Supabase échouée : %s", exc)
+
+    # -----------------------------------------------------------------
+    def _start_sync_poller(self) -> None:
+        """Démarre les pollers Supabase + IMAP au login (idempotent)."""
+        if getattr(self, "_sync_poller", None) is None:
+            try:
+                from .integrations.sync_poll import SyncPoller
+
+                def on_table_change(table: str) -> None:
+                    # Le callback tourne dans un thread → on schedule sur la UI
+                    logger.info("Sync : table '%s' a changé, refresh UI.", table)
+                    self.after(0, self._on_remote_change, table)
+
+                poller = SyncPoller(on_change=on_table_change)
+                ok = poller.start()
+                if ok:
+                    self._sync_poller = poller
+                    logger.info("SyncPoller actif (polling Supabase).")
+            except Exception as exc:
+                logger.debug("SyncPoller non démarré : %s", exc)
+        # Poller IMAP des réponses prospects (best-effort, no-op si IMAP pas
+        # configuré dans shared_settings ou settings.json local).
+        try:
+            from .integrations import replies_poller
+            replies_poller.start_poller(self.app_state)
+            logger.info("RepliesPoller actif (IMAP toutes les 5 min).")
+        except Exception as exc:
+            logger.debug("RepliesPoller non démarré : %s", exc)
+        # Worker des réponses auto (envoie les drafts pending dont le délai
+        # configuré est expiré, mode delay_30m / instant).
+        try:
+            from .integrations import reply_responder
+            reply_responder.start_worker(self.app_state)
+            logger.info("ReplyResponder actif (worker auto-envoi 60 s).")
+        except Exception as exc:
+            logger.debug("ReplyResponder non démarré : %s", exc)
+        # Drip runner — relances J+7 / J+30 sur les envois sans réponse.
+        try:
+            from .integrations import drip_runner
+            drip_runner.start_worker(self.app_state)
+            logger.info("DripRunner actif (cycle 1 h).")
+        except Exception as exc:
+            logger.debug("DripRunner non démarré : %s", exc)
+        # Post-sale — cross-sell J+30 + NPS J+90 sur les clients livrés.
+        try:
+            from .integrations import post_sale_runner
+            post_sale_runner.start_worker(self.app_state)
+            logger.info("PostSaleRunner actif (cycle 1 h).")
+        except Exception as exc:
+            logger.debug("PostSaleRunner non démarré : %s", exc)
+        # Veille Claude — toutes les heures, signale les urgences.
+        try:
+            from .integrations import claude_proactive
+            claude_proactive.set_notify_callback(self._on_claude_calls)
+            claude_proactive.start_worker(self.app_state)
+            logger.info("Veille Claude active (cycle 1 h).")
+        except Exception as exc:
+            logger.debug("Veille Claude non démarrée : %s", exc)
+
+    def _on_remote_change(self, table: str) -> None:
+        """Appelée sur le mainloop Tk quand Supabase signale un changement."""
+        # Status bar : toujours utile
+        try:
+            self.status_bar.refresh()
+        except Exception:
+            pass
+        # Vue courante : on rafraîchit si elle dépend de la table changée
+        relevant_views = {
+            "prospects": ("prospects", "drafts", "replies", "dashboard",
+                           "morning", "funnel"),
+            "prospect_drafts": ("drafts", "dashboard", "morning"),
+            "convoy_drafts": ("convoy", "morning"),
+            "convoy_campaigns": ("convoy",),
+            "email_history": ("replies", "dashboard", "morning", "funnel"),
+            "shared_settings": ("config",),
+        }
+        targets = relevant_views.get(table, ())
+        if self._current_view is not None and targets:
+            for view_id, view in self._views.items():
+                if view_id in targets and view is self._current_view:
+                    try:
+                        view.on_show()
+                    except Exception:
+                        pass
+
+    # -----------------------------------------------------------------
+    def _on_claude_calls(self, advice: dict) -> None:
+        """Callback invoqué (depuis un thread) quand la veille Claude détecte
+        une urgence. On schedule sur le mainloop Tk pour toucher l'UI.
+        """
+        try:
+            self.after(0, self._handle_claude_call, advice)
+        except Exception:
+            pass
+
+    def _handle_claude_call(self, advice: dict) -> None:
+        # Pastille sur le bouton sidebar (si encore présent)
+        try:
+            self.sidebar.set_attention("claude", True)
+        except Exception:
+            pass
+        # FAB Claude : passe en mode attention (pulse rapide + dot rouge)
+        try:
+            if getattr(self, "claude_fab", None) is not None:
+                self.claude_fab.set_attention(True)
+        except Exception:
+            pass
+        # Toast cliquable en bas à droite — discret, disparaît seul
+        try:
+            self._show_claude_toast(advice)
+        except Exception as exc:
+            logger.debug("toast claude: %s", exc)
+
+    def _show_claude_toast(self, advice: dict) -> None:
+        c = self.colors
+        urgency = advice.get("urgency", "medium")
+        head = advice.get("headline", "").strip() or "Claude veut te parler"
+        label = head if len(head) <= 90 else head[:87] + "…"
+        bg = c.danger if urgency == "high" else c.warning
+
+        toast = ctk.CTkFrame(self, fg_color=bg, corner_radius=12)
+        ctk.CTkLabel(
+            toast, text=f"📞  Allô Claude",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+            text_color="#FFFFFF",
+        ).pack(anchor="w", padx=14, pady=(10, 0))
+        ctk.CTkLabel(
+            toast, text=label,
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL, "bold"),
+            text_color="#FFFFFF",
+            wraplength=320, justify="left",
+        ).pack(anchor="w", padx=14, pady=(2, 4))
+        ctk.CTkLabel(
+            toast, text="Cliquer pour ouvrir →",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY),
+            text_color="#FFFFFF",
+        ).pack(anchor="w", padx=14, pady=(0, 10))
+
+        # Place en bas à droite, marge 24px
+        toast.place(relx=1.0, rely=1.0, x=-24, y=-24, anchor="se")
+
+        def open_dialog(_evt=None):
+            try:
+                toast.destroy()
+            except Exception:
+                pass
+            self.show_view("claude")
+
+        for w in (toast, *toast.winfo_children()):
+            w.bind("<Button-1>", open_dialog)
+            try:
+                w.configure(cursor="hand2")
+            except Exception:
+                pass
+
+        # Auto-destroy après 12s
+        self.after(12_000, lambda: toast.destroy() if toast.winfo_exists() else None)
 
     # -----------------------------------------------------------------
     def _resolve_icon_path(self) -> Path | None:
@@ -255,6 +622,7 @@ def run() -> None:
         # 1.4s plus tard : on affiche la window principale + onboarding si nécessaire
         def _post_splash():
             app.deiconify()
+            tutorial_pending = False
             try:
                 from .widgets.onboarding import OnboardingDialog, needs_onboarding
                 if needs_onboarding(app.app_state):
@@ -263,15 +631,36 @@ def run() -> None:
                             app.status_bar.refresh()
                         except Exception:
                             pass
+                        # Onboarding fini : on enchaîne sur le tuto v0.3
+                        _maybe_show_tutorial(app)
                     OnboardingDialog(
                         app, colors=app.colors,
                         app_state=app.app_state,
                         on_done=_refresh_status,
                     )
+                else:
+                    tutorial_pending = True
             except Exception as exc:
                 logger.debug("Onboarding skipped : %s", exc)
+                tutorial_pending = True
+            if tutorial_pending:
+                _maybe_show_tutorial(app)
         app.after(1400, _post_splash)
     except Exception as exc:
         logger.debug("Splash skipped : %s", exc)
         app.deiconify()
     app.mainloop()
+
+
+def _maybe_show_tutorial(app) -> None:
+    """Affiche le tuto v0.3 au 1er boot (flag persisté). Idempotent."""
+    try:
+        from .widgets.tutorial_dialog import TutorialDialog, needs_tutorial
+        if not needs_tutorial(app.app_state):
+            return
+        TutorialDialog(
+            app, colors=app.colors, app_state=app.app_state,
+            on_navigate=app.show_view,
+        )
+    except Exception as exc:
+        logger.debug("Tutorial skipped : %s", exc)

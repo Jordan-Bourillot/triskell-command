@@ -44,6 +44,13 @@ class ConfigView(BaseView):
         header = ViewHeader(self, title=self.title, subtitle=self.subtitle, colors=c)
         header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_LG))
 
+        from ..widgets.components import SecondaryButton
+        SecondaryButton(
+            header.actions, colors=c, icon="sparkle",
+            text="Revoir le tuto",
+            command=lambda: self._navigate_to("tutorial"),
+        ).pack(side="left", padx=(0, T.SPACE_SM))
+
         self._save_button = PrimaryButton(
             header.actions, colors=c, icon="save", text="Enregistrer",
             command=self._save_all,
@@ -77,6 +84,7 @@ class ConfigView(BaseView):
         self._build_section_outreach()
         self._build_section_sources()
         self._build_section_social()
+        self._build_section_publish_auto()
         self._build_section_nightly()
         self._build_section_appearance()
         self._build_section_updates()
@@ -229,14 +237,36 @@ class ConfigView(BaseView):
 
     def _build_section_social(self) -> None:
         section = self._make_section(
-            "Service Réseaux",
-            "URL de ton service Réseaux quand il tourne en local",
+            "Service AlphaCast (ex-Réseaux)",
+            "URL de l'API AlphaCast. Par défaut : la prod Railway partagée. "
+            "Mets ton JWT Clerk perso ci-dessous.",
         )
-        self._make_text_field(section, "URL du service",
+        self._make_text_field(section, "URL de l'API",
                               path=("social", "reseaux_api_url"),
-                              placeholder="http://localhost:3001")
-        self._make_password_field(section, "JWT (si Clerk activé)",
+                              placeholder="https://reseauxapi-production.up.railway.app")
+        self._make_password_field(section, "JWT Clerk",
                                   path=("social", "reseaux_jwt"))
+
+    def _build_section_publish_auto(self) -> None:
+        section = self._make_section(
+            "Auto-publish AlphaCast",
+            "Cadence : un draft tous les X premiers contacts envoyés. "
+            "Plafond : nombre maximum de drafts par jour pour éviter le sur-postage.",
+        )
+        # Cadence par plateforme
+        for platform, default_cadence in (("linkedin", 10), ("x", 3), ("bluesky", 5)):
+            self._make_text_field(
+                section, f"Cadence {platform.upper()} (1 draft tous les N envois)",
+                path=("publish_auto", "cadence", platform),
+                placeholder=str(default_cadence),
+            )
+        # Plafond par plateforme
+        for platform, default_cap in (("linkedin", 1), ("x", 5), ("bluesky", 2)):
+            self._make_text_field(
+                section, f"Plafond {platform.upper()} (drafts max / jour)",
+                path=("publish_auto", "daily_cap", platform),
+                placeholder=str(default_cap),
+            )
 
     def _build_section_nightly(self) -> None:
         c = self.colors
@@ -401,13 +431,65 @@ class ConfigView(BaseView):
     def _build_section_appearance(self) -> None:
         section = self._make_section(
             "Apparence",
-            "Mode clair/sombre",
+            "Trois ambiances : claire (Apple-light), intermédiaire "
+            "(graphite reposant) ou sombre (cockpit). Raccourci : Ctrl+T.",
         )
-        self._make_combobox_field(
-            section, "Mode",
-            path=("appearance_mode",),
-            values=["dark", "light"],
+        c = self.colors
+        cur = T.normalize_mode(
+            self.app_state.get("appearance_mode", default="mid")
         )
+
+        row = ctk.CTkFrame(section, fg_color="transparent")
+        row.pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_LG))
+
+        modes = [
+            ("light", "Claire",        "Surfaces blanches, slate, ambiance Apple."),
+            ("mid",   "Intermédiaire", "Graphite chaud, ni clair ni sombre — sweet spot."),
+            ("dark",  "Sombre",        "Cockpit nuit, ambiance focus."),
+        ]
+
+        def apply(mode: str) -> None:
+            try:
+                self.winfo_toplevel().apply_theme(mode)
+            except Exception:
+                # Fallback : juste mémorise dans state, prendra effet au reboot
+                self.app_state.set("appearance_mode", value=mode)
+                self.app_state.save()
+
+        for key, label, desc in modes:
+            is_active = (key == cur)
+            card_color = c.panel_elevated if is_active else c.panel
+            border_color = c.accent if is_active else c.border
+            card = ctk.CTkFrame(
+                row, fg_color=card_color, corner_radius=T.RADIUS_MD,
+                border_color=border_color, border_width=2 if is_active else 1,
+            )
+            card.pack(side="left", fill="both", expand=True,
+                       padx=(0 if key == "light" else T.SPACE_SM, 0))
+            ctk.CTkLabel(
+                card, text=label.upper(),
+                font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+                text_color=c.accent if is_active else c.text_muted,
+                anchor="w",
+            ).pack(fill="x", padx=T.SPACE_MD, pady=(T.SPACE_MD, T.SPACE_XS))
+            ctk.CTkLabel(
+                card, text=desc,
+                font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL),
+                text_color=c.text_secondary, anchor="w",
+                justify="left", wraplength=240,
+            ).pack(fill="x", padx=T.SPACE_MD, pady=(0, T.SPACE_SM))
+            ctk.CTkButton(
+                card,
+                text=("✓ Actif" if is_active else "Choisir"),
+                fg_color=c.accent if is_active else "transparent",
+                hover_color=c.accent_hover if is_active else c.panel_hover,
+                text_color=c.accent_text if is_active else c.text_secondary,
+                border_width=0 if is_active else 1,
+                border_color=c.border_strong,
+                corner_radius=T.RADIUS_SM,
+                font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL, "bold"),
+                command=lambda k=key: apply(k),
+            ).pack(fill="x", padx=T.SPACE_MD, pady=(0, T.SPACE_MD))
 
     def _build_section_updates(self) -> None:
         c = self.colors
@@ -656,7 +738,12 @@ class ConfigView(BaseView):
             value = entry.get()
             # Cast int si la dernière clé sent le numérique
             last = path[-1]
-            if last in ("smtp_port", "imap_port", "daily_cap", "follow_up_days"):
+            is_int_field = (
+                last in ("smtp_port", "imap_port", "daily_cap", "follow_up_days")
+                or (len(path) >= 2 and path[0] == "publish_auto"
+                    and path[1] in ("cadence", "daily_cap"))
+            )
+            if is_int_field:
                 try:
                     value = int(value) if value else 0
                 except ValueError:

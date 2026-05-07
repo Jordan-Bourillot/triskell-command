@@ -4,3 +4,17 @@ pyperclip>=1.8
 requests>=2.31
 beautifulsoup4>=4.12
 lxml>=5.0
+# Backend partagé Jordan / Thomas (CRM + drafts + Convoi en cloud)
+supabase>=2.4
+# Le Convoi — extraction de fichiers (toutes optionnelles, fallback gracieux)
+openpyxl>=3.1     # Excel .xlsx / .xlsm
+python-docx>=1.1  # Word .docx
+pypdf>=4.0        # PDF
+# OCR images : nécessite Tesseract OCR installé sur la machine
+# pytesseract>=0.3
+# Drag & drop (optionnel — sinon « Parcourir… » uniquement)
+# tkinterdnd2>=0.3
+# Le Phare — Google Search Console (optionnel ; sans ces 2 paquets,
+# l'intégration GSC est désactivée gracieusement, le reste tourne)
+# google-auth>=2.30
+# google-api-python-client>=2.130

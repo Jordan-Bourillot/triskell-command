@@ -145,13 +145,15 @@ class OnboardingDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             self._body,
             text=(
-                "Triskell Command, c'est ton pilote automatique de prospection.\n\n"
-                "Tu lui dis qui contacter (ICP, secteur, région) UNE FOIS,\n"
-                "il cherche, enrichit, rédige avec l'IA et envoie tout seul.\n\n"
-                "Ton seul travail : valider chaque matin les mails préparés,\n"
+                "Triskell Command, c'est ton tableau de bord pour piloter "
+                "tout Triskell.\n\n"
+                "Tu décris qui tu veux contacter (secteur, région) UNE fois.\n"
+                "L'app cherche, enrichit, rédige et envoie pendant que tu "
+                "fais autre chose.\n\n"
+                "Ton seul travail : valider chaque matin ce qui est préparé, "
                 "et répondre quand un prospect répond.\n\n"
-                "Avant de commencer, on te demande 2 choses : ta clé IA et ton mail.\n"
-                "5 minutes max, on te guide."
+                "Avant de commencer, on te demande 2 choses : ta clé IA et "
+                "ton mail. 5 minutes max, on te guide."
             ),
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY_LG),
             text_color=c.text_secondary, justify="left", anchor="w",
@@ -355,15 +357,18 @@ class OnboardingDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             self._body, text="Tout est prêt.",
             font=(T.FONT_FAMILY_DISPLAY, 32, "bold"),
-            text_color=c.gold, anchor="w",
+            text_color=c.accent, anchor="w",
         ).pack(fill="x", anchor="w", pady=(T.SPACE_XL, T.SPACE_MD))
 
         ctk.CTkLabel(
             self._body,
             text=(
-                "Tu peux maintenant aller dans « Auto-pilote » pour configurer\n"
-                "ton premier ciblage (NAF, département, etc.) et lancer le pipeline.\n\n"
-                "Bouton « Aide » en bas à gauche si tu as un doute."
+                "Tu peux maintenant aller dans « Auto-pilote » pour décrire "
+                "qui tu veux contacter (secteur d'activité, département…) "
+                "et lancer la machine.\n\n"
+                "Une visite guidée va s'ouvrir derrière pour te présenter "
+                "tout le reste. Tu peux aussi cliquer « Tuto » dans la barre "
+                "de gauche à tout moment."
             ),
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY_LG),
             text_color=c.text_secondary, justify="left", anchor="w",

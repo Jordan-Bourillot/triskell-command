@@ -19,13 +19,16 @@ from .base import BaseView
 
 class CampaignsView(BaseView):
     title = "Envoyer & suivre"
-    subtitle = "Tes vagues d'emails, relances J+5, détection automatique des réponses."
+    subtitle = (
+        "Tes vagues de mails, les relances à J+5, "
+        "et la détection automatique des réponses."
+    )
 
     def build(self) -> None:
         c = self.colors
         # Header
         header = ViewHeader(self, title=self.title, subtitle=self.subtitle, colors=c)
-        header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_LG))
+        header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_MD))
 
         SecondaryButton(header.actions, colors=c, icon="refresh",
                         text="Vérifier réponses",
@@ -39,7 +42,7 @@ class CampaignsView(BaseView):
             ("today",     "Envoyés aujourd'hui", c.text_primary),
             ("contacted", "Total contactés",     c.warning),
             ("replied",   "Réponses",            c.success),
-            ("rate",      "Taux de réponse",     c.gold),
+            ("rate",      "Taux de réponse",     c.accent),
         ]:
             card = StatCard(stats, label=label, value="—", accent=accent, colors=c)
             card.pack(side="left", expand=True, fill="x", padx=T.SPACE_SM)
@@ -69,9 +72,9 @@ class CampaignsView(BaseView):
             text_color=c.text_muted, justify="left", wraplength=420,
         ).pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_MD))
 
-        # Sélecteur template
+        # Sélecteur modèle
         ctk.CTkLabel(
-            camp_card, text="Template",
+            camp_card, text="Modèle de mail",
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL),
             text_color=c.text_secondary, anchor="w",
         ).pack(fill="x", padx=T.SPACE_LG, pady=(0, 2))
@@ -248,8 +251,8 @@ class CampaignsView(BaseView):
                                "smtp_password", "from_email") if not cfg.get(k)]
         if missing and not self._dry_run_var.get():
             self._status_var.set(
-                f"⚠ Config SMTP incomplète : manque {', '.join(missing)}. "
-                f"Voir Réglages."
+                f"⚠ Configuration mail incomplète : il manque "
+                f"{', '.join(missing)}. À renseigner dans Réglages."
             )
             return
 
@@ -273,8 +276,16 @@ class CampaignsView(BaseView):
 
         self._launch_btn.configure(state="disabled", text="…")
         self._status_var.set(
-            f"{'Dry-run' if dry else 'Envoi'} {mode} avec template {template}…"
+            f"{'Test à blanc' if dry else 'Envoi'} {mode} avec le modèle {template}…"
         )
+
+        # Snapshot des prospects déjà contactés AVANT la campagne, pour
+        # détecter ensuite quels prospects sont en 1er contact (= alimentent
+        # le compteur d'auto-publish AlphaCast).
+        from .. import publish_auto
+        is_first_contact_pass = (mode != "followup") and not dry
+        snapshot = (publish_auto.snapshot_email_sent_counts()
+                    if is_first_contact_pass else {})
 
         def worker():
             try:
@@ -288,6 +299,12 @@ class CampaignsView(BaseView):
                     dry_run=dry,
                     limit=limit,
                 )
+
+                # Détection 1er contact + déclenchement auto-publish AlphaCast.
+                first_contacts: list = []
+                if is_first_contact_pass:
+                    first_contacts = publish_auto.fresh_first_contacts(snapshot)
+
                 def apply():
                     self._status_var.set(
                         f"{'✓' if stats.get('sent', 0) >= 0 else '✗'} "
@@ -298,6 +315,13 @@ class CampaignsView(BaseView):
                     self._launch_btn.configure(state="normal", text="Envoyer")
                     self._refresh_stats()
                     self._refresh_log()
+
+                    if first_contacts:
+                        publish_auto.record_first_contact(
+                            self.app_state,
+                            contacts=first_contacts,
+                            on_draft=self._on_auto_draft,
+                        )
                 self.after(0, apply)
             except Exception as e:
                 err = str(e)
@@ -308,9 +332,19 @@ class CampaignsView(BaseView):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _on_auto_draft(self, platform: str, ok: bool, msg: str) -> None:
+        """Callback du hook auto-publish : remonte une ligne dans la status bar."""
+        def apply():
+            prefix = "🤖 Brouillon auto "
+            self._status_var.set(prefix + msg)
+        try:
+            self.after(0, apply)
+        except Exception:
+            pass
+
     def _poll_replies(self) -> None:
         self._sync_core_config()
-        self._status_var.set("Connexion IMAP…")
+        self._status_var.set("Connexion à ta boîte mail…")
 
         def worker():
             try:
@@ -318,7 +352,7 @@ class CampaignsView(BaseView):
                 stats = imap_listener.poll_replies(verbose=False)
                 def apply():
                     self._status_var.set(
-                        f"✓ IMAP : {stats['scanned']} mail(s) scanné(s), "
+                        f"✓ {stats['scanned']} mail(s) examiné(s), "
                         f"{stats['matched']} réponse(s) détectée(s)."
                     )
                     self._refresh_stats()
@@ -327,7 +361,7 @@ class CampaignsView(BaseView):
             except Exception as e:
                 err = str(e)
                 def apply():
-                    self._status_var.set(f"✗ IMAP : {err[:200]}")
+                    self._status_var.set(f"✗ Boîte mail : {err[:200]}")
                 self.after(0, apply)
 
         threading.Thread(target=worker, daemon=True).start()

@@ -14,14 +14,14 @@ from .base import BaseView
 class AutopilotView(BaseView):
     title = "Auto-pilote"
     subtitle = (
-        "Définis ta cible 1 fois. La machine cherche, enrichit, rédige, "
-        "envoie (ou prépare des drafts) — pendant que tu fais autre chose."
+        "Tu définis ta cible une fois. L'app cherche, enrichit, rédige et "
+        "prépare les mails — pendant que tu fais autre chose."
     )
 
     def build(self) -> None:
         c = self.colors
         header = ViewHeader(self, title=self.title, subtitle=self.subtitle, colors=c)
-        header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_LG))
+        header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_MD))
 
         SecondaryButton(header.actions, colors=c, icon="save", text="Enregistrer",
                         command=self._save_only).pack(side="left", padx=(0, T.SPACE_SM))
@@ -367,7 +367,7 @@ class AutopilotView(BaseView):
                     f"{stats.searched} trouvés, "
                     f"{stats.enriched} enrichis, "
                     f"{stats.drafts_sent} envoyés, "
-                    f"{stats.drafts_pending} drafts en attente, "
+                    f"{stats.drafts_pending} brouillons en attente, "
                     f"{stats.replies_detected} réponses, "
                     f"{len(stats.errors)} erreurs."
                 )

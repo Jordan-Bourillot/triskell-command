@@ -19,14 +19,17 @@ from .base import BaseView
 
 
 class ComposeView(BaseView):
-    title = "Rédiger avec l'IA"
-    subtitle = "Tes règles d'écriture, tes 5 services IA — tu écris vite, juste."
+    title = "Écrire avec l'IA"
+    subtitle = (
+        "Tes règles d'écriture, tes assistants IA. "
+        "Tu écris vite, et juste."
+    )
 
     def build(self) -> None:
         c = self.colors
         # Header
         header = ViewHeader(self, title=self.title, subtitle=self.subtitle, colors=c)
-        header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_LG))
+        header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_MD))
 
         # Sélecteur provider + modèle
         sel_block = ctk.CTkFrame(header.actions, fg_color="transparent")
@@ -234,9 +237,9 @@ class ComposeView(BaseView):
         SalesTunnelTemplateDialog(self, on_pick=self._inject_template)
 
     def _inject_template(self, tpl: dict) -> None:
-        """Insère un template Sales Tunnel dans la zone prompt avec consigne IA."""
+        """Insère un modèle Sales Tunnel dans la zone prompt avec consigne IA."""
         instruction = (
-            f"Voici un template de prospection pour {tpl['client']} "
+            f"Voici un modèle de prospection pour {tpl['client']} "
             f"(produit : {tpl['product']}, canal : {tpl['channel']}).\n\n"
             f"Personnalise-le pour un prospect précis (à toi de me dire qui), "
             f"en gardant le ton chaleureux et professionnel. "
@@ -245,12 +248,12 @@ class ComposeView(BaseView):
         )
         if tpl.get("subject"):
             instruction += f"OBJET ORIGINAL : {tpl['subject']}\n\n"
-        instruction += "TEMPLATE ORIGINAL :\n" + tpl.get("body", "")
+        instruction += "MODÈLE ORIGINAL :\n" + tpl.get("body", "")
 
         self._prompt_text.delete("1.0", "end")
         self._prompt_text.insert("1.0", instruction)
         self._status_var.set(
-            f"✓ Template chargé : {tpl['product']} → {tpl['client']} → {tpl['channel']}"
+            f"✓ Modèle chargé : {tpl['product']} → {tpl['client']} → {tpl['channel']}"
         )
 
     def _send(self) -> None:
@@ -309,7 +312,7 @@ class SalesTunnelTemplateDialog(ctk.CTkToplevel):
         self._colors = master.colors
         c = self._colors
 
-        self.title("Importer un template Sales Tunnel")
+        self.title("Importer un modèle de mail")
         self.geometry("620x520")
         self.minsize(560, 460)
         self.configure(fg_color=c.bg)
@@ -318,7 +321,7 @@ class SalesTunnelTemplateDialog(ctk.CTkToplevel):
         self.after(100, lambda: self.lift())
 
         ctk.CTkLabel(
-            self, text="Choisir un template",
+            self, text="Choisir un modèle",
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TITLE, "bold"),
             text_color=c.text_primary,
         ).pack(anchor="w", padx=T.SPACE_LG, pady=(T.SPACE_LG, T.SPACE_SM))
@@ -326,8 +329,8 @@ class SalesTunnelTemplateDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             self,
             text="Sélectionne en cascade : produit → cible → canal.\n"
-                 "Le template sera inséré dans la zone prompt avec une consigne "
-                 "pour que l'IA le personnalise.",
+                 "Le modèle sera inséré dans la zone d'écriture avec une "
+                 "consigne pour que l'IA le personnalise.",
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL),
             text_color=c.text_muted, justify="left", wraplength=560,
         ).pack(anchor="w", padx=T.SPACE_LG, pady=(0, T.SPACE_MD))
@@ -359,7 +362,7 @@ class SalesTunnelTemplateDialog(ctk.CTkToplevel):
         )
         self._preview.pack(fill="both", expand=True,
                            padx=T.SPACE_LG, pady=(T.SPACE_SM, T.SPACE_MD))
-        self._preview.insert("1.0", "(la prévisualisation du template apparaîtra ici)")
+        self._preview.insert("1.0", "(l'aperçu du modèle apparaîtra ici)")
 
         # Bottom
         bottom = ctk.CTkFrame(self, fg_color="transparent")

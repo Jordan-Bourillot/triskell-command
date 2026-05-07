@@ -19,8 +19,8 @@ SETTINGS_FILE = APP_DIR / "settings.json"
 
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "appearance_mode": "dark",          # dark | light
-    "active_view": "prospects",         # vue affichée au lancement
+    "appearance_mode": "light",         # light | mid | dark (light par défaut, Apple-clear)
+    "active_view": "morning",           # vue affichée au lancement
     "ai": {
         "selected_provider": "anthropic",
         "selected_model": "claude-sonnet-4-5",
@@ -56,8 +56,43 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "google_places_api_key": "",
     },
     "social": {
-        "reseaux_api_url": "http://localhost:3001",
+        "reseaux_api_url": "https://reseauxapi-production.up.railway.app",
         "reseaux_jwt": "",
+    },
+    "publish_auto": {
+        "enabled": True,
+        "cadence": {           # X premiers contacts entre deux drafts
+            "linkedin": 10,
+            "x": 3,
+            "bluesky": 5,
+        },
+        "daily_cap": {         # Plafond de drafts générés par jour
+            "linkedin": 1,
+            "x": 5,
+            "bluesky": 2,
+        },
+        "auto_publish": {      # True = publie sans validation, False = draft à valider
+            "linkedin": False,
+            "x": False,
+            "bluesky": False,
+        },
+        "counters": {          # Compteur de premiers contacts depuis le dernier draft
+            "linkedin": 0,
+            "x": 0,
+            "bluesky": 0,
+        },
+        "today": {             # Date ISO + drafts générés aujourd'hui par plateforme
+            "date": "",
+            "linkedin": 0,
+            "x": 0,
+            "bluesky": 0,
+        },
+        "next_theme": "",      # Thème pré-sélectionné (vide = aléatoire)
+        "angle_index": 0,      # Index rotatif sur la liste d'angles
+        "last_prospect": {     # Dernier prospect démarché en 1er contact (pour le draft)
+            "metier": "",
+            "region": "",
+        },
     },
     "ui": {
         "last_window_width": 1280,

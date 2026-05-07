@@ -1,17 +1,13 @@
 """Tokens de design — palette canonique Triskell Studio.
 
-Source de vérité : `Triskell 0 - Lanceur/style.css` (variables CSS officielles
-du lanceur "La Table Ronde"), complétée par `Triskell 1 - Site officiel`
-(palette site web).
+Trois modes : LIGHT (par défaut, Apple-clear), MID (graphite intermédiaire,
+chaleureux et reposant), DARK (cockpit nuit).
 
-Aligné avec :
-- `--triskell-indigo: #6366F1` (univers du quotidien)
-- `--triskell-violet: #A78BFA` (Atelier des Pros)
-- `--triskell-orange: #F97316` (accent)
-- `--gold: #D4B35A` (signature Table Ronde, sceaux)
-- Fond sombre #0F1218, texte chaud #ECEBF5
+Inspiration : AlphaCast (Réseaux/) — surfaces blanches sobres, indigo +
+violet en accents, slate pour les nuances, or réservé aux séparateurs fins
+et au branding (sceau Table Ronde).
 
-Esprit : héraldique sobre, cockpit pro, pas alchimique excessif.
+Esprit : héraldique sobre, large white space, hiérarchie visuelle nette.
 """
 
 from __future__ import annotations
@@ -20,54 +16,22 @@ from dataclasses import dataclass
 
 
 # ---------------------------------------------------------------------------
-# Trio Triskell (constantes officielles, partagées dark/light)
+# Palette canonique Triskell (constantes partagées)
 # ---------------------------------------------------------------------------
 TRISKELL_INDIGO = "#6366F1"
+TRISKELL_INDIGO_DARK = "#4F46E5"
+TRISKELL_INDIGO_LIGHT = "#818CF8"
 TRISKELL_VIOLET = "#A78BFA"
+TRISKELL_VIOLET_LIGHT = "#C4B5FD"
 TRISKELL_ORANGE = "#F97316"
-TRISKELL_GOLD = "#D4B35A"
-TRISKELL_GOLD_SOFT = "#E6CD87"
+TRISKELL_GOLD = "#C9A032"          # or sobre, un peu désaturé
+TRISKELL_GOLD_SOFT = "#D4B35A"     # or signature historique
 
-# ---------------------------------------------------------------------------
-# Palette DARK (Table Ronde)
-# ---------------------------------------------------------------------------
-D_BG = "#0F1218"
-D_BG_2 = "#161A23"
-D_BG_3 = "#1D222E"
-D_BG_CARD = "#181C27"
-D_BG_CARD_HOVER = "#202530"
-D_BG_ELEVATED = "#22283A"
-D_BORDER = "#262C39"
-D_BORDER_STRONG = "#353C4D"
-D_TEXT = "#ECEBF5"
-D_TEXT_DIM = "#9DA3B3"
-D_TEXT_MUTED = "#6B7180"
-D_ACCENT = "#7C7FE9"        # indigo doux principal (CTA)
-D_ACCENT_HOT = "#9396F0"
-D_ACCENT_GLOW = "#A78BFA"
-D_GOLD = TRISKELL_GOLD
-D_GOLD_SOFT = TRISKELL_GOLD_SOFT
-
-# ---------------------------------------------------------------------------
-# Palette LIGHT
-# ---------------------------------------------------------------------------
-L_BG = "#E9ECF2"
-L_BG_2 = "#FFFFFF"
-L_BG_3 = "#F3F4F8"
-L_BG_CARD = "#FFFFFF"
-L_BG_CARD_HOVER = "#F5F6FA"
-L_BG_ELEVATED = "#EEF0FF"
-L_BORDER = "#D4D7E0"
-L_BORDER_STRONG = "#A8ACBA"
-L_TEXT = "#14171F"
-L_TEXT_DIM = "#4A4F5E"
-L_TEXT_MUTED = "#6F7484"
-
-# Sémantique
-GREEN = "#4ADE80"
+# Sémantique (partagée 3 modes — variantes ajustées par mode si besoin)
+SUCCESS = "#10B981"
 WARNING = "#F59E0B"
 DANGER = "#EF4444"
-INFO = "#60A5FA"
+INFO = "#0EA5E9"
 
 
 @dataclass(frozen=True)
@@ -103,86 +67,174 @@ class ThemeColors:
     sidebar_text_active: str
 
 
-DARK = ThemeColors(
-    bg=D_BG,
-    bg_alt=D_BG_2,
-    bg_hero=D_BG_3,
-    panel=D_BG_CARD,
-    panel_hover=D_BG_CARD_HOVER,
-    panel_elevated=D_BG_ELEVATED,
-    border=D_BORDER,
-    border_strong=D_BORDER_STRONG,
-    border_focus=D_ACCENT,
-    text_primary=D_TEXT,
-    text_secondary=D_TEXT_DIM,
-    text_muted=D_TEXT_MUTED,
-    accent=D_ACCENT,
-    accent_hover=D_ACCENT_HOT,
-    accent_glow=D_ACCENT_GLOW,
-    accent_text="#FFFFFF",
-    accent_secondary=TRISKELL_VIOLET,
-    accent_tertiary=TRISKELL_ORANGE,
-    gold=D_GOLD,
-    gold_soft=D_GOLD_SOFT,
-    success=GREEN,
-    danger=DANGER,
-    warning=WARNING,
-    info=INFO,
-    sidebar_bg="#0B0E13",
-    sidebar_item_hover=D_BG_CARD_HOVER,
-    sidebar_item_active=D_ACCENT,
-    sidebar_text=D_TEXT_DIM,
-    sidebar_text_active="#FFFFFF",
-)
-
-
+# ---------------------------------------------------------------------------
+# LIGHT — slate / blanc, indigo en accents, large white space (Apple-light)
+# ---------------------------------------------------------------------------
 LIGHT = ThemeColors(
-    bg=L_BG,
-    bg_alt=L_BG_2,
-    bg_hero=L_BG_ELEVATED,
-    panel=L_BG_CARD,
-    panel_hover=L_BG_CARD_HOVER,
-    panel_elevated=L_BG_ELEVATED,
-    border=L_BORDER,
-    border_strong=L_BORDER_STRONG,
-    border_focus=D_ACCENT,
-    text_primary=L_TEXT,
-    text_secondary=L_TEXT_DIM,
-    text_muted=L_TEXT_MUTED,
-    accent=D_ACCENT,
-    accent_hover=D_ACCENT_HOT,
+    bg="#F8FAFC",                # slate-50
+    bg_alt="#FFFFFF",
+    bg_hero="#F1F5F9",           # slate-100
+    panel="#FFFFFF",
+    panel_hover="#F8FAFC",
+    panel_elevated="#FFFFFF",
+    border="#E2E8F0",            # slate-200
+    border_strong="#CBD5E1",     # slate-300
+    border_focus=TRISKELL_INDIGO,
+    text_primary="#0F172A",      # slate-900
+    text_secondary="#475569",    # slate-600
+    text_muted="#64748B",        # slate-500
+    accent=TRISKELL_INDIGO,
+    accent_hover=TRISKELL_INDIGO_DARK,
     accent_glow=TRISKELL_VIOLET,
     accent_text="#FFFFFF",
     accent_secondary=TRISKELL_VIOLET,
     accent_tertiary=TRISKELL_ORANGE,
-    gold=D_GOLD,
-    gold_soft=D_GOLD_SOFT,
-    success=GREEN,
+    gold=TRISKELL_GOLD,
+    gold_soft=TRISKELL_GOLD_SOFT,
+    success=SUCCESS,
     danger=DANGER,
     warning=WARNING,
     info=INFO,
-    sidebar_bg=L_BG_2,
-    sidebar_item_hover=L_BG_3,
-    sidebar_item_active=D_ACCENT,
-    sidebar_text=L_TEXT_DIM,
-    sidebar_text_active="#FFFFFF",
+    sidebar_bg="#FFFFFF",
+    sidebar_item_hover="#F1F5F9",
+    sidebar_item_active="#EEF2FF",   # indigo-50
+    sidebar_text="#64748B",
+    sidebar_text_active=TRISKELL_INDIGO,
 )
 
 
 # ---------------------------------------------------------------------------
-# Typographie — alignée Table Ronde + site officiel
+# MID — graphite chaud, ni clair ni sombre, reposant (sweet spot)
 # ---------------------------------------------------------------------------
-# Cinzel : police signature Table Ronde (serif noble, héraldique). Si absente
-# du système : Tk fallback automatique sur Segoe UI Bold.
-# Inter : corps texte (site officiel + écosystème). Fallback : Segoe UI.
+MID = ThemeColors(
+    bg="#2A2F3D",                # graphite chaud
+    bg_alt="#252A37",
+    bg_hero="#323847",
+    panel="#2F3543",
+    panel_hover="#373D4D",
+    panel_elevated="#3C4354",
+    border="#3D4454",
+    border_strong="#4F5668",
+    border_focus=TRISKELL_INDIGO_LIGHT,
+    text_primary="#F1F5F9",      # slate-100
+    text_secondary="#CBD5E1",    # slate-300
+    text_muted="#94A3B8",        # slate-400
+    accent=TRISKELL_INDIGO_LIGHT,
+    accent_hover="#A5B4FC",      # indigo-300
+    accent_glow=TRISKELL_VIOLET_LIGHT,
+    accent_text="#0F172A",
+    accent_secondary=TRISKELL_VIOLET,
+    accent_tertiary=TRISKELL_ORANGE,
+    gold=TRISKELL_GOLD_SOFT,
+    gold_soft="#E8CC7E",
+    success="#34D399",
+    danger="#F87171",
+    warning="#FBBF24",
+    info="#38BDF8",
+    sidebar_bg="#1F2433",
+    sidebar_item_hover="#2F3543",
+    sidebar_item_active="#3C4354",
+    sidebar_text="#94A3B8",
+    sidebar_text_active="#F1F5F9",
+)
+
+
+# ---------------------------------------------------------------------------
+# DARK — cockpit nuit (adouci par rapport à v0.3)
+# ---------------------------------------------------------------------------
+DARK = ThemeColors(
+    bg="#0F1218",
+    bg_alt="#161A23",
+    bg_hero="#1D222E",
+    panel="#181C27",
+    panel_hover="#202530",
+    panel_elevated="#22283A",
+    border="#262C39",
+    border_strong="#353C4D",
+    border_focus=TRISKELL_INDIGO_LIGHT,
+    text_primary="#ECEBF5",
+    text_secondary="#9DA3B3",
+    text_muted="#6B7180",
+    accent=TRISKELL_INDIGO_LIGHT,
+    accent_hover="#A5B4FC",
+    accent_glow=TRISKELL_VIOLET_LIGHT,
+    accent_text="#0F172A",
+    accent_secondary=TRISKELL_VIOLET,
+    accent_tertiary=TRISKELL_ORANGE,
+    gold=TRISKELL_GOLD,
+    gold_soft=TRISKELL_GOLD_SOFT,
+    success="#34D399",
+    danger="#F87171",
+    warning="#FBBF24",
+    info="#38BDF8",
+    sidebar_bg="#0B0E13",
+    sidebar_item_hover="#202530",
+    sidebar_item_active="#22283A",
+    sidebar_text="#9DA3B3",
+    sidebar_text_active="#ECEBF5",
+)
+
+
+# ---------------------------------------------------------------------------
+# Sélection du thème
+# ---------------------------------------------------------------------------
+THEME_MODES = ("light", "mid", "dark")
+
+
+def get_theme(mode: str) -> ThemeColors:
+    """Renvoie l'instance ThemeColors pour le mode demandé.
+    `mode` ∈ {'light', 'mid', 'dark'}. Tout autre valeur retombe sur 'light'."""
+    m = (mode or "").lower()
+    if m == "mid":
+        return MID
+    if m == "dark":
+        return DARK
+    return LIGHT  # défaut Apple-clear
+
+
+def normalize_mode(mode: str) -> str:
+    """Normalise une valeur de mode en {'light','mid','dark'}."""
+    m = (mode or "").lower()
+    return m if m in THEME_MODES else "light"
+
+
+def cycle_mode(current: str) -> str:
+    """Cycle light → mid → dark → light. Pour raccourci clavier."""
+    order = ["light", "mid", "dark"]
+    cur = normalize_mode(current)
+    try:
+        i = order.index(cur)
+    except ValueError:
+        return "mid"
+    return order[(i + 1) % len(order)]
+
+
+# Alias rétro-compat : dans l'ancien code on faisait `T.DARK if mode == 'dark'
+# else T.LIGHT`. On garde DARK et LIGHT exportés ; MID est nouveau.
+__all__ = [
+    "ThemeColors", "LIGHT", "MID", "DARK",
+    "THEME_MODES", "get_theme", "normalize_mode", "cycle_mode",
+    # Tokens
+    "TRISKELL_INDIGO", "TRISKELL_INDIGO_DARK", "TRISKELL_INDIGO_LIGHT",
+    "TRISKELL_VIOLET", "TRISKELL_VIOLET_LIGHT",
+    "TRISKELL_ORANGE", "TRISKELL_GOLD", "TRISKELL_GOLD_SOFT",
+    "SUCCESS", "WARNING", "DANGER", "INFO",
+    # Tous les autres exportés ci-dessous (typo, espacements, brand)
+]
+
+
+# ---------------------------------------------------------------------------
+# Typographie — Inter pour le corps, Cinzel pour la signature
+# ---------------------------------------------------------------------------
 FONT_FAMILY = "Inter"
-FONT_FAMILY_DISPLAY = "Cinzel"        # titres nobles (BRAND_NAME, vues)
+FONT_FAMILY_DISPLAY = "Cinzel"
 FONT_FAMILY_FALLBACK = "Segoe UI"
 FONT_FAMILY_MONO = "Consolas"
 
-FONT_SIZE_HERO = 32
-FONT_SIZE_DISPLAY = 24
-FONT_SIZE_TITLE = 18
+# Hiérarchie typo allégée (un peu plus généreuse à la Apple)
+FONT_SIZE_HERO = 36          # +4 vs v0.3
+FONT_SIZE_DISPLAY = 26
+FONT_SIZE_TITLE = 19
 FONT_SIZE_HEADING = 15
 FONT_SIZE_BODY = 13
 FONT_SIZE_BODY_LG = 14
@@ -191,29 +243,29 @@ FONT_SIZE_TINY = 10
 
 
 # ---------------------------------------------------------------------------
-# Espacements (4px base)
+# Espacements — base 4px, plus généreux (Apple-like)
 # ---------------------------------------------------------------------------
 SPACE_XS = 4
 SPACE_SM = 8
 SPACE_MD = 12
 SPACE_LG = 18
-SPACE_XL = 24
-SPACE_2XL = 36
-SPACE_3XL = 48
+SPACE_XL = 28           # +4 pour aérer
+SPACE_2XL = 40          # +4
+SPACE_3XL = 56          # +8
 
 RADIUS_SM = 8
-RADIUS_MD = 12
-RADIUS_LG = 18
-RADIUS_XL = 24
+RADIUS_MD = 14          # +2 pour cards plus douces
+RADIUS_LG = 20          # +2
+RADIUS_XL = 28          # +4
 RADIUS_PILL = 100
 
 # Tailles fenêtre
-WINDOW_WIDTH = 1280
-WINDOW_HEIGHT = 820
-WINDOW_MIN_WIDTH = 1100
-WINDOW_MIN_HEIGHT = 720
+WINDOW_WIDTH = 1320
+WINDOW_HEIGHT = 860
+WINDOW_MIN_WIDTH = 1140
+WINDOW_MIN_HEIGHT = 740
 
-SIDEBAR_WIDTH = 220
+SIDEBAR_WIDTH = 232
 
 
 # ---------------------------------------------------------------------------
@@ -221,12 +273,12 @@ SIDEBAR_WIDTH = 220
 # ---------------------------------------------------------------------------
 BRAND_NAME = "Triskell"
 BRAND_PRODUCT = "Command"
-BRAND_TAGLINE = "La Table Ronde de tes outils Triskell."
-BRAND_LOCATION = "🌊 Agence bretonne · Fait en Bretagne · 100 % français"
+BRAND_TAGLINE = "Le tableau de bord de Triskell."
+BRAND_LOCATION = "🌊 Bretagne · 100 % français"
 BRAND_WEB = "triskell-studio.fr"
-APP_VERSION_LABEL = "v0.1"
+APP_VERSION_LABEL = "v0.4"
 
-# Microcopie signature (esprit Table Ronde — tutoiement, ton chaleureux)
-COPY_LOADING_GENERIC = "Allumage des chandelles…"
-COPY_EMPTY_DEFAULT = "Aucun compagnon ne répond à cet appel pour le moment."
-COPY_OWNER_AFFIRM = "Tu es proprio. On te lâche pas."
+# Microcopie signature (tutoiement, ton chaleureux)
+COPY_LOADING_GENERIC = "Préparation en cours…"
+COPY_EMPTY_DEFAULT = "Rien ici pour l'instant."
+COPY_OWNER_AFFIRM = "On te suit pas à pas."

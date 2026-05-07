@@ -12,13 +12,13 @@ from .base import BaseView
 
 
 class DashboardView(BaseView):
-    title = "Ta Table Ronde"
+    title = "Tableau de bord"
     subtitle = "Vue d'ensemble en temps réel de ton activité de prospection."
 
     def build(self) -> None:
         c = self.colors
         header = ViewHeader(self, title=self.title, subtitle=self.subtitle, colors=c)
-        header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_LG))
+        header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_MD))
 
         SecondaryButton(header.actions, colors=c, icon="refresh", text="Rafraîchir",
                         command=self._refresh).pack(side="left")

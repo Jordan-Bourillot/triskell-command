@@ -1,0 +1,897 @@
+/* Vue Réglages — apparence, IA, mail, connexion base partagée */
+
+const Config = {
+  async render(container) {
+    container.innerHTML = `
+      <section class="animate-slide-up">
+        <div class="mb-10">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="hero-kicker mb-2">RÉGLAGES</div>
+              <h1 class="hero-title mb-3" style="font-size: 36px;">Configurer ton Triskell.</h1>
+              <p class="hero-subtitle">Ton apparence, tes clés, ton compte mail, et ta connexion à la base partagée.</p>
+            </div>
+            ${Help.button('config')}
+          </div>
+        </div>
+
+        <div id="cfg-content" class="space-y-12 max-w-3xl"></div>
+      </section>
+    `;
+    await this.refresh();
+  },
+
+  async refresh() {
+    let s = null;
+    let l2c = null;
+    let stripeCfg = null;
+    let calendlyCfg = null;
+    let phantomCfg = null;
+    let trackerCfg = null;
+    if (App.api) {
+      try { s = await App.api.get_settings(); } catch (e) {}
+      try {
+        const r = await App.api.lead_to_client_get_config();
+        if (r && r.ok) l2c = r.config;
+      } catch (e) {}
+      try {
+        const r = await App.api.stripe_get_config();
+        if (r && r.ok) stripeCfg = r.config;
+      } catch (e) {}
+      try {
+        const r = await App.api.calendly_get_config();
+        if (r && r.ok) calendlyCfg = r.config;
+      } catch (e) {}
+      try {
+        const r = await App.api.phantombuster_get_config();
+        if (r && r.ok) phantomCfg = r.config;
+      } catch (e) {}
+      try {
+        const r = await App.api.tracker_get_config();
+        if (r && r.ok) trackerCfg = r.config;
+      } catch (e) {}
+    }
+    const slot = document.getElementById('cfg-content');
+    slot.innerHTML = this._renderAppearance(s) +
+                     this._renderAi(s) +
+                     this._renderOutreach(s) +
+                     this._renderStripe(stripeCfg) +
+                     this._renderCalendly(calendlyCfg) +
+                     this._renderPhantombuster(phantomCfg) +
+                     this._renderTracker(trackerCfg) +
+                     this._renderLeadToClient(l2c) +
+                     this._renderDelivery() +
+                     this._renderTutorial();
+    this._bind();
+    this._bindLeadToClient();
+    this._bindStripe();
+    this._bindCalendly();
+    this._bindPhantombuster();
+    this._bindTracker();
+  },
+
+  _renderAppearance(s) {
+    const cur = s ? s.appearance_mode : 'mid';
+    const modes = [
+      { key: 'light', label: 'Claire',        desc: 'Surfaces blanches, ambiance Apple-light.' },
+      { key: 'mid',   label: 'Intermédiaire', desc: 'Graphite chaud, sweet spot reposant.' },
+      { key: 'dark',  label: 'Sombre',        desc: 'Cockpit nuit, pour la concentration.' },
+    ];
+    return `
+      <section>
+        <div class="section-label">Apparence</div>
+        <p class="text-sm text-text-muted mb-4">
+          Trois ambiances. Tu peux aussi cycler avec Ctrl+T.
+        </p>
+        <div class="grid grid-cols-3 gap-4">
+          ${modes.map(m => {
+            const active = m.key === cur;
+            return `
+              <button data-theme-mode="${m.key}"
+                      class="card p-5 text-left transition-all hover:translate-y-[-1px]"
+                      style="${active ? 'border-color: hsl(var(--accent)); border-width: 2px; background: hsl(var(--accent) / 0.06);' : ''}">
+                <div class="text-[10px] font-bold tracking-widest mb-1
+                            ${active ? 'text-accent' : 'text-text-muted'}">
+                  ${m.label.toUpperCase()}
+                </div>
+                <div class="text-sm text-text-secondary mb-3">${m.desc}</div>
+                <div class="text-[11px] font-semibold ${active ? 'text-accent' : 'text-text-muted'}">
+                  ${active ? '✓ Actif' : 'Choisir →'}
+                </div>
+              </button>
+            `;
+          }).join('')}
+        </div>
+      </section>
+    `;
+  },
+
+  _renderAi(s) {
+    const ai = (s && s.ai) || { api_keys: {} };
+    const keys = ai.api_keys || {};
+    const providers = [
+      { id: 'anthropic', label: 'Anthropic (Claude)', recommended: false },
+      { id: 'google',    label: 'Google (Gemini) — gratuit', recommended: true },
+      { id: 'openai',    label: 'OpenAI (GPT)',     recommended: false },
+      { id: 'mistral',   label: 'Mistral',          recommended: false },
+      { id: 'xai',       label: 'xAI (Grok)',       recommended: false },
+    ];
+    return `
+      <section>
+        <div class="section-label">Services IA</div>
+        <p class="text-sm text-text-muted mb-4">
+          Tes clés sont stockées localement et jamais envoyées hors de l'app.
+        </p>
+        <div class="card p-6 space-y-4">
+          ${providers.map(p => {
+            const has = !!keys[p.id];
+            return `
+              <div>
+                <label class="block text-sm font-semibold mb-1">
+                  ${this._esc(p.label)}
+                  ${p.recommended ? '<span class="ml-2 text-[10px] bg-success/15 text-success px-2 py-0.5 rounded-full font-bold">RECOMMANDÉ</span>' : ''}
+                </label>
+                <input type="password"
+                       data-save-path="ai.api_keys.${p.id}"
+                       placeholder="${has ? '(clé enregistrée — tape pour remplacer)' : 'Clé API…'}"
+                       class="w-full px-4 py-2.5 text-sm rounded-xl bg-bg border border-border
+                              focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent" />
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </section>
+    `;
+  },
+
+  _renderOutreach(s) {
+    const o = (s && s.outreach) || {};
+    return `
+      <section>
+        <div class="section-label">Compte mail (envoi & réception)</div>
+        <p class="text-sm text-text-muted mb-4">
+          Identifiants de ton fournisseur (Gmail, IONOS, OVH…). Mot de passe
+          d'application requis si Gmail.
+        </p>
+        <div class="card p-6 space-y-4">
+          ${this._field('Adresse mail (envoi)', 'outreach.from_email', o.from_email, 'email')}
+          ${this._field('Nom affiché', 'outreach.from_name', o.from_name)}
+          <div class="grid grid-cols-2 gap-4">
+            ${this._field('Serveur d\'envoi (SMTP)', 'outreach.smtp_host', o.smtp_host, 'text', 'smtp.ionos.fr')}
+            ${this._field('Port SMTP', 'outreach.smtp_port', o.smtp_port, 'number', '587')}
+          </div>
+          ${this._field('Identifiant SMTP', 'outreach.smtp_user', o.smtp_user)}
+          ${this._field('Mot de passe SMTP', 'outreach.smtp_password', '', 'password', 'tape pour modifier')}
+          <div class="grid grid-cols-2 gap-4">
+            ${this._field('Serveur de réception (IMAP)', 'outreach.imap_host', o.imap_host, 'text', 'imap.ionos.fr')}
+            ${this._field('Port IMAP', 'outreach.imap_port', o.imap_port, 'number', '993')}
+          </div>
+          ${this._field('Identifiant IMAP', 'outreach.imap_user', o.imap_user)}
+          ${this._field('Mot de passe IMAP', 'outreach.imap_password', '', 'password', 'tape pour modifier')}
+          <div class="grid grid-cols-2 gap-4">
+            ${this._field('Plafond quotidien', 'outreach.daily_cap', o.daily_cap, 'number', '40')}
+            ${this._field('Délai relance (jours)', 'outreach.follow_up_days', o.follow_up_days, 'number', '5')}
+          </div>
+        </div>
+      </section>
+    `;
+  },
+
+  _renderStripe(cfg) {
+    const c = cfg || { enabled: false, secret_key: '', poll_minutes: 5,
+                       product_mapping: {}, default_product_key: '_default',
+                       default_product_name: 'Commande Stripe', _has_key: false };
+    const mapping = c.product_mapping || {};
+    const mappingRows = Object.entries(mapping)
+      .filter(([k]) => !k.endsWith('_name'))
+      .map(([stripeId, prodKey], i) => `
+        <div class="grid grid-cols-12 gap-2 items-center" data-map-row="${i}">
+          <input type="text" data-map-stripe="${i}" value="${this._esc(stripeId)}"
+                 placeholder="prod_xxx ou price_xxx"
+                 class="col-span-5 px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+          <input type="text" data-map-key="${i}" value="${this._esc(prodKey)}"
+                 placeholder="pack-electricien-pro"
+                 class="col-span-4 px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+          <input type="text" data-map-name="${i}" value="${this._esc(mapping[stripeId + '_name'] || '')}"
+                 placeholder="Nom affiché"
+                 class="col-span-2 px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+          <button class="col-span-1 text-text-muted hover:text-danger text-lg leading-none" data-map-del="${i}" title="Supprimer">×</button>
+        </div>
+      `).join('');
+
+    return `
+      <section>
+        <div class="section-label">Paiements Stripe → livraison auto</div>
+        <p class="text-sm text-text-muted mb-4">
+          Quand un client paie sur Stripe, l'app crée automatiquement une carte
+          projet (statut Briefing, payée). Le mail de bienvenue + livrables du
+          kit du produit partent immédiatement après.
+        </p>
+        <div class="card p-6 space-y-4">
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input type="checkbox" data-stripe-key="enabled" ${c.enabled?'checked':''}
+                   class="mt-0.5 w-4 h-4 accent-accent" />
+            <div>
+              <div class="text-sm font-medium">Activer le polling Stripe</div>
+              <div class="text-xs text-text-muted">Vérifie les nouveaux paiements toutes les 5 minutes (configurable).</div>
+            </div>
+          </label>
+
+          <div>
+            <label class="block text-xs font-medium text-text-secondary mb-1.5">
+              Clé secrète Stripe ${c._has_key ? '<span class="text-success">(✓ enregistrée)</span>' : ''}
+            </label>
+            <input type="password" data-stripe-key="secret_key"
+                   placeholder="${c._has_key ? '(clé enregistrée — tape pour remplacer)' : 'sk_live_… ou sk_test_…'}"
+                   class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none font-mono" />
+            <div class="text-[11px] text-text-muted mt-1">
+              Trouvable dans Stripe Dashboard → Développeurs → Clés API. Stockée chiffrée dans la base partagée.
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-text-secondary mb-1.5">Fréquence (minutes)</label>
+              <input type="number" min="1" max="60" data-stripe-key="poll_minutes" value="${c.poll_minutes || 5}"
+                     class="w-32 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+            </div>
+          </div>
+
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="text-xs font-bold tracking-widest text-text-muted">MAPPING PRODUITS STRIPE → KIT TRISKELL</label>
+              <button class="text-[11px] text-accent hover:underline" id="stripe-add-map">+ Ajouter</button>
+            </div>
+            <div class="text-xs text-text-muted mb-3">
+              Pour chaque produit Stripe, dis quel kit de livraison Triskell utiliser.
+              Le « product_id » Stripe se trouve dans Stripe Dashboard → Produits.
+            </div>
+            <div id="stripe-mapping" class="space-y-2">
+              ${mappingRows || '<div class="text-text-muted text-xs py-2">Aucun mapping. Sans mapping, tous les paiements utilisent le kit générique.</div>'}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 pt-2">
+            <div>
+              <label class="block text-xs font-medium text-text-secondary mb-1.5">Kit par défaut (si non mappé)</label>
+              <input type="text" data-stripe-key="default_product_key" value="${this._esc(c.default_product_key || '_default')}"
+                     class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-text-secondary mb-1.5">Nom affiché par défaut</label>
+              <input type="text" data-stripe-key="default_product_name" value="${this._esc(c.default_product_name || 'Commande Stripe')}"
+                     class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+            </div>
+          </div>
+
+          <div class="flex gap-3 pt-2">
+            <button class="btn btn-primary" id="stripe-save">Enregistrer</button>
+            <button class="btn btn-secondary" id="stripe-test">Tester maintenant</button>
+            <span id="stripe-feedback" class="text-xs text-text-muted self-center"></span>
+          </div>
+        </div>
+      </section>
+    `;
+  },
+
+  _bindStripe() {
+    const save = document.getElementById('stripe-save');
+    const test = document.getElementById('stripe-test');
+    const fb   = document.getElementById('stripe-feedback');
+    const addMap = document.getElementById('stripe-add-map');
+    if (!save) return;
+
+    const gather = () => {
+      const v = (k) => {
+        const el = document.querySelector(`[data-stripe-key="${k}"]`);
+        if (!el) return undefined;
+        if (el.type === 'checkbox') return !!el.checked;
+        if (el.type === 'number')   return parseInt(el.value, 10) || 0;
+        return el.value;
+      };
+      // Mapping
+      const mapping = {};
+      document.querySelectorAll('[data-map-row]').forEach(row => {
+        const idx = row.dataset.mapRow;
+        const sid = (document.querySelector(`[data-map-stripe="${idx}"]`) || {}).value || '';
+        const pk  = (document.querySelector(`[data-map-key="${idx}"]`)    || {}).value || '';
+        const nm  = (document.querySelector(`[data-map-name="${idx}"]`)   || {}).value || '';
+        if (sid && pk) {
+          mapping[sid] = pk;
+          if (nm) mapping[sid + '_name'] = nm;
+        }
+      });
+      return {
+        enabled: v('enabled'),
+        secret_key: v('secret_key'),  // si masquée (•), api.py garde l'existante
+        poll_minutes: v('poll_minutes'),
+        product_mapping: mapping,
+        default_product_key:  v('default_product_key'),
+        default_product_name: v('default_product_name'),
+      };
+    };
+
+    save.onclick = async () => {
+      if (!App.api) return;
+      save.disabled = true; save.textContent = 'Enregistrement…';
+      try {
+        const r = await App.api.stripe_save_config({ config: gather() });
+        save.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
+      } catch (e) { save.textContent = 'Erreur'; }
+      setTimeout(() => { save.disabled = false; save.textContent = 'Enregistrer'; }, 1600);
+    };
+
+    test.onclick = async () => {
+      if (!App.api) return;
+      test.disabled = true; test.textContent = 'Test en cours…';
+      fb.textContent = '';
+      try {
+        await App.api.stripe_save_config({ config: gather() });
+        const r = await App.api.stripe_run_now();
+        if (r && r.ok && r.result) {
+          const c = r.result;
+          fb.textContent = `Polled: ${c.polled}, nouveaux: ${c.new_payments}, projets créés: ${c.projects_created}, erreurs: ${c.errors}` +
+                            (c.error ? ` — ${c.error}` : '');
+        } else {
+          fb.textContent = 'Erreur : ' + ((r && r.error) || 'inconnu');
+        }
+      } catch (e) { fb.textContent = 'Erreur : ' + e; }
+      test.disabled = false; test.textContent = 'Tester maintenant';
+    };
+
+    if (addMap) addMap.onclick = () => {
+      const wrap = document.getElementById('stripe-mapping');
+      const idx = Date.now();
+      const row = document.createElement('div');
+      row.className = 'grid grid-cols-12 gap-2 items-center';
+      row.dataset.mapRow = idx;
+      row.innerHTML = `
+        <input type="text" data-map-stripe="${idx}" placeholder="prod_xxx ou price_xxx"
+               class="col-span-5 px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+        <input type="text" data-map-key="${idx}" placeholder="pack-electricien-pro"
+               class="col-span-4 px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+        <input type="text" data-map-name="${idx}" placeholder="Nom affiché"
+               class="col-span-2 px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+        <button class="col-span-1 text-text-muted hover:text-danger text-lg leading-none" data-map-del="${idx}">×</button>
+      `;
+      // Si placeholder text "Aucun mapping..." : on le supprime
+      const placeholder = wrap.querySelector('div.text-text-muted');
+      if (placeholder) placeholder.remove();
+      wrap.appendChild(row);
+      row.querySelector('[data-map-del]').onclick = () => row.remove();
+    };
+
+    // Bind delete sur les rows déjà rendues
+    document.querySelectorAll('[data-map-del]').forEach(b => {
+      b.onclick = () => {
+        const row = b.closest('[data-map-row]');
+        if (row) row.remove();
+      };
+    });
+  },
+
+  _renderCalendly(cfg) {
+    const c = cfg || { enabled: false, personal_access_token: '',
+                       default_event_type_uri: '', default_event_type_name: '',
+                       _has_token: false };
+    return `
+      <section>
+        <div class="section-label">Calendly — propose un créneau en 1 clic</div>
+        <p class="text-sm text-text-muted mb-4">
+          Quand un prospect dit « ok, on en parle ? », tu cliques « Proposer créneau »
+          dans la vue Réponses et l'app envoie un mail avec un lien Calendly à usage unique.
+        </p>
+        <div class="card p-6 space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-text-secondary mb-1.5">
+              Personal Access Token Calendly
+              ${c._has_token ? '<span class="text-success">(✓ enregistré)</span>' : ''}
+            </label>
+            <input type="password" data-cal-key="personal_access_token"
+                   placeholder="${c._has_token ? '(token enregistré — tape pour remplacer)' : 'eyJ…'}"
+                   class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none font-mono" />
+            <div class="text-[11px] text-text-muted mt-1">
+              Génère-le dans Calendly → Integrations → API & Webhooks → Personal Access Tokens.
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-text-secondary mb-1.5">Type de RDV par défaut</label>
+            <div class="flex gap-2">
+              <select id="cal-event-select" data-cal-key="default_event_type_uri"
+                      class="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none">
+                ${c.default_event_type_uri
+                  ? `<option value="${this._esc(c.default_event_type_uri)}" selected>${this._esc(c.default_event_type_name || '(actuel)')}</option>`
+                  : `<option value="">— Charge la liste ↓ —</option>`}
+              </select>
+              <button class="btn btn-secondary text-xs" id="cal-refresh-events">Charger mes types de RDV</button>
+            </div>
+          </div>
+
+          <div class="flex gap-3 pt-2">
+            <button class="btn btn-primary" id="cal-save">Enregistrer</button>
+            <button class="btn btn-secondary" id="cal-test">Vérifier la connexion</button>
+            <span id="cal-feedback" class="text-xs text-text-muted self-center"></span>
+          </div>
+        </div>
+      </section>
+    `;
+  },
+
+  _bindCalendly() {
+    const save = document.getElementById('cal-save');
+    const test = document.getElementById('cal-test');
+    const refresh = document.getElementById('cal-refresh-events');
+    const fb = document.getElementById('cal-feedback');
+    const select = document.getElementById('cal-event-select');
+    if (!save) return;
+
+    const gather = () => {
+      const tk = (document.querySelector('[data-cal-key="personal_access_token"]') || {}).value || '';
+      const sel = document.querySelector('[data-cal-key="default_event_type_uri"]');
+      const evtUri = sel ? sel.value : '';
+      const evtName = sel && sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : '';
+      return {
+        enabled: !!tk,
+        personal_access_token: tk,
+        default_event_type_uri: evtUri,
+        default_event_type_name: evtName,
+      };
+    };
+
+    save.onclick = async () => {
+      if (!App.api) return;
+      save.disabled = true; save.textContent = 'Enregistrement…';
+      try {
+        const r = await App.api.calendly_save_config({ config: gather() });
+        save.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
+      } catch (e) { save.textContent = 'Erreur'; }
+      setTimeout(() => { save.disabled = false; save.textContent = 'Enregistrer'; }, 1600);
+    };
+
+    test.onclick = async () => {
+      if (!App.api) return;
+      test.disabled = true; test.textContent = '…';
+      fb.textContent = '';
+      try {
+        await App.api.calendly_save_config({ config: gather() });
+        const r = await App.api.calendly_test();
+        if (r && r.ok) {
+          fb.innerHTML = `<span class="text-success">✓ Connecté en tant que ${this._esc(r.user_name || r.user_email || '?')}</span>`;
+        } else {
+          fb.innerHTML = `<span class="text-danger">✗ ${this._esc(r && r.error || 'erreur')}</span>`;
+        }
+      } catch (e) { fb.textContent = 'Erreur : ' + e; }
+      test.disabled = false; test.textContent = 'Vérifier la connexion';
+    };
+
+    if (refresh) refresh.onclick = async () => {
+      if (!App.api) return;
+      refresh.disabled = true; refresh.textContent = 'Chargement…';
+      try {
+        await App.api.calendly_save_config({ config: gather() });
+        const r = await App.api.calendly_list_event_types();
+        if (r && r.ok && r.event_types) {
+          select.innerHTML = r.event_types.map(e =>
+            `<option value="${this._esc(e.uri)}">${this._esc(e.name)} (${e.duration} min)</option>`
+          ).join('');
+          fb.innerHTML = `<span class="text-success">${r.event_types.length} type(s) de RDV chargé(s)</span>`;
+        } else {
+          fb.innerHTML = `<span class="text-danger">${this._esc(r && r.error || 'erreur')}</span>`;
+        }
+      } catch (e) { fb.textContent = 'Erreur : ' + e; }
+      refresh.disabled = false; refresh.textContent = 'Charger mes types de RDV';
+    };
+  },
+
+  _renderPhantombuster(cfg) {
+    const c = cfg || { enabled: false, api_key: '', agent_id: '',
+                       max_per_launch: 10, _has_key: false };
+    return `
+      <section>
+        <div class="section-label">Phantombuster — DM LinkedIn auto</div>
+        <p class="text-sm text-text-muted mb-4">
+          Service tiers (~70 €/mois) qui envoie tes DM LinkedIn rate-limité
+          (~25/jour) via ton compte. Triskell Command lui envoie la liste.
+        </p>
+        <div class="card p-6 space-y-4">
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input type="checkbox" data-pb-key="enabled" ${c.enabled?'checked':''}
+                   class="mt-0.5 w-4 h-4 accent-accent" />
+            <div>
+              <div class="text-sm font-medium">Activer l'envoi auto via Phantombuster</div>
+              <div class="text-xs text-text-muted">
+                Si désactivé, les relances LinkedIn restent à envoyer manuellement (3 clics depuis la Matinale).
+              </div>
+            </div>
+          </label>
+
+          <div>
+            <label class="block text-xs font-medium text-text-secondary mb-1.5">
+              Clé API Phantombuster
+              ${c._has_key ? '<span class="text-success">(✓ enregistrée)</span>' : ''}
+            </label>
+            <input type="password" data-pb-key="api_key"
+                   placeholder="${c._has_key ? '(clé enregistrée — tape pour remplacer)' : 'Ta clé API'}"
+                   class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none font-mono" />
+            <div class="text-[11px] text-text-muted mt-1">
+              Trouvable dans Phantombuster → Settings → API key.
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-text-secondary mb-1.5">ID du Phantom « LinkedIn Message Sender »</label>
+            <input type="text" data-pb-key="agent_id" value="${this._esc(c.agent_id || '')}"
+                   placeholder="ex : 1234567890123456"
+                   class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none font-mono" />
+            <div class="text-[11px] text-text-muted mt-1">
+              Crée un Phantom « LinkedIn Message Sender » sur Phantombuster, copie son ID depuis l'URL.
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-text-secondary mb-1.5">Max DMs par lancement</label>
+            <input type="number" min="1" max="50" data-pb-key="max_per_launch" value="${c.max_per_launch || 10}"
+                   class="w-32 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+            <div class="text-[11px] text-text-muted mt-1">Phantombuster espace les envois (~25/jour côté LinkedIn).</div>
+          </div>
+
+          <div class="flex gap-3 pt-2">
+            <button class="btn btn-primary" id="pb-save">Enregistrer</button>
+            <button class="btn btn-secondary" id="pb-test">Vérifier la connexion</button>
+            <span id="pb-feedback" class="text-xs text-text-muted self-center"></span>
+          </div>
+        </div>
+      </section>
+    `;
+  },
+
+  _bindPhantombuster() {
+    const save = document.getElementById('pb-save');
+    const test = document.getElementById('pb-test');
+    const fb = document.getElementById('pb-feedback');
+    if (!save) return;
+    const gather = () => {
+      const v = (k) => {
+        const el = document.querySelector(`[data-pb-key="${k}"]`);
+        if (!el) return undefined;
+        if (el.type === 'checkbox') return !!el.checked;
+        if (el.type === 'number') return parseInt(el.value, 10) || 0;
+        return el.value;
+      };
+      return {
+        enabled: v('enabled'),
+        api_key: v('api_key'),
+        agent_id: v('agent_id'),
+        max_per_launch: v('max_per_launch'),
+      };
+    };
+    save.onclick = async () => {
+      if (!App.api) return;
+      save.disabled = true; save.textContent = 'Enregistrement…';
+      try {
+        const r = await App.api.phantombuster_save_config({ config: gather() });
+        save.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
+      } catch (e) { save.textContent = 'Erreur'; }
+      setTimeout(() => { save.disabled = false; save.textContent = 'Enregistrer'; }, 1600);
+    };
+    test.onclick = async () => {
+      if (!App.api) return;
+      test.disabled = true; test.textContent = '…';
+      fb.textContent = '';
+      try {
+        await App.api.phantombuster_save_config({ config: gather() });
+        const r = await App.api.phantombuster_test();
+        if (r && r.ok) {
+          fb.innerHTML = `<span class="text-success">✓ Connecté — ${r.agents_count || 0} Phantom(s) trouvé(s)</span>`;
+        } else {
+          fb.innerHTML = `<span class="text-danger">✗ ${this._esc(r && r.error || 'erreur')}</span>`;
+        }
+      } catch (e) { fb.textContent = 'Erreur : ' + e; }
+      test.disabled = false; test.textContent = 'Vérifier la connexion';
+    };
+  },
+
+  _renderTracker(cfg) {
+    const c = cfg || { enabled: false, pixel_endpoint: '' };
+    return `
+      <section>
+        <div class="section-label">Tracking d'ouvertures de mail</div>
+        <p class="text-sm text-text-muted mb-4">
+          Ajoute un pixel transparent 1×1 dans tes mails pour mesurer les
+          ouvertures. Demande de déployer une mini-fonction Netlify gratuite
+          (cf. <code>netlify_functions/README.md</code>, ~5 min).
+        </p>
+        <div class="card p-6 space-y-4">
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input type="checkbox" data-trk-key="enabled" ${c.enabled?'checked':''}
+                   class="mt-0.5 w-4 h-4 accent-accent" />
+            <div>
+              <div class="text-sm font-medium">Activer le tracking d'ouvertures</div>
+              <div class="text-xs text-text-muted">
+                Tous les mails sortants incluront un pixel invisible. RGPD-friendly (pas d'IP/UA logués).
+              </div>
+            </div>
+          </label>
+
+          <div>
+            <label class="block text-xs font-medium text-text-secondary mb-1.5">URL de la Netlify Function</label>
+            <input type="text" data-trk-key="pixel_endpoint" value="${this._esc(c.pixel_endpoint || '')}"
+                   placeholder="https://triskell-track.netlify.app/.netlify/functions/track-pixel"
+                   class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none font-mono" />
+            <div class="text-[11px] text-text-muted mt-1">
+              Suis <code class="bg-bg px-1 rounded">netlify_functions/README.md</code> à la racine du projet
+              pour déployer en 5 minutes (gratuit).
+            </div>
+          </div>
+
+          <div class="flex gap-3 pt-2">
+            <button class="btn btn-primary" id="trk-save">Enregistrer</button>
+            <span id="trk-stats" class="text-xs text-text-muted self-center"></span>
+          </div>
+        </div>
+      </section>
+    `;
+  },
+
+  _bindTracker() {
+    const save = document.getElementById('trk-save');
+    const stats = document.getElementById('trk-stats');
+    if (!save) return;
+    save.onclick = async () => {
+      if (!App.api) return;
+      save.disabled = true; save.textContent = 'Enregistrement…';
+      const cfg = {
+        enabled: !!document.querySelector('[data-trk-key="enabled"]').checked,
+        pixel_endpoint: document.querySelector('[data-trk-key="pixel_endpoint"]').value.trim(),
+      };
+      try {
+        const r = await App.api.tracker_save_config({ config: cfg });
+        save.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
+      } catch (e) { save.textContent = 'Erreur'; }
+      setTimeout(() => { save.disabled = false; save.textContent = 'Enregistrer'; }, 1600);
+    };
+    // Charge les stats si dispo
+    if (App.api && stats) {
+      App.api.tracker_stats().then(r => {
+        if (r && r.ok && r.sent_7d > 0) {
+          stats.textContent = `7j : ${r.opened_7d}/${r.sent_7d} ouverts (${r.open_rate_7d}%)`;
+        }
+      }).catch(() => {});
+    }
+  },
+
+  _renderLeadToClient(cfg) {
+    const c = cfg || { enabled: true, mode: 'strong',
+                       default_product_key: 'custom-dev',
+                       default_product_name: 'Service Triskell',
+                       min_confidence: 0.6 };
+    const opt = (v, l, sel) => `<option value="${v}" ${sel===v?'selected':''}>${l}</option>`;
+    return `
+      <section>
+        <div class="section-label">Bascule auto des prospects intéressés</div>
+        <p class="text-sm text-text-muted mb-4">
+          Quand un prospect répond positivement à un de tes mails, l'app peut
+          créer toute seule une carte projet client (statut « Briefing »).
+        </p>
+        <div class="card p-6 space-y-4">
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input type="checkbox" data-l2c-key="enabled" ${c.enabled?'checked':''}
+                   class="mt-0.5 w-4 h-4 accent-accent" />
+            <div>
+              <div class="text-sm font-medium">Activer la bascule auto</div>
+              <div class="text-xs text-text-muted">Si désactivé, tu cliques manuellement « + Créer projet client » dans la vue Réponses.</div>
+            </div>
+          </label>
+
+          <div>
+            <label class="block text-xs font-medium text-text-secondary mb-1.5">Quand basculer ?</label>
+            <select data-l2c-key="mode"
+                    class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none">
+              ${opt('strong', 'Seulement si signal d\'achat fort (prix, devis, "j\'achète"…) — recommandé', c.mode)}
+              ${opt('all',    'Tous les prospects classés intéressés (à toi de filtrer après)', c.mode)}
+              ${opt('off',    'Jamais (bascule manuelle uniquement)', c.mode)}
+            </select>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-text-secondary mb-1.5">Produit par défaut (identifiant)</label>
+              <input type="text" data-l2c-key="default_product_key"
+                     value="${this._esc(c.default_product_key || '')}"
+                     placeholder="ex : custom-dev"
+                     class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+              <div class="text-[11px] text-text-muted mt-1">Utilisé si on ne peut pas inférer le produit pitché.</div>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-text-secondary mb-1.5">Produit par défaut (nom affiché)</label>
+              <input type="text" data-l2c-key="default_product_name"
+                     value="${this._esc(c.default_product_name || '')}"
+                     placeholder="ex : Service Triskell"
+                     class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-text-secondary mb-1.5">Seuil de confiance minimal</label>
+            <input type="number" min="0" max="1" step="0.05"
+                   data-l2c-key="min_confidence" value="${c.min_confidence ?? 0.6}"
+                   class="w-32 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
+            <div class="text-[11px] text-text-muted mt-1">
+              Entre 0 et 1. Les classifications IA en dessous sont ignorées (par défaut 0.6).
+            </div>
+          </div>
+
+          <div class="flex gap-3 pt-2">
+            <button class="btn btn-primary" id="l2c-save">Enregistrer</button>
+            <button class="btn btn-secondary" id="l2c-run">Tester maintenant</button>
+            <span id="l2c-feedback" class="text-xs text-text-muted self-center"></span>
+          </div>
+        </div>
+      </section>
+    `;
+  },
+
+  _bindLeadToClient() {
+    const save = document.getElementById('l2c-save');
+    const run  = document.getElementById('l2c-run');
+    const fb   = document.getElementById('l2c-feedback');
+    if (!save) return;
+    const gather = () => {
+      const v = (k) => {
+        const el = document.querySelector(`[data-l2c-key="${k}"]`);
+        if (!el) return undefined;
+        if (el.type === 'checkbox') return !!el.checked;
+        if (el.type === 'number')   return parseFloat(el.value) || 0;
+        return el.value;
+      };
+      return {
+        enabled: v('enabled'),
+        mode:    v('mode'),
+        default_product_key:  v('default_product_key'),
+        default_product_name: v('default_product_name'),
+        min_confidence:       v('min_confidence'),
+      };
+    };
+    save.onclick = async () => {
+      if (!App.api) return;
+      save.disabled = true; save.textContent = 'Enregistrement…';
+      try {
+        const r = await App.api.lead_to_client_save_config({ config: gather() });
+        save.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
+      } catch (e) { save.textContent = 'Erreur'; }
+      setTimeout(() => { save.disabled = false; save.textContent = 'Enregistrer'; }, 1600);
+    };
+    run.onclick = async () => {
+      if (!App.api) return;
+      run.disabled = true; run.textContent = 'Test en cours…';
+      fb.textContent = '';
+      try {
+        // Sauve la config avant test pour utiliser les nouveaux réglages
+        await App.api.lead_to_client_save_config({ config: gather() });
+        const r = await App.api.lead_to_client_run_now();
+        if (r && r.ok && r.result) {
+          const c = r.result;
+          fb.textContent = `Scan : ${c.scanned}, basculés : ${c.converted}, signal faible : ${c.weak_signal}, sautés : ${c.skipped}, erreurs : ${c.errors}`;
+        } else {
+          fb.textContent = 'Erreur : ' + ((r && r.error) || 'inconnu');
+        }
+      } catch (e) { fb.textContent = 'Erreur : ' + e; }
+      run.disabled = false; run.textContent = 'Tester maintenant';
+    };
+  },
+
+  _renderDelivery() {
+    return `
+      <section>
+        <div class="section-label">Livraison automatique après vente</div>
+        <div class="card p-6 flex items-center justify-between">
+          <div>
+            <div class="font-semibold mb-1">Kits de livraison par produit</div>
+            <div class="text-sm text-text-muted max-w-lg">
+              Mail de bienvenue, accès aux livrables, et suivis automatiques.
+              Un kit par produit (Pack Élec, Studio PDF, Obelisk…). Modifiable à volonté.
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="App.show('delivery')">Éditer les kits</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-label">Santé du système</div>
+        <div class="card p-6 flex items-center justify-between">
+          <div>
+            <div class="font-semibold mb-1">Tableau de bord en temps réel</div>
+            <div class="text-sm text-text-muted max-w-lg">
+              État des 10 outils autonomes, dernières exécutions, taux de réponse,
+              alertes de configuration. Mise à jour auto toutes les 15 secondes.
+            </div>
+          </div>
+          <button class="btn btn-secondary" onclick="App.show('health')">Voir l'état</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-label">Test A/B des sujets de mail</div>
+        <div class="card p-6 flex items-center justify-between">
+          <div>
+            <div class="font-semibold mb-1">Compare plusieurs sujets et trouve celui qui marche</div>
+            <div class="text-sm text-text-muted max-w-lg">
+              Tu proposes 2 à 5 variantes, l'app les distribue équitablement,
+              mesure le taux de réponse et te dit laquelle gagne avec un verdict
+              statistique fiable.
+            </div>
+          </div>
+          <button class="btn btn-secondary" onclick="App.show('abtest')">Gérer mes tests</button>
+        </div>
+      </section>
+    `;
+  },
+
+  _renderTutorial() {
+    return `
+      <section>
+        <div class="section-label">Visite guidée</div>
+        <div class="card p-6 flex items-center justify-between">
+          <div>
+            <div class="font-semibold mb-1">Revoir le tuto Triskell Command</div>
+            <div class="text-sm text-text-muted">12 étapes pour découvrir tout le pipeline d'automatisation.</div>
+          </div>
+          <button class="btn btn-secondary" onclick="App.show('tutorial')">Lancer la visite</button>
+        </div>
+      </section>
+    `;
+  },
+
+  _field(label, savePath, value, type = 'text', placeholder = '') {
+    const masked = (type === 'password' && value && value.startsWith('•'));
+    return `
+      <div>
+        <label class="block text-sm font-semibold mb-1">${this._esc(label)}</label>
+        <input type="${type}"
+               data-save-path="${savePath}"
+               value="${masked ? '' : this._esc(value || '')}"
+               placeholder="${this._esc(placeholder || (masked ? '••••••••' : ''))}"
+               class="w-full px-4 py-2.5 text-sm rounded-xl bg-bg border border-border
+                      focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent" />
+      </div>
+    `;
+  },
+
+  _bind() {
+    // Boutons thème
+    document.querySelectorAll('[data-theme-mode]').forEach(btn => {
+      btn.onclick = async () => {
+        if (!App.api) return;
+        const mode = btn.dataset.themeMode;
+        const r = await App.api.set_theme_mode(mode);
+        if (r && r.ok) {
+          document.documentElement.setAttribute('data-theme', r.mode);
+          await this.refresh();
+        }
+      };
+    });
+
+    // Auto-save sur blur pour chaque champ
+    document.querySelectorAll('[data-save-path]').forEach(input => {
+      input.addEventListener('blur', async () => {
+        if (!App.api) return;
+        const v = input.value;
+        if (v === '' && input.type === 'password') return;  // ne pas écraser un mot de passe avec vide
+        const path = input.dataset.savePath.split('.');
+        let value = v;
+        if (input.type === 'number') {
+          value = v === '' ? null : parseInt(v, 10);
+        }
+        try { await App.api.save_setting({ path, value }); }
+        catch (e) { console.warn('save_setting:', e); }
+      });
+    });
+  },
+
+  _esc(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  },
+};

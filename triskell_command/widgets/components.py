@@ -10,24 +10,28 @@ from .. import theme as T
 
 
 class ViewHeader(ctk.CTkFrame):
-    """Header standardisé pour chaque vue (titre Cinzel + sous-titre + actions)."""
+    """Header standardisé pour chaque vue (titre Cinzel + sous-titre + actions).
+
+    Style 2026 : barre fine indigo (3 px de large, 28 px de long) au-dessus
+    du titre. L'or est réservé au branding (Table Ronde, sceau).
+    """
 
     def __init__(
         self, master, *, title: str, subtitle: str = "", colors: T.ThemeColors
     ):
-        super().__init__(master, fg_color="transparent", height=92)
+        super().__init__(master, fg_color="transparent", height=104)
         self.pack_propagate(False)
         self._colors = colors
 
         # Bloc texte (gauche)
         text_block = ctk.CTkFrame(self, fg_color="transparent")
         text_block.pack(side="left", fill="both", expand=True,
-                        pady=(T.SPACE_LG + 4, T.SPACE_SM))
+                        pady=(T.SPACE_LG + 6, T.SPACE_SM))
 
-        # Petite barre or 24px au-dessus du titre (signature Triskell)
-        bar = ctk.CTkFrame(text_block, fg_color=colors.gold,
-                           width=28, height=2, corner_radius=1)
-        bar.pack(anchor="w", pady=(0, T.SPACE_XS))
+        # Filet accent au-dessus du titre (signature de section)
+        bar = ctk.CTkFrame(text_block, fg_color=colors.accent,
+                           width=32, height=3, corner_radius=2)
+        bar.pack(anchor="w", pady=(0, T.SPACE_SM))
         bar.pack_propagate(False)
 
         ctk.CTkLabel(
@@ -39,13 +43,14 @@ class ViewHeader(ctk.CTkFrame):
         if subtitle:
             ctk.CTkLabel(
                 text_block, text=subtitle,
-                font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY),
+                font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY_LG),
                 text_color=colors.text_secondary, anchor="w",
+                justify="left", wraplength=860,
             ).pack(fill="x", anchor="w", pady=(T.SPACE_XS, 0))
 
         # Zone actions (droite)
         self.actions = ctk.CTkFrame(self, fg_color="transparent")
-        self.actions.pack(side="right", pady=T.SPACE_LG)
+        self.actions.pack(side="right", pady=T.SPACE_LG, padx=(T.SPACE_MD, 0))
 
 
 class Card(ctk.CTkFrame):

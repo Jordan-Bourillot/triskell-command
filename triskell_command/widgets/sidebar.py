@@ -31,23 +31,40 @@ def _resolve_asset(filename: str) -> Path | None:
 
 # Définition statique des entrées de la sidebar
 SIDEBAR_SECTIONS = [
-    ("PILOTE AUTOMATIQUE", [
-        ("autopilot",  "sparkle",   "Auto-pilote"),
-        ("drafts",     "check",     "À valider"),
+    ("LE MATIN", [
+        ("morning",    "chart",     "Matinale"),
     ]),
-    ("OUTILS MANUELS", [
-        ("prospects",  "search",    "Trouver"),
-        ("compose",    "pen",       "Rédiger"),
-        ("templates",  "doc",       "Modèles"),
-        ("campaigns",  "mail",      "Envoyer"),
-        ("publish",    "broadcast", "Publier"),
+    ("L'APP TRAVAILLE POUR TOI", [
+        ("autopilot",  "sparkle",   "Auto-pilote"),
+        ("convoy",     "convoy",    "Importer une liste"),
+        ("drafts",     "check",     "Brouillons à valider"),
+        ("replies",    "mail",      "Réponses des prospects"),
+    ]),
+    ("À LA MAIN", [
+        ("prospects",  "search",    "Chercher des prospects"),
+        ("compose",    "pen",       "Écrire avec l'IA"),
+        ("templates",  "doc",       "Modèles d'emails"),
+        ("campaigns",  "mail",      "Envoyer des emails"),
+        ("publish",    "broadcast", "Publier sur les réseaux"),
+    ]),
+    ("LIVRAISON", [
+        ("clients",    "doc",       "Projets clients"),
+    ]),
+    ("CHIFFRES", [
+        ("funnel",     "chart",     "Conversions"),
         ("dashboard",  "chart",     "Tableau de bord"),
+    ]),
+    ("VISIBILITÉ", [
+        ("phare",      "broadcast", "Le Phare"),
     ]),
 ]
 # Compat : on garde NAV_ITEMS comme la concat de toutes les sections
 NAV_ITEMS = [item for _label, items in SIDEBAR_SECTIONS for item in items]
 
 FOOTER_ITEMS = [
+    # Allô Claude est désormais accessible via le bouton flottant en bas à
+    # droite (le FAB) — pas besoin d'un item sidebar dédié.
+    ("tutorial",   "sparkle",   "Tuto"),
     ("help",       "external",  "Aide"),
     ("config",     "settings",  "Réglages"),
 ]
@@ -101,6 +118,17 @@ class SidebarItem(ctk.CTkFrame):
         )
         self._label.pack(side="left", fill="x", expand=True)
 
+        # Pastille « attention » : un point or qui s'affiche pour signaler
+        # qu'un événement attend l'utilisateur (ex: Claude veut te parler).
+        self._attention_dot = ctk.CTkFrame(
+            self._row, fg_color="transparent",
+            width=8, height=8, corner_radius=4,
+        )
+        self._attention_dot.pack(side="right", padx=(0, T.SPACE_SM))
+        self._attention_dot.pack_propagate(False)
+        self._has_attention = False
+        self._attention_blink_job = None
+
         # Hover handlers (sur tous les widgets pour que la zone soit cliquable)
         for w in (self, self._row, self._icon_label, self._label):
             w.bind("<Button-1>", self._handle_click)
@@ -134,15 +162,16 @@ class SidebarItem(ctk.CTkFrame):
     def set_active(self, active: bool) -> None:
         self._is_active = active
         c = self._colors
+        active_color = c.sidebar_text_active
         if active:
-            # Fond panel subtil + indicateur or + texte clair + icône or
-            self._row.configure(fg_color=c.panel_elevated)
-            self._indicator.configure(fg_color=c.gold)
+            # Fond actif + indicateur accent + texte/icône accent (plus d'or)
+            self._row.configure(fg_color=c.sidebar_item_active)
+            self._indicator.configure(fg_color=c.accent)
             self._label.configure(
-                text_color=c.gold,
+                text_color=active_color,
                 font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY, "bold"),
             )
-            self._refresh_icon(c.gold)
+            self._refresh_icon(active_color)
         else:
             self._row.configure(fg_color="transparent")
             self._indicator.configure(fg_color="transparent")
@@ -151,6 +180,43 @@ class SidebarItem(ctk.CTkFrame):
                 font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY, "normal"),
             )
             self._refresh_icon(c.sidebar_text)
+
+    def set_attention(self, on: bool) -> None:
+        """Active/désactive la pastille « événement à voir »."""
+        self._has_attention = bool(on)
+        # Stoppe le blink en cours
+        if self._attention_blink_job is not None:
+            try:
+                self.after_cancel(self._attention_blink_job)
+            except Exception:
+                pass
+            self._attention_blink_job = None
+        if not self._has_attention:
+            try:
+                self._attention_dot.configure(fg_color="transparent")
+            except Exception:
+                pass
+            return
+        self._blink_attention(visible=True)
+
+    def _blink_attention(self, *, visible: bool) -> None:
+        if not self._has_attention:
+            try:
+                self._attention_dot.configure(fg_color="transparent")
+            except Exception:
+                pass
+            return
+        c = self._colors
+        try:
+            self._attention_dot.configure(
+                fg_color=c.accent if visible else "transparent"
+            )
+        except Exception:
+            return
+        # Re-planifie l'inversion (clignote toutes les 700ms)
+        self._attention_blink_job = self.after(
+            700, lambda: self._blink_attention(visible=not visible)
+        )
 
 
 class Sidebar(ctk.CTkFrame):
@@ -218,7 +284,7 @@ class Sidebar(ctk.CTkFrame):
         ctk.CTkLabel(
             text_block, text=T.BRAND_PRODUCT.upper(),
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
-            text_color=colors.gold, anchor="w",
+            text_color=colors.accent, anchor="w",
         ).pack(fill="x", anchor="w", pady=(2, 0))
 
         # Séparateur fin or sous le header
@@ -241,7 +307,7 @@ class Sidebar(ctk.CTkFrame):
                     on_click=self._handle_click, colors=colors,
                     is_active=(view_id == active_view),
                 )
-                item.pack(fill="x", pady=1)
+                item.pack(fill="x", pady=2)
                 self._items[view_id] = item
 
         # ----- Spacer -----
@@ -280,7 +346,7 @@ class Sidebar(ctk.CTkFrame):
         ctk.CTkLabel(
             self, text=T.APP_VERSION_LABEL,
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
-            text_color=colors.gold,
+            text_color=colors.text_muted,
         ).pack(fill="x", pady=(0, T.SPACE_LG))
 
     def _handle_click(self, view_id: str) -> None:
@@ -296,3 +362,17 @@ class Sidebar(ctk.CTkFrame):
             self._items[self._active].set_active(False)
         self._items[view_id].set_active(True)
         self._active = view_id
+
+    def set_attention(self, view_id: str, on: bool = True) -> None:
+        """Allume/éteint la pastille de notification sur un item de la sidebar.
+
+        Utilisé par exemple pour signaler « Claude veut te parler » :
+            sidebar.set_attention("claude", True)
+        """
+        item = self._items.get(view_id)
+        if item is None:
+            return
+        try:
+            item.set_attention(on)
+        except Exception:
+            pass

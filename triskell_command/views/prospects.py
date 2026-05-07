@@ -49,10 +49,10 @@ class ProspectsView(BaseView):
         self._stats_row.pack(fill="x", padx=T.SPACE_2XL, pady=(0, T.SPACE_LG))
         self._stat_cards: dict[str, StatCard] = {}
         for key, label, accent in [
-            ("total",     "Total CRM",     c.text_primary),
-            ("verified",  "Vérifiés",      c.success),
-            ("with_email","Avec email",    c.info),
-            ("contacted", "Déjà contactés",c.warning),
+            ("total",     "Total prospects", c.text_primary),
+            ("verified",  "Vérifiés",        c.success),
+            ("with_email","Avec email",      c.info),
+            ("contacted", "Déjà contactés",  c.warning),
         ]:
             card = StatCard(self._stats_row, label=label, value="—",
                             accent=accent, colors=c)
@@ -362,14 +362,14 @@ class ProspectsView(BaseView):
         from ..widgets.prospect_dialog import ConfirmDialog
         n = len(self._all_prospects)
         if n == 0:
-            self._status_var.set("CRM déjà vide.")
+            self._status_var.set("La liste est déjà vide.")
             return
         confirm = ConfirmDialog(
             self,
-            title="Vider tout le CRM ?",
-            message=(f"Tous les {n} prospects seront supprimés du CRM unifié.\n"
-                     "Cette action est irréversible. "
-                     "Le CRM Le Dénicheur n'est PAS impacté."),
+            title="Vider toute la liste ?",
+            message=(f"Les {n} prospects vont être supprimés de la base "
+                     f"partagée Triskell.\nCette action est irréversible. "
+                     f"Les prospects d'Obelisk ne sont PAS touchés."),
             colors=self.colors,
         )
         self.wait_window(confirm)
@@ -380,7 +380,7 @@ class ProspectsView(BaseView):
             if PROSPECTS_FILE.exists():
                 PROSPECTS_FILE.unlink()
             self._refresh()
-            self._status_var.set(f"✓ CRM vidé ({n} prospects supprimés).")
+            self._status_var.set(f"✓ Liste vidée ({n} prospects supprimés).")
         except Exception as e:
             self._status_var.set(f"✗ Échec : {e}")
 

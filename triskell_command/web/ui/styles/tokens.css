@@ -1,0 +1,68 @@
+/* Design tokens Triskell — 3 modes (light / mid / dark)
+ * En HSL pour interpolation propre. Le mode est porté par
+ * data-theme="light|mid|dark" sur <html>.
+ */
+
+:root,
+[data-theme="mid"] {
+  /* MID — graphite chaud, sweet spot */
+  --bg:               225 18% 20%;
+  --surface:          224 16% 24%;
+  --surface-elevated: 224 16% 28%;
+  --border:           224 14% 28%;
+  --border-strong:    224 12% 36%;
+  --text:             210 40% 96%;
+  --text-secondary:   215 16% 80%;
+  --text-muted:       215 14% 64%;
+  --accent:           239 84% 71%;       /* indigo plus clair sur graphite */
+  --accent-hover:     239 84% 78%;
+  --accent-glow:      263 90% 76%;       /* violet */
+  --success:          158 64% 52%;
+  --warning:          43 96% 56%;
+  --danger:           0 91% 71%;
+  --info:             199 95% 60%;
+  --gold:             43 47% 54%;
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  /* LIGHT — slate / blanc, Apple-light */
+  --bg:               210 40% 98%;       /* slate-50 */
+  --surface:          0 0% 100%;
+  --surface-elevated: 0 0% 100%;
+  --border:           214 32% 91%;       /* slate-200 */
+  --border-strong:    213 27% 84%;       /* slate-300 */
+  --text:             222 47% 11%;       /* slate-900 */
+  --text-secondary:   215 25% 35%;
+  --text-muted:       215 16% 47%;       /* slate-500 */
+  --accent:           239 84% 67%;       /* #6366F1 */
+  --accent-hover:     245 79% 60%;
+  --accent-glow:      263 90% 66%;       /* violet */
+  --success:          158 64% 39%;
+  --warning:          38 92% 50%;
+  --danger:           0 84% 60%;
+  --info:             199 89% 48%;
+  --gold:             40 60% 49%;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  /* DARK — cockpit nuit */
+  --bg:               222 47% 5%;
+  --surface:          222 30% 10%;
+  --surface-elevated: 217 33% 15%;
+  --border:           217 33% 17%;
+  --border-strong:    215 25% 27%;
+  --text:             210 40% 96%;
+  --text-secondary:   215 20% 78%;
+  --text-muted:       215 20% 58%;
+  --accent:           239 84% 71%;
+  --accent-hover:     245 86% 78%;
+  --accent-glow:      263 90% 76%;
+  --success:          158 64% 52%;
+  --warning:          43 96% 56%;
+  --danger:           0 91% 71%;
+  --info:             199 95% 60%;
+  --gold:             43 47% 54%;
+  color-scheme: dark;
+}
