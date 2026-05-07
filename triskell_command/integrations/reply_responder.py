@@ -379,9 +379,33 @@ def _worker_loop(app_state) -> None:
         return
     while not _WORKER_STOP.is_set():
         try:
-            _do_one_cycle(app_state)
+            result = _do_one_cycle(app_state)
+            try:
+                from . import pulse_bus
+                sent = result.get("sent", 0) if isinstance(result, dict) else 0
+                err = result.get("error") if isinstance(result, dict) else None
+                if sent > 0:
+                    pulse_bus.report(
+                        "responder", "active",
+                        text=(f"{sent} draft envoyé"
+                              if sent == 1
+                              else f"{sent} drafts envoyés"),
+                        relative_time="à l'instant",
+                    )
+                elif err and err != "supabase_unavailable":
+                    pulse_bus.report(
+                        "responder", "error",
+                        error=str(err),
+                    )
+            except Exception:
+                pass
         except Exception as exc:
             logger.warning("ReplyResponder cycle: %s", exc)
+            try:
+                from . import pulse_bus
+                pulse_bus.report("responder", "error", error=str(exc))
+            except Exception:
+                pass
         for _ in range(WORKER_INTERVAL_SECONDS // 5):
             if _WORKER_STOP.is_set():
                 return

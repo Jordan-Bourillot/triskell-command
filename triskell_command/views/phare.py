@@ -19,8 +19,10 @@ from typing import Optional
 
 import customtkinter as ctk
 
+from tkinter import messagebox
+
 from .. import theme as T
-from ..integrations.phare import orchestrator, repo, scheduler
+from ..integrations.phare import client_report, orchestrator, repo, scheduler
 from ..widgets.components import (
     Card,
     EmptyState,
@@ -29,6 +31,9 @@ from ..widgets.components import (
     StatCard,
     ViewHeader,
 )
+from ..widgets.components_pro import HeroQuestion
+from ..widgets.phare_client_dialog import PhareClientDialog
+from ..widgets.phare_site_dialog import PhareSiteDialog
 from .base import BaseView
 
 logger = logging.getLogger(__name__)
@@ -72,7 +77,7 @@ class PhareView(BaseView):
         ("ecosystem", "Écosystème"),
         ("site",      "Site"),
         ("advanced",  "Avancé"),
-        ("inbox",     "Bac à PRs"),
+        ("inbox",     "Modifications en attente"),
         ("bulletin",  "Bulletins"),
     ]
 
@@ -183,6 +188,11 @@ class PhareView(BaseView):
     # ------------------------------------------------------------------
     def _build_ecosystem(self, parent: ctk.CTkFrame) -> None:
         c = self.colors
+        HeroQuestion(
+            parent, colors=c,
+            text="Comment se portent les 13 sites de l'écosystème ?",
+        ).pack(fill="x", pady=(T.SPACE_LG, T.SPACE_MD))
+
         try:
             overview = orchestrator.ecosystem_overview()
         except Exception as exc:
@@ -236,9 +246,9 @@ class PhareView(BaseView):
         if not cfg_status.get("dataforseo"):
             warns.append("DataForSEO non configuré (volumes mots-clés indisponibles)")
         if not cfg_status.get("github_token"):
-            warns.append("GitHub token absent (pas d'ouverture de PR auto)")
+            warns.append("Connexion à GitHub manquante (les modifications ne pourront pas être appliquées automatiquement)")
         if not cfg_status.get("netlify_token"):
-            warns.append("Netlify token absent (pas de preview deploy)")
+            warns.append("Connexion à Netlify manquante (impossible de prévisualiser avant mise en ligne)")
         if warns:
             warn_card = Card(parent, colors=c)
             warn_card.pack(fill="x", pady=(0, T.SPACE_MD))
@@ -260,12 +270,26 @@ class PhareView(BaseView):
         table = Card(parent, colors=c)
         table.pack(fill="both", expand=True)
 
+        # Barre titre + bouton ajout
+        title_bar = ctk.CTkFrame(table, fg_color="transparent")
+        title_bar.pack(fill="x", padx=T.SPACE_LG,
+                        pady=(T.SPACE_LG, T.SPACE_SM))
+        ctk.CTkLabel(
+            title_bar, text="Sites surveillés",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY, "bold"),
+            text_color=c.text_primary, anchor="w",
+        ).pack(side="left")
+        PrimaryButton(
+            title_bar, colors=c, text="Ajouter un site", icon="plus",
+            command=self._open_site_form_dialog,
+        ).pack(side="right")
+
         head = ctk.CTkFrame(table, fg_color="transparent")
-        head.pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_LG, T.SPACE_SM))
+        head.pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_SM, T.SPACE_SM))
         for label, w in (("SITE", 220), ("PERF", 70), ("SEO", 70),
                           ("PAGES", 70), ("CLICS 30J", 100),
                           ("À VALIDER", 100), ("DERNIER AUDIT", 130),
-                          ("", 110)):
+                          ("ACTIONS", 200)):
             ctk.CTkLabel(
                 head, text=label, width=w,
                 font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
@@ -312,10 +336,19 @@ class PhareView(BaseView):
                     text_color=accent or c.text_primary, anchor="w",
                 ).pack(side="left", padx=(0, T.SPACE_SM))
 
+            actions_cell = ctk.CTkFrame(row, fg_color="transparent", width=200)
+            actions_cell.pack(side="left")
+            actions_cell.pack_propagate(False)
             SecondaryButton(
-                row, colors=c, text="Ouvrir", icon="external",
-                width=110,
+                actions_cell, colors=c, text="Ouvrir", icon="external",
+                width=95,
                 command=lambda sid=s["id"]: self._open_site(sid),
+            ).pack(side="left", padx=(0, T.SPACE_XS))
+            SecondaryButton(
+                actions_cell, colors=c, text="Désactiver", icon="close",
+                width=95,
+                command=lambda sid=s["id"], nm=s["name"]:
+                    self._deactivate_site(sid, nm),
             ).pack(side="left")
 
         self._status_var.set(
@@ -343,6 +376,206 @@ class PhareView(BaseView):
     def _open_site(self, site_id: str) -> None:
         self._selected_site_id = site_id
         self._switch_tab("site")
+
+    def _open_site_form_dialog(self, site: Optional[dict] = None) -> None:
+        """Ouvre la modale d'ajout / édition d'un site."""
+        try:
+            PhareSiteDialog(
+                self.winfo_toplevel(),
+                colors=self.colors,
+                site=site,
+                on_done=self._refresh_active_tab,
+            )
+        except Exception as exc:
+            logger.exception("phare site dialog: %s", exc)
+            messagebox.showerror(
+                "Erreur",
+                f"Impossible d'ouvrir le formulaire :\n{exc}",
+            )
+
+    # ------------------------------------------------------------------
+    # Carte fiche client (site marqué `is_external_client`)
+    # ------------------------------------------------------------------
+    def _build_client_card(self, parent: ctk.CTkFrame, site: dict) -> None:
+        c = self.colors
+        client = repo.get_client_by_site(site["id"])
+
+        card = Card(parent, colors=c)
+        card.pack(fill="x", pady=(0, T.SPACE_MD))
+
+        head = ctk.CTkFrame(card, fg_color="transparent")
+        head.pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_LG, T.SPACE_XS))
+        ctk.CTkLabel(
+            head, text="FICHE CLIENT",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+            text_color=c.text_muted, anchor="w",
+        ).pack(side="left")
+
+        if client is None:
+            # Pas encore de fiche → CTA création
+            body = ctk.CTkFrame(card, fg_color="transparent")
+            body.pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_XS, T.SPACE_LG))
+            ctk.CTkLabel(
+                body,
+                text="Pas encore de fiche client. Crée-la pour configurer "
+                     "l'envoi des rapports.",
+                font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL),
+                text_color=c.text_secondary, anchor="w",
+            ).pack(fill="x", pady=(0, T.SPACE_SM))
+            PrimaryButton(
+                body, colors=c, text="Créer la fiche client", icon="plus",
+                command=lambda: self._open_client_form_dialog(site, None),
+            ).pack(anchor="w")
+            return
+
+        # Fiche existante : affichage compact
+        body = ctk.CTkFrame(card, fg_color="transparent")
+        body.pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_XS, T.SPACE_LG))
+
+        # Ligne 1 : nom + société
+        line1 = ctk.CTkFrame(body, fg_color="transparent")
+        line1.pack(fill="x", pady=(0, 2))
+        ctk.CTkLabel(
+            line1, text=client.get("contact_name") or "—",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY, "bold"),
+            text_color=c.text_primary, anchor="w",
+        ).pack(side="left")
+        if client.get("company"):
+            ctk.CTkLabel(
+                line1, text=f"  ·  {client['company']}",
+                font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL),
+                text_color=c.text_muted, anchor="w",
+            ).pack(side="left")
+
+        # Ligne 2 : email + téléphone
+        line2_parts = []
+        if client.get("contact_email"):
+            line2_parts.append(client["contact_email"])
+        if client.get("phone"):
+            line2_parts.append(client["phone"])
+        if line2_parts:
+            ctk.CTkLabel(
+                body, text="  ·  ".join(line2_parts),
+                font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL),
+                text_color=c.text_secondary, anchor="w",
+            ).pack(fill="x", pady=(0, T.SPACE_XS))
+
+        # Ligne 3 : cadence + dernier envoi
+        cadence = client.get("report_cadence") or "manuel"
+        cad_label = ("Envoi auto · 1× par mois" if cadence == "auto_mensuel"
+                     else "Envoi manuel sur demande")
+        last_sent = client.get("last_report_sent_at")
+        last_sent_str = (f"  ·  Dernier envoi : {last_sent[:10]}"
+                         if last_sent else "  ·  Aucun rapport envoyé")
+        ctk.CTkLabel(
+            body, text=cad_label + last_sent_str,
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY),
+            text_color=c.text_muted, anchor="w",
+        ).pack(fill="x", pady=(0, T.SPACE_SM))
+
+        # Boutons d'action
+        btns = ctk.CTkFrame(body, fg_color="transparent")
+        btns.pack(fill="x")
+        SecondaryButton(
+            btns, colors=c, text="Modifier la fiche", icon="settings",
+            command=lambda s=site, cl=client:
+                self._open_client_form_dialog(s, cl),
+        ).pack(side="left", padx=(0, T.SPACE_SM))
+        PrimaryButton(
+            btns, colors=c, text="Générer le rapport maintenant",
+            icon="sparkle",
+            command=lambda s=site, cl=client:
+                self._generate_report_for_client(s, cl),
+        ).pack(side="left")
+
+    def _open_client_form_dialog(
+        self, site: dict, client: Optional[dict],
+    ) -> None:
+        try:
+            PhareClientDialog(
+                self.winfo_toplevel(),
+                colors=self.colors,
+                site=site,
+                client=client,
+                on_done=self._refresh_active_tab,
+            )
+        except Exception as exc:
+            logger.exception("phare client dialog: %s", exc)
+            messagebox.showerror(
+                "Erreur",
+                f"Impossible d'ouvrir le formulaire :\n{exc}",
+            )
+
+    def _generate_report_for_client(self, site: dict, client: dict) -> None:
+        """Génère le rapport mensuel client (HTML + PDF) et ouvre le résultat
+        dans le navigateur. La modale de prévisualisation/envoi viendra à
+        l'étape 6.
+        """
+        import threading
+        import webbrowser
+
+        self._status_var.set(f"Génération du rapport pour {site.get('name')}…")
+
+        def worker():
+            try:
+                result = client_report.generate_for_client(
+                    site["id"], client.get("id"),
+                    app_state=self.app_state,
+                )
+            except Exception as exc:
+                logger.exception("client_report failed: %s", exc)
+                self.after(0, lambda:
+                    messagebox.showerror("Erreur",
+                        f"Génération échouée :\n{exc}"))
+                self.after(0, lambda: self._status_var.set(""))
+                return
+
+            if not result.get("ok"):
+                self.after(0, lambda:
+                    messagebox.showerror("Erreur",
+                        result.get("error") or "Échec de la génération."))
+                self.after(0, lambda: self._status_var.set(""))
+                return
+
+            # Ouvre le résultat (PDF si dispo, sinon HTML)
+            path = result.get("pdf_path") or result.get("html_path")
+            if path:
+                try:
+                    webbrowser.open(f"file:///{path.replace(chr(92), '/')}")
+                except Exception as exc:
+                    logger.debug("webbrowser open: %s", exc)
+
+            fmt = result["format"].upper()
+            self.after(0, lambda: self._status_var.set(
+                f"✓ Rapport {fmt} généré pour {site.get('name')} — "
+                f"{result.get('pdf_path') or result.get('html_path')}"))
+            self.after(0, lambda: messagebox.showinfo(
+                "Rapport généré",
+                f"Le rapport {fmt} a été généré et ouvert dans ton navigateur.\n\n"
+                f"Chemin : {path}\n\n"
+                f"L'envoi par email au client arrivera à l'étape suivante "
+                f"(préversion + bouton « Envoyer »)."))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _deactivate_site(self, site_id: str, site_name: str) -> None:
+        """Désactive un site après confirmation."""
+        if not messagebox.askyesno(
+            "Désactiver le site",
+            f"Désactiver « {site_name} » ?\n\n"
+            "Le site sera caché de la liste et plus aucune mission ne sera "
+            "lancée. Les données passées (audits, mots-clés) restent en base.",
+        ):
+            return
+        ok = repo.deactivate_site(site_id)
+        if not ok:
+            messagebox.showerror(
+                "Erreur",
+                "Impossible de désactiver le site. Vérifie la connexion "
+                "Supabase.",
+            )
+            return
+        self._refresh_active_tab()
 
     # ------------------------------------------------------------------
     # ONGLET 2 — Site (focus)
@@ -385,6 +618,14 @@ class PhareView(BaseView):
                       font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY),
                       text_color=c.text_muted, anchor="w"
                       ).pack(side="left", padx=(T.SPACE_SM, 0))
+        SecondaryButton(
+            header, colors=c, text="Éditer le site", icon="settings",
+            command=lambda s=site: self._open_site_form_dialog(s),
+        ).pack(side="right")
+
+        # Carte client (si site marqué comme client externe)
+        if site.get("is_external_client"):
+            self._build_client_card(parent, site)
 
         # Boutons missions
         actions_bar = ctk.CTkFrame(parent, fg_color="transparent")
@@ -640,17 +881,17 @@ class PhareView(BaseView):
 
         if not actions and not drafts:
             EmptyState(parent, colors=c, icon="check",
-                        title="Bac vide",
-                        message=("Aucune action n'attend ta validation. "
+                        title="Tout est à jour",
+                        message=("Aucune modification n'attend ta validation. "
                                  "Lance un cycle complet sur un site pour "
-                                 "alimenter le bac."),
+                                 "voir des suggestions ici."),
                         cta_text="Voir l'écosystème",
                         cta_command=lambda: self._switch_tab("ecosystem")
                         ).pack(fill="both", expand=True, pady=T.SPACE_2XL)
             return
 
         if actions:
-            ctk.CTkLabel(parent, text="EN ATTENTE DE VALIDATION (PR ouvertes)",
+            ctk.CTkLabel(parent, text="PRÊTES À APPLIQUER",
                           font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
                           text_color=c.text_muted, anchor="w"
                           ).pack(fill="x", pady=(0, T.SPACE_SM))
@@ -658,7 +899,7 @@ class PhareView(BaseView):
                 self._render_action_card(parent, a, with_actions=True)
 
         if drafts:
-            ctk.CTkLabel(parent, text="RECOMMANDATIONS (sans PR auto)",
+            ctk.CTkLabel(parent, text="SUGGESTIONS À EXAMINER",
                           font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
                           text_color=c.text_muted, anchor="w"
                           ).pack(fill="x", pady=(T.SPACE_LG, T.SPACE_SM))
@@ -693,7 +934,7 @@ class PhareView(BaseView):
         if with_actions:
             bar = ctk.CTkFrame(card, fg_color="transparent")
             bar.pack(fill="x", padx=T.SPACE_LG, pady=T.SPACE_MD)
-            PrimaryButton(bar, colors=c, text="Valider et merger",
+            PrimaryButton(bar, colors=c, text="Appliquer",
                            icon="check",
                            command=lambda aid=a["id"]: self._merge(aid)
                            ).pack(side="left", padx=(0, T.SPACE_SM))
@@ -701,7 +942,7 @@ class PhareView(BaseView):
                              command=lambda aid=a["id"]: self._reject(aid)
                              ).pack(side="left")
             if a.get("github_pr_url"):
-                SecondaryButton(bar, colors=c, text="Voir la PR",
+                SecondaryButton(bar, colors=c, text="Voir sur GitHub",
                                  icon="external",
                                  command=lambda url=a["github_pr_url"]:
                                      self._open_url(url)
@@ -814,7 +1055,7 @@ class PhareView(BaseView):
 
         def _go():
             r = orchestrator.merge_action(action_id)
-            msg = ("Merge réussi" if r.get("ok")
+            msg = ("Modification appliquée" if r.get("ok")
                    else f"Bloqué : {r.get('decision') or r.get('error')}")
             self.after(0, lambda: self._status_var.set(msg))
             self.after(0, self._refresh_active_tab)

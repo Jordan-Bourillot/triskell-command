@@ -35,6 +35,7 @@ from .views.templates import TemplatesView
 from .widgets.sidebar import Sidebar
 from .widgets.splash import SplashScreen
 from .widgets.status_bar import StatusBar
+from .widgets.worker_pulse import WorkerPulse
 
 
 logger = logging.getLogger("triskell.command")
@@ -89,22 +90,23 @@ class TriskellCommandApp(ctk.CTk):
         except Exception as exc:
             logger.debug("Échec de chargement de l'icône : %s", exc)
 
-        # Layout : status bar haute + sidebar gauche + content
-        # - col 0 : sidebar (ns sur 2 rows)
-        # - col 1 : status bar (row 0) puis content (row 1)
+        # Layout : status bar haute + sidebar gauche + content + worker pulse bas
+        # - col 0 : sidebar (ns sur 3 rows)
+        # - col 1 : status bar (row 0), content (row 1), worker pulse (row 2)
         self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=0)  # status bar
         self.grid_rowconfigure(1, weight=1)  # content
+        self.grid_rowconfigure(2, weight=0)  # worker pulse
 
-        # Sidebar (s'étend sur les 2 rows)
+        # Sidebar (s'étend sur les 3 rows)
         self.sidebar = Sidebar(
             self,
             colors=self.colors,
             on_navigate=self.show_view,
             active_view=self.app_state.get("active_view", default="autopilot"),
         )
-        self.sidebar.grid(row=0, column=0, rowspan=2, sticky="ns")
+        self.sidebar.grid(row=0, column=0, rowspan=3, sticky="ns")
 
         # Status bar haute (col 1, row 0)
         self.status_bar = StatusBar(
@@ -118,6 +120,29 @@ class TriskellCommandApp(ctk.CTk):
         # Content (col 1, row 1)
         self.content = ctk.CTkFrame(self, fg_color=self.colors.bg, corner_radius=0)
         self.content.grid(row=1, column=1, sticky="nsew")
+
+        # Worker pulse (col 1, row 2) — pulsation des 6 workers background
+        self.worker_pulse = WorkerPulse(self, colors=self.colors)
+        self.worker_pulse.grid(row=2, column=1, sticky="sew")
+        self.worker_pulse.set_last_event("Cockpit prêt. 6 engrenages au repos.")
+
+        # Branche le bus de pulsation : chaque worker publie via
+        # `pulse_bus.report(...)` ; on relaye sur le mainloop Tk pour
+        # toucher l'UI proprement (les workers tournent en background).
+        from .integrations import pulse_bus
+
+        def _on_pulse_event(evt: dict) -> None:
+            try:
+                self.after(0, lambda: self.worker_pulse.update_worker(
+                    evt["key"], state=evt["state"],
+                    last_activity_text=evt.get("text", ""),
+                    relative_time=evt.get("relative_time", ""),
+                    error_message=evt.get("error", ""),
+                ))
+            except Exception:
+                pass
+
+        pulse_bus.subscribe(_on_pulse_event)
 
         # Vues — instanciation lazy (pas tout d'un coup, gain perfs)
         self._views: dict[str, BaseView] = {}
@@ -387,7 +412,7 @@ class TriskellCommandApp(ctk.CTk):
             on_navigate=self.show_view,
             active_view=self.app_state.get("active_view", default="morning"),
         )
-        self.sidebar.grid(row=0, column=0, rowspan=2, sticky="ns")
+        self.sidebar.grid(row=0, column=0, rowspan=3, sticky="ns")
 
     def _rebuild_status_bar(self) -> None:
         try:
@@ -653,10 +678,22 @@ class TriskellCommandApp(ctk.CTk):
                 logger.info("Supabase non configuré → mode local.")
                 return
             if client.is_authenticated:
-                logger.info("Supabase : session restaurée pour %s",
-                            client.user_display_name or client.user_id)
+                name = client.user_display_name or client.user_id
+                logger.info("Supabase : session restaurée pour %s", name)
                 try:
                     self.status_bar.refresh()
+                except Exception:
+                    pass
+                # Pulse worker : signale la connexion + bascule l'indicateur
+                # de la worker_pulse de "Local" à "Supabase".
+                try:
+                    self.worker_pulse.set_supabase_status(True, label="Supabase")
+                    from .integrations import pulse_bus
+                    pulse_bus.report(
+                        "sync", "active",
+                        text=f"Connecté en tant que {name}",
+                        relative_time="à l'instant",
+                    )
                 except Exception:
                     pass
                 self._start_sync_poller()
@@ -664,9 +701,25 @@ class TriskellCommandApp(ctk.CTk):
             # Pas de session → demande login
             try:
                 from .widgets.login_dialog import LoginDialog
-                LoginDialog(self, colors=self.colors,
-                             on_done=lambda: (self.status_bar.refresh(),
-                                              self._start_sync_poller()))
+
+                def _on_login_done():
+                    try:
+                        self.status_bar.refresh()
+                    except Exception:
+                        pass
+                    try:
+                        self.worker_pulse.set_supabase_status(True, label="Supabase")
+                        from .integrations import pulse_bus
+                        pulse_bus.report(
+                            "sync", "active",
+                            text="Connecté à Supabase",
+                            relative_time="à l'instant",
+                        )
+                    except Exception:
+                        pass
+                    self._start_sync_poller()
+
+                LoginDialog(self, colors=self.colors, on_done=_on_login_done)
             except Exception as exc:
                 logger.warning("Login dialog échec : %s", exc)
         except ImportError:
@@ -892,7 +945,7 @@ def run() -> None:
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         datefmt="%H:%M:%S",
     )
-    logger.info("Démarrage Triskell Command v0.1.0")
+    logger.info("Démarrage Triskell Command %s", T.APP_VERSION_LABEL)
     # Splash bref pendant que l'app se charge
     app = TriskellCommandApp()
     app.withdraw()  # cache la window principale pendant le splash

@@ -34,6 +34,19 @@ WATCH_TABLES = {
     "messages": 10,                  # chat 1-à-1 — réactif
 }
 
+# Étiquettes lisibles pour la barre de pulsation ("prospect_drafts" →
+# "brouillons prospects"). Si une table n'est pas mappée, on retombe
+# sur son nom technique.
+_TABLE_LABELS = {
+    "prospects":        "prospects",
+    "prospect_drafts":  "brouillons prospects",
+    "convoy_drafts":    "brouillons convoi",
+    "convoy_campaigns": "campagnes convoi",
+    "email_history":    "historique emails",
+    "shared_settings":  "réglages partagés",
+    "messages":         "chat",
+}
+
 
 class SyncPoller:
     """Poll Supabase à intervalles, déclenche un callback quand ça a bougé.
@@ -94,6 +107,16 @@ class SyncPoller:
                             self._on_change(table)
                         except Exception as exc:
                             logger.debug("on_change(%s) : %s", table, exc)
+                        # Pulse worker : changement détecté côté Supabase
+                        try:
+                            from . import pulse_bus
+                            pulse_bus.report(
+                                "sync", "active",
+                                text=f"{_TABLE_LABELS.get(table, table)} synchronisés",
+                                relative_time="à l'instant",
+                            )
+                        except Exception:
+                            pass
                 except Exception as exc:
                     logger.debug("Poll %s : %s", table, exc)
             # Sleep court (5s) pour permettre des stops rapides

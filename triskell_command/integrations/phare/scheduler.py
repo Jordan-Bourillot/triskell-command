@@ -77,9 +77,35 @@ def _loop(app_state) -> None:
             result = _tick(app_state)
             _LAST_RUN_AT = datetime.now().isoformat(timespec="seconds")
             _LAST_RUN_RESULT = result
+            try:
+                from .. import pulse_bus
+                actions = (result.get("actions_done") or []
+                           if isinstance(result, dict) else [])
+                if actions:
+                    n = len(actions)
+                    last = actions[-1]
+                    mission = last.get("mission", "?")
+                    site = last.get("site", "")
+                    suffix = f" sur {site}" if site else ""
+                    if n == 1:
+                        text = f"{mission}{suffix}"
+                    else:
+                        text = f"{n} missions ({mission}{suffix} en dernière)"
+                    pulse_bus.report(
+                        "phare", "active",
+                        text=text,
+                        relative_time="à l'instant",
+                    )
+            except Exception:
+                pass
         except Exception as exc:
             logger.exception("phare scheduler tick: %s", exc)
             _LAST_RUN_RESULT = {"error": str(exc)}
+            try:
+                from .. import pulse_bus
+                pulse_bus.report("phare", "error", error=str(exc))
+            except Exception:
+                pass
         if _WORKER_STOP.wait(CYCLE_INTERVAL_SECONDS):
             return
 

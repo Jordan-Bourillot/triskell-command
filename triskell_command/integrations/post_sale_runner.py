@@ -127,9 +127,35 @@ def _loop(app_state) -> None:
         return
     while not _WORKER_STOP.is_set():
         try:
-            _do_one_cycle(app_state)
+            result = _do_one_cycle(app_state)
+            try:
+                from . import pulse_bus
+                drafts = result.get("drafts", 0) if isinstance(result, dict) else 0
+                sent = result.get("auto_sent", 0) if isinstance(result, dict) else 0
+                err = result.get("error") if isinstance(result, dict) else None
+                total = drafts + sent
+                if total > 0:
+                    parts = []
+                    if drafts:
+                        parts.append(f"{drafts} cross-sell prêt{'s' if drafts > 1 else ''}")
+                    if sent:
+                        parts.append(f"{sent} envoi{'s' if sent > 1 else ''}")
+                    pulse_bus.report(
+                        "postsale", "active",
+                        text=" + ".join(parts),
+                        relative_time="à l'instant",
+                    )
+                elif err and err != "supabase_unavailable":
+                    pulse_bus.report("postsale", "error", error=str(err))
+            except Exception:
+                pass
         except Exception as exc:
             logger.warning("PostSale cycle: %s", exc)
+            try:
+                from . import pulse_bus
+                pulse_bus.report("postsale", "error", error=str(exc))
+            except Exception:
+                pass
         for _ in range(CYCLE_INTERVAL_SECONDS // 5):
             if _WORKER_STOP.is_set():
                 return

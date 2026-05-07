@@ -89,9 +89,35 @@ def _poller_loop(app_state) -> None:
         return
     while not _POLLER_STOP.is_set():
         try:
-            _do_one_poll(app_state)
+            result = _do_one_poll(app_state)
+            # Pulse worker : on ne reporte que si quelque chose de notable
+            # (nouvelle réponse écrite ou erreur). Pas de pulse si scan vide.
+            try:
+                from . import pulse_bus
+                written = result.get("written", 0) if isinstance(result, dict) else 0
+                err = result.get("error") if isinstance(result, dict) else None
+                if written > 0:
+                    pulse_bus.report(
+                        "replies", "active",
+                        text=(f"{written} nouvelle réponse"
+                              if written == 1
+                              else f"{written} nouvelles réponses"),
+                        relative_time="à l'instant",
+                    )
+                elif err:
+                    pulse_bus.report(
+                        "replies", "error",
+                        error=str(err),
+                    )
+            except Exception:
+                pass
         except Exception as exc:
             logger.warning("RepliesPoller cycle: %s", exc)
+            try:
+                from . import pulse_bus
+                pulse_bus.report("replies", "error", error=str(exc))
+            except Exception:
+                pass
         # Sleep par tranches de 5s pour permettre stop rapide
         for _ in range(POLL_INTERVAL_SECONDS // 5):
             if _POLLER_STOP.is_set():

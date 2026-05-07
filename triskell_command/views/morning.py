@@ -128,6 +128,14 @@ class MorningView(BaseView):
         wrap = ctk.CTkFrame(self._scroll, fg_color="transparent")
         wrap.pack(fill="x", pady=(T.SPACE_LG, T.SPACE_2XL))
 
+        # Filet accent OR — signature exclusive de la Matinale.
+        # Ne réutiliser nulle part ailleurs dans l'app : c'est ce qui
+        # marque le moment rituel matinal. Voir docs/PATCHES.md (M2).
+        bar = ctk.CTkFrame(wrap, fg_color=c.gold,
+                           width=32, height=3, corner_radius=2)
+        bar.pack(anchor="w", pady=(0, T.SPACE_SM))
+        bar.pack_propagate(False)
+
         # Petit label date discret
         ctk.CTkLabel(
             wrap, text=_date_phrase().upper(),
