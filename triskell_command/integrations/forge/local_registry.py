@@ -214,6 +214,11 @@ def write_project_from_brief(*, project_id: str, brief: dict) -> bool:
         "client_email": brief.get("email") or "",
         "client_phone": brief.get("phone") or "",
         "opened": False,
+        # `analyzed` reste False jusqu'à ce que l'app standalone fasse passer
+        # le brief par analyzeBriefText (Claude Sonnet + AlphaBeast) pour
+        # remplir toutes les étapes du wizard. Au 1er ouvre, l'app détecte
+        # ce flag et déclenche l'analyse automatiquement.
+        "analyzed": False,
     }
 
     project_data = _build_project_data(
