@@ -203,37 +203,35 @@ class ThomasFAB(ctk.CTkFrame):
     # ------------------------------------------------------------------
     # Auto-destroy de sécurité si <Leave> ne se déclenche pas
     # (cas de switch rapide entre 2 FABs voisins).
-    _TOOLTIP_TTL_MS = 2500
+    _TOOLTIP_TTL_MS = 1200
 
     def _show_tooltip(self) -> None:
         # Idempotent : détruit tout tooltip restant avant d'en créer un nouveau.
         self._hide_tooltip()
         c = self._colors
         try:
+            # Fond plein : vert si calme, rouge si non-lus. Texte blanc.
+            # Coins droits — les coins arrondis CTk laissent voir le fond
+            # du toplevel parent (artefact de rendu).
+            bg = c.danger if self._unread > 0 else c.success
             tip = ctk.CTkToplevel(self)
             tip.overrideredirect(True)
-            tip.configure(fg_color=c.bg)
+            tip.configure(fg_color=bg)
             tip.attributes("-topmost", True)
-            # Bordure d'accent qui matche l'état du FAB :
-            # vert au repos, rouge si message non lu.
-            border_color = c.danger if self._unread > 0 else c.success
             wrap = ctk.CTkFrame(
-                tip, fg_color=c.bg_alt,
-                corner_radius=10,
-                border_color=border_color, border_width=1,
+                tip, fg_color=bg, corner_radius=0,
+                border_color=bg, border_width=0,
             )
             wrap.pack(padx=0, pady=0)
             # Titre
             if self._unread > 0:
                 title = f"{self._peer_name} t'a écrit !"
-                title_color = c.danger
             else:
                 title = f"Chat {self._peer_name} · F11"
-                title_color = c.text_primary
             ctk.CTkLabel(
                 wrap, text=title,
                 font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL, "bold"),
-                text_color=title_color,
+                text_color="#FFFFFF",
                 fg_color="transparent",
             ).pack(padx=14, pady=(10, 2), anchor="w")
             # Aperçu du dernier message (si dispo)
@@ -243,7 +241,7 @@ class ThomasFAB(ctk.CTkFrame):
                 ctk.CTkLabel(
                     wrap, text=preview,
                     font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY),
-                    text_color=c.text_secondary,
+                    text_color="#FFFFFF",
                     fg_color="transparent",
                     justify="left", wraplength=260,
                     anchor="w",
@@ -253,7 +251,7 @@ class ThomasFAB(ctk.CTkFrame):
                               height=8).pack()
             self.update_idletasks()
             tip.update_idletasks()
-            x = self.winfo_rootx() - tip.winfo_reqwidth() - 14
+            x = self.winfo_rootx() - tip.winfo_reqwidth() - 12
             y = self.winfo_rooty() + (SIZE - tip.winfo_reqheight()) // 2
             tip.geometry(f"+{x}+{y}")
             self._tooltip = tip

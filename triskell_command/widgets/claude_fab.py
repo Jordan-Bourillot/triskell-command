@@ -211,21 +211,24 @@ class ClaudeFAB(ctk.CTkFrame):
     # ------------------------------------------------------------------
     # Auto-destroy de sécurité si <Leave> ne se déclenche pas
     # (cas de switch rapide entre 2 FABs voisins).
-    _TOOLTIP_TTL_MS = 2500
+    _TOOLTIP_TTL_MS = 1200
 
     def _show_tooltip(self) -> None:
         # Idempotent : détruit tout tooltip restant avant d'en créer un nouveau.
         self._hide_tooltip()
         c = self._colors
         try:
+            # Fond plein couleur du FAB → texte blanc, lisible et cohérent.
+            # Coins droits volontairement : les coins arrondis CTk laissent
+            # voir le fond du toplevel parent (artefact de rendu).
+            bg = c.accent
             tip = ctk.CTkToplevel(self)
             tip.overrideredirect(True)
-            tip.configure(fg_color=c.bg)
+            tip.configure(fg_color=bg)
             tip.attributes("-topmost", True)
             wrap = ctk.CTkFrame(
-                tip, fg_color=c.bg_alt,
-                corner_radius=10,
-                border_color=c.accent, border_width=1,
+                tip, fg_color=bg, corner_radius=0,
+                border_color=bg, border_width=0,
             )
             wrap.pack(padx=0, pady=0)
             label_text = ("Claude veut te parler · F12"
@@ -234,13 +237,13 @@ class ClaudeFAB(ctk.CTkFrame):
             ctk.CTkLabel(
                 wrap, text=label_text,
                 font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL, "bold"),
-                text_color=c.text_primary,
+                text_color="#FFFFFF",
                 fg_color="transparent",
             ).pack(padx=14, pady=8)
             # Place à gauche du bouton, vertical center
             self.update_idletasks()
             tip.update_idletasks()
-            x = self.winfo_rootx() - tip.winfo_reqwidth() - 14
+            x = self.winfo_rootx() - tip.winfo_reqwidth() - 12
             y = self.winfo_rooty() + (SIZE - tip.winfo_reqheight()) // 2
             tip.geometry(f"+{x}+{y}")
             self._tooltip = tip
