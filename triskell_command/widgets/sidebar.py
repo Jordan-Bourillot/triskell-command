@@ -55,7 +55,7 @@ SIDEBAR_SECTIONS = [
         ("dashboard",  "chart",     "Tableau de bord"),
     ]),
     ("VISIBILITÉ", [
-        ("phare",      "broadcast", "Le Phare"),
+        ("phare",      "broadcast", "Le Phare — SEO"),
     ]),
 ]
 # Compat : on garde NAV_ITEMS comme la concat de toutes les sections
