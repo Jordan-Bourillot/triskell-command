@@ -81,12 +81,18 @@ class PhareView(BaseView):
         ("bulletin",  "Bulletins"),
     ]
 
+    # Frames du spinner (Braille pattern, comme spin/dots dans cli-spinners)
+    _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
     def __init__(self, master, *, app_state, colors):
         super().__init__(master, app_state=app_state, colors=colors)
         self._active_tab = "ecosystem"
         self._selected_site_id: Optional[str] = None
         self._tab_frames: dict[str, ctk.CTkFrame] = {}
         self._tab_buttons: dict[str, ctk.CTkButton] = {}
+        self._spinner_label: Optional[ctk.CTkLabel] = None
+        self._spinner_job: Optional[str] = None
+        self._spinner_frame: int = 0
 
     # ------------------------------------------------------------------
     # Build (1 seule fois)
@@ -125,13 +131,23 @@ class PhareView(BaseView):
         self._content.pack(fill="both", expand=True,
                             padx=T.SPACE_2XL, pady=(0, T.SPACE_LG))
 
-        # Status bar
+        # Status bar : spinner animé + texte. Le spinner reste vide tant
+        # qu'aucune mission n'est en cours (cf. _show_spinner / _hide_spinner).
         self._status_var = ctk.StringVar(value="")
+        status_row = ctk.CTkFrame(self, fg_color="transparent")
+        status_row.pack(fill="x", padx=T.SPACE_2XL, pady=(0, T.SPACE_SM))
+        self._spinner_label = ctk.CTkLabel(
+            status_row, text="",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL, "bold"),
+            text_color=c.accent,
+            width=14,
+        )
+        self._spinner_label.pack(side="left", padx=(0, 6))
         ctk.CTkLabel(
-            self, textvariable=self._status_var,
+            status_row, textvariable=self._status_var,
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL),
-            text_color=c.text_muted,
-        ).pack(fill="x", padx=T.SPACE_2XL, pady=(0, T.SPACE_SM))
+            text_color=c.text_muted, anchor="w",
+        ).pack(side="left", fill="x", expand=True)
 
         # Construit les 4 frames d'onglets vides
         for tab_id, _ in self.TABS:
@@ -146,6 +162,56 @@ class PhareView(BaseView):
             scheduler.start_worker(self.app_state)
         except Exception as exc:
             logger.debug("phare scheduler start: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Spinner (animation visuelle pendant les opérations async)
+    # ------------------------------------------------------------------
+    def _show_spinner(self, text: str = "") -> None:
+        """Démarre l'animation du spinner et met à jour le statut.
+
+        Idempotent : appeler à nouveau pendant que le spinner tourne ne fait
+        que rafraîchir le texte affiché.
+        """
+        if text:
+            try:
+                self._status_var.set(text)
+            except Exception:
+                pass
+        if self._spinner_job is not None:
+            return
+        self._tick_spinner()
+
+    def _hide_spinner(self, text: str = "") -> None:
+        if self._spinner_job is not None:
+            try:
+                self.after_cancel(self._spinner_job)
+            except Exception:
+                pass
+            self._spinner_job = None
+        if self._spinner_label is not None:
+            try:
+                self._spinner_label.configure(text="")
+            except Exception:
+                pass
+        if text:
+            try:
+                self._status_var.set(text)
+            except Exception:
+                pass
+
+    def _tick_spinner(self) -> None:
+        if self._spinner_label is None:
+            self._spinner_job = None
+            return
+        frame = self._SPINNER_FRAMES[
+            self._spinner_frame % len(self._SPINNER_FRAMES)]
+        try:
+            self._spinner_label.configure(text=frame)
+        except Exception:
+            self._spinner_job = None
+            return
+        self._spinner_frame += 1
+        self._spinner_job = self.after(80, self._tick_spinner)
 
     # ------------------------------------------------------------------
     # Onglets
@@ -527,7 +593,7 @@ class PhareView(BaseView):
         import threading
         import webbrowser
 
-        self._status_var.set(f"Génération du rapport pour {site.get('name')}…")
+        self._show_spinner(f"Génération du rapport pour {site.get('name')}…")
 
         def worker():
             try:
@@ -540,14 +606,14 @@ class PhareView(BaseView):
                 self.after(0, lambda:
                     messagebox.showerror("Erreur",
                         f"Génération échouée :\n{exc}"))
-                self.after(0, lambda: self._status_var.set(""))
+                self.after(0, lambda: self._hide_spinner(""))
                 return
 
             if not result.get("ok"):
                 self.after(0, lambda:
                     messagebox.showerror("Erreur",
                         result.get("error") or "Échec de la génération."))
-                self.after(0, lambda: self._status_var.set(""))
+                self.after(0, lambda: self._hide_spinner(""))
                 return
 
             # Ouvre le résultat (PDF si dispo, sinon HTML)
@@ -559,7 +625,7 @@ class PhareView(BaseView):
                     logger.debug("webbrowser open: %s", exc)
 
             fmt = result["format"].upper()
-            self.after(0, lambda: self._status_var.set(
+            self.after(0, lambda: self._hide_spinner(
                 f"✓ Rapport {fmt} généré pour {site.get('name')} — "
                 f"{result.get('pdf_path') or result.get('html_path')}"))
             self.after(0, lambda: messagebox.showinfo(
@@ -1072,7 +1138,7 @@ class PhareView(BaseView):
         """
         from ..integrations import pulse_bus
 
-        self._status_var.set(f"Mission « {mission } » en cours…")
+        self._show_spinner(f"Mission « {mission} » en cours…")
         pulse_bus.report("phare", "active",
                          text=f"Mission « {mission} » en cours",
                          relative_time="à l'instant")
@@ -1082,7 +1148,7 @@ class PhareView(BaseView):
                 r = scheduler.run_now(mission, site_id, app_state=self.app_state)
                 ok = r.get("ok", False)
                 msg = "Mission terminée" if ok else f"Échec : {r.get('error', '?')}"
-                self.after(0, lambda: self._status_var.set(msg))
+                self.after(0, lambda: self._hide_spinner(msg))
                 self.after(0, self._refresh_active_tab)
                 if ok:
                     pulse_bus.report("phare", "active",
@@ -1094,7 +1160,7 @@ class PhareView(BaseView):
                                      error=str(r.get("error", "?")))
             except Exception as exc:
                 logger.exception("run_mission %s: %s", mission, exc)
-                self.after(0, lambda: self._status_var.set(f"Erreur : {exc}"))
+                self.after(0, lambda: self._hide_spinner(f"Erreur : {exc}"))
                 pulse_bus.report("phare", "error",
                                  text=f"Mission « {mission} » plantée",
                                  error=str(exc))
@@ -1105,7 +1171,7 @@ class PhareView(BaseView):
         """Valide une action Phare (merge GitHub) + relais pulse-bus."""
         from ..integrations import pulse_bus
 
-        self._status_var.set("Validation en cours…")
+        self._show_spinner("Validation en cours…")
         pulse_bus.report("phare", "active",
                          text="Validation d'une modification",
                          relative_time="à l'instant")
@@ -1115,7 +1181,7 @@ class PhareView(BaseView):
             ok = bool(r.get("ok"))
             msg = ("Modification appliquée" if ok
                    else f"Bloqué : {r.get('decision') or r.get('error')}")
-            self.after(0, lambda: self._status_var.set(msg))
+            self.after(0, lambda: self._hide_spinner(msg))
             self.after(0, self._refresh_active_tab)
             if ok:
                 pulse_bus.report("phare", "active",
