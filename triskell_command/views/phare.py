@@ -31,7 +31,7 @@ from ..widgets.components import (
     StatCard,
     ViewHeader,
 )
-from ..widgets.components_pro import HeroQuestion
+from ..widgets.components_pro import HeroQuestion, KpiHero
 from ..widgets.phare_client_dialog import PhareClientDialog
 from ..widgets.phare_site_dialog import PhareSiteDialog
 from .base import BaseView
@@ -217,27 +217,40 @@ class PhareView(BaseView):
         totals = overview.get("totals", {})
         cfg_status = overview.get("config_status", {})
 
-        # Bandeau KPI globaux
+        # Bandeau KPI globaux (patch P1 : 4 → 3 KPIs).
+        # « Performance 30 j » fusionne clics organiques + impressions
+        # (delta) — un seul chiffre primaire, ratio en sous-texte.
         kpis = ctk.CTkFrame(parent, fg_color="transparent")
         kpis.pack(fill="x", pady=(0, T.SPACE_MD))
-        for i in range(4):
+        for i in range(3):
             kpis.grid_columnconfigure(i, weight=1, uniform="phare_kpi")
-        StatCard(kpis, label="Sites surveillés",
-                 value=str(len(overview["sites"])),
-                 colors=c).grid(row=0, column=0, sticky="nsew",
-                                padx=(0, T.SPACE_MD))
-        StatCard(kpis, label="Clics organiques 30j",
-                 value=_fmt_int(totals.get("organic_clicks_30d", 0)),
-                 colors=c).grid(row=0, column=1, sticky="nsew",
-                                padx=(0, T.SPACE_MD))
-        StatCard(kpis, label="Impressions 30j",
-                 value=_fmt_int(totals.get("impressions_30d", 0)),
-                 colors=c).grid(row=0, column=2, sticky="nsew",
-                                padx=(0, T.SPACE_MD))
-        StatCard(kpis, label="Actions en attente",
-                 value=str(totals.get("actions_pending", 0)),
-                 accent=c.accent if totals.get("actions_pending", 0) else "",
-                 colors=c).grid(row=0, column=3, sticky="nsew")
+
+        n_actions = totals.get("actions_pending", 0)
+        clicks_30d = totals.get("organic_clicks_30d", 0)
+        imps_30d = totals.get("impressions_30d", 0)
+
+        KpiHero(
+            kpis, colors=c,
+            label="Sites surveillés",
+            value=str(len(overview["sites"])),
+        ).grid(row=0, column=0, sticky="nsew", padx=(0, T.SPACE_MD))
+
+        KpiHero(
+            kpis, colors=c,
+            label="Performance 30 j",
+            value=_fmt_int(clicks_30d),
+            delta_value=f"sur {_fmt_int(imps_30d)} impressions",
+            delta_kind="neutral",
+        ).grid(row=0, column=1, sticky="nsew", padx=(0, T.SPACE_MD))
+
+        KpiHero(
+            kpis, colors=c,
+            label="Actions en attente",
+            value=str(n_actions),
+            delta_value=("—" if n_actions == 0 else "à valider"),
+            delta_kind="up" if n_actions else "neutral",
+            accent=c.accent if n_actions else "",
+        ).grid(row=0, column=2, sticky="nsew")
 
         # Bandeau de configuration (warnings si quelque chose manque)
         warns = []
@@ -592,6 +605,11 @@ class PhareView(BaseView):
             ).pack(fill="both", expand=True, pady=T.SPACE_2XL)
             return
 
+        HeroQuestion(
+            parent, colors=c,
+            text="Que se passe-t-il sur ce site ?",
+        ).pack(fill="x", pady=(T.SPACE_LG, T.SPACE_MD))
+
         site = repo.get_site(self._selected_site_id)
         if not site:
             EmptyState(parent, colors=c, icon="close",
@@ -744,6 +762,10 @@ class PhareView(BaseView):
     # ------------------------------------------------------------------
     def _build_advanced(self, parent: ctk.CTkFrame) -> None:
         c = self.colors
+        HeroQuestion(
+            parent, colors=c,
+            text="Quels outils avancés lancer cette semaine ?",
+        ).pack(fill="x", pady=(T.SPACE_LG, T.SPACE_MD))
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent",
                                           scrollbar_button_color=c.border_strong)
         scroll.pack(fill="both", expand=True)
@@ -876,6 +898,10 @@ class PhareView(BaseView):
     # ------------------------------------------------------------------
     def _build_inbox(self, parent: ctk.CTkFrame) -> None:
         c = self.colors
+        HeroQuestion(
+            parent, colors=c,
+            text="Qu'est-ce qui attend mon validateur ?",
+        ).pack(fill="x", pady=(T.SPACE_LG, T.SPACE_MD))
         actions = repo.list_actions(status="preview", limit=50)
         drafts = repo.list_actions(status="draft", limit=50)
 
@@ -956,6 +982,10 @@ class PhareView(BaseView):
     # ------------------------------------------------------------------
     def _build_bulletin(self, parent: ctk.CTkFrame) -> None:
         c = self.colors
+        HeroQuestion(
+            parent, colors=c,
+            text="Qu'est-ce que Le Phare a appris ce mois-ci ?",
+        ).pack(fill="x", pady=(T.SPACE_LG, T.SPACE_MD))
         bulletins = []
         for s in repo.list_sites():
             for a in repo.list_actions(site_id=s["id"], limit=10):
@@ -1035,7 +1065,17 @@ class PhareView(BaseView):
                        command=_go).pack(pady=T.SPACE_LG)
 
     def _run_mission(self, mission: str, site_id: Optional[str]) -> None:
-        self._status_var.set(f"Mission « {mission} » en cours…")
+        """Lance une mission Phare en thread + relais pulse-bus (patch B3).
+
+        Le WorkerPulse en bas affiche la LED PHAR active pendant que la
+        mission tourne. Plus de silence de 60 s pendant un audit.
+        """
+        from ..integrations import pulse_bus
+
+        self._status_var.set(f"Mission « {mission } » en cours…")
+        pulse_bus.report("phare", "active",
+                         text=f"Mission « {mission} » en cours",
+                         relative_time="à l'instant")
 
         def _go():
             try:
@@ -1044,21 +1084,49 @@ class PhareView(BaseView):
                 msg = "Mission terminée" if ok else f"Échec : {r.get('error', '?')}"
                 self.after(0, lambda: self._status_var.set(msg))
                 self.after(0, self._refresh_active_tab)
+                if ok:
+                    pulse_bus.report("phare", "active",
+                                     text=f"Mission « {mission} » terminée",
+                                     relative_time="à l'instant")
+                else:
+                    pulse_bus.report("phare", "error",
+                                     text=f"Mission « {mission} » a échoué",
+                                     error=str(r.get("error", "?")))
             except Exception as exc:
                 logger.exception("run_mission %s: %s", mission, exc)
                 self.after(0, lambda: self._status_var.set(f"Erreur : {exc}"))
+                pulse_bus.report("phare", "error",
+                                 text=f"Mission « {mission} » plantée",
+                                 error=str(exc))
 
         threading.Thread(target=_go, daemon=True).start()
 
     def _merge(self, action_id: str) -> None:
+        """Valide une action Phare (merge GitHub) + relais pulse-bus."""
+        from ..integrations import pulse_bus
+
         self._status_var.set("Validation en cours…")
+        pulse_bus.report("phare", "active",
+                         text="Validation d'une modification",
+                         relative_time="à l'instant")
 
         def _go():
             r = orchestrator.merge_action(action_id)
-            msg = ("Modification appliquée" if r.get("ok")
+            ok = bool(r.get("ok"))
+            msg = ("Modification appliquée" if ok
                    else f"Bloqué : {r.get('decision') or r.get('error')}")
             self.after(0, lambda: self._status_var.set(msg))
             self.after(0, self._refresh_active_tab)
+            if ok:
+                pulse_bus.report("phare", "active",
+                                 text="Modification appliquée",
+                                 relative_time="à l'instant")
+            else:
+                pulse_bus.report(
+                    "phare", "error",
+                    text="Validation bloquée",
+                    error=str(r.get("decision") or r.get("error") or "?"),
+                )
 
         threading.Thread(target=_go, daemon=True).start()
 
