@@ -27,6 +27,7 @@ import email
 import imaplib
 import json
 import logging
+import quopri
 import re
 import threading
 import time
@@ -42,8 +43,14 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 300        # 5 min, aligné avec replies_poller
 INITIAL_DELAY_SECONDS = 45         # juste après replies_poller (qui a 30 s)
 
+# Notre payload JSON est plat (pas d'objets imbriqués). On limite la classe
+# de caractères à `[^{}]` pour matcher un seul niveau, ce qui évite le
+# piège de la regex greedy sur les mails multi-part : ils contiennent le
+# marker DEUX FOIS (text/plain + text/html), et un `\{.*\}` greedy
+# capturerait du 1er `{` de la 1re occurrence jusqu'au dernier `}` de la
+# 2e — JSON invalide.
 MARKER_RE = re.compile(
-    r"\[TRISKELL-INTAKE-V1\]\s*(\{.*\})",
+    r"\[TRISKELL-INTAKE-V1\]\s*(\{[^{}]*\})",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -318,16 +325,24 @@ _LABEL_PATTERNS = {
 }
 
 # Pour les blocs multilignes (Description / Audience / Ton), on prend ce qui
-# suit le label jusqu'à la prochaine ligne de label vide ou nouvelle section.
+# suit le label jusqu'au prochain label connu OU une borne de fin de mail
+# (signature `—`, marker JSON, frontière multipart `----`, EOF).
+_STOP = (
+    r"(?=\n[A-ZÀ-ÿ][^\n]*\s*:\s*\n"   # nouvelle section "Label :\n"
+    r"|\n[—–-]\s|"                     # signature "— Envoyé..."
+    r"\n\[TRISKELL-INTAKE-V1\]|"       # marker machine
+    r"\n----|"                          # frontière multipart MIME
+    r"\Z)"
+)
 _BLOCK_PATTERNS = {
     "description": re.compile(
-        r"Description du site\s*:?\s*\n+(.+?)(?=\n[A-ZÀ-ÿ][^\n]*\s*:\s*\n|\Z)",
+        r"Description du site\s*:?\s*\n+(.+?)" + _STOP,
         re.IGNORECASE | re.DOTALL),
     "audience": re.compile(
-        r"Audience(?: vis[ée]e)?\s*:?\s*\n+(.+?)(?=\n[A-ZÀ-ÿ][^\n]*\s*:\s*\n|\Z)",
+        r"Audience(?: vis[ée]e)?\s*:?\s*\n+(.+?)" + _STOP,
         re.IGNORECASE | re.DOTALL),
     "tone": re.compile(
-        r"Ton(?: souhait[ée])?\s*:?\s*\n+(.+?)(?=\n[A-ZÀ-ÿ][^\n]*\s*:\s*\n|\Z)",
+        r"Ton(?: souhait[ée])?\s*:?\s*\n+(.+?)" + _STOP,
         re.IGNORECASE | re.DOTALL),
 }
 
@@ -354,18 +369,24 @@ def _parse_labelled_body(body: str) -> Optional[dict]:
 # Helpers IMAP / parsing (alignés sur replies_poller)
 # ---------------------------------------------------------------------------
 def _parse_fetch_response(msg_data) -> tuple[dict, str]:
+    """Extrait headers + body texte d'une réponse imaplib.fetch.
+
+    Décode aussi le body si encodé en quoted-printable (cas Resend) — sinon
+    les `=\n` soft-line-breaks coupent le marker JSON et les valeurs des
+    labels au milieu, ce qui casse le parsing en aval.
+    """
     headers: dict = {}
-    body_parts: list[str] = []
+    body_raw_parts: list[bytes] = []
+    body_is_qp = False
     for part in msg_data:
         if not isinstance(part, tuple):
             continue
         raw = part[1]
-        if isinstance(raw, bytes):
-            text = raw.decode("utf-8", errors="ignore")
-        else:
-            text = str(raw or "")
-        if not text:
+        if not raw:
             continue
+        if not isinstance(raw, bytes):
+            raw = str(raw).encode("utf-8", errors="ignore")
+        text = raw.decode("utf-8", errors="ignore")
         first = text.lstrip().split(":", 1)[0].lower()
         if first in ("from", "subject", "date", "message-id",
                      "x-triskell-intake"):
@@ -375,14 +396,39 @@ def _parse_fetch_response(msg_data) -> tuple[dict, str]:
                           "X-Triskell-Intake"):
                     v = m.get(k)
                     if v and k not in headers:
+                        # decode_header pour les sujets en =?UTF-8?Q?…?=
+                        if k == "Subject":
+                            try:
+                                parts = email.header.decode_header(v)
+                                v = "".join(
+                                    (s.decode(c or "utf-8", errors="ignore")
+                                     if isinstance(s, bytes) else s)
+                                    for s, c in parts
+                                )
+                            except Exception:
+                                pass
                         headers[k] = v
             except Exception:
                 pass
         else:
-            body_parts.append(text)
-    body = "\n".join(body_parts).strip()
-    # Décodage HTML grossier — on garde la version brute pour parsing,
-    # mais on enlève les tags si le mail est multi-part HTML.
+            body_raw_parts.append(raw)
+            # Heuristique : si le body contient un en-tête CTE quoted-printable
+            # quelque part, on saura qu'il faut décoder.
+            if b"quoted-printable" in raw.lower():
+                body_is_qp = True
+
+    body_blob = b"\n".join(body_raw_parts)
+
+    # Décodage quoted-printable si détecté. Idempotent en pratique :
+    # quopri.decodestring conserve les octets non-encodés tels quels.
+    if body_is_qp or b"=\r\n" in body_blob or b"=\n" in body_blob:
+        try:
+            body_blob = quopri.decodestring(body_blob)
+        except Exception:
+            pass
+
+    body = body_blob.decode("utf-8", errors="ignore")
+    # Strip HTML tags (si multi-part avec HTML)
     body = re.sub(r"<[^>]+>", " ", body)
     body = re.sub(r"\s+\n", "\n", body)
     body = re.sub(r"[ \t]+", " ", body)
