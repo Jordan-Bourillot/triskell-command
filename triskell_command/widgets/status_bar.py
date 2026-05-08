@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 from typing import Callable
 
 import customtkinter as ctk
 
 from .. import theme as T
+
+logger = logging.getLogger(__name__)
 
 
 class StatusPill(ctk.CTkFrame):
@@ -102,6 +106,12 @@ class StatusBar(ctk.CTkFrame):
         self._app_state = app_state
         self._on_navigate = on_navigate
 
+        # Cache du count prospects : la lecture CRM peut être lente sur grosse
+        # base (ex. 5000+ entrées). On affiche la dernière valeur connue et on
+        # rafraîchit en arrière-plan.
+        self._cached_prospects: int = 0
+        self._prospects_fetching: bool = False
+
         # Container interne (padding horizontal)
         self._inner = ctk.CTkFrame(self, fg_color="transparent")
         self._inner.pack(fill="both", expand=True, padx=T.SPACE_LG, pady=4)
@@ -156,14 +166,15 @@ class StatusBar(ctk.CTkFrame):
                 on_click=lambda: self._on_navigate("drafts"),
             )
 
-        # === Prospects total ===
-        n_prospects = self._count_prospects()
+        # === Prospects total === (cache + fetch async pour ne pas bloquer UI)
+        n_prospects = self._cached_prospects
         self._make_kpi_link(
             self._inner,
             f"{n_prospects} prospect{'s' if n_prospects > 1 else ''}",
             color=c.text_secondary,
             on_click=lambda: self._on_navigate("prospects"),
         )
+        self._maybe_fetch_prospects_async()
 
         # === Envoyés aujourd'hui ===
         n_today = self._count_today()
@@ -294,12 +305,40 @@ class StatusBar(ctk.CTkFrame):
         except Exception:
             return False
 
-    def _count_prospects(self) -> int:
+    def _maybe_fetch_prospects_async(self) -> None:
+        """Lance un fetch CRM en thread si pas déjà en cours.
+
+        Le résultat alimente `self._cached_prospects` puis re-trigger un
+        `refresh()` UI seulement si la valeur a changé (évite la boucle).
+        """
+        if self._prospects_fetching:
+            return
+        self._prospects_fetching = True
+
+        def worker():
+            try:
+                from triskell_core.prospect.core.crm import CRM
+                n = len(CRM().all())
+            except Exception as exc:
+                logger.debug("count_prospects fetch failed: %s", exc)
+                n = self._cached_prospects
+            try:
+                self.after(0, self._on_prospects_fetched, n)
+            except Exception:
+                # Widget détruit entre-temps
+                self._prospects_fetching = False
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_prospects_fetched(self, n: int) -> None:
+        self._prospects_fetching = False
+        if n == self._cached_prospects:
+            return
+        self._cached_prospects = n
         try:
-            from triskell_core.prospect.core.crm import CRM
-            return len(CRM().all())
+            self.refresh()
         except Exception:
-            return 0
+            pass
 
     def _count_pending_drafts(self) -> int:
         try:

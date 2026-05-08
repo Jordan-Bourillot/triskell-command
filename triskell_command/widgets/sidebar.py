@@ -228,7 +228,7 @@ class Sidebar(ctk.CTkFrame):
         *,
         colors: T.ThemeColors,
         on_navigate: Callable[[str], None],
-        active_view: str = "prospects",
+        active_view: str = "morning",
     ):
         super().__init__(
             master,
