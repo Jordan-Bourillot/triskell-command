@@ -26,6 +26,7 @@ from .views.autopilot import AutopilotView
 from .views.clients import ClientsView
 from .views.drafts import DraftsView
 from .views.funnel import FunnelView
+from .views.la_forge import LaForgeView
 from .views.morning import MorningView
 from .views.phare import PhareView
 from .views.prospects import ProspectsView
@@ -57,6 +58,7 @@ VIEW_REGISTRY: dict[str, type[BaseView]] = {
     "funnel":     FunnelView,
     "dashboard":  DashboardView,
     "phare":      PhareView,
+    "la_forge":   LaForgeView,
     "config":     ConfigView,
 }
 
@@ -490,6 +492,30 @@ class TriskellCommandApp(ctk.CTk):
         self.status_bar.grid(row=0, column=1, sticky="new")
 
     # -----------------------------------------------------------------
+    def _refresh_forge_badge(self) -> None:
+        """MAJ la pastille « briefs en attente » sur l'item sidebar La Forge.
+
+        Appelé au login Supabase, et à chaque notification SyncPoller sur
+        forge_pending_briefs / forge_projects. Tourne en thread pour ne
+        pas bloquer le mainloop sur l'appel réseau Supabase."""
+        import threading
+        from .integrations.forge import repo as forge_repo
+
+        def worker():
+            try:
+                n = forge_repo.count_briefs(status="new")
+            except Exception:
+                n = 0
+            try:
+                self.after(0, lambda v=n:
+                           self.sidebar.set_attention("la_forge", v > 0))
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True,
+                         name="ForgeBadgeRefresh").start()
+
+    # -----------------------------------------------------------------
     def _refresh_unread_badge(self) -> None:
         """Recalcule (async) le compteur de non-lus + l'aperçu du dernier
         message, MAJ le FAB. Notifie aussi côté système si un nouveau
@@ -803,6 +829,20 @@ class TriskellCommandApp(ctk.CTk):
             self._refresh_unread_badge()
         except Exception:
             pass
+        # Bridge Teddy → La Forge du Web : poller IMAP filtré qui détecte
+        # les mails "Demande de création de site" et dépose les briefs
+        # dans forge_pending_briefs.
+        try:
+            from .integrations import teddy_to_forge
+            teddy_to_forge.start_poller(self.app_state)
+            logger.info("TeddyToForge bridge actif (cycle 5 min).")
+        except Exception as exc:
+            logger.debug("TeddyToForge non démarré : %s", exc)
+        # Badge sidebar La Forge : compte des briefs en attente d'import
+        try:
+            self._refresh_forge_badge()
+        except Exception:
+            pass
 
     def _on_remote_change(self, table: str) -> None:
         """Appelée sur le mainloop Tk quand Supabase signale un changement."""
@@ -817,6 +857,9 @@ class TriskellCommandApp(ctk.CTk):
                 except Exception:
                     pass
             return
+        # Forge : nouveau brief / projet → MAJ badge sidebar
+        if table in ("forge_pending_briefs", "forge_projects"):
+            self._refresh_forge_badge()
         # Status bar : toujours utile
         try:
             self.status_bar.refresh()
@@ -831,6 +874,8 @@ class TriskellCommandApp(ctk.CTk):
             "convoy_campaigns": ("convoy",),
             "email_history": ("replies", "dashboard", "morning", "funnel"),
             "shared_settings": ("config",),
+            "forge_pending_briefs": ("la_forge",),
+            "forge_projects":       ("la_forge",),
         }
         targets = relevant_views.get(table, ())
         if self._current_view is not None and targets:

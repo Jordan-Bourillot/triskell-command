@@ -32,6 +32,8 @@ WATCH_TABLES = {
     "email_history": 30,
     "shared_settings": 60,
     "messages": 10,                  # chat 1-à-1 — réactif
+    "forge_pending_briefs": 60,      # briefs reçus par Teddy
+    "forge_projects": 60,            # projets La Forge
 }
 
 # Étiquettes lisibles pour la barre de pulsation ("prospect_drafts" →
@@ -45,6 +47,8 @@ _TABLE_LABELS = {
     "email_history":    "historique emails",
     "shared_settings":  "réglages partagés",
     "messages":         "chat",
+    "forge_pending_briefs": "briefs Forge",
+    "forge_projects":       "projets Forge",
 }
 
 

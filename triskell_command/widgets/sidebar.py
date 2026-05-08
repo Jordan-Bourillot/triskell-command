@@ -57,6 +57,9 @@ SIDEBAR_SECTIONS = [
     ("VISIBILITÉ", [
         ("phare",      "broadcast", "Le Phare — SEO"),
     ]),
+    ("FABRICATION", [
+        ("la_forge",   "globe",     "La Forge du Web"),
+    ]),
 ]
 # Compat : on garde NAV_ITEMS comme la concat de toutes les sections
 NAV_ITEMS = [item for _label, items in SIDEBAR_SECTIONS for item in items]
