@@ -96,7 +96,7 @@ Triskell Studio/
         │   ├── funnel_metrics.py     ← v0.3, agrégats Funnel
         │   ├── clients_repo.py       ← v0.3, CRUD client_projects
         │   ├── post_sale_runner.py   ← v0.3, cross-sell J+30 + NPS J+90
-        │   ├── alphacast.py / sales_tunnel.py / pirate_mail.py
+        │   ├── alphacast.py / sales_tunnel.py / teddy_mail.py
         │   ├── convoy_parser.py / convoy_ai.py / convoy_runner.py
         └── widgets/
             ├── sidebar.py            ← nav 5 sections (MATIN, AUTO, OUTILS,

@@ -1,11 +1,11 @@
 """
-Intégration Pirate Life Mail pour Triskell Command.
+Intégration Teddy Mail pour Triskell Command (anciennement Pirate Life Mail).
 
-Écrit des commandes JSON dans le dossier queue de PLM.
-PLM les ramasse automatiquement (FileSystemWatcher) et envoie les emails.
+Écrit des commandes JSON dans le dossier queue de Teddy Mail.
+Teddy Mail les ramasse automatiquement (FileSystemWatcher) et envoie les emails.
 
 Usage standard :
-    from triskell_command.integrations.pirate_mail import queue_purchase_email
+    from triskell_command.integrations.teddy_mail import queue_purchase_email
 
     queue_purchase_email(
         product="pack-electricien-pro",
@@ -30,32 +30,42 @@ logger = logging.getLogger(__name__)
 
 # ── Chemins ──────────────────────────────────────────────────────────────────
 
-def _plm_data_dir() -> Path:
-    """Renvoie %APPDATA%\\PirateLifeMail (où PLM stocke ses données)."""
+def _teddy_data_dir() -> Path:
+    """Renvoie %APPDATA%\\TeddyMail (où Teddy Mail stocke ses données).
+
+    Si Teddy Mail n'a jamais été lancé mais l'ancienne installation
+    %APPDATA%\\PirateLifeMail existe, on l'utilise en attendant que la
+    migration interne soit déclenchée au prochain lancement de Teddy Mail.
+    """
     appdata = os.environ.get("APPDATA", "")
     if not appdata:
         raise EnvironmentError("Variable d'environnement APPDATA introuvable")
-    return Path(appdata) / "PirateLifeMail"
+    new_dir = Path(appdata) / "TeddyMail"
+    if not new_dir.exists():
+        legacy = Path(appdata) / "PirateLifeMail"
+        if legacy.exists():
+            return legacy
+    return new_dir
 
 def _pending_dir() -> Path:
-    d = _plm_data_dir() / "pipeline" / "pending"
+    d = _teddy_data_dir() / "pipeline" / "pending"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 def _templates_dir() -> Path:
-    d = _plm_data_dir() / "pipeline" / "templates"
+    d = _teddy_data_dir() / "pipeline" / "templates"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 # ── Check disponibilité ───────────────────────────────────────────────────────
 
-def is_plm_available() -> bool:
+def is_teddy_available() -> bool:
     """
-    Retourne True si Pirate Life Mail semble installé.
-    Vérifie l'existence du dossier de données (créé au premier lancement de PLM).
+    Retourne True si Teddy Mail semble installé.
+    Vérifie l'existence du dossier de données (créé au premier lancement).
     """
     try:
-        return _plm_data_dir().exists()
+        return _teddy_data_dir().exists()
     except Exception:
         return False
 
@@ -74,13 +84,13 @@ def queue_email_command(
     delay_seconds: int = 0,
 ) -> str:
     """
-    Dépose une commande d'envoi dans la queue PLM.
+    Dépose une commande d'envoi dans la queue Teddy Mail.
 
     Paramètres
     ----------
     trigger       : "purchase" | "followup" | "upsell" | "custom"
     product       : id produit Triskell (ex: "pack-electricien-pro")
-    template_id   : id du template dans %APPDATA%\\PirateLifeMail\\pipeline\\templates\\
+    template_id   : id du template dans %APPDATA%\\TeddyMail\\pipeline\\templates\\
     customer_email: adresse du destinataire
     customer_name : prénom (utilisé dans {{customer.name}})
     variables     : dict de variables supplémentaires ({{variables.clé}})
@@ -114,7 +124,7 @@ def queue_email_command(
     dest  = _pending_dir() / fname
 
     dest.write_text(json.dumps(command, ensure_ascii=False, indent=2), encoding="utf-8")
-    logger.info("[pirate_mail] Commande %s déposée → %s", cmd_id[:8], dest.name)
+    logger.info("[teddy_mail] Commande %s déposée → %s", cmd_id[:8], dest.name)
     return cmd_id
 
 # ── Helpers métier ────────────────────────────────────────────────────────────
@@ -200,7 +210,7 @@ def queue_upsell_email(
 
 def list_templates() -> list[dict[str, str]]:
     """
-    Liste les templates disponibles dans le dossier PLM.
+    Liste les templates disponibles dans le dossier Teddy Mail.
     Utile pour l'UI Triskell Command (ComboBox de sélection de template).
     Retourne [{"id": ..., "name": ..., "subject": ...}, ...]
     """
@@ -217,11 +227,11 @@ def list_templates() -> list[dict[str, str]]:
             except Exception:
                 pass
     except Exception as e:
-        logger.warning("[pirate_mail] Impossible de lister les templates : %s", e)
+        logger.warning("[teddy_mail] Impossible de lister les templates : %s", e)
     return templates
 
 def count_pending() -> int:
-    """Nombre de commandes en attente dans la queue PLM."""
+    """Nombre de commandes en attente dans la queue Teddy Mail."""
     try:
         return len(list(_pending_dir().glob("*.json")))
     except Exception:

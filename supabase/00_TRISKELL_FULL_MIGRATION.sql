@@ -984,7 +984,7 @@ on conflict (key) do nothing;
 
 -- ---------------------------------------------------------------------
 -- Apex / Table Ronde (catalogue principal — héberge AUSSI les sous-routes
--- AlphaBeast, AlphaCast, AlphaPitch, Obelisk, Pirate Life Mail, etc.)
+-- AlphaBeast, AlphaCast, AlphaPitch, Obelisk, Teddy Mail, etc.)
 -- ---------------------------------------------------------------------
 update public.phare_sites set
     repo_github     = 'Jordan-Bourillot/triskell-site-officiel',
