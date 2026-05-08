@@ -322,18 +322,32 @@ class TriskellCommandApp(ctk.CTk):
 
     # -----------------------------------------------------------------
     def _bind_shortcuts(self) -> None:
-        """Raccourcis clavier globaux."""
-        # Ctrl+1..9 → vues, en suivant l'ordre de la sidebar
+        """Raccourcis clavier globaux.
+
+        Ordre choisi pour mettre en avant les actions quotidiennes
+        (cf. docs/ux/01_NAVIGATION §3.4) :
+            1 Aujourd'hui · 2 Brouillons · 3 Réponses · 4 Prospects
+            5 Auto-pilote · 6 Convoy · 7 Compose · 8 Phare · 9 Tableau
+            0 Tunnel
+        """
         ordered_views = [
-            "morning", "autopilot", "convoy", "drafts", "replies",
-            "prospects", "compose", "templates",
-            "funnel",
+            "morning",     # 1
+            "drafts",      # 2 — porte d'entrée quotidienne
+            "replies",     # 3 — réponses entrantes
+            "prospects",   # 4 — recherche manuelle
+            "autopilot",   # 5
+            "convoy",      # 6
+            "compose",     # 7
+            "phare",       # 8 — promu vs ancien ordre (était hors raccourci)
+            "dashboard",   # 9
         ]
         for i, view_id in enumerate(ordered_views, 1):
             self.bind(
                 f"<Control-Key-{i}>",
                 lambda _e, v=view_id: self.show_view(v),
             )
+        # Ctrl+0 → Tunnel de conversion (10e vue)
+        self.bind("<Control-Key-0>", lambda _e: self.show_view("funnel"))
         # Ctrl+, → Réglages (convention macOS/Windows)
         self.bind("<Control-comma>", lambda _e: self.show_view("config"))
         # F1 ou Ctrl+? → Aide
