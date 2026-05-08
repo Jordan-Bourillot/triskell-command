@@ -344,6 +344,35 @@ def _draw_send(d, s, color):
     )
 
 
+def _draw_chat_bubble(d, s, color):
+    """Bulle de chat arrondie avec petite queue en bas-gauche."""
+    w = max(2, s // 12)
+    # Bulle (rectangle arrondi tracé via deux ellipses + un rect)
+    left = s * 0.14
+    right = s * 0.86
+    top = s * 0.18
+    bottom = s * 0.66
+    radius = (bottom - top) / 2
+    # Bord gauche arrondi
+    d.arc((left, top, left + 2 * radius, bottom),
+          start=90, end=270, fill=color, width=w)
+    # Bord droit arrondi
+    d.arc((right - 2 * radius, top, right, bottom),
+          start=270, end=90, fill=color, width=w)
+    # Bord haut
+    d.line((left + radius, top, right - radius, top),
+           fill=color, width=w)
+    # Bord bas
+    d.line((left + radius, bottom, right - radius, bottom),
+           fill=color, width=w)
+    # Petite queue triangulaire en bas-gauche
+    tail_x = left + radius * 1.2
+    d.line((tail_x, bottom, tail_x - s * 0.06, bottom + s * 0.16),
+           fill=color, width=w)
+    d.line((tail_x - s * 0.06, bottom + s * 0.16, tail_x + s * 0.06, bottom),
+           fill=color, width=w)
+
+
 def _draw_sparkle(d, s, color):
     # Étoile à 4 branches (sparkle)
     w = max(2, s // 12)
@@ -476,6 +505,7 @@ _DRAWERS = {
     "copy":       _draw_copy,
     "send":       _draw_send,
     "sparkle":    _draw_sparkle,
+    "chat_bubble": _draw_chat_bubble,
     "target":     _draw_target,
     "download":   _draw_download,
     "close":      _draw_close,

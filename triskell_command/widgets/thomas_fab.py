@@ -16,11 +16,14 @@ from typing import Callable, Optional
 import customtkinter as ctk
 
 from .. import theme as T
+from . import icons as I
 
 logger = logging.getLogger(__name__)
 
 
 SIZE = 60
+ICON_SIZE = 28
+ICON_SIZE_HOVER = 32
 DOT_SIZE = 18                        # un peu plus gros que sur Claude pour le compteur
 PULSE_INTERVAL_MS = 1900
 PULSE_INTERVAL_ATTENTION_MS = 650
@@ -58,10 +61,12 @@ class ThomasFAB(ctk.CTkFrame):
         self._pulse_phase = 0
         self._tooltip: Optional[ctk.CTkToplevel] = None
 
+        # Icône vectorielle (bulle de chat, dessinée en PIL — pas un emoji système).
+        self._icon_img_rest = I.get_icon("chat_bubble", "#FFFFFF", size=ICON_SIZE)
+        self._icon_img_hover = I.get_icon("chat_bubble", "#FFFFFF", size=ICON_SIZE_HOVER)
         self._icon = ctk.CTkLabel(
-            self, text="💬",
-            font=(T.FONT_FAMILY_FALLBACK, 22, "bold"),
-            text_color="#FFFFFF",
+            self, text="",
+            image=self._icon_img_rest,
             fg_color="transparent",
         )
         self._icon.place(relx=0.5, rely=0.5, anchor="center")
@@ -101,7 +106,7 @@ class ThomasFAB(ctk.CTkFrame):
     def _on_enter(self, _evt=None) -> None:
         try:
             self.configure(border_width=HOVER_BORDER_WIDTH)
-            self._icon.configure(font=(T.FONT_FAMILY_FALLBACK, 24, "bold"))
+            self._icon.configure(image=self._icon_img_hover)
         except Exception:
             pass
         self._show_tooltip()
@@ -109,7 +114,7 @@ class ThomasFAB(ctk.CTkFrame):
     def _on_leave(self, _evt=None) -> None:
         try:
             self.configure(border_width=RESTING_BORDER_WIDTH)
-            self._icon.configure(font=(T.FONT_FAMILY_FALLBACK, 22, "bold"))
+            self._icon.configure(image=self._icon_img_rest)
         except Exception:
             pass
         self._hide_tooltip()

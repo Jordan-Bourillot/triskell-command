@@ -20,11 +20,14 @@ from typing import Callable, Optional
 import customtkinter as ctk
 
 from .. import theme as T
+from . import icons as I
 
 logger = logging.getLogger(__name__)
 
 
 SIZE = 60                       # diamètre du bouton
+ICON_SIZE = 28                  # icône au repos
+ICON_SIZE_HOVER = 32            # icône au hover
 DOT_SIZE = 14                   # taille du dot d'alerte
 PULSE_INTERVAL_MS = 1700        # respiration calme
 PULSE_INTERVAL_ATTENTION_MS = 600   # pulse rapide quand attention
@@ -58,12 +61,14 @@ class ClaudeFAB(ctk.CTkFrame):
         self._pulse_phase = 0
         self._tooltip: Optional[ctk.CTkToplevel] = None
 
-        # Icône (emoji téléphone simple — visible sans charger d'asset)
+        # Icône vectorielle (sparkle, dessinée en PIL — pas un emoji système).
+        self._icon_color = "#FFFFFF"
+        self._icon_img_rest = I.get_icon("sparkle", self._icon_color, size=ICON_SIZE)
+        self._icon_img_hover = I.get_icon("sparkle", self._icon_color, size=ICON_SIZE_HOVER)
         self._icon = ctk.CTkLabel(
             self,
-            text="✨",
-            font=(T.FONT_FAMILY_FALLBACK, 24, "bold"),
-            text_color=colors.accent_text,
+            text="",
+            image=self._icon_img_rest,
             fg_color="transparent",
         )
         self._icon.place(relx=0.5, rely=0.5, anchor="center")
@@ -111,7 +116,7 @@ class ClaudeFAB(ctk.CTkFrame):
                 border_width=HOVER_BORDER_WIDTH,
                 fg_color=c.accent_hover,
             )
-            self._icon.configure(font=(T.FONT_FAMILY_FALLBACK, 26, "bold"))
+            self._icon.configure(image=self._icon_img_hover)
         except Exception:
             pass
         self._show_tooltip()
@@ -123,7 +128,7 @@ class ClaudeFAB(ctk.CTkFrame):
                 border_width=RESTING_BORDER_WIDTH,
                 fg_color=c.accent,
             )
-            self._icon.configure(font=(T.FONT_FAMILY_FALLBACK, 24, "bold"))
+            self._icon.configure(image=self._icon_img_rest)
         except Exception:
             pass
         self._hide_tooltip()
