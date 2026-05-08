@@ -148,6 +148,41 @@ def _count_failed_convoy_drafts(client, day_start: str, day_end: str) -> int:
         return 0
 
 
+def _daily_history_last_7d(client, kind: str) -> list[int]:
+    """Renvoie 7 entiers : nombre d'événements `kind` par jour, du
+    plus ancien au plus récent (J-6 ... J).
+
+    Patch M1 (cf. docs/PATCHES.md) : alimente la sparkline KpiHero
+    de la Matinale. 1 requête, agrégation côté Python.
+    """
+    today = date.today()
+    counts = [0] * 7
+    try:
+        sb = client.raw
+        start = datetime.combine(today - timedelta(days=6),
+                                  datetime.min.time()).isoformat()
+        end = datetime.combine(today + timedelta(days=1),
+                                datetime.min.time()).isoformat()
+        res = (sb.table("email_history").select("ts")
+               .eq("kind", kind)
+               .gte("ts", start).lt("ts", end)
+               .limit(2000).execute())
+        for r in res.data or []:
+            ts = r.get("ts") or ""
+            if not ts:
+                continue
+            try:
+                d = datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
+            except ValueError:
+                continue
+            offset = (today - d).days
+            if 0 <= offset <= 6:
+                counts[6 - offset] += 1
+    except Exception as exc:
+        logger.debug("daily_history_last_7d(%s): %s", kind, exc)
+    return counts
+
+
 def _count_total_prospects(client) -> int:
     try:
         sb = client.raw
@@ -164,7 +199,8 @@ def compute_digest() -> dict[str, Any]:
         "ok": False,
         "today": date.today().isoformat(),
         "yesterday": (date.today() - timedelta(days=1)).isoformat(),
-        "sent": {"yesterday": 0, "today": 0, "last_7d": 0},
+        "sent": {"yesterday": 0, "today": 0, "last_7d": 0,
+                  "daily_last_7d": [0] * 7},
         "replies": {
             "yesterday_total": 0,
             "yesterday_breakdown": {},
@@ -199,6 +235,7 @@ def compute_digest() -> dict[str, Any]:
     out["sent"]["yesterday"] = _count_history(client, "email_sent", y_start, y_end)
     out["sent"]["today"] = _count_history(client, "email_sent", t_start, t_end)
     out["sent"]["last_7d"] = _count_history(client, "email_sent", w_start, t_end)
+    out["sent"]["daily_last_7d"] = _daily_history_last_7d(client, "email_sent")
 
     out["replies"]["yesterday_total"] = _count_history(
         client, "reply_received", y_start, y_end)

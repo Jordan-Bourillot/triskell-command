@@ -14,6 +14,7 @@ import customtkinter as ctk
 
 from .. import theme as T
 from ..integrations import morning_digest
+from ..tokens_v2 import ttype
 from ..widgets.components import (
     Card,
     EmptyState,
@@ -21,6 +22,7 @@ from ..widgets.components import (
     SecondaryButton,
     StatCard,
 )
+from ..widgets.components_pro import KpiHero
 from .base import BaseView
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,25 @@ def _date_phrase() -> str:
     return f"{days[now.weekday()]} {now.day} {months[now.month - 1]}"
 
 
+def _transition_phrase(digest: dict | None) -> str:
+    """Phrase d'accroche contextuelle au-dessous du greeting.
+
+    Patch M3 (cf. docs/PATCHES.md) : varie selon ce qui attend
+    réellement l'utilisateur. Plus vivant qu'une constante.
+    """
+    if not digest:
+        return "Voilà ce qui t'attend aujourd'hui."
+    queue = digest.get("queue", {}) or {}
+    if queue.get("replies_unhandled_interested", 0) > 0:
+        return "Tu as une vraie occasion ce matin."
+    if (queue.get("drafts_prospect_pending", 0)
+            + queue.get("drafts_convoy_pending", 0)) > 0:
+        return "Quelques validations rapides et tu débloques la journée."
+    if queue.get("replies_unhandled_total", 0) > 0:
+        return "Un peu de tri à faire avant d'attaquer."
+    return "Aucune urgence. Le terrain est libre."
+
+
 class MorningView(BaseView):
     title = "Matinale"
     subtitle = ""  # Le hero personnalisé prend le relais
@@ -66,7 +87,7 @@ class MorningView(BaseView):
         self._status_var = ctk.StringVar(value="")
         ctk.CTkLabel(
             self, textvariable=self._status_var,
-            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY),
+            font=(T.FONT_FAMILY, T.FONT_SIZE_TINY, "normal"),
             text_color=c.text_muted,
         ).pack(fill="x", padx=T.SPACE_2XL, pady=(0, T.SPACE_SM))
 
@@ -79,10 +100,11 @@ class MorningView(BaseView):
             w.destroy()
         c = self.colors
 
-        # --- HERO : salut chaleureux + date ---
-        self._hero(c)
-
+        # Digest d'abord — la phrase d'accroche du hero en dépend.
         digest = morning_digest.compute_digest()
+
+        # --- HERO : salut chaleureux + date + phrase contextuelle ---
+        self._hero(c, digest=digest if digest.get("ok") else None)
 
         if not digest.get("ok"):
             EmptyState(
@@ -124,7 +146,7 @@ class MorningView(BaseView):
         )
 
     # ------------------------------------------------------------------
-    def _hero(self, c) -> None:
+    def _hero(self, c, *, digest: dict | None = None) -> None:
         wrap = ctk.CTkFrame(self._scroll, fg_color="transparent")
         wrap.pack(fill="x", pady=(T.SPACE_LG, T.SPACE_2XL))
 
@@ -139,7 +161,7 @@ class MorningView(BaseView):
         # Petit label date discret
         ctk.CTkLabel(
             wrap, text=_date_phrase().upper(),
-            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+            font=ttype.SECTION_CAP,
             text_color=c.text_muted, anchor="w",
         ).pack(fill="x", anchor="w")
 
@@ -151,28 +173,25 @@ class MorningView(BaseView):
             name = name.split(" ")[0]
         ctk.CTkLabel(
             wrap, text=f"{_greeting()} {name}.",
-            font=(T.FONT_FAMILY_DISPLAY, T.FONT_SIZE_HERO, "bold"),
+            font=ttype.HERO,
             text_color=c.text_primary, anchor="w",
         ).pack(fill="x", anchor="w", pady=(T.SPACE_XS, 0))
 
-        # Une phrase de transition
+        # Phrase de transition contextuelle (patch M3)
         ctk.CTkLabel(
-            wrap, text="Voilà ce qui t'attend aujourd'hui.",
-            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY_LG),
+            wrap, text=_transition_phrase(digest),
+            font=ttype.BODY_LG,
             text_color=c.text_secondary, anchor="w",
         ).pack(fill="x", anchor="w", pady=(T.SPACE_XS, 0))
 
-        # Actions discrètes (refresh + tuto) à droite
+        # Action discrète : refresh seulement.
+        # « Demander conseil à Claude » est accessible via le FAB flottant
+        # (F12) — pas la peine de doubler dans le hero.
         action_row = ctk.CTkFrame(wrap, fg_color="transparent")
         action_row.pack(fill="x", pady=(T.SPACE_MD, 0), anchor="w")
         SecondaryButton(action_row, colors=c, icon="refresh",
                          text="Rafraîchir",
-                         command=self._refresh).pack(side="left",
-                                                      padx=(0, T.SPACE_SM))
-        SecondaryButton(action_row, colors=c, icon="sparkle",
-                         text="Demander conseil à Claude",
-                         command=lambda: self._navigate_to("claude")).pack(
-                             side="left")
+                         command=self._refresh).pack(side="left")
 
     # ------------------------------------------------------------------
     def _priority_block(self, digest: dict) -> None:
@@ -243,8 +262,11 @@ class MorningView(BaseView):
 
     # ------------------------------------------------------------------
     def _yesterday_block(self, digest: dict) -> None:
-        """3 KPIs sobres pour la veille — pas 4. Pas de désinscriptions
-        affichées par défaut (anxiogène et rare)."""
+        """3 KPIs pour la veille (patch M1 — KpiHero + sparkline 7 j).
+
+        Pas 4 KPIs (manifeste DESIGN.md), pas de désinscriptions
+        affichées par défaut (anxiogène et rare).
+        """
         c = self.colors
         self._section_label("Hier en chiffres")
 
@@ -252,29 +274,44 @@ class MorningView(BaseView):
         replies_y = digest["replies"]["yesterday_total"]
         breakdown = digest["replies"]["yesterday_breakdown"] or {}
         interested_y = breakdown.get("interested", 0)
+        spark_sent = digest["sent"].get("daily_last_7d") or []
+        # Tendance « envois » : J-1 vs J-2 (les 2 derniers points utiles)
+        sent_trend = "neutral"
+        if len(spark_sent) >= 2:
+            prev = spark_sent[-2]
+            if sent_y > prev:
+                sent_trend = "up"
+            elif sent_y < prev:
+                sent_trend = "down"
 
         grid = ctk.CTkFrame(self._scroll, fg_color="transparent")
         grid.pack(fill="x", pady=(0, T.SPACE_2XL))
         for col in range(3):
             grid.grid_columnconfigure(col, weight=1, uniform="kpi")
 
-        StatCard(
-            grid, label="Mails envoyés", value=str(sent_y),
-            delta=f"{digest['sent']['last_7d']} sur les 7 derniers jours",
-            colors=c,
-        ).grid(row=0, column=0, padx=(0, T.SPACE_MD), sticky="ew")
-        StatCard(
-            grid, label="Réponses reçues", value=str(replies_y),
-            delta=("—" if replies_y == 0
-                    else f"{int(100*replies_y/max(sent_y,1))} % des envoyés"),
-            colors=c,
-        ).grid(row=0, column=1, padx=T.SPACE_MD, sticky="ew")
-        StatCard(
-            grid, label="Prospects intéressés", value=str(interested_y),
-            delta=("—" if interested_y == 0 else "à recontacter"),
+        KpiHero(
+            grid, colors=c,
+            label="Mails envoyés", value=str(sent_y),
+            delta_value=f"{digest['sent']['last_7d']} en 7 jours",
+            delta_kind=sent_trend,
+            sparkline=spark_sent if any(spark_sent) else None,
+        ).grid(row=0, column=0, padx=(0, T.SPACE_MD), sticky="nsew")
+
+        rate = int(100 * replies_y / max(sent_y, 1)) if replies_y else 0
+        KpiHero(
+            grid, colors=c,
+            label="Réponses reçues", value=str(replies_y),
+            delta_value=("—" if replies_y == 0 else f"{rate} % des envoyés"),
+            delta_kind="up" if replies_y > 0 else "neutral",
+        ).grid(row=0, column=1, padx=T.SPACE_MD, sticky="nsew")
+
+        KpiHero(
+            grid, colors=c,
+            label="Prospects intéressés", value=str(interested_y),
+            delta_value=("—" if interested_y == 0 else "à recontacter"),
+            delta_kind="up" if interested_y > 0 else "neutral",
             accent=c.success if interested_y > 0 else "",
-            colors=c,
-        ).grid(row=0, column=2, padx=(T.SPACE_MD, 0), sticky="ew")
+        ).grid(row=0, column=2, padx=(T.SPACE_MD, 0), sticky="nsew")
 
     # ------------------------------------------------------------------
     def _today_block(self, digest: dict) -> None:
@@ -371,7 +408,7 @@ class MorningView(BaseView):
         c = self.colors
         ctk.CTkLabel(
             self._scroll, text=text.upper(),
-            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+            font=ttype.SECTION_CAP,
             text_color=c.text_muted, anchor="w",
         ).pack(fill="x", anchor="w", pady=(0, T.SPACE_MD))
 
@@ -393,20 +430,20 @@ class MorningView(BaseView):
 
         ctk.CTkLabel(
             body_wrap, text=kicker.upper(),
-            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
+            font=ttype.SECTION_CAP,
             text_color=accent_color, anchor="w",
         ).pack(fill="x", anchor="w")
 
         ctk.CTkLabel(
             body_wrap, text=title,
-            font=(T.FONT_FAMILY_DISPLAY, T.FONT_SIZE_DISPLAY, "bold"),
+            font=ttype.DISPLAY,
             text_color=c.text_primary, anchor="w",
             justify="left", wraplength=860,
         ).pack(fill="x", anchor="w", pady=(T.SPACE_SM, T.SPACE_SM))
 
         ctk.CTkLabel(
             body_wrap, text=body,
-            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY_LG),
+            font=ttype.BODY_LG,
             text_color=c.text_secondary, anchor="w",
             justify="left", wraplength=860,
         ).pack(fill="x", anchor="w", pady=(0, T.SPACE_LG))
@@ -431,13 +468,13 @@ class MorningView(BaseView):
             dot.pack_propagate(False)
         ctk.CTkLabel(
             head, text=title,
-            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_HEADING, "bold"),
+            font=ttype.H2,
             text_color=c.text_primary, anchor="w",
         ).pack(side="left", fill="x", expand=True)
 
         ctk.CTkLabel(
             card, text=body,
-            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL),
+            font=ttype.BODY_SM,
             text_color=c.text_secondary, anchor="w",
             justify="left", wraplength=900,
         ).pack(fill="x", padx=T.SPACE_XL, pady=(0, T.SPACE_SM))
