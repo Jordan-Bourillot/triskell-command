@@ -80,27 +80,26 @@ class KpiHero(ctk.CTkFrame):
             anchor="w",
         ).pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_LG, T.SPACE_XS))
 
-        # Valeur géante
-        ctk.CTkLabel(
+        # Valeur géante (gardée en attribut pour set_value())
+        self._value_color = accent or colors.text_primary
+        self._value_label = ctk.CTkLabel(
             self, text=value,
             font=ttype.KPI_HERO,
-            text_color=accent or colors.text_primary,
+            text_color=self._value_color,
             anchor="w",
-        ).pack(fill="x", padx=T.SPACE_LG)
+        )
+        self._value_label.pack(fill="x", padx=T.SPACE_LG)
 
-        # Delta (optionnel)
+        # Delta (réservé même si absent : permet set_delta() après coup
+        # sans bouleverser le layout)
+        self._delta_label = ctk.CTkLabel(
+            self, text="",
+            font=ttype.KPI_DELTA, text_color=colors.text_secondary,
+            anchor="w",
+        )
+        self._delta_label.pack(fill="x", padx=T.SPACE_LG, pady=(2, 0))
         if delta_value:
-            arrow = {"up": "▲", "down": "▼", "neutral": "●"}[delta_kind]
-            color = {
-                "up": colors.success,
-                "down": colors.danger,
-                "neutral": colors.text_secondary,
-            }[delta_kind]
-            ctk.CTkLabel(
-                self, text=f"{arrow} {delta_value}",
-                font=ttype.KPI_DELTA, text_color=color,
-                anchor="w",
-            ).pack(fill="x", padx=T.SPACE_LG, pady=(2, 0))
+            self.set_delta(delta_value, delta_kind)
 
         # Sparkline (optionnelle)
         if sparkline is not None:
@@ -112,6 +111,36 @@ class KpiHero(ctk.CTkFrame):
         else:
             # Spacer pour homogénéiser la hauteur entre KPIs avec/sans sparkline
             ctk.CTkFrame(self, fg_color="transparent", height=T.SPACE_LG).pack()
+
+    def set_value(self, value: str) -> None:
+        """Met à jour la valeur principale (ex. après refresh des KPIs)."""
+        try:
+            self._value_label.configure(text=value)
+        except Exception:
+            pass
+
+    def set_delta(
+        self,
+        value: str,
+        kind: Literal["up", "down", "neutral"] = "neutral",
+    ) -> None:
+        """Met à jour le delta. value="" efface le delta."""
+        if not value:
+            try:
+                self._delta_label.configure(text="")
+            except Exception:
+                pass
+            return
+        arrow = {"up": "▲", "down": "▼", "neutral": "●"}[kind]
+        color = {
+            "up": self._colors.success,
+            "down": self._colors.danger,
+            "neutral": self._colors.text_secondary,
+        }[kind]
+        try:
+            self._delta_label.configure(text=f"{arrow} {value}", text_color=color)
+        except Exception:
+            pass
 
 
 class _Sparkline(ctk.CTkCanvas):

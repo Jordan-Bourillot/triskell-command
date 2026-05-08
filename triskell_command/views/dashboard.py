@@ -7,7 +7,8 @@ from collections import Counter
 import customtkinter as ctk
 
 from .. import theme as T
-from ..widgets.components import Card, SecondaryButton, StatCard, ViewHeader
+from ..widgets.components import Card, SecondaryButton, ViewHeader
+from ..widgets.components_pro import KpiHero
 from .base import BaseView
 
 
@@ -23,18 +24,18 @@ class DashboardView(BaseView):
         SecondaryButton(header.actions, colors=c, icon="refresh", text="Rafraîchir",
                         command=self._refresh).pack(side="left")
 
-        # Bloc 1 : 4 stats principales
-        self._stat_cards: dict[str, StatCard] = {}
+        # Bloc 1 : 4 KPIs principaux (entonnoir : total → email → contactés → réponses)
+        self._stat_cards: dict[str, KpiHero] = {}
         stats_row = ctk.CTkFrame(self, fg_color="transparent")
         stats_row.pack(fill="x", padx=T.SPACE_2XL, pady=(0, T.SPACE_LG))
         for key, label, accent in [
-            ("total",     "Prospects total",      c.text_primary),
-            ("with_email","Avec email",           c.info),
-            ("contacted", "Contactés",            c.warning),
-            ("replied",   "Réponses",             c.success),
+            ("total",     "Prospects total", c.text_primary),
+            ("with_email","Avec email",      c.info),
+            ("contacted", "Contactés",       c.warning),
+            ("replied",   "Réponses",        c.success),
         ]:
-            card = StatCard(stats_row, label=label, value="—",
-                            accent=accent, colors=c)
+            card = KpiHero(stats_row, colors=c, label=label, value="—",
+                           accent=accent)
             card.pack(side="left", expand=True, fill="x", padx=T.SPACE_SM)
             self._stat_cards[key] = card
 
@@ -109,6 +110,17 @@ class DashboardView(BaseView):
         self._set_stat("contacted", str(contacted))
         self._set_stat("replied", str(replied))
 
+        # Deltas % d'entonnoir : chaque KPI rapporté à l'étape précédente.
+        def _pct(num: int, denom: int) -> str:
+            return f"{round(100 * num / denom)}%" if denom else ""
+
+        self._stat_cards["with_email"].set_delta(
+            _pct(with_email, total), "neutral")
+        self._stat_cards["contacted"].set_delta(
+            _pct(contacted, with_email), "neutral")
+        self._stat_cards["replied"].set_delta(
+            _pct(replied, contacted), "up" if replied else "neutral")
+
         # Breakdown par source
         by_source = Counter()
         for p in prospects:
@@ -136,8 +148,5 @@ class DashboardView(BaseView):
 
     def _set_stat(self, key: str, value: str) -> None:
         card = self._stat_cards.get(key)
-        if not card:
-            return
-        labels = [w for w in card.winfo_children() if isinstance(w, ctk.CTkLabel)]
-        if len(labels) >= 2:
-            labels[1].configure(text=value)
+        if card is not None:
+            card.set_value(value)
