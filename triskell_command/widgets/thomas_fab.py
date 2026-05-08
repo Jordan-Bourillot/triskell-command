@@ -201,15 +201,28 @@ class ThomasFAB(ctk.CTkFrame):
         self._last_from_me = bool(is_from_me)
 
     # ------------------------------------------------------------------
+    # Auto-destroy de sécurité si <Leave> ne se déclenche pas
+    # (cas de switch rapide entre 2 FABs voisins).
+    _TOOLTIP_TTL_MS = 2500
+
     def _show_tooltip(self) -> None:
-        if self._tooltip is not None:
-            return
+        # Idempotent : détruit tout tooltip restant avant d'en créer un nouveau.
+        self._hide_tooltip()
         c = self._colors
         try:
             tip = ctk.CTkToplevel(self)
             tip.overrideredirect(True)
-            tip.configure(fg_color=c.panel_elevated)
+            tip.configure(fg_color=c.bg)
             tip.attributes("-topmost", True)
+            # Bordure d'accent qui matche l'état du FAB :
+            # vert au repos, rouge si message non lu.
+            border_color = c.danger if self._unread > 0 else c.success
+            wrap = ctk.CTkFrame(
+                tip, fg_color=c.bg_alt,
+                corner_radius=10,
+                border_color=border_color, border_width=1,
+            )
+            wrap.pack(padx=0, pady=0)
             # Titre
             if self._unread > 0:
                 title = f"{self._peer_name} t'a écrit !"
@@ -218,39 +231,46 @@ class ThomasFAB(ctk.CTkFrame):
                 title = f"Chat {self._peer_name} · F11"
                 title_color = c.text_primary
             ctk.CTkLabel(
-                tip, text=title,
+                wrap, text=title,
                 font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL, "bold"),
                 text_color=title_color,
                 fg_color="transparent",
-            ).pack(padx=12, pady=(8, 2), anchor="w")
+            ).pack(padx=14, pady=(10, 2), anchor="w")
             # Aperçu du dernier message (si dispo)
             if self._last_preview:
                 prefix = "Toi : " if self._last_from_me else f"{self._peer_name} : "
                 preview = f"{prefix}{self._last_preview}"
                 ctk.CTkLabel(
-                    tip, text=preview,
+                    wrap, text=preview,
                     font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY),
                     text_color=c.text_secondary,
                     fg_color="transparent",
                     justify="left", wraplength=260,
                     anchor="w",
-                ).pack(padx=12, pady=(0, 8), anchor="w", fill="x")
+                ).pack(padx=14, pady=(0, 10), anchor="w", fill="x")
             else:
-                # Padding bottom équivalent si pas d'aperçu
-                ctk.CTkLabel(
-                    tip, text="", height=2, fg_color="transparent",
-                ).pack(padx=12, pady=(0, 6))
+                ctk.CTkFrame(wrap, fg_color="transparent",
+                              height=8).pack()
             self.update_idletasks()
             tip.update_idletasks()
-            x = self.winfo_rootx() - tip.winfo_reqwidth() - 12
+            x = self.winfo_rootx() - tip.winfo_reqwidth() - 14
             y = self.winfo_rooty() + (SIZE - tip.winfo_reqheight()) // 2
             tip.geometry(f"+{x}+{y}")
             self._tooltip = tip
+            self._tooltip_ttl_job = self.after(
+                self._TOOLTIP_TTL_MS, self._hide_tooltip)
         except Exception as exc:
             logger.debug("tooltip thomas: %s", exc)
             self._tooltip = None
 
     def _hide_tooltip(self) -> None:
+        ttl = getattr(self, "_tooltip_ttl_job", None)
+        if ttl is not None:
+            try:
+                self.after_cancel(ttl)
+            except Exception:
+                pass
+            self._tooltip_ttl_job = None
         if self._tooltip is None:
             return
         try:

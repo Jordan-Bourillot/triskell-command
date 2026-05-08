@@ -209,36 +209,57 @@ class ClaudeFAB(ctk.CTkFrame):
     # ------------------------------------------------------------------
     # Tooltip
     # ------------------------------------------------------------------
+    # Auto-destroy de sécurité si <Leave> ne se déclenche pas
+    # (cas de switch rapide entre 2 FABs voisins).
+    _TOOLTIP_TTL_MS = 2500
+
     def _show_tooltip(self) -> None:
-        if self._tooltip is not None:
-            return
+        # Idempotent : détruit tout tooltip restant avant d'en créer un nouveau.
+        self._hide_tooltip()
         c = self._colors
         try:
             tip = ctk.CTkToplevel(self)
             tip.overrideredirect(True)
-            tip.configure(fg_color=c.panel_elevated)
+            tip.configure(fg_color=c.bg)
             tip.attributes("-topmost", True)
+            wrap = ctk.CTkFrame(
+                tip, fg_color=c.bg_alt,
+                corner_radius=10,
+                border_color=c.accent, border_width=1,
+            )
+            wrap.pack(padx=0, pady=0)
             label_text = ("Claude veut te parler · F12"
                           if self._has_attention
                           else "Allô Claude · F12")
             ctk.CTkLabel(
-                tip, text=label_text,
+                wrap, text=label_text,
                 font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL, "bold"),
                 text_color=c.text_primary,
                 fg_color="transparent",
-            ).pack(padx=12, pady=6)
-            # Place à gauche du bouton
+            ).pack(padx=14, pady=8)
+            # Place à gauche du bouton, vertical center
             self.update_idletasks()
             tip.update_idletasks()
-            x = self.winfo_rootx() - tip.winfo_reqwidth() - 12
+            x = self.winfo_rootx() - tip.winfo_reqwidth() - 14
             y = self.winfo_rooty() + (SIZE - tip.winfo_reqheight()) // 2
             tip.geometry(f"+{x}+{y}")
             self._tooltip = tip
+            # Filet de sécurité : auto-destroy si on rate <Leave>
+            self._tooltip_ttl_job = self.after(
+                self._TOOLTIP_TTL_MS, self._hide_tooltip)
         except Exception as exc:
             logger.debug("tooltip: %s", exc)
             self._tooltip = None
 
     def _hide_tooltip(self) -> None:
+        # Cancel le TTL en attente
+        ttl = getattr(self, "_tooltip_ttl_job", None)
+        if ttl is not None:
+            try:
+                self.after_cancel(ttl)
+            except Exception:
+                pass
+            self._tooltip_ttl_job = None
         if self._tooltip is None:
             return
         try:
