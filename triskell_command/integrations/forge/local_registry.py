@@ -82,12 +82,16 @@ def is_available() -> bool:
 # Construction du payload Project frontend depuis un brief
 # ---------------------------------------------------------------------------
 def _build_project_data(*, name: str, description: str, audience: str,
-                        tone: str) -> dict:
+                        tone: str, intake: Optional[dict] = None) -> dict:
     """Construit la struct Project compatible avec le frontend React.
 
     Schéma calqué sur les projets existants : ce sont les défauts de
     l'app au step 0 (brief) avec les champs du brief client pré-remplis.
     L'utilisateur valide les autres étapes dans l'app autonome.
+
+    `intake` : métadonnées d'origine (site source, email client, …) que
+    le frontend lit pour afficher un badge « 📩 importé » + « ✨ Nouveau »
+    sur la Home tant que le projet n'a pas été ouvert.
     """
     project = {
         "name": name,
@@ -156,11 +160,14 @@ def _build_project_data(*, name: str, description: str, audience: str,
             "recapHebdo": False,
         },
     }
-    return {
+    out: dict = {
         "project": project,
         "stepIndex": 0,           # premier écran : Brief, déjà rempli
         "visitedSteps": [0],
     }
+    if intake is not None:
+        out["intake"] = intake
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -184,14 +191,38 @@ def write_project_from_brief(*, project_id: str, brief: dict) -> bool:
     last = (brief.get("last_name") or "").strip()
     full_name = f"{first} {last}".strip() or brief.get("email") or "Sans nom"
 
+    now = int(time.time())
+    # Métadonnées d'import affichées comme badges « 📩 + ✨ Nouveau »
+    # par la Home de l'app standalone tant que `opened: false`.
+    received_at = brief.get("received_at")
+    if isinstance(received_at, str):
+        # ISO string → epoch
+        try:
+            from datetime import datetime as _dt
+            received_at = int(_dt.fromisoformat(
+                received_at.replace("Z", "+00:00")
+            ).timestamp())
+        except (ValueError, TypeError):
+            received_at = now
+    if not isinstance(received_at, int):
+        received_at = now
+
+    intake = {
+        "source": "form-import",
+        "site": brief.get("source") or "unknown",
+        "received_at": received_at,
+        "client_email": brief.get("email") or "",
+        "client_phone": brief.get("phone") or "",
+        "opened": False,
+    }
+
     project_data = _build_project_data(
         name=full_name,
         description=brief.get("description") or "",
         audience=brief.get("audience") or "",
         tone=brief.get("tone") or "",
+        intake=intake,
     )
-
-    now = int(time.time())
     record = {
         "id": project_id,
         "name": full_name,
