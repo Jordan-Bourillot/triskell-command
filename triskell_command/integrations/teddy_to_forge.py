@@ -394,6 +394,9 @@ def _normalize_v2_payload(raw: dict) -> dict:
         "description":  str(raw.get("description") or brief.get("prompt") or "").strip(),
         "audience":     str(raw.get("audience")    or brief.get("audience") or "").strip(),
         "tone":         str(raw.get("tone")        or brief.get("ton") or "").strip(),
+        # Demande spéciale du client (optionnelle, V2 et V1) → affichée
+        # comme avertissement ⚠️ persistant côté La Forge.
+        "special_request": s("special_request"),
         # Marqueurs V2
         "client_filled_steps": True,
         "client_type":  s("client_type") or "particulier",
@@ -427,6 +430,7 @@ def _normalize_payload(raw: dict) -> dict:
         "description":  pick("description"),
         "audience":     pick("audience"),
         "tone":         pick("tone", "ton"),
+        "special_request": pick("special_request"),
     }
 
 

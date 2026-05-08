@@ -323,6 +323,10 @@ def write_project_from_brief(
         "company_name": brief.get("company_name") or "",
         "siret":        brief.get("siret") or "",
         "vat_number":   brief.get("vat_number") or "",
+        # Demande spéciale du client (V1 et V2). Si non vide, La Forge
+        # affichera un avertissement ⚠️ persistant sur la Home + en haut
+        # du wizard tant que le projet n'est pas livré.
+        "special_request": (brief.get("special_request") or "").strip(),
     }
 
     project_data = _build_project_data(
