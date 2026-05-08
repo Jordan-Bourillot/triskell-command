@@ -216,11 +216,21 @@ def get_project(project_id: str) -> Optional[dict]:
         return None
 
 
-def create_project_from_brief(brief: dict, *, auto_run: bool = True) -> Optional[dict]:
+def create_project_from_brief(
+    brief: dict,
+    *,
+    auto_run: bool = True,
+    v2_payload: Optional[dict] = None,
+    client_filled_steps: bool = False,
+) -> Optional[dict]:
     """Crée un projet à partir d'un brief reçu.
 
     Le brief reste en base ; on copie ses champs dans le projet et on
     pointe brief.project_id vers le projet créé.
+
+    Si V2 (`client_filled_steps=True` + `v2_payload` non vide), le mirror
+    local Tauri pré-remplit les 14 étapes avec les choix exacts du client
+    (pas d'analyse IA nécessaire).
     """
     sb = _sb()
     if sb is None:
@@ -255,7 +265,10 @@ def create_project_from_brief(brief: dict, *, auto_run: bool = True) -> Optional
         try:
             from . import local_registry
             local_registry.write_project_from_brief(
-                project_id=project["id"], brief=brief,
+                project_id=project["id"],
+                brief=brief,
+                v2_payload=v2_payload,
+                client_filled_steps=client_filled_steps,
             )
         except Exception as exc:
             logger.debug("forge.local_registry mirror skipped: %s", exc)

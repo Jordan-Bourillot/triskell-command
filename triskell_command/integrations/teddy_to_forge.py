@@ -43,15 +43,28 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 300        # 5 min, aligné avec replies_poller
 INITIAL_DELAY_SECONDS = 45         # juste après replies_poller (qui a 30 s)
 
-# Notre payload JSON est plat (pas d'objets imbriqués). On limite la classe
-# de caractères à `[^{}]` pour matcher un seul niveau, ce qui évite le
-# piège de la regex greedy sur les mails multi-part : ils contiennent le
-# marker DEUX FOIS (text/plain + text/html), et un `\{.*\}` greedy
-# capturerait du 1er `{` de la 1re occurrence jusqu'au dernier `}` de la
-# 2e — JSON invalide.
-MARKER_RE = re.compile(
+# Deux versions de marker :
+#   V1 → payload plat 8 champs (form rapide ou ancien intake auto)
+#   V2 → payload complet (wizard détaillé : billing + site.{typeSite,
+#        identite, structure, contenu, medias, reseauxSociaux, multilingue})
+#
+# V1 est plat → `[^{}]*` matche un seul niveau d'objet.
+# V2 contient des objets imbriqués (site.identite, site.structure, etc.)
+# → on tolère 2 niveaux d'imbrication via une alternation.
+#
+# Le mail multi-part contient le marker DEUX FOIS (text/plain + text/html
+# après strip). MARKER_RE_V1 et MARKER_RE_V2 utilisent une stratégie
+# non-greedy + équilibrage limité pour éviter de fusionner les 2 occurrences.
+MARKER_RE_V1 = re.compile(
     r"\[TRISKELL-INTAKE-V1\]\s*(\{[^{}]*\})",
     re.IGNORECASE | re.DOTALL,
+)
+# Pour V2, le payload contient des objets imbriqués. On accepte des `{}`
+# imbriqués mais on s'arrête au premier `}` qui ferme l'objet racine —
+# implémenté via comptage manuel (cf. _extract_v2_marker).
+MARKER_V2_HEAD = re.compile(
+    r"\[TRISKELL-INTAKE-V2\]\s*\{",
+    re.IGNORECASE,
 )
 
 
@@ -197,10 +210,15 @@ def _do_one_poll(app_state) -> dict:
                     msg_id = _extract_msg_id(headers.get("Message-ID", ""))
                     intake_hdr = (headers.get("X-Triskell-Intake") or "").strip().lower()
 
-                    # Filtre subject + header dédié (l'un OU l'autre suffit)
+                    # Filtre subject + header dédié (l'un OU l'autre suffit).
+                    # V1 : header `site-request` ou subject « Demande de
+                    #      création de site … ».
+                    # V2 : header `site-request-detailed` ou subject
+                    #      « Configuration de site … ».
                     is_intake = (
-                        intake_hdr == "site-request"
+                        intake_hdr in ("site-request", "site-request-detailed")
                         or (subject_prefix and subject_prefix in subject.lower())
+                        or "configuration de site" in subject.lower()
                     )
                     if not is_intake:
                         counters["skipped"] += 1
@@ -212,7 +230,7 @@ def _do_one_poll(app_state) -> dict:
                         counters["skipped"] += 1
                         continue
 
-                    # Parse → payload normalisé
+                    # Parse → payload normalisé (V1 ou V2)
                     payload = _parse_intake_payload(body)
                     if not payload:
                         logger.warning(
@@ -233,10 +251,18 @@ def _do_one_poll(app_state) -> dict:
                     counters["written"] += 1
 
                     if auto_create:
-                        # Mode validation auto jusqu'à l'étape 14 :
-                        # on crée tout de suite le projet associé, queued.
+                        # On crée tout de suite le projet associé.
+                        # Pour V2, on passe le payload structuré complet
+                        # à local_registry pour qu'il pré-remplisse les 14
+                        # étapes du wizard La Forge dès l'écriture du
+                        # fichier projet (pas d'analyse Claude nécessaire).
                         forge_repo.create_project_from_brief(
-                            brief, auto_run=True,
+                            brief,
+                            auto_run=True,
+                            v2_payload=payload.get("v2_payload"),
+                            client_filled_steps=bool(
+                                payload.get("client_filled_steps")
+                            ),
                         )
 
                 except Exception as exc:
@@ -268,30 +294,118 @@ def _do_one_poll(app_state) -> dict:
 # ---------------------------------------------------------------------------
 # Parsing du payload depuis le mail
 # ---------------------------------------------------------------------------
+def _extract_v2_marker(body: str) -> Optional[dict]:
+    """Cherche `[TRISKELL-INTAKE-V2] {...}` avec accolades imbriquées
+    (V2 contient site.identite, site.structure, etc.).
+
+    On localise le `{` qui suit le marker, puis on compte les accolades
+    jusqu'à retrouver l'équilibre — robuste aux objets imbriqués sans
+    tenter de matcher tout en regex.
+    """
+    head = MARKER_V2_HEAD.search(body)
+    if not head:
+        return None
+    start = head.end() - 1   # position du `{` ouvrant
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(body)):
+        c = body[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif c == "\\":
+                escape = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                raw = body[start:i + 1]
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError as exc:
+                    logger.debug("marker V2 JSON invalide: %s", exc)
+                    return None
+    return None
+
+
 def _parse_intake_payload(body: str) -> Optional[dict]:
     """Tente d'extraire un payload normalisé.
 
     Stratégie :
-      1. Cherche la ligne `[TRISKELL-INTAKE-V1] {...}` → parse JSON.
-      2. Fallback : regex sur les labels français du mail (`Prénom : ...`).
+      1. V2 : `[TRISKELL-INTAKE-V2] {...payload détaillé...}` → parse JSON
+         imbriqué. Marqué `client_filled_steps: True`.
+      2. V1 : `[TRISKELL-INTAKE-V1] {...payload plat...}` → parse JSON.
+      3. Fallback : regex sur les labels français du mail (`Prénom : …`).
+
     Renvoie un dict aux clés snake_case alignées sur forge_pending_briefs,
-    ou None si rien de viable n'a été trouvé.
+    ou None si rien de viable n'a été trouvé. Le dict V2 inclut un champ
+    `client_filled_steps: True` et un sous-objet `site` complet à passer
+    tel quel à local_registry.
     """
     if not body:
         return None
 
-    # Stratégie 1 : marker JSON
-    m = MARKER_RE.search(body)
+    # Stratégie 1 : V2 (marker JSON imbriqué)
+    v2 = _extract_v2_marker(body)
+    if v2 is not None:
+        return _normalize_v2_payload(v2)
+
+    # Stratégie 2 : V1 (marker JSON plat)
+    m = MARKER_RE_V1.search(body)
     if m:
         try:
             data = json.loads(m.group(1))
             if isinstance(data, dict):
                 return _normalize_payload(data)
         except json.JSONDecodeError as exc:
-            logger.debug("marker JSON invalide: %s", exc)
+            logger.debug("marker V1 JSON invalide: %s", exc)
 
-    # Stratégie 2 : fallback regex labels
+    # Stratégie 3 : fallback regex labels
     return _parse_labelled_body(body)
+
+
+def _normalize_v2_payload(raw: dict) -> dict:
+    """Aplati le payload V2 vers les clés forge_pending_briefs + garde le
+    sous-objet `site` complet pour local_registry."""
+    def s(*keys: str) -> str:
+        for k in keys:
+            v = raw.get(k)
+            if v:
+                return str(v).strip()
+        return ""
+
+    site = raw.get("site") or {}
+    brief = (site.get("brief") if isinstance(site, dict) else None) or {}
+
+    out = {
+        "source":       s("source") or "rankus",
+        "first_name":   s("first_name"),
+        "last_name":    s("last_name"),
+        "email":        s("email"),
+        "phone":        s("phone"),
+        "address":      s("address"),
+        "description":  str(raw.get("description") or brief.get("prompt") or "").strip(),
+        "audience":     str(raw.get("audience")    or brief.get("audience") or "").strip(),
+        "tone":         str(raw.get("tone")        or brief.get("ton") or "").strip(),
+        # Marqueurs V2
+        "client_filled_steps": True,
+        "client_type":  s("client_type") or "particulier",
+        "company_name": s("company_name"),
+        "siret":        s("siret"),
+        "vat_number":   s("vat_number"),
+        # Payload structuré complet (typeSite, identite, structure, etc.)
+        # Si V2 n'a pas envoyé `site`, on reconstruit minimalement à partir
+        # des champs aplatis pour rester compatible avec local_registry.
+        "v2_payload":   raw,
+    }
+    return out
 
 
 def _normalize_payload(raw: dict) -> dict:
@@ -330,7 +444,7 @@ _LABEL_PATTERNS = {
 _STOP = (
     r"(?=\n[A-ZÀ-ÿ][^\n]*\s*:\s*\n"   # nouvelle section "Label :\n"
     r"|\n[—–-]\s|"                     # signature "— Envoyé..."
-    r"\n\[TRISKELL-INTAKE-V1\]|"       # marker machine
+    r"\n\[TRISKELL-INTAKE-V[12]\]|"    # marker machine (V1 ou V2)
     r"\n----|"                          # frontière multipart MIME
     r"\Z)"
 )

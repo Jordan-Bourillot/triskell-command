@@ -81,50 +81,126 @@ def is_available() -> bool:
 # ---------------------------------------------------------------------------
 # Construction du payload Project frontend depuis un brief
 # ---------------------------------------------------------------------------
-def _build_project_data(*, name: str, description: str, audience: str,
-                        tone: str, intake: Optional[dict] = None) -> dict:
+def _build_project_data(
+    *,
+    name: str,
+    description: str,
+    audience: str,
+    tone: str,
+    intake: Optional[dict] = None,
+    v2_payload: Optional[dict] = None,
+) -> dict:
     """Construit la struct Project compatible avec le frontend React.
 
     Schéma calqué sur les projets existants : ce sont les défauts de
     l'app au step 0 (brief) avec les champs du brief client pré-remplis.
-    L'utilisateur valide les autres étapes dans l'app autonome.
+
+    Si `v2_payload` est fourni (mode wizard détaillé : le client a
+    rempli toutes les étapes lui-même), on utilise ses choix exacts
+    pour identité, structure, contenu, médias, réseaux, multilingue
+    et type de site. Les étapes 9/10/11 (Technique, Options, SEO)
+    restent aux défauts car elles ne sont pas exposées au client.
 
     `intake` : métadonnées d'origine (site source, email client, …) que
-    le frontend lit pour afficher un badge « 📩 importé » + « ✨ Nouveau »
-    sur la Home tant que le projet n'a pas été ouvert.
+    le frontend lit pour afficher un badge « 📩 importé » + « ✓ rempli
+    par le client » + « ✨ Nouveau » sur la Home.
     """
+    # Helpers de pick avec fallback
+    # Le payload V2 peut arriver sous deux formes :
+    #   (a) imbriquée  → { site: { typeSite, identite, structure, ... } }
+    #       (forme générée par le wizard React La Forge ou ImportFiche)
+    #   (b) aplatie    → { typeSite, identite, structure, ... } à la racine
+    #       (forme de la Netlify function request-site-detailed.js)
+    # On cherche `site.X` en priorité, fallback sur la racine.
+    v2 = v2_payload or {}
+    inner = v2.get("site") if isinstance(v2.get("site"), dict) else None
+
+    def take(key: str) -> dict:
+        if inner and isinstance(inner.get(key), dict):
+            return inner[key]
+        if isinstance(v2.get(key), dict):
+            return v2[key]
+        return {}
+
+    v2_brief    = take("brief")
+    v2_identite = take("identite")
+    v2_structure = take("structure")
+    v2_contenu  = take("contenu")
+    v2_medias   = take("medias")
+    v2_reseaux  = take("reseauxSociaux")
+    v2_multi    = take("multilingue")
+
+    def s(d: dict, k: str, default=""):
+        v = d.get(k) if isinstance(d, dict) else None
+        return v if v is not None and v != "" else default
+
+    def lst(d: dict, k: str, default):
+        v = d.get(k) if isinstance(d, dict) else None
+        return v if isinstance(v, list) and v else default
+
+    def dct(d: dict, k: str, default):
+        v = d.get(k) if isinstance(d, dict) else None
+        return v if isinstance(v, dict) and v else default
+
+    def boo(d: dict, k: str, default):
+        v = d.get(k) if isinstance(d, dict) else None
+        return v if isinstance(v, bool) else default
+
+    # Type de site : V2 explicite (sous site.typeSite OU à la racine), sinon "vitrine"
+    type_site = (inner or {}).get("typeSite") if inner else None
+    if not type_site:
+        type_site = v2.get("typeSite")
+    if not type_site or type_site not in ("vitrine", "blog", "portfolio", "onepage"):
+        type_site = "vitrine"
+
+    # Brand name : priorité au nom de marque V2, sinon le full name client
+    brand_name = s(v2_identite, "nom", name)
     project = {
-        "name": name,
+        "name": brand_name,
         "brief": {
             "prompt":   description,
             "audience": audience,
             "ton":      tone,
-            "objectif": "",
-            "forged":   "",   # rempli par l'IA quand l'utilisateur lance l'étape
+            "objectif": s(v2_brief, "objectif", "") or s(v2, "objectif", ""),
+            "forged":   "",   # rempli par AlphaBeast quand l'utilisateur lance l'étape
         },
         "identite": {
-            "nom": name, "slogan": "", "logoSource": "ia",
-            "logoModel": "ideogram", "logoUrl": "",
-            "palette": "neutre", "paletteCustom": [],
-            "typo": "", "darkMode": "auto",
+            "nom": brand_name,
+            "slogan": s(v2_identite, "slogan", ""),
+            "logoSource": "ia",
+            "logoModel": "ideogram",
+            "logoUrl": "",
+            "palette": s(v2_identite, "palette", "neutre"),
+            "paletteCustom": [],
+            "typo": "",
+            "darkMode": s(v2_identite, "darkMode", "auto"),
         },
         "structure": {
-            "pages": ["accueil", "apropos", "contact"],
-            "pagesCustom": [], "navigation": "topbar",
+            "pages": lst(v2_structure, "pages", ["accueil", "apropos", "contact"]),
+            "pagesCustom": lst(v2_structure, "pagesCustom", []),
+            "navigation": s(v2_structure, "navigation", "topbar"),
         },
         "contenu": {
-            "source": "ia", "longueur": "moyen",
-            "cta": True, "importedFiles": [],
+            "source": s(v2_contenu, "source", "ia"),
+            "longueur": s(v2_contenu, "longueur", "moyen"),
+            "cta": boo(v2_contenu, "cta", True),
+            "importedFiles": [],
         },
         "medias": {
-            "photos": "upload", "photoFiles": [], "videos": "aucune",
-            "videoLinks": [], "videoFiles": [],
+            "photos": s(v2_medias, "photos", "upload"),
+            "photoFiles": [],
+            "videos": s(v2_medias, "videos", "aucune"),
+            "videoLinks": lst(v2_medias, "videoLinks", []),
+            "videoFiles": [],
             "webp": True, "lazy": True, "altIa": True, "compression": True,
         },
-        "typeSite": "vitrine",
+        "typeSite": type_site,
         "reseauxSociaux": {
-            "reseaux": [], "handles": {}, "boutonsPartage": True,
-            "autoPublication": False, "autoPubMatrix": {},
+            "reseaux": lst(v2_reseaux, "reseaux", []),
+            "handles": dct(v2_reseaux, "handles", {}),
+            "boutonsPartage": boo(v2_reseaux, "boutonsPartage", True),
+            "autoPublication": boo(v2_reseaux, "autoPublication", False),
+            "autoPubMatrix": {},
         },
         "options": {
             "espaceMembre": False, "commentaires": False, "avis": False,
@@ -133,7 +209,11 @@ def _build_project_data(*, name: str, description: str, audience: str,
             "pwa": False, "notifications": False,
         },
         "responsive": "mobile-first",
-        "multilingue": {"active": False, "langues": ["fr"], "defaut": "fr"},
+        "multilingue": {
+            "active": boo(v2_multi, "active", False),
+            "langues": lst(v2_multi, "langues", ["fr"]),
+            "defaut": s(v2_multi, "defaut", "fr"),
+        },
         "technique": {
             "stack": "nextjs", "auth": False, "db": False,
             "contact": True, "newsletter": False,
@@ -160,10 +240,16 @@ def _build_project_data(*, name: str, description: str, audience: str,
             "recapHebdo": False,
         },
     }
+    # Mode V2 : on marque les étapes 1-8 comme visitées (le client a tout
+    #          rempli, pas d'IA à invoquer pour pré-remplir).
+    # Mode V1 : seule l'étape 0 (Brief) est visitée — l'IA Claude prendra
+    #          la suite au 1er ouvre via analyzeBriefText.
+    is_v2 = bool(v2_payload)
+    visited_count = 8 if is_v2 else 1
     out: dict = {
         "project": project,
-        "stepIndex": 0,           # premier écran : Brief, déjà rempli
-        "visitedSteps": [0],
+        "stepIndex": 0,
+        "visitedSteps": list(range(visited_count)),
     }
     if intake is not None:
         out["intake"] = intake
@@ -173,11 +259,22 @@ def _build_project_data(*, name: str, description: str, audience: str,
 # ---------------------------------------------------------------------------
 # API publique
 # ---------------------------------------------------------------------------
-def write_project_from_brief(*, project_id: str, brief: dict) -> bool:
+def write_project_from_brief(
+    *,
+    project_id: str,
+    brief: dict,
+    v2_payload: Optional[dict] = None,
+    client_filled_steps: bool = False,
+) -> bool:
     """Crée le fichier <project_id>.json dans le data dir local.
 
     `project_id` doit être un UUID (le même que celui de forge_projects
     Supabase pour garder une correspondance 1:1 entre les deux fronts).
+
+    Mode V2 (`client_filled_steps=True` + `v2_payload` non vide) :
+    on pré-remplit toutes les étapes 1-8 du wizard avec les choix exacts
+    du client (typeSite, identite, structure, contenu, medias, reseaux,
+    multilingue) — pas d'analyse Claude requise.
 
     Renvoie True si écrit avec succès, False si data dir indispo ou erreur.
     """
@@ -214,11 +311,18 @@ def write_project_from_brief(*, project_id: str, brief: dict) -> bool:
         "client_email": brief.get("email") or "",
         "client_phone": brief.get("phone") or "",
         "opened": False,
-        # `analyzed` reste False jusqu'à ce que l'app standalone fasse passer
-        # le brief par analyzeBriefText (Claude Sonnet + AlphaBeast) pour
-        # remplir toutes les étapes du wizard. Au 1er ouvre, l'app détecte
-        # ce flag et déclenche l'analyse automatiquement.
-        "analyzed": False,
+        # V1 (brief libre) → `analyzed: False` : l'app standalone déclenche
+        #     analyzeBriefText au 1er ouvre.
+        # V2 (wizard détaillé) → `analyzed: True` car le client a tout
+        #     rempli. AlphaBeast peut tourner pour enrichir le brief
+        #     stratégique mais Claude Extract est sauté.
+        "analyzed": bool(client_filled_steps),
+        "client_filled_steps": bool(client_filled_steps),
+        # Type de client + facturation (V2 seulement, dispo pour devis)
+        "client_type":  brief.get("client_type") or "particulier",
+        "company_name": brief.get("company_name") or "",
+        "siret":        brief.get("siret") or "",
+        "vat_number":   brief.get("vat_number") or "",
     }
 
     project_data = _build_project_data(
@@ -227,7 +331,14 @@ def write_project_from_brief(*, project_id: str, brief: dict) -> bool:
         audience=brief.get("audience") or "",
         tone=brief.get("tone") or "",
         intake=intake,
+        v2_payload=v2_payload if client_filled_steps else None,
     )
+    # Si V2 : le nom du projet privilégie le nom de marque (depuis
+    # site.identite.nom) plutôt que le nom du client.
+    if client_filled_steps and isinstance(project_data.get("project"), dict):
+        brand = (project_data["project"].get("identite") or {}).get("nom")
+        if brand:
+            full_name = brand
     record = {
         "id": project_id,
         "name": full_name,
