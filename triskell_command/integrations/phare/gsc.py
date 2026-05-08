@@ -1,8 +1,23 @@
 """Wrapper Google Search Console API.
 
-Utilise un service account (JSON path stocké dans phare_config.gsc_credentials_path).
-Tant que le path n'est pas configuré, toutes les fonctions renvoient un état
-vide et logguent en debug — pas d'exception.
+Authentification : OAuth2 user (flow Desktop) en priorité, service account
+en fallback legacy.
+
+Pourquoi OAuth user d'abord : Google refuse d'ajouter un service account
+comme membre des Domain properties Search Console (erreur "adresse e-mail
+introuvable"). Seul un user OAuth a accès. Le service account reste utile
+uniquement pour les properties URL-prefix.
+
+Setup OAuth2 (1 seule fois) :
+  1. Console GCP → APIs & Services → Credentials → Create OAuth client ID
+     → Application type "Desktop". Télécharger le JSON.
+  2. Enregistrer le JSON sous `~/.triskell-command/gsc-oauth-client.json`.
+  3. Au 1er appel d'une fonction GSC : un onglet navigateur s'ouvre, on
+     consent, le token est persisté dans `gsc-oauth-token.json`. Plus rien
+     à faire ensuite.
+
+Tant qu'aucune méthode (OAuth ou service account) n'est configurée, toutes
+les fonctions renvoient un état vide et logguent en debug — pas d'exception.
 
 Quand configuré, requête /searchanalytics/query pour chaque site et remonte :
   - clicks, impressions, position moyenne, CTR par jour
@@ -13,6 +28,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Optional
 
 from . import repo
@@ -20,8 +36,76 @@ from . import repo
 logger = logging.getLogger(__name__)
 
 
-def _credentials():
-    """Charge les credentials Google service account, ou None."""
+_OAUTH_SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly"]
+_OAUTH_CLIENT_PATH = Path.home() / ".triskell-command" / "gsc-oauth-client.json"
+_OAUTH_TOKEN_PATH = Path.home() / ".triskell-command" / "gsc-oauth-token.json"
+
+
+def _oauth_credentials():
+    """Charge ou crée les credentials OAuth2 user (Desktop flow).
+
+    Renvoie None si :
+    - le client_secrets n'est pas posé (mode pas encore configuré),
+    - une dépendance `google-auth-oauthlib` n'est pas installée,
+    - le flow échoue (erreur réseau, refus utilisateur).
+
+    ⚠️ Le 1er appel ouvre un navigateur (run_local_server) et BLOQUE le
+    thread courant jusqu'au consentement. À déclencher depuis un script CLI
+    ou un thread dédié, jamais depuis le thread UI.
+    """
+    if not _OAUTH_CLIENT_PATH.exists():
+        return None
+    try:
+        from google.oauth2.credentials import Credentials  # type: ignore
+        from google.auth.transport.requests import Request  # type: ignore
+        from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore
+    except ImportError:
+        logger.debug("gsc oauth: google-auth-oauthlib pas installé")
+        return None
+
+    creds = None
+    if _OAUTH_TOKEN_PATH.exists():
+        try:
+            creds = Credentials.from_authorized_user_file(
+                str(_OAUTH_TOKEN_PATH), _OAUTH_SCOPES)
+        except Exception as exc:
+            logger.warning("gsc oauth token load: %s", exc)
+            creds = None
+
+    if creds and not creds.valid:
+        if creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+            except Exception as exc:
+                logger.warning("gsc oauth refresh: %s", exc)
+                creds = None
+        else:
+            creds = None
+
+    if not creds:
+        try:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(_OAUTH_CLIENT_PATH), _OAUTH_SCOPES)
+            creds = flow.run_local_server(port=0, open_browser=True)
+        except Exception as exc:
+            logger.warning("gsc oauth flow: %s", exc)
+            return None
+
+    try:
+        _OAUTH_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _OAUTH_TOKEN_PATH.write_text(creds.to_json(), encoding="utf-8")
+    except Exception as exc:
+        logger.debug("gsc oauth token save: %s", exc)
+
+    return creds
+
+
+def _service_account_credentials():
+    """Fallback legacy : credentials Google service account.
+
+    Limité aux properties URL-prefix (sc-domain refusé par Google pour les
+    service accounts). Conservé pour compat avec config existante.
+    """
     cfg = repo.get_config()
     path = cfg.get("gsc_credentials_path") or ""
     if not path:
@@ -33,12 +117,18 @@ def _credentials():
         return None
     try:
         return service_account.Credentials.from_service_account_file(
-            path,
-            scopes=["https://www.googleapis.com/auth/webmasters.readonly"],
-        )
+            path, scopes=_OAUTH_SCOPES)
     except Exception as exc:
-        logger.warning("gsc credentials %s : %s", path, exc)
+        logger.warning("gsc service account %s : %s", path, exc)
         return None
+
+
+def _credentials():
+    """Préférence OAuth user (couvre Domain properties), sinon service account."""
+    creds = _oauth_credentials()
+    if creds is not None:
+        return creds
+    return _service_account_credentials()
 
 
 def _service():

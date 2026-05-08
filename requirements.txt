@@ -14,9 +14,13 @@ pypdf>=4.0        # PDF
 # pytesseract>=0.3
 # Drag & drop (optionnel — sinon « Parcourir… » uniquement)
 # tkinterdnd2>=0.3
-# Le Phare — Google Search Console (optionnel ; sans ces 2 paquets,
-# l'intégration GSC est désactivée gracieusement, le reste tourne)
+# Le Phare — Google Search Console (optionnel ; sans ces 3 paquets,
+# l'intégration GSC est désactivée gracieusement, le reste tourne).
+# google-auth-oauthlib est requis pour le flow OAuth2 user (cf.
+# scripts/phare_setup_gsc_oauth.py — seul moyen d'accéder aux Domain
+# properties Search Console, le service account ne suffit pas).
 # google-auth>=2.30
+# google-auth-oauthlib>=1.2
 # google-api-python-client>=2.130
 # Le Phare — Génération PDF des rapports clients (optionnel ; sans ces
 # paquets, le rapport est produit en HTML imprimable depuis le navigateur)
