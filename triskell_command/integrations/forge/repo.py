@@ -249,6 +249,16 @@ def create_project_from_brief(brief: dict, *, auto_run: bool = True) -> Optional
         # Lien retour brief → project
         if brief.get("id"):
             mark_brief_imported(brief["id"], project["id"])
+        # Mirror dans le data dir local de l'app standalone La Forge
+        # du Web (best-effort : on n'échoue pas si l'app n'est pas
+        # installée ou si le data dir est inaccessible).
+        try:
+            from . import local_registry
+            local_registry.write_project_from_brief(
+                project_id=project["id"], brief=brief,
+            )
+        except Exception as exc:
+            logger.debug("forge.local_registry mirror skipped: %s", exc)
         return project
     except Exception as exc:
         logger.warning("forge.create_project_from_brief: %s", exc)
