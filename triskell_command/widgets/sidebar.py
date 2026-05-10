@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import webbrowser
 from pathlib import Path
 from typing import Callable
 
@@ -13,6 +14,11 @@ from .. import theme as T
 from . import icons as I
 
 logger = logging.getLogger(__name__)
+
+# Carte mentale interne de l'écosystème Triskell (Jordan + Thomas).
+# Hébergée sur Netlify avec Basic Auth — voir reference_carte_ecosysteme dans
+# la mémoire Claude pour les credentials.
+ECOSYSTEME_URL = "https://triskell-ecosysteme.netlify.app"
 
 
 def _resolve_asset(filename: str) -> Path | None:
@@ -292,7 +298,26 @@ class Sidebar(ctk.CTkFrame):
 
         # Séparateur fin or sous le header
         sep = ctk.CTkFrame(self, fg_color=colors.border, height=1, corner_radius=0)
-        sep.pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_LG))
+        sep.pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_MD))
+
+        # ----- Bouton "Écosystème" — carte mentale interne du projet -----
+        # Ouvre dans le navigateur la vue d'ensemble Triskell (Jordan + Thomas).
+        # N'est PAS un view_id : c'est un lien externe, donc pas dans la nav.
+        eco_btn = ctk.CTkButton(
+            self,
+            text="🌟   Écosystème",
+            command=lambda: webbrowser.open(ECOSYSTEME_URL),
+            fg_color="transparent",
+            hover_color=colors.gold_soft,
+            text_color=colors.gold,
+            border_width=1,
+            border_color=colors.border,
+            height=36,
+            corner_radius=10,
+            anchor="w",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY, "bold"),
+        )
+        eco_btn.pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_LG))
 
         # ----- Sections de navigation regroupées -----
         for sec_idx, (section_label, items) in enumerate(SIDEBAR_SECTIONS):
