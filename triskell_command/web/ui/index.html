@@ -117,6 +117,34 @@
         </button>
       </div>
 
+      <!-- Bouton "Écosystème" — ouvre la carte mentale interne dans le navigateur -->
+      <div class="px-3 pt-1 pb-1">
+        <button id="ecosysteme-trigger"
+                title="Vue d'ensemble de l'écosystème Triskell (interne)"
+                class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl
+                       border border-border bg-bg
+                       hover:border-gold hover:bg-surface-elevated
+                       transition-all duration-160 group">
+          <div class="w-8 h-8 rounded-lg
+                      bg-gradient-to-br from-gold to-accent-glow
+                      flex items-center justify-center shrink-0
+                      shadow-soft">
+            <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2l2.4 6.4L21 9.3l-5 4.5L17.6 21 12 17.5 6.4 21 8 13.8 3 9.3l6.6-.9L12 2z"/>
+            </svg>
+          </div>
+          <div class="flex-1 text-left">
+            <div class="text-[13px] font-semibold leading-none mb-0.5">Écosystème</div>
+            <div class="text-[10.5px] text-text-muted">Vue d'ensemble · interne</div>
+          </div>
+          <svg class="w-3.5 h-3.5 text-text-muted shrink-0
+                      group-hover:text-gold transition-colors"
+               fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M7 17L17 7M17 7H8M17 7v9"/>
+          </svg>
+        </button>
+      </div>
+
       <!-- Sections de navigation -->
       <nav class="flex-1 overflow-y-auto px-3 pt-3 pb-4 space-y-6">
         <div>
@@ -189,6 +217,90 @@
     </main>
   </div>
 
+  <!-- ===================== FAB Thomas (chat 1-à-1) ===================== -->
+  <!-- Bouton flottant vert au-dessus du Claude FAB. Ouvre la modale de chat. -->
+  <button id="thomas-fab"
+          class="fixed right-8 z-50 w-14 h-14 rounded-full
+                 flex items-center justify-center
+                 text-white shadow-fab
+                 transition-all duration-200
+                 hover:scale-110 hover:shadow-hero
+                 cursor-pointer
+                 hidden"
+          style="bottom: 116px; background: linear-gradient(135deg, #10b981 0%, #059669 100%);"
+          title="Chat avec Thomas · F11">
+    <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+    </svg>
+    <span id="thomas-fab-badge"
+          class="absolute -top-1 -right-1 min-w-[20px] h-5 px-1.5 rounded-full
+                 bg-danger text-white text-[10px] font-bold
+                 flex items-center justify-center
+                 ring-2 ring-bg
+                 hidden">0</span>
+  </button>
+
+  <!-- ===================== Dialog Thomas (chat) ===================== -->
+  <div id="thomas-dialog"
+       class="fixed inset-0 z-[60] bg-black/40 hidden items-end justify-end p-8">
+    <div class="bg-surface w-[420px] h-[620px] max-h-[90vh] rounded-2xl
+                shadow-lift flex flex-col overflow-hidden border border-border">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-5 py-3
+                  border-b border-border bg-surface-elevated">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full
+                      flex items-center justify-center text-white font-bold"
+               style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);"
+               id="thomas-dialog-avatar">T</div>
+          <div>
+            <div id="thomas-dialog-name"
+                 class="text-sm font-semibold text-text">Thomas</div>
+            <div id="thomas-dialog-status"
+                 class="text-[11px] text-text-muted">Chat 1-à-1</div>
+          </div>
+        </div>
+        <button id="thomas-dialog-close"
+                class="w-8 h-8 rounded-lg flex items-center justify-center
+                       text-text-muted hover:text-text hover:bg-bg
+                       transition-colors text-xl leading-none">×</button>
+      </div>
+
+      <!-- Liste des messages -->
+      <div id="thomas-messages"
+           class="flex-1 overflow-y-auto px-4 py-3 space-y-2 bg-bg"></div>
+
+      <!-- Typing indicator (caché par défaut) -->
+      <div id="thomas-typing"
+           class="px-5 py-1 text-[11px] text-text-muted italic hidden">
+        Thomas écrit…
+      </div>
+
+      <!-- Composer -->
+      <div class="p-3 border-t border-border bg-surface flex gap-2">
+        <input id="thomas-input" type="text"
+               placeholder="Écris un message à Thomas…"
+               autocomplete="off"
+               class="flex-1 px-3 py-2 rounded-lg bg-bg
+                      border border-border
+                      text-sm text-text
+                      placeholder:text-text-muted
+                      focus:border-accent focus:outline-none
+                      transition-colors"/>
+        <button id="thomas-send"
+                class="px-4 py-2 rounded-lg
+                       bg-gradient-to-br from-accent to-accent-hover
+                       text-white text-sm font-semibold
+                       hover:shadow-soft transition-all
+                       disabled:opacity-50 disabled:cursor-not-allowed">
+          Envoyer
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===================== FAB Allô Claude ===================== -->
   <!-- Bloc flottant : label à gauche + bouton rond à droite -->
   <div id="claude-fab-wrap"
@@ -250,5 +362,6 @@
   <script src="scripts/onboarding.js"></script>
   <script src="scripts/user_badge.js"></script>
   <script src="scripts/claude.js"></script>
+  <script src="scripts/thomas.js"></script>
 </body>
 </html>

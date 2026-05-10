@@ -59,6 +59,22 @@ const App = {
     const launcherBtn = document.getElementById('launcher-trigger');
     if (launcherBtn) launcherBtn.addEventListener('click', () => Launcher.open());
 
+    // Bind bouton "Écosystème" → carte mentale interne dans le navigateur
+    const ecoBtn = document.getElementById('ecosysteme-trigger');
+    if (ecoBtn) ecoBtn.addEventListener('click', async () => {
+      const url = 'https://triskell-ecosysteme.netlify.app';
+      try {
+        if (this.api && this.api.open_url) {
+          await this.api.open_url({ url });
+        } else {
+          window.open(url, '_blank');
+        }
+      } catch (e) {
+        console.warn('open ecosysteme:', e);
+        window.open(url, '_blank');
+      }
+    });
+
     // Raccourcis clavier
     window.addEventListener('keydown', (e) => {
       if (e.key === 'F12') { e.preventDefault(); Claude.open(); }

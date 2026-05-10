@@ -1741,3 +1741,92 @@ class Api:
             pass
 
         return {"ok": True, "workers": worker_status}
+
+    # ------------------------------------------------------------------
+    # Chat 1-à-1 Jordan ↔ Thomas (équivalent web du FAB Tk)
+    # ------------------------------------------------------------------
+    def messages_me(self) -> dict:
+        """Renvoie mon user_id Supabase (pour aligner les bulles côté UI)."""
+        try:
+            from triskell_core.db import get_client
+            c = get_client()
+            return {"ok": True, "user_id": c.user_id}
+        except Exception as exc:
+            logger.debug("messages_me: %s", exc)
+            return {"ok": False, "error": str(exc), "user_id": None}
+
+    def messages_other_user(self) -> dict:
+        """Renvoie le profil de l'autre user (Jordan voit Thomas, etc.)."""
+        try:
+            from ..integrations.messages import other_user
+            return {"ok": True, "other": other_user()}
+        except Exception as exc:
+            logger.debug("messages_other_user: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def messages_list(self, payload: dict | None = None) -> dict:
+        """Renvoie la liste des derniers messages échangés (chronologique)."""
+        try:
+            from ..integrations.messages import list_messages
+            limit = int((payload or {}).get("limit", 100))
+            return {"ok": True, "messages": list_messages(limit)}
+        except Exception as exc:
+            logger.debug("messages_list: %s", exc)
+            return {"ok": False, "error": str(exc), "messages": []}
+
+    def messages_send(self, payload: dict) -> dict:
+        """Envoie un message à l'autre user."""
+        try:
+            from ..integrations.messages import send_message
+            body = (payload or {}).get("body", "")
+            msg = send_message(body)
+            return {"ok": bool(msg), "message": msg}
+        except Exception as exc:
+            logger.warning("messages_send: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def messages_mark_read(self) -> dict:
+        """Marque tous les messages reçus non-lus comme lus."""
+        try:
+            from ..integrations.messages import mark_all_read
+            return {"ok": True, "count": mark_all_read()}
+        except Exception as exc:
+            logger.debug("messages_mark_read: %s", exc)
+            return {"ok": False, "error": str(exc), "count": 0}
+
+    def messages_count_unread(self) -> dict:
+        """Nombre de messages reçus non lus."""
+        try:
+            from ..integrations.messages import count_unread
+            return {"ok": True, "count": count_unread()}
+        except Exception as exc:
+            logger.debug("messages_count_unread: %s", exc)
+            return {"ok": False, "error": str(exc), "count": 0}
+
+    def messages_last_preview(self) -> dict:
+        """Dernier message échangé (pour tooltip / aperçu)."""
+        try:
+            from ..integrations.messages import last_message_preview
+            return {"ok": True, "preview": last_message_preview()}
+        except Exception as exc:
+            logger.debug("messages_last_preview: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def messages_set_typing(self, payload: dict | None = None) -> dict:
+        """Notifie que je suis (ou ne suis plus) en train d'écrire."""
+        try:
+            from ..integrations.messages import set_typing
+            active = bool((payload or {}).get("active", True))
+            return {"ok": bool(set_typing(active))}
+        except Exception as exc:
+            logger.debug("messages_set_typing: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def messages_peer_typing(self) -> dict:
+        """L'autre user est-il en train d'écrire ?"""
+        try:
+            from ..integrations.messages import peer_is_typing
+            return {"ok": True, "typing": peer_is_typing()}
+        except Exception as exc:
+            logger.debug("messages_peer_typing: %s", exc)
+            return {"ok": False, "error": str(exc), "typing": False}
