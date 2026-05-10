@@ -6,6 +6,11 @@ beautifulsoup4>=4.12
 lxml>=5.0
 # Backend partagé Jordan / Thomas (CRM + drafts + Convoi en cloud)
 supabase>=2.4
+# Fait que Python utilise le store CA Windows (sinon le MITM antivirus/proxy
+# casse le TLS de httpx/supabase → SSL CERTIFICATE_VERIFY_FAILED au login).
+# OBLIGATOIRE sur Windows. Sans ce paquet, impossible de se connecter à
+# Supabase depuis l'app.
+pip-system-certs>=4.0; sys_platform == "win32"
 # Le Convoi — extraction de fichiers (toutes optionnelles, fallback gracieux)
 openpyxl>=3.1     # Excel .xlsx / .xlsm
 python-docx>=1.1  # Word .docx
