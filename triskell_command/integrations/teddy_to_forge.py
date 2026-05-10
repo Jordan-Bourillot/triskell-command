@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from . import pulse_bus
+from .forge import local_registry as forge_local_registry
 from .forge import repo as forge_repo
 
 logger = logging.getLogger(__name__)
@@ -148,29 +149,45 @@ def _poller_loop(app_state) -> None:
 def _do_one_poll(app_state) -> dict:
     """Un cycle complet : IMAP fetch → filter → parse → insert brief."""
     global _LAST_RUN_AT, _LAST_RUN_RESULT
+    started_at = time.time()
+    started_iso = _now_iso()
     counters = {"scanned": 0, "matched": 0, "written": 0,
                 "skipped": 0, "errors": 0}
+
+    def _finalize(result: dict) -> dict:
+        """Persiste le résultat et écrit le heartbeat lu par La Forge."""
+        global _LAST_RUN_AT, _LAST_RUN_RESULT
+        completed_iso = _now_iso()
+        _LAST_RUN_RESULT = result
+        _LAST_RUN_AT = completed_iso
+        try:
+            forge_local_registry.write_bridge_heartbeat(
+                bridge_module="teddy_to_forge",
+                cycle_seconds=POLL_INTERVAL_SECONDS,
+                started_at_iso=started_iso,
+                completed_at_iso=completed_iso,
+                duration_seconds=time.time() - started_at,
+                result=dict(result),
+            )
+        except Exception as exc:
+            # Heartbeat best-effort : ne JAMAIS faire planter le bridge.
+            logger.debug("heartbeat write KO: %s", exc)
+        return result
 
     cfg = forge_repo.get_intake_config()
     if not cfg.get("enabled", True):
         counters["error"] = "intake_disabled"
-        _LAST_RUN_RESULT = counters
-        _LAST_RUN_AT = _now_iso()
-        return counters
+        return _finalize(counters)
 
     client = _get_supabase_client()
     if client is None:
         counters["error"] = "supabase_unavailable"
-        _LAST_RUN_RESULT = counters
-        _LAST_RUN_AT = _now_iso()
-        return counters
+        return _finalize(counters)
 
     imap_cfg = _resolve_imap_config(app_state, client)
     if not imap_cfg:
         counters["error"] = "imap_not_configured"
-        _LAST_RUN_RESULT = counters
-        _LAST_RUN_AT = _now_iso()
-        return counters
+        return _finalize(counters)
 
     last_uid = int(client.get_shared_setting("imap_last_uid_forge", 0) or 0)
     subject_prefix = (cfg.get("subject_prefix") or "").strip().lower()
@@ -286,9 +303,7 @@ def _do_one_poll(app_state) -> dict:
     except Exception as exc:
         counters["error"] = str(exc)
 
-    _LAST_RUN_RESULT = counters
-    _LAST_RUN_AT = _now_iso()
-    return counters
+    return _finalize(counters)
 
 
 # ---------------------------------------------------------------------------

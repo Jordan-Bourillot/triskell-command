@@ -294,10 +294,34 @@ def list_pages(site_id: str, limit: int = 500) -> list[dict]:
 # phare_actions (PRs & recommandations)
 # ---------------------------------------------------------------------------
 def insert_action(action: dict) -> Optional[dict]:
+    """Crée (ou met à jour) une action.
+
+    Déduplication : si une action *en draft* existe déjà avec les mêmes
+    `(site_id, agent, kind, title)`, on la met à jour au lieu d'en
+    créer une nouvelle. Les actions déjà mergées/rejetées restent
+    intactes (historique). Évite de polluer l'inbox quand un agent
+    repasse plusieurs fois sans qu'aucun changement ne soit validé.
+    """
     sb = _sb()
     if sb is None:
         return None
     try:
+        site_id = action.get("site_id")
+        agent = action.get("agent")
+        kind = action.get("kind")
+        title = action.get("title")
+        if site_id and agent and kind and title:
+            existing = (sb.table("phare_actions").select("id")
+                        .eq("site_id", site_id).eq("agent", agent)
+                        .eq("kind", kind).eq("title", title)
+                        .eq("status", "draft")
+                        .limit(1).execute().data) or []
+            if existing:
+                action_id = existing[0]["id"]
+                patch = {k: v for k, v in action.items()
+                         if k not in ("created_at", "id")}
+                sb.table("phare_actions").update(patch).eq("id", action_id).execute()
+                return {"id": action_id, **patch}
         rows = sb.table("phare_actions").insert(action).execute().data
         return rows[0] if rows else None
     except Exception as exc:

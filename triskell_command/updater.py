@@ -43,7 +43,7 @@ try:
     if APP_VERSION.count(".") < 2:
         APP_VERSION += ".0"  # "0.4" → "0.4.0" (semver)
 except Exception:
-    APP_VERSION = "0.4.0"
+    APP_VERSION = "0.4.1"
 GITHUB_OWNER = "Jordan-Bourillot"
 GITHUB_REPO = "triskell-command"
 UPDATE_INSTALLER_PATTERN = "TriskellCommand_Setup*.exe"

@@ -17,11 +17,33 @@ class ViewHeader(ctk.CTkFrame):
     """
 
     def __init__(
-        self, master, *, title: str, subtitle: str = "", colors: T.ThemeColors
+        self, master, *, title: str, subtitle: str = "", colors: T.ThemeColors,
+        logo_path: str | None = None, logo_size: int = 56,
     ):
         super().__init__(master, fg_color="transparent", height=104)
         self.pack_propagate(False)
         self._colors = colors
+
+        # Logo optionnel (gauche)
+        if logo_path:
+            try:
+                from pathlib import Path
+                from PIL import Image
+                p = Path(logo_path)
+                if p.exists():
+                    img = Image.open(str(p))
+                    ctk_img = ctk.CTkImage(
+                        light_image=img, dark_image=img,
+                        size=(logo_size, logo_size),
+                    )
+                    logo = ctk.CTkLabel(
+                        self, image=ctk_img, text="",
+                        fg_color="transparent",
+                    )
+                    logo.pack(side="left", padx=(0, T.SPACE_MD),
+                              pady=(T.SPACE_LG, T.SPACE_SM))
+            except Exception:
+                pass  # logo absent ou Pillow KO -> on continue sans
 
         # Bloc texte (gauche)
         text_block = ctk.CTkFrame(self, fg_color="transparent")

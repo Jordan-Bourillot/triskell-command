@@ -380,3 +380,72 @@ def delete_project(project_id: str) -> bool:
     except OSError as exc:
         logger.debug("local_registry: échec delete %s: %s", target, exc)
         return False
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat : signal de vie du bridge teddy_to_forge → consommé par La Forge
+# ---------------------------------------------------------------------------
+# Fichier : %APPDATA%\studio.triskell.laforge\bridge_heartbeat.json
+#
+# Schéma :
+#   {
+#     "schema_version": 1,
+#     "bridge_module": "teddy_to_forge",
+#     "cycle_seconds": 300,                    # période du poller
+#     "last_scan_started_at":   "2026-05-09T10:29:55Z",
+#     "last_scan_completed_at": "2026-05-09T10:30:00Z",
+#     "last_scan_duration_seconds": 5,
+#     "last_scan_result": {                    # cf. counters de _do_one_poll
+#         "scanned": 0, "matched": 0, "written": 0,
+#         "skipped": 0, "errors": 0, "error": null
+#     }
+#   }
+#
+# La Forge lit ce fichier toutes les 30 s et affiche un voyant. Si
+# `last_scan_completed_at` est plus vieux que ~2× cycle_seconds → bridge
+# considéré comme inactif. Si le fichier n'existe pas du tout → bridge
+# jamais lancé depuis l'install.
+def _heartbeat_path() -> Optional[Path]:
+    base = _data_dir()
+    if base is None:
+        return None
+    return base / "bridge_heartbeat.json"
+
+
+def write_bridge_heartbeat(
+    *,
+    bridge_module: str,
+    cycle_seconds: int,
+    started_at_iso: str,
+    completed_at_iso: str,
+    duration_seconds: float,
+    result: dict,
+) -> bool:
+    """Écrit/écrase le heartbeat du bridge à chaque fin de cycle.
+
+    Best-effort : si le data dir n'est pas accessible (l'app La Forge n'est
+    pas installée chez l'utilisateur), on log debug et on continue. Le
+    bridge ne doit JAMAIS planter à cause d'un heartbeat qui ne s'écrit pas.
+    """
+    target = _heartbeat_path()
+    if target is None:
+        return False
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": 1,
+            "bridge_module": bridge_module,
+            "cycle_seconds": int(cycle_seconds),
+            "last_scan_started_at": started_at_iso,
+            "last_scan_completed_at": completed_at_iso,
+            "last_scan_duration_seconds": round(float(duration_seconds), 3),
+            "last_scan_result": result,
+        }
+        target.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return True
+    except OSError as exc:
+        logger.debug("local_registry: heartbeat write KO: %s", exc)
+        return False

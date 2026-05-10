@@ -19,9 +19,11 @@ Ne tourne PAS quand l'utilisateur n'est pas authentifié à Supabase
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from datetime import date, datetime
+from pathlib import Path
 from typing import Optional
 
 from . import orchestrator, repo
@@ -31,8 +33,81 @@ logger = logging.getLogger(__name__)
 
 CYCLE_INTERVAL_SECONDS = 60 * 60        # 1 h
 INITIAL_DELAY_SECONDS = 120              # 2 min après boot
+TOKEN_REFRESH_INTERVAL_SECONDS = 30 * 60  # 30 min — refresh proactif du JWT
+LOCK_FILE = Path.home() / ".triskell-command" / "phare_scheduler.lock"
+
+
+def _process_alive(pid: int) -> bool:
+    """Indique si un PID est encore vivant (Windows + Linux/Mac)."""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            h = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            if not h:
+                return False
+            try:
+                exit_code = ctypes.c_ulong()
+                ok = ctypes.windll.kernel32.GetExitCodeProcess(
+                    h, ctypes.byref(exit_code))
+                if not ok:
+                    return False
+                return exit_code.value == 259  # STILL_ACTIVE
+            finally:
+                ctypes.windll.kernel32.CloseHandle(h)
+        except Exception:
+            return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except Exception:
+        return False
+
+
+def _acquire_lock() -> bool:
+    """Pose un verrou fichier pour qu'un seul scheduler tourne sur la machine.
+
+    Renvoie True si on a obtenu le verrou (= on peut démarrer le scheduler),
+    False si un autre process le tient déjà. Le verrou est libéré à
+    l'arrêt (`_release_lock`) ou écrasé si le process titulaire est mort.
+    """
+    try:
+        LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        if LOCK_FILE.exists():
+            try:
+                pid_str = LOCK_FILE.read_text(encoding="utf-8").strip()
+                holder = int(pid_str) if pid_str.isdigit() else 0
+            except Exception:
+                holder = 0
+            if holder and holder != os.getpid() and _process_alive(holder):
+                logger.info(
+                    "Scheduler Phare déjà actif dans le process %s — "
+                    "je n'en lance pas un deuxième.", holder)
+                return False
+        LOCK_FILE.write_text(str(os.getpid()), encoding="utf-8")
+        return True
+    except Exception as exc:
+        logger.warning("Lock scheduler: %s — démarrage sans verrou.", exc)
+        return True
+
+
+def _release_lock() -> None:
+    try:
+        if LOCK_FILE.exists():
+            try:
+                holder = int((LOCK_FILE.read_text(encoding="utf-8") or "0").strip())
+            except Exception:
+                holder = 0
+            if holder == os.getpid():
+                LOCK_FILE.unlink()
+    except Exception:
+        pass
 
 _WORKER_THREAD: Optional[threading.Thread] = None
+_TOKEN_THREAD: Optional[threading.Thread] = None
 _WORKER_STOP = threading.Event()
 _WORKER_LOCK = threading.Lock()
 _LAST_RUN_AT: str = ""
@@ -41,21 +116,49 @@ _LAST_RUNS_BY_MISSION: dict[str, str] = {}   # mission_key → ISO date
 
 
 def start_worker(app_state) -> bool:
-    """Démarre le worker en thread daemon (idempotent)."""
-    global _WORKER_THREAD
+    """Démarre le worker en thread daemon (idempotent).
+
+    Verrouille à l'échelle machine : si un autre process Triskell tourne
+    déjà le scheduler, on ne démarre PAS un deuxième thread (sinon les
+    missions sont lancées en double et l'API est appelée 2× pour rien).
+    """
+    global _WORKER_THREAD, _TOKEN_THREAD
     with _WORKER_LOCK:
         if _WORKER_THREAD is not None and _WORKER_THREAD.is_alive():
             return True
+        if not _acquire_lock():
+            return False
         _WORKER_STOP.clear()
         t = threading.Thread(target=_loop, args=(app_state,),
                               name="PhareScheduler", daemon=True)
         t.start()
         _WORKER_THREAD = t
+        # Worker dédié au refresh JWT — tourne toutes les 30 min, indépendant
+        # du cycle des missions, pour ne jamais avoir un JWT périmé en main.
+        tt = threading.Thread(target=_token_loop,
+                               name="PhareTokenRefresh", daemon=True)
+        tt.start()
+        _TOKEN_THREAD = tt
     return True
 
 
 def stop_worker() -> None:
     _WORKER_STOP.set()
+    _release_lock()
+
+
+def _token_loop() -> None:
+    """Refresh proactif du JWT toutes les 30 min."""
+    while not _WORKER_STOP.is_set():
+        try:
+            from triskell_core.db import get_client
+            c = get_client()
+            if hasattr(c, "ensure_fresh_token"):
+                c.ensure_fresh_token()
+        except Exception as exc:
+            logger.debug("token refresh: %s", exc)
+        if _WORKER_STOP.wait(TOKEN_REFRESH_INTERVAL_SECONDS):
+            return
 
 
 def get_status() -> dict:
@@ -112,6 +215,16 @@ def _loop(app_state) -> None:
 
 def _tick(app_state) -> dict:
     """Un cycle : lit la config, décide quoi lancer, persiste."""
+    # Refresh proactif du JWT — évite les "JWT expired" en plein milieu
+    # d'une mission. Le SDK supabase-py ne refresh pas toujours à temps.
+    try:
+        from triskell_core.db import get_client
+        c = get_client()
+        if hasattr(c, "ensure_fresh_token"):
+            c.ensure_fresh_token()
+    except Exception as exc:
+        logger.debug("ensure_fresh_token: %s", exc)
+
     cfg = repo.get_config()
     if not cfg:
         return {"skipped": "supabase_or_config_missing"}

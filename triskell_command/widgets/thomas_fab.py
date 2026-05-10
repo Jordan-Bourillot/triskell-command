@@ -60,6 +60,8 @@ class ThomasFAB(ctk.CTkFrame):
         self._pulse_job: Optional[str] = None
         self._pulse_phase = 0
         self._tooltip: Optional[ctk.CTkToplevel] = None
+        self._tooltip_poll_job: Optional[str] = None
+        self._tooltip_ttl_job: Optional[str] = None
 
         # Icône vectorielle (bulle de chat, dessinée en PIL — pas un emoji système).
         self._icon_img_rest = I.get_icon("chat_bubble", "#FFFFFF", size=ICON_SIZE)
@@ -201,8 +203,11 @@ class ThomasFAB(ctk.CTkFrame):
         self._last_from_me = bool(is_from_me)
 
     # ------------------------------------------------------------------
-    # Auto-destroy de sécurité si <Leave> ne se déclenche pas
-    # (cas de switch rapide entre 2 FABs voisins).
+    # Filets si <Leave> ne tire pas (Alt+Tab, fenêtre minimisée, switch rapide).
+    # Poll : on vérifie périodiquement que le pointeur est toujours sur le
+    # bouton ET dans une fenêtre Tk vivante (sinon une autre app est devant).
+    # TTL : auto-destroy absolu, en dernier recours.
+    _TOOLTIP_POLL_MS = 150
     _TOOLTIP_TTL_MS = 1200
 
     def _show_tooltip(self) -> None:
@@ -255,14 +260,55 @@ class ThomasFAB(ctk.CTkFrame):
             y = self.winfo_rooty() + (SIZE - tip.winfo_reqheight()) // 2
             tip.geometry(f"+{x}+{y}")
             self._tooltip = tip
+            # Filet 1 : poll périodique (couvre Alt+Tab, minimize, Leave manqué)
+            self._tooltip_poll_job = self.after(
+                self._TOOLTIP_POLL_MS, self._poll_tooltip)
+            # Filet 2 : auto-destroy absolu
             self._tooltip_ttl_job = self.after(
                 self._TOOLTIP_TTL_MS, self._hide_tooltip)
         except Exception as exc:
             logger.debug("tooltip thomas: %s", exc)
             self._tooltip = None
 
+    def _poll_tooltip(self) -> None:
+        """Vérifie que le pointeur est toujours sur le bouton, dans une
+        fenêtre Tk vivante. Si une autre app passe devant ou si la fenêtre
+        Triskell est minimisée, `winfo_containing` ne renvoie pas self →
+        on cache le tooltip."""
+        self._tooltip_poll_job = None
+        if self._tooltip is None:
+            return
+        keep = False
+        try:
+            px = self.winfo_pointerx()
+            py = self.winfo_pointery()
+            under = self.winfo_containing(px, py)
+            w = under
+            while w is not None:
+                if w is self:
+                    keep = True
+                    break
+                w = getattr(w, "master", None)
+        except Exception:
+            keep = False
+        if not keep:
+            self._hide_tooltip()
+            return
+        try:
+            self._tooltip_poll_job = self.after(
+                self._TOOLTIP_POLL_MS, self._poll_tooltip)
+        except Exception:
+            self._tooltip_poll_job = None
+
     def _hide_tooltip(self) -> None:
-        ttl = getattr(self, "_tooltip_ttl_job", None)
+        poll = self._tooltip_poll_job
+        if poll is not None:
+            try:
+                self.after_cancel(poll)
+            except Exception:
+                pass
+            self._tooltip_poll_job = None
+        ttl = self._tooltip_ttl_job
         if ttl is not None:
             try:
                 self.after_cancel(ttl)

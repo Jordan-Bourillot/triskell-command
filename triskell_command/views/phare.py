@@ -84,6 +84,26 @@ class PhareView(BaseView):
     # Frames du spinner (Braille pattern, comme spin/dots dans cli-spinners)
     _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
+    @staticmethod
+    def _resolve_logo_path() -> str | None:
+        """Cherche phare.png dans plusieurs emplacements (bundle, dev, fallback)."""
+        import sys
+        from pathlib import Path
+        candidates: list[Path] = []
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "assets" / "phare.png")
+        # Triskell Command/assets/ (cas cockpit)
+        candidates.append(Path(__file__).parent.parent.parent / "assets" / "phare.png")
+        # Le Phare/assets/ (cas app standalone en dev — sibling de Triskell Command)
+        candidates.append(
+            Path(__file__).parent.parent.parent.parent / "Le Phare" / "assets" / "phare.png"
+        )
+        for p in candidates:
+            if p.exists():
+                return str(p)
+        return None
+
     def __init__(self, master, *, app_state, colors):
         super().__init__(master, app_state=app_state, colors=colors)
         self._active_tab = "ecosystem"
@@ -99,7 +119,10 @@ class PhareView(BaseView):
     # ------------------------------------------------------------------
     def build(self) -> None:
         c = self.colors
-        header = ViewHeader(self, title=self.title, subtitle=self.subtitle, colors=c)
+        header = ViewHeader(
+            self, title=self.title, subtitle=self.subtitle, colors=c,
+            logo_path=self._resolve_logo_path(),
+        )
         header.pack(fill="x", padx=T.SPACE_2XL, pady=(T.SPACE_LG, T.SPACE_MD))
 
         SecondaryButton(header.actions, colors=c, icon="refresh",

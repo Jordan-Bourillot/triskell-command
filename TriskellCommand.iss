@@ -19,7 +19,7 @@
 ; ===========================================================================
 
 #define MyAppName      "Triskell Command"
-#define MyAppVersion   "0.4.0"
+#define MyAppVersion   "0.4.1"
 #define MyAppPublisher "Triskell Studio"
 #define MyAppURL       "https://triskell-studio.fr"
 #define MyAppExeName   "Triskell Command.exe"

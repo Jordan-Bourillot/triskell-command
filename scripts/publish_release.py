@@ -30,26 +30,21 @@ except Exception:
     pass
 
 # ============== À MODIFIER À CHAQUE NOUVELLE RELEASE ====================
-TAG = "v0.4.0"
-NAME = "Triskell Command 0.4.0"
+TAG = "v0.4.1"
+NAME = "Triskell Command 0.4.1"
 BODY = """\
-## Triskell Command 0.4.0
+## Triskell Command 0.4.1
 
-Première release publique avec auto-update activé.
+Patch ciblé sur les bulles d'info des boutons flottants Chat Thomas et Allô Claude.
 
-**Au menu** :
-- Connexion simplifiée par prénom (plus besoin de retaper email + password à chaque fois)
-- Module **Le Phare** intégré : agence SEO embarquée pour tous tes sites Triskell
-- 8 agents Claude qui auditent, analysent et optimisent en continu
-- UI nettoyée : labels en français accessible, plus de jargon technique
-- Connexion Supabase avec stockage local sécurisé
+**Corrigé** :
+- Les bulles « Chat Thomas · F11 » et « Allô Claude · F12 » restaient parfois
+  collées à l'écran après un Alt+Tab, une fermeture ou une minimisation
+  de la fenêtre. Elles s'effacent maintenant dès que la souris quitte
+  vraiment le bouton ou que Triskell Command passe en arrière-plan.
 
-**Pré-requis** :
-- Windows 10 ou 11
-- Une connexion internet pour la première configuration
-
-L'installeur va simplement remplacer la version actuelle. Tes réglages
-et ton historique sont conservés.
+L'installeur remplace la version actuelle. Tes réglages et ton historique
+sont conservés.
 """
 # ========================================================================
 
