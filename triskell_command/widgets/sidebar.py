@@ -55,6 +55,7 @@ SIDEBAR_SECTIONS = [
     ]),
     ("LIVRAISON", [
         ("clients",    "doc",       "Projets clients"),
+        ("billing",    "doc",       "Facturation"),
     ]),
     ("CHIFFRES", [
         ("funnel",     "chart",     "Conversions"),
@@ -65,6 +66,7 @@ SIDEBAR_SECTIONS = [
     ]),
     ("FABRICATION", [
         ("la_forge",   "globe",     "La Forge du Web"),
+        ("wow_intakes","sparkle",   "Studio WoW — validations"),
     ]),
 ]
 # Compat : on garde NAV_ITEMS comme la concat de toutes les sections

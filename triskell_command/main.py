@@ -23,6 +23,7 @@ from .views.config import ConfigView
 from .views.convoy import ConvoyView
 from .views.dashboard import DashboardView
 from .views.autopilot import AutopilotView
+from .views.billing import BillingView
 from .views.clients import ClientsView
 from .views.drafts import DraftsView
 from .views.funnel import FunnelView
@@ -33,6 +34,7 @@ from .views.prospects import ProspectsView
 from .views.publish import PublishView
 from .views.replies import RepliesView
 from .views.templates import TemplatesView
+from .views.wow_intakes import WowIntakesView
 from .widgets.sidebar import Sidebar
 from .widgets.splash import SplashScreen
 from .widgets.status_bar import StatusBar
@@ -58,7 +60,9 @@ VIEW_REGISTRY: dict[str, type[BaseView]] = {
     "funnel":     FunnelView,
     "dashboard":  DashboardView,
     "phare":      PhareView,
+    "wow_intakes": WowIntakesView,
     "la_forge":   LaForgeView,
+    "billing":    BillingView,
     "config":     ConfigView,
 }
 
