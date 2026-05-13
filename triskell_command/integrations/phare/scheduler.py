@@ -11,6 +11,8 @@ Cron logique simplifié (vu qu'on tourne toutes les heures) :
 - Maillage : lundi 9h
 - Bulletin Analyste : tous les jours 8h
 - Plan stratégique Opus : 1er du mois 9h
+- Bulletin PDF interne : 1er du mois 10h
+- Envoi rapports clients SEO : 1er du mois 11h
 
 Ne tourne PAS quand l'utilisateur n'est pas authentifié à Supabase
 (sinon rien à persister). Auto-restart si plante.
@@ -324,6 +326,15 @@ def _tick(app_state) -> dict:
             actions_done.append({"mission": "bulletin_pdf", **r})
             _LAST_RUNS_BY_MISSION["bulletin_pdf:"] = today.isoformat()
 
+    # Envoi rapports clients SEO : 1er du mois 11h
+    # (1h après la génération bulletin pour laisser respirer)
+    if today.day == 1 and hour == 11:
+        last = _LAST_RUNS_BY_MISSION.get("client_reports_send:")
+        if last != today.isoformat():
+            r = run_now("client_reports_send", None, app_state=app_state)
+            actions_done.append({"mission": "client_reports_send", **r})
+            _LAST_RUNS_BY_MISSION["client_reports_send:"] = today.isoformat()
+
     return {"actions_done": actions_done,
             "sites_count": len(sites),
             "weekday": weekday, "hour": hour}
@@ -440,4 +451,7 @@ def run_now(mission: str, site_id: Optional[str] = None,
     if mission == "bulletin_pdf":
         from . import bulletin_pdf
         return bulletin_pdf.render_pdf()
+    if mission == "client_reports_send":
+        from . import client_report_sender
+        return client_report_sender.send_pending_reports(app_state=app_state)
     return {"ok": False, "error": f"mission inconnue: {mission}"}

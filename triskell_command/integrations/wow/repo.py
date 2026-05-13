@@ -155,9 +155,9 @@ def reject_intake(intake_id: str, reason: str = "") -> bool:
 
 
 def dispatch_now(intake_id: str) -> tuple[bool, str]:
-    """Déclenche immédiatement le pipeline pour un intake approved
-    (sans attendre le cron 5 min). Appelle directement la Netlify
-    Function dispatch-site-build.
+    """Déclenche immédiatement le pipeline preview pour un intake approved
+    (sans attendre le cron 5 min). Appelle directement la Netlify Function
+    dispatch-site-build.
 
     Renvoie (success, message).
     """
@@ -166,7 +166,46 @@ def dispatch_now(intake_id: str) -> tuple[bool, str]:
     try:
         r = requests.post(url, json={"intake_id": intake_id}, timeout=30)
         if r.ok:
-            return True, "Pipeline déclenché."
+            return True, "Pipeline preview déclenché."
+        return False, f"HTTP {r.status_code}: {r.text[:200]}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def save_client_feedback(
+    intake_id: str, *, feedback: str, assets_url: str = ""
+) -> bool:
+    """Enregistre les retours du client (texte) et l'URL des visuels qu'il
+    a transmis (Dropbox, Drive, GoFile, etc.). Données utilisées par le
+    pipeline finalisation pour intégrer les retours et les photos.
+    """
+    sb = _sb()
+    if sb is None:
+        return False
+    patch: dict[str, Any] = {
+        "client_feedback": (feedback or "").strip() or None,
+        "client_assets_url": (assets_url or "").strip() or None,
+    }
+    try:
+        sb.table("wow_intakes").update(patch).eq("id", intake_id).execute()
+        return True
+    except Exception as exc:
+        logger.warning("wow.save_client_feedback: %s", exc)
+        return False
+
+
+def launch_finalization(intake_id: str) -> tuple[bool, str]:
+    """Déclenche le workflow de finalisation pour un intake en status 'paid'.
+    Code TOUTES les pages, intègre les retours + visuels du client, déploie.
+
+    Renvoie (success, message).
+    """
+    import requests
+    url = "https://studio-wow.fr/.netlify/functions/finalize-site-build"
+    try:
+        r = requests.post(url, json={"intake_id": intake_id}, timeout=30)
+        if r.ok:
+            return True, "Pipeline finalisation déclenché."
         return False, f"HTTP {r.status_code}: {r.text[:200]}"
     except Exception as exc:
         return False, str(exc)

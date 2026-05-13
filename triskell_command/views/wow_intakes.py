@@ -35,12 +35,16 @@ logger = logging.getLogger(__name__)
 
 
 STATUS_LABELS = {
-    "pending_validation": "À valider",
+    "pending_validation": "À valider (avant preview)",
     "approved": "Approuvé · en attente du cron",
-    "processing": "Génération en cours",
-    "sent": "Preview envoyée",
+    "processing": "Génération preview en cours",
+    "sent": "Preview envoyée · attente client",
+    "paid": "Payé · à finaliser (Bloc 4)",
+    "finalizing": "Finalisation en cours",
+    "live": "Site final en ligne",
     "rejected": "Refusé",
-    "failed": "Échec",
+    "failed": "Échec preview",
+    "final_failed": "Échec finalisation",
 }
 
 
@@ -103,9 +107,9 @@ class WowIntakesView(BaseView):
         )
         self._list_body.pack(fill="both", expand=True)
 
-        # Actions
-        self._detail_card = Card(self, title="Action sur la demande sélectionnée")
-        self._detail_card.pack(fill="x", padx=24, pady=(0, 16))
+        # Actions preview (validation avant génération)
+        self._detail_card = Card(self, title="Actions — avant preview")
+        self._detail_card.pack(fill="x", padx=24, pady=(0, 10))
         actions = ctk.CTkFrame(self._detail_card.body, fg_color="transparent")
         actions.pack(fill="x", padx=8, pady=8)
         PrimaryButton(actions, text="Approuver et lancer la preview",
@@ -115,6 +119,33 @@ class WowIntakesView(BaseView):
         self._status_lbl = ctk.CTkLabel(actions, text="",
                                          text_color=self.colors.text_muted)
         self._status_lbl.pack(side="left", padx=12)
+
+        # Actions finalisation (Bloc 4 — après paiement client)
+        self._final_card = Card(self, title="Actions — après paiement (finalisation)")
+        self._final_card.pack(fill="x", padx=24, pady=(0, 16))
+        final_body = ctk.CTkFrame(self._final_card.body, fg_color="transparent")
+        final_body.pack(fill="x", padx=8, pady=8)
+
+        # Champ retours client
+        ctk.CTkLabel(final_body, text="Retours du client (collés depuis le mail) :",
+                     anchor="w").pack(fill="x", padx=4, pady=(0, 2))
+        self._feedback_txt = ctk.CTkTextbox(final_body, height=80)
+        self._feedback_txt.pack(fill="x", padx=4, pady=(0, 6))
+
+        # Champ URL des assets
+        ctk.CTkLabel(final_body, text="URL des visuels fournis (Dropbox, Drive, GoFile…) :",
+                     anchor="w").pack(fill="x", padx=4, pady=(0, 2))
+        self._assets_var = ctk.StringVar()
+        self._assets_entry = ctk.CTkEntry(final_body, textvariable=self._assets_var)
+        self._assets_entry.pack(fill="x", padx=4, pady=(0, 8))
+
+        # Boutons finalisation
+        final_btns = ctk.CTkFrame(final_body, fg_color="transparent")
+        final_btns.pack(fill="x", padx=4, pady=(0, 4))
+        PrimaryButton(final_btns, text="Lancer la fabrication finale (~15 €)",
+                      command=self._launch_finalization).pack(side="left", padx=4)
+        SecondaryButton(final_btns, text="Enregistrer les retours seulement",
+                        command=self._save_feedback_only).pack(side="left", padx=4)
 
     def _set_status(self, msg: str, *, error: bool = False):
         self._status_lbl.configure(
@@ -309,4 +340,88 @@ class WowIntakesView(BaseView):
                 self.after(0, lambda: self._set_status("Échec refus.", error=True))
 
         self._set_status("Refus en cours…")
+        threading.Thread(target=_run, daemon=True).start()
+
+    # -----------------------------------------------------------------
+    # Bloc 4 : finalisation
+    # -----------------------------------------------------------------
+    def _save_feedback_only(self):
+        """Enregistre feedback + assets sans déclencher la finalisation."""
+        if not self._selected_id:
+            self._set_status("Sélectionne d'abord une demande.", error=True)
+            return
+        feedback = self._feedback_txt.get("1.0", "end").strip()
+        assets = self._assets_var.get().strip()
+        if not feedback and not assets:
+            self._set_status("Rien à enregistrer (feedback et URL vides).", error=True)
+            return
+
+        def _run():
+            ok = wow_repo.save_client_feedback(
+                self._selected_id, feedback=feedback, assets_url=assets,
+            )
+            if ok:
+                self.after(0, lambda: self._set_status("Retours enregistrés."))
+            else:
+                self.after(0, lambda: self._set_status("Échec enregistrement.", error=True))
+
+        self._set_status("Enregistrement…")
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _launch_finalization(self):
+        """Lance le workflow de finalisation (TOUTES pages + retours + visuels)."""
+        if not self._selected_id:
+            self._set_status("Sélectionne d'abord une demande.", error=True)
+            return
+        intake = next((i for i in self._intakes if i["id"] == self._selected_id), None)
+        if intake is None:
+            self._set_status("Demande introuvable.", error=True)
+            return
+
+        # Garde-fou : intake doit être en status 'paid'
+        if intake.get("status") not in ("paid", "final_failed"):
+            self._set_status(
+                f"Impossible : intake en status '{intake.get('status')}'. "
+                f"Attendu 'paid' (paiement Stripe reçu).",
+                error=True,
+            )
+            return
+
+        feedback = self._feedback_txt.get("1.0", "end").strip()
+        assets = self._assets_var.get().strip()
+
+        # Confirmation explicite
+        full_name = f"{intake.get('client_first_name', '')} {intake.get('client_last_name', '')}".strip()
+        confirm = messagebox.askyesno(
+            "Confirmation finalisation",
+            f"Lancer la fabrication finale pour :\n\n"
+            f"  {full_name} · {intake.get('company_name', '')}\n\n"
+            f"Coût estimé : ~15 € HT en tokens Claude Opus.\n"
+            f"Cette action va CODER TOUTES LES PAGES et envoyer le site final\n"
+            f"au client par mail à la fin.\n\n"
+            f"Retours client : {len(feedback)} caractères\n"
+            f"URL visuels : {'oui' if assets else 'non'}",
+        )
+        if not confirm:
+            return
+
+        self._set_status("Enregistrement feedback + lancement finalisation…")
+
+        def _run():
+            # 1. Enregistre feedback + assets (même vides)
+            wow_repo.save_client_feedback(
+                self._selected_id, feedback=feedback, assets_url=assets,
+            )
+            # 2. Lance le workflow finalisation
+            ok, msg = wow_repo.launch_finalization(self._selected_id)
+            if ok:
+                self.after(0, lambda: (
+                    self._set_status(f"Finalisation lancée. {msg}"),
+                    self._refresh(),
+                ))
+            else:
+                self.after(0, lambda: self._set_status(
+                    f"Échec lancement : {msg}", error=True,
+                ))
+
         threading.Thread(target=_run, daemon=True).start()

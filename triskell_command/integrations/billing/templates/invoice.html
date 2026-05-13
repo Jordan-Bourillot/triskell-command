@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>{{ invoice.invoice_number }}</title>
+<style>
+@page {
+    size: A4;
+    margin: 1.8cm 1.8cm 2cm;
+    @bottom-center {
+        content: "Page " counter(page) " / " counter(pages);
+        font-size: 9px;
+        color: #94A3B8;
+    }
+}
+* { box-sizing: border-box; }
+body {
+    font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', sans-serif;
+    color: #1E293B;
+    font-size: 11px;
+    line-height: 1.5;
+    margin: 0;
+}
+.header {
+    display: table;
+    width: 100%;
+    margin-bottom: 2.5em;
+}
+.header-left, .header-right {
+    display: table-cell;
+    vertical-align: top;
+    width: 50%;
+}
+.header-right { text-align: right; }
+.brand-mark {
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #C5A572;
+    font-weight: 700;
+    margin-bottom: 0.3em;
+}
+.issuer-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #0F172A;
+    margin-bottom: 0.2em;
+}
+.issuer-meta { font-size: 10px; color: #64748B; line-height: 1.5; }
+
+.doc-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0F172A;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.3em;
+}
+.doc-number {
+    font-size: 14px;
+    color: #C5A572;
+    font-weight: 600;
+    font-family: 'Consolas', 'Menlo', monospace;
+}
+.doc-dates {
+    margin-top: 0.5em;
+    font-size: 10px;
+    color: #64748B;
+}
+.doc-dates strong { color: #1E293B; font-weight: 600; }
+
+.parties {
+    display: table;
+    width: 100%;
+    margin: 2em 0;
+    border-collapse: collapse;
+}
+.party {
+    display: table-cell;
+    width: 50%;
+    padding: 1em;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    vertical-align: top;
+}
+.party + .party { border-left: none; }
+.party-label {
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: #94A3B8;
+    margin-bottom: 0.5em;
+}
+.party-name { font-weight: 700; color: #0F172A; font-size: 12px; }
+.party-meta { font-size: 10px; color: #475569; line-height: 1.6; }
+
+.free-text-top {
+    background: #FDF6E8;
+    border-left: 3px solid #C5A572;
+    padding: 0.8em 1em;
+    margin: 1.5em 0;
+    font-size: 11px;
+    color: #1E293B;
+}
+
+table.lines {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5em 0;
+    font-size: 10.5px;
+}
+table.lines thead th {
+    background: #0F172A;
+    color: #F8FAFC;
+    text-align: left;
+    padding: 0.6em 0.7em;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+}
+table.lines thead th.right { text-align: right; }
+table.lines tbody td {
+    padding: 0.7em;
+    border-bottom: 1px solid #E2E8F0;
+    vertical-align: top;
+}
+table.lines tbody td.right { text-align: right; font-variant-numeric: tabular-nums; }
+.line-desc { font-weight: 500; color: #0F172A; }
+
+table.totals {
+    margin-left: auto;
+    width: 50%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+table.totals td {
+    padding: 0.45em 0.7em;
+    border-bottom: 1px solid #E2E8F0;
+}
+table.totals td.label { text-align: right; color: #475569; }
+table.totals td.value { text-align: right; font-variant-numeric: tabular-nums; }
+table.totals tr.grand-total td {
+    background: #0F172A;
+    color: #FFF;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 0.7em 0.7em;
+    border-bottom: none;
+}
+
+.payment-block {
+    margin-top: 2em;
+    padding: 1em 1.2em;
+    background: #F8F4EC;
+    border: 1px solid #E5D7BC;
+    border-radius: 4px;
+    font-size: 10.5px;
+}
+.payment-block strong { color: #0F172A; }
+
+.legal-mentions {
+    margin-top: 2em;
+    padding-top: 1em;
+    border-top: 1px solid #E2E8F0;
+    font-size: 9px;
+    color: #64748B;
+    line-height: 1.6;
+}
+.legal-mentions p { margin: 0.3em 0; }
+.legal-mentions strong { color: #475569; }
+
+.free-text-bottom {
+    margin-top: 1.5em;
+    font-size: 10.5px;
+    color: #1E293B;
+    font-style: italic;
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+    <div class="header-left">
+        <div class="brand-mark">{{ issuer.name | upper }}</div>
+        <div class="issuer-name">{{ issuer.name }}</div>
+        <div class="issuer-meta">
+            {{ issuer.address_line1 }}<br>
+            {{ issuer.address_zip }} {{ issuer.address_city }}<br>
+            {{ issuer.address_country }}<br>
+            SIRET : {{ issuer.siret }}<br>
+            {% if issuer.tva_intra %}TVA intracom. : {{ issuer.tva_intra }}<br>{% endif %}
+            {{ issuer.email }}
+            {% if issuer.website %} · {{ issuer.website }}{% endif %}
+        </div>
+    </div>
+    <div class="header-right">
+        <div class="doc-title">{{ doc_title }}</div>
+        <div class="doc-number">{{ invoice.invoice_number }}</div>
+        <div class="doc-dates">
+            <div><strong>Émise le</strong> {{ fmt_date(invoice.issued_at) }}</div>
+            {% if invoice.service_executed_at %}
+            <div><strong>Prestation exécutée le</strong> {{ fmt_date(invoice.service_executed_at) }}</div>
+            {% endif %}
+            {% if invoice.due_date %}
+            <div><strong>Échéance</strong> {{ fmt_date(invoice.due_date) }}</div>
+            {% endif %}
+            {% if invoice.is_credit_note %}
+            <div><strong>Annule et remplace</strong> la facture {{ cancels_invoice_number or '—' }}</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Parties -->
+<div class="parties">
+    <div class="party">
+        <div class="party-label">Émetteur</div>
+        <div class="party-name">{{ issuer.name }}</div>
+        <div class="party-meta">
+            {{ issuer.legal_form }}<br>
+            {{ issuer.address_line1 }}<br>
+            {{ issuer.address_zip }} {{ issuer.address_city }}, {{ issuer.address_country }}<br>
+            SIRET : {{ issuer.siret }}
+        </div>
+    </div>
+    <div class="party">
+        <div class="party-label">Destinataire</div>
+        <div class="party-name">{{ client.name }}</div>
+        <div class="party-meta">
+            {% if client.address_line1 %}{{ client.address_line1 }}<br>{% endif %}
+            {% if client.address_line2 %}{{ client.address_line2 }}<br>{% endif %}
+            {% if client.address_zip or client.address_city %}
+                {{ client.address_zip }} {{ client.address_city }}<br>
+            {% endif %}
+            {% if client.address_country %}{{ client.address_country }}<br>{% endif %}
+            {% if client.siret %}SIRET : {{ client.siret }}<br>{% endif %}
+            {% if client.tva_intra %}TVA : {{ client.tva_intra }}<br>{% endif %}
+            {{ client.email }}
+        </div>
+    </div>
+</div>
+
+{% if invoice.free_text_top %}
+<div class="free-text-top">{{ invoice.free_text_top }}</div>
+{% endif %}
+
+<!-- Lignes -->
+<table class="lines">
+<thead>
+<tr>
+    <th style="width:55%">Désignation</th>
+    <th class="right" style="width:8%">Qté</th>
+    <th class="right" style="width:14%">P.U. HT</th>
+    <th class="right" style="width:9%">TVA</th>
+    <th class="right" style="width:14%">Total HT</th>
+</tr>
+</thead>
+<tbody>
+{% for line in invoice.lines %}
+<tr>
+    <td class="line-desc">{{ line.description }}</td>
+    <td class="right">{{ fmt_qty(line.quantity) }}</td>
+    <td class="right">{{ fmt_money(line.unit_price_ht_cents) }}</td>
+    <td class="right">{{ fmt_vat_rate(line.vat_rate) }}</td>
+    <td class="right">{{ fmt_money(line.total_ht_cents) }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+<!-- Totaux -->
+<table class="totals">
+<tr>
+    <td class="label">Total HT</td>
+    <td class="value">{{ fmt_money(invoice.subtotal_ht_cents) }}</td>
+</tr>
+<tr>
+    <td class="label">
+        {% if invoice.vat_exempt_reason %}TVA{% else %}Total TVA{% endif %}
+    </td>
+    <td class="value">
+        {% if invoice.vat_exempt_reason %}—{% else %}{{ fmt_money(invoice.total_vat_cents) }}{% endif %}
+    </td>
+</tr>
+<tr class="grand-total">
+    <td class="label" style="color:#FFF;">Total TTC</td>
+    <td class="value">{{ fmt_money(invoice.total_ttc_cents) }}</td>
+</tr>
+</table>
+
+<!-- Paiement -->
+<div class="payment-block">
+{% if invoice.paid_at %}
+    <strong>Facture acquittée</strong> le {{ fmt_date(invoice.paid_at) }}
+    {% if invoice.payment_method %}par {{ payment_label }}{% endif %}.
+    {% if invoice.payment_reference %}<br>Référence : <code>{{ invoice.payment_reference }}</code>{% endif %}
+{% else %}
+    <strong>Modalités de paiement :</strong>
+    {% if invoice.due_date %}échéance le {{ fmt_date(invoice.due_date) }}{% else %}à réception{% endif %}.
+    {% if config.iban %}<br>IBAN : <code>{{ config.iban }}</code>{% endif %}
+    {% if config.bic %} · BIC : <code>{{ config.bic }}</code>{% endif %}
+{% endif %}
+</div>
+
+{% if invoice.free_text_bottom %}
+<div class="free-text-bottom">{{ invoice.free_text_bottom }}</div>
+{% endif %}
+
+<!-- Mentions légales -->
+<div class="legal-mentions">
+{% if invoice.vat_exempt_reason %}
+    <p><strong>{{ invoice.vat_exempt_reason }}</strong></p>
+{% endif %}
+    <p><strong>Pénalités de retard :</strong> {{ config.late_payment_rate or "Taux d'intérêt légal majoré de 10 points" }}.
+       Indemnité forfaitaire pour frais de recouvrement : {{ config.late_payment_fixed_fee_eur or 40 }} € (art. L.441-10 et D.441-5 du Code de commerce, applicable aux clients professionnels).</p>
+    <p>Pas d'escompte pour paiement anticipé sauf accord particulier.</p>
+    <p>{{ issuer.name }} · {{ issuer.legal_form }} · SIRET {{ issuer.siret }} · {{ issuer.address_line1 }}, {{ issuer.address_zip }} {{ issuer.address_city }}</p>
+</div>
+
+</body>
+</html>
