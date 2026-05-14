@@ -1,12 +1,12 @@
-"""Studio WoW — vue de validation manuelle des demandes client.
+"""Lagriffe Studio — vue de validation manuelle des demandes client.
 
-Chaque demande reçue via le formulaire WoW arrive en `pending_validation`.
+Chaque demande reçue via le formulaire Lagriffe arrive en `pending_validation`.
 Jordan ou Thomas regarde le brief, vérifie qu'il s'agit d'un prospect
 sérieux (anti-spam + cible premium) et clique :
 
   • Approuver et lancer la preview → status passe à `approved`, le cron
     Netlify ramasse l'intake dans les 5 minutes et déclenche Claude
-    Code (~15 € de tokens consommés).
+    Code (~5-7 € de tokens (1 page mockup) consommés).
   • Refuser → status passe à `rejected`. Aucune génération.
 
 L'objectif est d'éviter de cramer 15 €/intake sur des soumissions
@@ -25,7 +25,7 @@ from typing import Optional
 import customtkinter as ctk
 
 from .. import theme as T
-from ..integrations.wow import repo as wow_repo
+from ..integrations.lagriffe import repo as lagriffe_repo
 from ..widgets.components import (
     Card, EmptyState, PrimaryButton, SecondaryButton, ViewHeader,
 )
@@ -39,9 +39,10 @@ STATUS_LABELS = {
     "approved": "Approuvé · en attente du cron",
     "processing": "Génération preview en cours",
     "sent": "Preview envoyée · attente client",
-    "paid": "Payé · à finaliser (Bloc 4)",
+    "paid": "Payé · à finaliser",
     "finalizing": "Finalisation en cours",
-    "live": "Site final en ligne",
+    "final_ready_review": "Site final prêt · À VALIDER avant envoi",
+    "live": "Site final envoyé · live",
     "rejected": "Refusé",
     "failed": "Échec preview",
     "final_failed": "Échec finalisation",
@@ -57,15 +58,16 @@ def _fmt_dt(iso: str) -> str:
         return iso[:16]
 
 
-class WowIntakesView(BaseView):
-    title = "Studio WoW — validations"
-    subtitle = "Validation manuelle des demandes avant génération preview. Anti-spam et tri premium."
+class LagriffeIntakesView(BaseView):
+    title = "Lagriffe Studio — validation finale"
+    subtitle = "Pipeline 100% auto. Ta seule action : valider le rendu du site final avant l'envoi du mail au client."
 
     def __init__(self, master, *, app_state, colors):
         super().__init__(master, app_state=app_state, colors=colors)
         self._intakes: list[dict] = []
         self._selected_id: Optional[str] = None
-        self._status_filter: str = "pending_validation"
+        # Filtre par défaut sur les sites prêts à valider (validation 3)
+        self._status_filter: str = "final_ready_review"
 
     def on_show(self):
         self._refresh()
@@ -83,7 +85,7 @@ class WowIntakesView(BaseView):
         bar.pack(fill="x", padx=24, pady=(0, 12))
         ctk.CTkLabel(bar, text="Filtrer :",
                      text_color=self.colors.text_muted).pack(side="left", padx=(0, 8))
-        self._status_var = ctk.StringVar(value="pending_validation")
+        self._status_var = ctk.StringVar(value="final_ready_review")
         self._status_menu = ctk.CTkOptionMenu(
             bar,
             variable=self._status_var,
@@ -103,45 +105,71 @@ class WowIntakesView(BaseView):
         )
         self._list_body.pack(fill="both", expand=True)
 
-        # Actions preview (validation avant génération)
-        self._detail_card = Card(self, title="Actions — avant preview")
-        self._detail_card.pack(fill="x", padx=24, pady=(0, 10))
-        actions = ctk.CTkFrame(self._detail_card.body, fg_color="transparent")
-        actions.pack(fill="x", padx=8, pady=8)
-        PrimaryButton(actions, text="Approuver et lancer la preview",
-                      command=self._approve_and_dispatch).pack(side="left", padx=4)
-        SecondaryButton(actions, text="Refuser",
-                        command=self._reject).pack(side="left", padx=4)
-        self._status_lbl = ctk.CTkLabel(actions, text="",
+        # ─── Carte "Relancer un pipeline en échec" ──────────────────────
+        # À utiliser quand un intake est en status 'failed' (timeout Claude,
+        # bug Puppeteer, etc.). Le brief reste intact ; on retente.
+        self._retry_card = Card(self, title="Relancer un pipeline en échec")
+        self._retry_card.pack(fill="x", padx=24, pady=(0, 12))
+        retry_body = ctk.CTkFrame(self._retry_card.body, fg_color="transparent")
+        retry_body.pack(fill="x", padx=8, pady=8)
+        ctk.CTkLabel(
+            retry_body,
+            text="Filtre la vue sur « Échec preview » pour voir les intakes en panne.\n"
+                 "Sélectionne-en un et clique « Relancer » : Claude reprendra le brief\n"
+                 "tel quel et tentera à nouveau la génération.",
+            anchor="w", justify="left", text_color=self.colors.text_muted,
+        ).pack(fill="x", padx=4, pady=(0, 8))
+        retry_btns = ctk.CTkFrame(retry_body, fg_color="transparent")
+        retry_btns.pack(fill="x", padx=4)
+        PrimaryButton(retry_btns, text="Relancer le pipeline",
+                      command=self._retry_pipeline).pack(side="left", padx=4)
+
+        # ─── Carte "Feedback client reçu par mail" ──────────────────────
+        # À utiliser quand l'intake est en status 'sent' (preview envoyée,
+        # en attente du retour mail) ou 'paid' (payé mais pas encore de
+        # feedback). Sans feedback, la fabrication finale ne démarre PAS.
+        self._feedback_card = Card(self, title="Feedback client reçu (par mail)")
+        self._feedback_card.pack(fill="x", padx=24, pady=(0, 12))
+        fb_body = ctk.CTkFrame(self._feedback_card.body, fg_color="transparent")
+        fb_body.pack(fill="x", padx=8, pady=8)
+        ctk.CTkLabel(
+            fb_body,
+            text="Le client a répondu au mail mockup (même un simple « OK ») ?\n"
+                 "Marque-le ici. Si le paiement est déjà reçu, la fabrication finale\n"
+                 "se déclenchera immédiatement. Sinon, on attendra Stripe.",
+            anchor="w", justify="left", text_color=self.colors.text_muted,
+        ).pack(fill="x", padx=4, pady=(0, 8))
+        ctk.CTkLabel(fb_body, text="Texte du feedback (optionnel) :",
+                     anchor="w", text_color=self.colors.text_muted,
+                     font=ctk.CTkFont(size=10)).pack(fill="x", padx=4)
+        self._fb_text = ctk.CTkTextbox(fb_body, height=60)
+        self._fb_text.pack(fill="x", padx=4, pady=(2, 8))
+        fb_btns = ctk.CTkFrame(fb_body, fg_color="transparent")
+        fb_btns.pack(fill="x", padx=4)
+        PrimaryButton(fb_btns, text="Marquer feedback reçu",
+                      command=self._mark_feedback_received).pack(side="left", padx=4)
+
+        # Validation 3 (et unique pour Lagriffe) : avant envoi du mail final au client
+        self._review_card = Card(self, title="Validation finale — avant envoi au client")
+        self._review_card.pack(fill="x", padx=24, pady=(0, 16))
+        review_body = ctk.CTkFrame(self._review_card.body, fg_color="transparent")
+        review_body.pack(fill="x", padx=8, pady=8)
+        ctk.CTkLabel(
+            review_body,
+            text="Pipeline Lagriffe 100% auto. Ta seule action :\n"
+                 "1. Ouvre l'URL du site final pour vérifier le rendu Claude.\n"
+                 "2. Si OK → clique « Approuver et envoyer ». Le client reçoit le mail final.",
+            anchor="w", justify="left", text_color=self.colors.text_muted,
+        ).pack(fill="x", padx=4, pady=(0, 12))
+        review_btns = ctk.CTkFrame(review_body, fg_color="transparent")
+        review_btns.pack(fill="x", padx=4, pady=(0, 4))
+        PrimaryButton(review_btns, text="Approuver et envoyer le mail final au client",
+                      command=self._approve_final_and_send).pack(side="left", padx=4)
+        SecondaryButton(review_btns, text="Ouvrir le site final",
+                        command=self._open_final_site).pack(side="left", padx=4)
+        self._status_lbl = ctk.CTkLabel(review_body, text="",
                                          text_color=self.colors.text_muted)
-        self._status_lbl.pack(side="left", padx=12)
-
-        # Actions finalisation (Bloc 4 — après paiement client)
-        self._final_card = Card(self, title="Actions — après paiement (finalisation)")
-        self._final_card.pack(fill="x", padx=24, pady=(0, 16))
-        final_body = ctk.CTkFrame(self._final_card.body, fg_color="transparent")
-        final_body.pack(fill="x", padx=8, pady=8)
-
-        # Champ retours client
-        ctk.CTkLabel(final_body, text="Retours du client (collés depuis le mail) :",
-                     anchor="w").pack(fill="x", padx=4, pady=(0, 2))
-        self._feedback_txt = ctk.CTkTextbox(final_body, height=80)
-        self._feedback_txt.pack(fill="x", padx=4, pady=(0, 6))
-
-        # Champ URL des assets
-        ctk.CTkLabel(final_body, text="URL des visuels fournis (Dropbox, Drive, GoFile…) :",
-                     anchor="w").pack(fill="x", padx=4, pady=(0, 2))
-        self._assets_var = ctk.StringVar()
-        self._assets_entry = ctk.CTkEntry(final_body, textvariable=self._assets_var)
-        self._assets_entry.pack(fill="x", padx=4, pady=(0, 8))
-
-        # Boutons finalisation
-        final_btns = ctk.CTkFrame(final_body, fg_color="transparent")
-        final_btns.pack(fill="x", padx=4, pady=(0, 4))
-        PrimaryButton(final_btns, text="Lancer la fabrication finale (~15 €)",
-                      command=self._launch_finalization).pack(side="left", padx=4)
-        SecondaryButton(final_btns, text="Enregistrer les retours seulement",
-                        command=self._save_feedback_only).pack(side="left", padx=4)
+        self._status_lbl.pack(fill="x", padx=4, pady=(8, 0))
 
     def _set_status(self, msg: str, *, error: bool = False):
         self._status_lbl.configure(
@@ -158,7 +186,7 @@ class WowIntakesView(BaseView):
     # -----------------------------------------------------------------
     def _refresh(self):
         try:
-            self._intakes = wow_repo.list_intakes(status=self._status_filter, limit=100)
+            self._intakes = lagriffe_repo.list_intakes(status=self._status_filter, limit=100)
         except Exception as exc:
             logger.warning("wow.list_intakes failed: %s", exc)
             self._intakes = []
@@ -287,7 +315,7 @@ class WowIntakesView(BaseView):
             "Confirmation",
             f"Approuver et lancer la preview Claude Code pour :\n\n"
             f"  {full_name} · {intake.get('company_name', '')}\n\n"
-            f"Coût estimé : ~15 € HT en tokens Claude Opus.\n"
+            f"Coût estimé : ~5-7 € HT en tokens Claude Opus (1 page mockup).\n"
             f"Cette action n'est pas réversible.",
         )
         if not confirm:
@@ -296,11 +324,11 @@ class WowIntakesView(BaseView):
         self._set_status("Approbation et déclenchement en cours…")
 
         def _run():
-            ok_approve = wow_repo.approve_intake(self._selected_id)
+            ok_approve = lagriffe_repo.approve_intake(self._selected_id)
             if not ok_approve:
                 self.after(0, lambda: self._set_status("Échec MAJ status.", error=True))
                 return
-            ok_dispatch, msg = wow_repo.dispatch_now(self._selected_id)
+            ok_dispatch, msg = lagriffe_repo.dispatch_now(self._selected_id)
             if ok_dispatch:
                 self.after(0, lambda: (
                     self._set_status(f"Preview déclenchée. {msg}"),
@@ -326,7 +354,7 @@ class WowIntakesView(BaseView):
             return
 
         def _run():
-            ok = wow_repo.reject_intake(self._selected_id, reason or "")
+            ok = lagriffe_repo.reject_intake(self._selected_id, reason or "")
             if ok:
                 self.after(0, lambda: (
                     self._set_status("Demande refusée."),
@@ -353,7 +381,7 @@ class WowIntakesView(BaseView):
             return
 
         def _run():
-            ok = wow_repo.save_client_feedback(
+            ok = lagriffe_repo.save_client_feedback(
                 self._selected_id, feedback=feedback, assets_url=assets,
             )
             if ok:
@@ -392,7 +420,7 @@ class WowIntakesView(BaseView):
             "Confirmation finalisation",
             f"Lancer la fabrication finale pour :\n\n"
             f"  {full_name} · {intake.get('company_name', '')}\n\n"
-            f"Coût estimé : ~15 € HT en tokens Claude Opus.\n"
+            f"Coût estimé : ~5-7 € HT en tokens Claude Opus (1 page mockup).\n"
             f"Cette action va CODER TOUTES LES PAGES et envoyer le site final\n"
             f"au client par mail à la fin.\n\n"
             f"Retours client : {len(feedback)} caractères\n"
@@ -405,11 +433,11 @@ class WowIntakesView(BaseView):
 
         def _run():
             # 1. Enregistre feedback + assets (même vides)
-            wow_repo.save_client_feedback(
+            lagriffe_repo.save_client_feedback(
                 self._selected_id, feedback=feedback, assets_url=assets,
             )
             # 2. Lance le workflow finalisation
-            ok, msg = wow_repo.launch_finalization(self._selected_id)
+            ok, msg = lagriffe_repo.launch_finalization(self._selected_id)
             if ok:
                 self.after(0, lambda: (
                     self._set_status(f"Finalisation lancée. {msg}"),
@@ -418,6 +446,177 @@ class WowIntakesView(BaseView):
             else:
                 self.after(0, lambda: self._set_status(
                     f"Échec lancement : {msg}", error=True,
+                ))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    # -----------------------------------------------------------------
+    # Relance pipeline en échec
+    # -----------------------------------------------------------------
+    def _retry_pipeline(self):
+        if not self._selected_id:
+            self._set_status("Sélectionne d'abord une demande.", error=True)
+            return
+        intake = next((i for i in self._intakes if i["id"] == self._selected_id), None)
+        if intake is None:
+            self._set_status("Demande introuvable.", error=True)
+            return
+
+        if intake.get("status") not in ("failed", "final_failed"):
+            self._set_status(
+                f"Status '{intake.get('status')}' — la relance se fait sur 'failed'.",
+                error=True,
+            )
+            return
+
+        full_name = f"{intake.get('client_first_name', '')} {intake.get('client_last_name', '')}".strip()
+        confirm = messagebox.askyesno(
+            "Relance pipeline",
+            f"Relancer la génération de la maquette pour :\n\n"
+            f"  {full_name} · {intake.get('company_name') or '(particulier)'}\n\n"
+            f"Erreur précédente :\n  {(intake.get('error_message') or '—')[:200]}\n\n"
+            f"Le brief reste intact, Claude retente. Coût : ~5-7 € de tokens.",
+        )
+        if not confirm:
+            return
+
+        self._set_status("Reset status + dispatch en cours…")
+
+        def _run():
+            # 1. Reset status à 'approved' pour que process-intakes le ramasse
+            ok_reset = lagriffe_repo.update_intake_status(self._selected_id, "approved")
+            if not ok_reset:
+                self.after(0, lambda: self._set_status("Échec reset status.", error=True))
+                return
+            # 2. Dispatch immédiat (sans attendre le cron 5 min)
+            ok, msg = lagriffe_repo.dispatch_now(self._selected_id)
+            if ok:
+                self.after(0, lambda: (
+                    self._set_status(f"Pipeline relancé. {msg}"),
+                    self._refresh(),
+                ))
+            else:
+                self.after(0, lambda: self._set_status(
+                    f"Reset OK mais dispatch échoué ({msg}). Le cron reprendra dans 5 min.",
+                ))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    # -----------------------------------------------------------------
+    # Feedback client reçu par mail
+    # -----------------------------------------------------------------
+    def _mark_feedback_received(self):
+        if not self._selected_id:
+            self._set_status("Sélectionne d'abord une demande.", error=True)
+            return
+        intake = next((i for i in self._intakes if i["id"] == self._selected_id), None)
+        if intake is None:
+            self._set_status("Demande introuvable.", error=True)
+            return
+
+        if intake.get("status") not in ("sent", "paid"):
+            self._set_status(
+                f"Status '{intake.get('status')}' — le feedback se marque sur 'sent' ou 'paid'.",
+                error=True,
+            )
+            return
+
+        feedback = self._fb_text.get("1.0", "end").strip() or "OK reçu manuellement via Triskell Command"
+
+        full_name = f"{intake.get('client_first_name', '')} {intake.get('client_last_name', '')}".strip()
+        confirm = messagebox.askyesno(
+            "Feedback client",
+            f"Marquer le feedback client reçu pour :\n\n"
+            f"  {full_name} · {intake.get('company_name') or '(particulier)'}\n\n"
+            f"Statut actuel : {STATUS_LABELS.get(intake.get('status'), intake.get('status'))}\n"
+            f"Si paiement déjà reçu → fabrication finale lancée tout de suite.\n"
+            f"Sinon → en attente du paiement Stripe.\n\n"
+            f"Feedback : {feedback[:100]}{'…' if len(feedback) > 100 else ''}",
+        )
+        if not confirm:
+            return
+
+        self._set_status("Enregistrement feedback…")
+
+        def _run():
+            ok, msg = lagriffe_repo.mark_feedback_received(
+                self._selected_id, feedback_text=feedback,
+            )
+            if ok:
+                self.after(0, lambda: (
+                    self._set_status(msg),
+                    self._fb_text.delete("1.0", "end"),
+                    self._refresh(),
+                ))
+            else:
+                self.after(0, lambda: self._set_status(
+                    f"Échec : {msg}", error=True,
+                ))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    # -----------------------------------------------------------------
+    # Validation finale (avant envoi du mail au client)
+    # -----------------------------------------------------------------
+    def _open_final_site(self):
+        if not self._selected_id:
+            self._set_status("Sélectionne d'abord une demande.", error=True)
+            return
+        intake = next((i for i in self._intakes if i["id"] == self._selected_id), None)
+        if intake is None:
+            self._set_status("Demande introuvable.", error=True)
+            return
+        url = intake.get("final_site_url") or intake.get("mockup_url")
+        if not url:
+            self._set_status("Pas d'URL de site sur cet intake.", error=True)
+            return
+        import webbrowser
+        webbrowser.open(url)
+        self._set_status(f"Ouverture : {url}")
+
+    def _approve_final_and_send(self):
+        """Validation finale : envoie le mail final au client + bascule live."""
+        if not self._selected_id:
+            self._set_status("Sélectionne d'abord une demande.", error=True)
+            return
+        intake = next((i for i in self._intakes if i["id"] == self._selected_id), None)
+        if intake is None:
+            self._set_status("Demande introuvable.", error=True)
+            return
+
+        if intake.get("status") != "final_ready_review":
+            self._set_status(
+                f"Impossible : status '{intake.get('status')}'. "
+                f"Attendu 'final_ready_review'.",
+                error=True,
+            )
+            return
+
+        full_name = f"{intake.get('client_first_name', '')} {intake.get('client_last_name', '')}".strip()
+        confirm = messagebox.askyesno(
+            "Validation finale",
+            f"Envoyer le mail final au client :\n\n"
+            f"  {full_name} <{intake.get('client_email', '')}>\n"
+            f"  Site : {intake.get('final_site_url', '')}\n\n"
+            f"Le client recevra un mail avec l'URL du site, la politique\n"
+            f"satisfaction/remboursement, et l'info facture mensuelle.\n\n"
+            f"Continuer ?",
+        )
+        if not confirm:
+            return
+
+        self._set_status("Envoi du mail final…")
+
+        def _run():
+            ok, msg = lagriffe_repo.approve_final_and_send(self._selected_id)
+            if ok:
+                self.after(0, lambda: (
+                    self._set_status(msg),
+                    self._refresh(),
+                ))
+            else:
+                self.after(0, lambda: self._set_status(
+                    f"Échec : {msg}", error=True,
                 ))
 
         threading.Thread(target=_run, daemon=True).start()

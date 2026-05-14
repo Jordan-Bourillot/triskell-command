@@ -25,6 +25,7 @@ from .views.dashboard import DashboardView
 from .views.autopilot import AutopilotView
 from .views.billing import BillingView
 from .views.clients import ClientsView
+from .views.clients_master import ClientsMasterView
 from .views.drafts import DraftsView
 from .views.funnel import FunnelView
 from .views.la_forge import LaForgeView
@@ -33,8 +34,11 @@ from .views.phare import PhareView
 from .views.prospects import ProspectsView
 from .views.publish import PublishView
 from .views.replies import RepliesView
+from .views.studio import StudioView
 from .views.templates import TemplatesView
 from .views.wow_intakes import WowIntakesView
+from .views.lagriffe_intakes import LagriffeIntakesView
+from .views.rankus_intakes import RankusIntakesView
 from .widgets.sidebar import Sidebar
 from .widgets.splash import SplashScreen
 from .widgets.status_bar import StatusBar
@@ -57,11 +61,15 @@ VIEW_REGISTRY: dict[str, type[BaseView]] = {
     "campaigns":  CampaignsView,
     "publish":    PublishView,
     "clients":    ClientsView,
+    "clients_master": ClientsMasterView,
     "funnel":     FunnelView,
     "dashboard":  DashboardView,
     "phare":      PhareView,
     "wow_intakes": WowIntakesView,
+    "rankus_intakes": RankusIntakesView,
+    "lagriffe_intakes": LagriffeIntakesView,
     "la_forge":   LaForgeView,
+    "studio":     StudioView,
     "billing":    BillingView,
     "config":     ConfigView,
 }
@@ -150,6 +158,20 @@ class TriskellCommandApp(ctk.CTk):
 
         pulse_bus.subscribe(_on_pulse_event)
 
+        # Badges sidebar « failed » sur Lagriffe/Rankus/WoW : refresh initial
+        # puis polling toutes les 60 s. Les changements ponctuels sont aussi
+        # captés par le SyncPoller via _refresh_intake_failed_badges().
+        def _schedule_failed_badges():
+            try:
+                self._refresh_intake_failed_badges()
+            except Exception:
+                pass
+            try:
+                self.after(60_000, _schedule_failed_badges)
+            except Exception:
+                pass
+        self.after(2_000, _schedule_failed_badges)
+
         # Vues — instanciation lazy (pas tout d'un coup, gain perfs)
         self._views: dict[str, BaseView] = {}
         self._current_view: BaseView | None = None
@@ -224,6 +246,16 @@ class TriskellCommandApp(ctk.CTk):
         return view
 
     def show_view(self, view_id: str) -> None:
+        # Force hide des tooltips FAB (bug visuel : le tooltip restait collé
+        # à l'écran quand on cliquait dans la sidebar pendant le hover du FAB)
+        for fab_name in ("claude_fab", "thomas_fab"):
+            fab = getattr(self, fab_name, None)
+            if fab is not None:
+                try:
+                    fab._hide_tooltip()
+                except Exception:
+                    pass
+
         # Cas spécial : "help" ouvre la modale d'aide sans changer de vue
         if view_id == "help":
             from .widgets.help_dialog import HelpDialog
@@ -518,6 +550,51 @@ class TriskellCommandApp(ctk.CTk):
 
         threading.Thread(target=worker, daemon=True,
                          name="ForgeBadgeRefresh").start()
+
+    # -----------------------------------------------------------------
+    def _refresh_intake_failed_badges(self) -> None:
+        """Recompte les intakes en status `failed` ou `final_failed` sur
+        chacune des 3 marques (Lagriffe / RankUs / WoW) et active le
+        clignotant or sur l'item sidebar correspondant si > 0.
+
+        Sert d'alerte visuelle pour qu'on n'oublie pas un client dont le
+        pipeline a planté. Tourne en thread (HTTP Supabase)."""
+        import threading
+
+        def worker():
+            counters: dict[str, int] = {}
+            mapping = [
+                ("lagriffe_intakes", "triskell_command.integrations.lagriffe.repo"),
+                ("rankus_intakes",   "triskell_command.integrations.rankus.repo"),
+                ("wow_intakes",      "triskell_command.integrations.wow.repo"),
+            ]
+            for view_id, mod_path in mapping:
+                try:
+                    import importlib
+                    mod = importlib.import_module(mod_path)
+                    n_failed = len(mod.list_intakes(status="failed", limit=100))
+                    try:
+                        n_final = len(mod.list_intakes(status="final_failed", limit=100))
+                    except Exception:
+                        n_final = 0
+                    counters[view_id] = n_failed + n_final
+                except Exception as exc:
+                    logger.debug("refresh_intake_failed_badges %s: %s", view_id, exc)
+                    counters[view_id] = 0
+
+            def apply():
+                for vid, n in counters.items():
+                    try:
+                        self.sidebar.set_attention(vid, n > 0)
+                    except Exception:
+                        pass
+            try:
+                self.after(0, apply)
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True,
+                         name="IntakeFailedBadges").start()
 
     # -----------------------------------------------------------------
     def _refresh_unread_badge(self) -> None:
@@ -833,20 +910,10 @@ class TriskellCommandApp(ctk.CTk):
             self._refresh_unread_badge()
         except Exception:
             pass
-        # Bridge Teddy → La Forge du Web : poller IMAP filtré qui détecte
-        # les mails "Demande de création de site" et dépose les briefs
-        # dans forge_pending_briefs.
-        try:
-            from .integrations import teddy_to_forge
-            teddy_to_forge.start_poller(self.app_state)
-            logger.info("TeddyToForge bridge actif (cycle 5 min).")
-        except Exception as exc:
-            logger.debug("TeddyToForge non démarré : %s", exc)
-        # Badge sidebar La Forge : compte des briefs en attente d'import
-        try:
-            self._refresh_forge_badge()
-        except Exception:
-            pass
+        # Bridge Teddy → La Forge : désactivé (La Forge en sommeil
+        # tant que l'app autonome n'est pas codée). Code conservé dans
+        # integrations/teddy_to_forge.py pour réactivation future.
+        # Idem pour le badge sidebar (_refresh_forge_badge).
 
     def _on_remote_change(self, table: str) -> None:
         """Appelée sur le mainloop Tk quand Supabase signale un changement."""
@@ -864,6 +931,9 @@ class TriskellCommandApp(ctk.CTk):
         # Forge : nouveau brief / projet → MAJ badge sidebar
         if table in ("forge_pending_briefs", "forge_projects"):
             self._refresh_forge_badge()
+        # Intakes (Lagriffe / Rankus / WoW) : nouveau failed → MAJ badge sidebar
+        if table in ("lagriffe_intakes", "rankus_intakes", "wow_intakes"):
+            self._refresh_intake_failed_badges()
         # Status bar : toujours utile
         try:
             self.status_bar.refresh()

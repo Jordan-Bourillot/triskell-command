@@ -117,6 +117,20 @@ class StatusBar(ctk.CTkFrame):
         self._inner.pack(fill="both", expand=True, padx=T.SPACE_LG, pady=4)
 
         self.refresh()
+        # Auto-refresh toutes les 60s — surtout pour mettre à jour le statut
+        # IA (health check Anthropic, ttl 5 min en cache). Le widget est
+        # idempotent : si rien n'a changé, c'est gratuit.
+        self._auto_refresh_loop()
+
+    def _auto_refresh_loop(self) -> None:
+        try:
+            self.refresh()
+        except Exception:
+            pass
+        try:
+            self.after(60_000, self._auto_refresh_loop)
+        except Exception:
+            pass
 
     def refresh(self) -> None:
         """Recalcule l'état complet et reconstruit la barre."""
@@ -125,13 +139,24 @@ class StatusBar(ctk.CTkFrame):
 
         c = self._colors
 
-        # === État IA ===
-        ai_ok = self._has_ai_key()
+        # === État IA — diagnostic fin via health check Anthropic ===
+        # Statuts possibles : ok / not_configured / invalid_key /
+        # insufficient_credit / rate_limited / offline / unknown.
+        # Le health check est non-bloquant : cache 5 min, refresh async.
+        try:
+            from ..integrations import anthropic_health
+            snap = anthropic_health.get_status()
+            ai_status = snap.get("status", "unknown")
+            ai_detail = snap.get("error_detail", "")
+        except Exception:
+            ai_status, ai_detail = "unknown", ""
+        from ..integrations import anthropic_health as _ah_mod
+        ai_text, ai_ok, ai_color_hint = _ah_mod.label_for_status(ai_status)
         StatusPill(
             self._inner, label="IA",
             ok=ai_ok, colors=c,
-            on_click=lambda: self._on_navigate("config"),
-            ok_text="prête", ko_text="clé manquante",
+            on_click=lambda s=ai_status, d=ai_detail: self._on_ai_pill_click(s, d),
+            ok_text=ai_text, ko_text=ai_text,
         ).pack(side="left", padx=(0, T.SPACE_LG))
 
         # === État Mail ===
@@ -292,6 +317,24 @@ class StatusBar(ctk.CTkFrame):
         keys = self._app_state.get("ai", "api_keys", default={}) or {}
         provider = self._app_state.get("ai", "selected_provider", default="anthropic")
         return bool(keys.get(provider))
+
+    def _on_ai_pill_click(self, status: str, detail: str) -> None:
+        """Action au clic sur la pastille IA selon l'état.
+
+        - insufficient_credit → ouvre directement la page billing Anthropic
+        - invalid_key / not_configured → page Réglages
+        - autres → page Réglages aussi (l'utilisateur peut vérifier)
+        """
+        import webbrowser
+        if status == "insufficient_credit":
+            webbrowser.open("https://console.anthropic.com/settings/billing")
+            return
+        if status == "rate_limited":
+            # Rate limit : on offre quand même un lien vers le dashboard
+            webbrowser.open("https://console.anthropic.com/settings/limits")
+            return
+        # Cas génériques → page Réglages locale
+        self._on_navigate("config")
 
     def _has_smtp(self) -> bool:
         outreach = self._app_state.get("outreach", default={}) or {}

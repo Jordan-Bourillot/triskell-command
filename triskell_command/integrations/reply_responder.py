@@ -384,6 +384,13 @@ def _worker_loop(app_state) -> None:
                 from . import pulse_bus
                 sent = result.get("sent", 0) if isinstance(result, dict) else 0
                 err = result.get("error") if isinstance(result, dict) else None
+                # Coupures réseau transitoires (Supabase injoignable, socket
+                # fermée) : on n'allume pas la LED rouge — le cycle suivant
+                # retentera dans 60s.
+                transient = isinstance(err, str) and (
+                    err == "supabase_unavailable"
+                    or err.startswith("fetch:")
+                )
                 if sent > 0:
                     pulse_bus.report(
                         "responder", "active",
@@ -392,11 +399,15 @@ def _worker_loop(app_state) -> None:
                               else f"{sent} drafts envoyés"),
                         relative_time="à l'instant",
                     )
-                elif err and err != "supabase_unavailable":
+                elif err and not transient:
                     pulse_bus.report(
                         "responder", "error",
                         error=str(err),
                     )
+                else:
+                    # Cycle propre ou erreur transitoire : on remet la LED
+                    # en idle pour effacer un état d'erreur précédent.
+                    pulse_bus.report("responder", "idle")
             except Exception:
                 pass
         except Exception as exc:

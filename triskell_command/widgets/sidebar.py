@@ -54,6 +54,7 @@ SIDEBAR_SECTIONS = [
         ("publish",    "broadcast", "Publier sur les réseaux"),
     ]),
     ("LIVRAISON", [
+        ("clients_master", "search", "Fiches clients"),
         ("clients",    "doc",       "Projets clients"),
         ("billing",    "doc",       "Facturation"),
     ]),
@@ -65,8 +66,10 @@ SIDEBAR_SECTIONS = [
         ("phare",      "broadcast", "Le Phare — SEO"),
     ]),
     ("FABRICATION", [
-        ("la_forge",   "globe",     "La Forge du Web"),
-        ("wow_intakes","sparkle",   "Studio WoW — validations"),
+        ("la_forge",         "globe",   "La Forge du Web"),
+        ("lagriffe_intakes", "sparkle", "Lagriffe — validations"),
+        ("rankus_intakes",   "sparkle", "RankUs — validations"),
+        ("wow_intakes",      "sparkle", "Studio WoW — validations"),
     ]),
 ]
 # Compat : on garde NAV_ITEMS comme la concat de toutes les sections
@@ -302,11 +305,42 @@ class Sidebar(ctk.CTkFrame):
         sep = ctk.CTkFrame(self, fg_color=colors.border, height=1, corner_radius=0)
         sep.pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_MD))
 
-        # ----- Bouton "Écosystème" — carte mentale interne du projet -----
-        # Ouvre dans le navigateur la vue d'ensemble Triskell (Jordan + Thomas).
-        # N'est PAS un view_id : c'est un lien externe, donc pas dans la nav.
-        eco_btn = ctk.CTkButton(
+        # ----- Zone scrollable contenant Écosystème + Nav + Footer items -----
+        # Permet d'avoir beaucoup d'items (FABRICATION x3, etc.) sans déborder
+        # quand la fenêtre est petite.
+        scroll = ctk.CTkScrollableFrame(
             self,
+            fg_color="transparent",
+            corner_radius=0,
+            scrollbar_button_color=colors.border,
+            scrollbar_button_hover_color=colors.accent,
+        )
+        scroll.pack(fill="both", expand=True, padx=0, pady=0)
+
+        # ----- Bouton CTA principal "+ Nouveau site" (Studio) -----
+        # Bouton visuellement fort : rempli accent, plein-large, en haut.
+        studio_btn = ctk.CTkButton(
+            scroll,
+            text="✦   + Nouveau site",
+            command=lambda: self._handle_click("studio"),
+            fg_color=colors.accent,
+            hover_color=colors.accent_hover,
+            text_color="#ffffff",
+            height=44,
+            corner_radius=10,
+            anchor="w",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_BODY, "bold"),
+        )
+        studio_btn.pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_SM))
+        ctk.CTkLabel(
+            scroll, text="Studio · génération à partir d'un sujet",
+            font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "italic"),
+            text_color=colors.text_muted, anchor="w",
+        ).pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_LG))
+
+        # ----- Bouton "Écosystème" -----
+        eco_btn = ctk.CTkButton(
+            scroll,
             text="🌟   Écosystème",
             command=lambda: webbrowser.open(ECOSYSTEME_URL),
             fg_color="transparent",
@@ -323,36 +357,32 @@ class Sidebar(ctk.CTkFrame):
 
         # ----- Sections de navigation regroupées -----
         for sec_idx, (section_label, items) in enumerate(SIDEBAR_SECTIONS):
-            # Espacement avant chaque section (sauf la 1re)
             top_pad = T.SPACE_LG if sec_idx > 0 else 0
             ctk.CTkLabel(
-                self, text=section_label,
+                scroll, text=section_label,
                 font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
                 text_color=colors.text_muted, anchor="w",
             ).pack(fill="x", padx=T.SPACE_LG, pady=(top_pad, T.SPACE_SM))
 
             for view_id, icon_name, label in items:
                 item = SidebarItem(
-                    self, view_id=view_id, icon_name=icon_name, label=label,
+                    scroll, view_id=view_id, icon_name=icon_name, label=label,
                     on_click=self._handle_click, colors=colors,
                     is_active=(view_id == active_view),
                 )
                 item.pack(fill="x", pady=2)
                 self._items[view_id] = item
 
-        # ----- Spacer -----
-        ctk.CTkFrame(self, fg_color="transparent").pack(fill="both", expand=True)
-
-        # ----- Section: système / réglages -----
+        # ----- Section: système / réglages (dans le scroll, en bas) -----
         ctk.CTkLabel(
-            self, text="SYSTÈME",
+            scroll, text="SYSTÈME",
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_TINY, "bold"),
             text_color=colors.text_muted, anchor="w",
-        ).pack(fill="x", padx=T.SPACE_LG, pady=(0, T.SPACE_SM))
+        ).pack(fill="x", padx=T.SPACE_LG, pady=(T.SPACE_LG, T.SPACE_SM))
 
         for view_id, icon_name, label in FOOTER_ITEMS:
             item = SidebarItem(
-                self, view_id=view_id, icon_name=icon_name, label=label,
+                scroll, view_id=view_id, icon_name=icon_name, label=label,
                 on_click=self._handle_click, colors=colors,
                 is_active=(view_id == active_view),
             )

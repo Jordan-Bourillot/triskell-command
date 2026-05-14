@@ -1,12 +1,12 @@
-"""Studio WoW — vue de validation manuelle des demandes client.
+"""RankUs Studio — vue de validation manuelle des demandes client.
 
-Chaque demande reçue via le formulaire WoW arrive en `pending_validation`.
+Chaque demande reçue via le formulaire RankUs arrive en `pending_validation`.
 Jordan ou Thomas regarde le brief, vérifie qu'il s'agit d'un prospect
 sérieux (anti-spam + cible premium) et clique :
 
   • Approuver et lancer la preview → status passe à `approved`, le cron
     Netlify ramasse l'intake dans les 5 minutes et déclenche Claude
-    Code (~15 € de tokens consommés).
+    Code (~10-15 € de tokens (2 pages mockup) consommés).
   • Refuser → status passe à `rejected`. Aucune génération.
 
 L'objectif est d'éviter de cramer 15 €/intake sur des soumissions
@@ -25,7 +25,7 @@ from typing import Optional
 import customtkinter as ctk
 
 from .. import theme as T
-from ..integrations.wow import repo as wow_repo
+from ..integrations.rankus import repo as rankus_repo
 from ..widgets.components import (
     Card, EmptyState, PrimaryButton, SecondaryButton, ViewHeader,
 )
@@ -57,9 +57,9 @@ def _fmt_dt(iso: str) -> str:
         return iso[:16]
 
 
-class WowIntakesView(BaseView):
-    title = "Studio WoW — validations"
-    subtitle = "Validation manuelle des demandes avant génération preview. Anti-spam et tri premium."
+class RankusIntakesView(BaseView):
+    title = "RankUs Studio — validations"
+    subtitle = "Validation manuelle des demandes avant génération preview. Anti-spam et tri qualité."
 
     def __init__(self, master, *, app_state, colors):
         super().__init__(master, app_state=app_state, colors=colors)
@@ -158,7 +158,7 @@ class WowIntakesView(BaseView):
     # -----------------------------------------------------------------
     def _refresh(self):
         try:
-            self._intakes = wow_repo.list_intakes(status=self._status_filter, limit=100)
+            self._intakes = rankus_repo.list_intakes(status=self._status_filter, limit=100)
         except Exception as exc:
             logger.warning("wow.list_intakes failed: %s", exc)
             self._intakes = []
@@ -296,11 +296,11 @@ class WowIntakesView(BaseView):
         self._set_status("Approbation et déclenchement en cours…")
 
         def _run():
-            ok_approve = wow_repo.approve_intake(self._selected_id)
+            ok_approve = rankus_repo.approve_intake(self._selected_id)
             if not ok_approve:
                 self.after(0, lambda: self._set_status("Échec MAJ status.", error=True))
                 return
-            ok_dispatch, msg = wow_repo.dispatch_now(self._selected_id)
+            ok_dispatch, msg = rankus_repo.dispatch_now(self._selected_id)
             if ok_dispatch:
                 self.after(0, lambda: (
                     self._set_status(f"Preview déclenchée. {msg}"),
@@ -326,7 +326,7 @@ class WowIntakesView(BaseView):
             return
 
         def _run():
-            ok = wow_repo.reject_intake(self._selected_id, reason or "")
+            ok = rankus_repo.reject_intake(self._selected_id, reason or "")
             if ok:
                 self.after(0, lambda: (
                     self._set_status("Demande refusée."),
@@ -353,7 +353,7 @@ class WowIntakesView(BaseView):
             return
 
         def _run():
-            ok = wow_repo.save_client_feedback(
+            ok = rankus_repo.save_client_feedback(
                 self._selected_id, feedback=feedback, assets_url=assets,
             )
             if ok:
@@ -405,11 +405,11 @@ class WowIntakesView(BaseView):
 
         def _run():
             # 1. Enregistre feedback + assets (même vides)
-            wow_repo.save_client_feedback(
+            rankus_repo.save_client_feedback(
                 self._selected_id, feedback=feedback, assets_url=assets,
             )
             # 2. Lance le workflow finalisation
-            ok, msg = wow_repo.launch_finalization(self._selected_id)
+            ok, msg = rankus_repo.launch_finalization(self._selected_id)
             if ok:
                 self.after(0, lambda: (
                     self._set_status(f"Finalisation lancée. {msg}"),
