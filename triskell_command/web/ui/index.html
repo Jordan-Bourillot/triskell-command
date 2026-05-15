@@ -2,7 +2,7 @@
 <html lang="fr" data-theme="light">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=1280" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Triskell Command</title>
 
   <!-- Tailwind via CDN (suffit pour le prototype, on packagera après) -->
@@ -73,21 +73,64 @@
   </script>
 </head>
 
-<body class="font-sans antialiased bg-bg text-text overflow-hidden h-screen">
+<body class="font-sans antialiased bg-bg text-text h-screen overflow-hidden md:overflow-hidden">
 
-  <div class="flex h-screen">
+  <!-- ===================== Header MOBILE (visible <md uniquement) ===================== -->
+  <!-- Bouton burger + brand. Le bouton ouvre la sidebar en drawer (slide-in). -->
+  <header id="mobile-header"
+          class="md:hidden fixed top-0 inset-x-0 z-30 h-14 bg-surface border-b border-border
+                 flex items-center justify-between px-4">
+    <button id="mobile-menu-toggle"
+            aria-label="Ouvrir le menu"
+            class="w-10 h-10 flex items-center justify-center rounded-lg
+                   text-text hover:bg-bg active:scale-95 transition-all">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <line x1="3" y1="6" x2="21" y2="6" stroke-linecap="round" />
+        <line x1="3" y1="12" x2="21" y2="12" stroke-linecap="round" />
+        <line x1="3" y1="18" x2="21" y2="18" stroke-linecap="round" />
+      </svg>
+    </button>
+    <div class="flex items-center gap-2">
+      <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-accent to-accent-glow shadow-soft flex items-center justify-center text-white font-bold text-sm">⛯</div>
+      <div class="font-display text-base font-bold leading-none">Triskell</div>
+    </div>
+    <div class="w-10 h-10"></div> <!-- spacer pour centrer le brand -->
+  </header>
+
+  <!-- Overlay foncé qui apparaît derrière le drawer mobile (clique pour fermer) -->
+  <div id="mobile-sidebar-overlay"
+       class="md:hidden fixed inset-0 z-40 bg-black/50 hidden"></div>
+
+  <div class="flex h-screen pt-14 md:pt-0">
     <!-- ===================== Sidebar ===================== -->
+    <!-- Desktop : statique à gauche.
+         Mobile : drawer fixe, caché par défaut (-translate-x-full),
+                  s'ouvre quand on toggle .sidebar-open sur le body. -->
     <aside id="sidebar"
-           class="w-64 shrink-0 bg-surface border-r border-border flex flex-col">
-      <!-- Brand -->
-      <div class="px-6 pt-6 pb-4 flex items-center gap-3">
-        <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-accent to-accent-glow shadow-soft flex items-center justify-center text-white font-bold">
-          ⛯
+           class="fixed md:static top-0 left-0 z-50 h-full w-72 md:w-64 shrink-0
+                  bg-surface border-r border-border flex flex-col
+                  transform -translate-x-full md:translate-x-0
+                  transition-transform duration-200 ease-out">
+      <!-- Brand + bouton fermer (mobile uniquement) -->
+      <div class="px-6 pt-6 pb-4 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-accent to-accent-glow shadow-soft flex items-center justify-center text-white font-bold">
+            ⛯
+          </div>
+          <div>
+            <div class="font-display text-lg font-bold leading-none">Triskell</div>
+            <div class="text-[10px] tracking-widest font-bold text-accent mt-1">COMMAND</div>
+          </div>
         </div>
-        <div>
-          <div class="font-display text-lg font-bold leading-none">Triskell</div>
-          <div class="text-[10px] tracking-widest font-bold text-accent mt-1">COMMAND</div>
-        </div>
+        <button id="mobile-sidebar-close"
+                aria-label="Fermer le menu"
+                class="md:hidden w-9 h-9 flex items-center justify-center rounded-lg
+                       text-text-muted hover:text-text hover:bg-bg active:scale-95 transition-all">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <line x1="6" y1="6" x2="18" y2="18" stroke-linecap="round" />
+            <line x1="18" y1="6" x2="6" y2="18" stroke-linecap="round" />
+          </svg>
+        </button>
       </div>
 
       <hr class="border-border mx-6" />
@@ -235,8 +278,8 @@
     </aside>
 
     <!-- ===================== Main area ===================== -->
-    <main id="main" class="flex-1 overflow-y-auto relative">
-      <div id="content" class="px-12 py-10 max-w-[1280px]"></div>
+    <main id="main" class="flex-1 overflow-y-auto relative w-full">
+      <div id="content" class="px-4 py-5 sm:px-8 sm:py-8 md:px-12 md:py-10 max-w-[1280px]"></div>
     </main>
   </div>
 

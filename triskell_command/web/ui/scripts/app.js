@@ -91,8 +91,19 @@ const App = {
 
     // Bind sidebar
     document.querySelectorAll('[data-view]').forEach(btn => {
-      btn.addEventListener('click', () => this.show(btn.dataset.view));
+      btn.addEventListener('click', () => {
+        this.show(btn.dataset.view);
+        this.closeMobileSidebar(); // ferme le drawer après navigation (mobile)
+      });
     });
+
+    // Mobile drawer : burger ouvre, croix + overlay ferment
+    const mobileToggle = document.getElementById('mobile-menu-toggle');
+    if (mobileToggle) mobileToggle.addEventListener('click', () => this.openMobileSidebar());
+    const mobileClose = document.getElementById('mobile-sidebar-close');
+    if (mobileClose) mobileClose.addEventListener('click', () => this.closeMobileSidebar());
+    const mobileOverlay = document.getElementById('mobile-sidebar-overlay');
+    if (mobileOverlay) mobileOverlay.addEventListener('click', () => this.closeMobileSidebar());
 
     // Bind FAB Claude (rond + label cliquables)
     const fab = document.getElementById('claude-fab');
@@ -124,6 +135,7 @@ const App = {
     window.addEventListener('keydown', (e) => {
       if (e.key === 'F12') { e.preventDefault(); Claude.open(); }
       if (e.ctrlKey && e.key === 't') { e.preventDefault(); this.cycleTheme(); }
+      if (e.key === 'Escape') this.closeMobileSidebar();
       // Ctrl+Shift+M (ou Cmd+Shift+M sur Mac) → ouvre le composer Mails de Triskell Command
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
@@ -141,6 +153,33 @@ const App = {
 
     // Polling claude attention (la veille proactive)
     setInterval(() => Claude.checkPending(), 60_000);
+
+    // Polling desktop notifications sur nouveaux mails entrants
+    if (typeof Mails !== 'undefined' && Mails.startDesktopNotifPolling) {
+      Mails.startDesktopNotifPolling();
+    }
+  },
+
+  // ---- Mobile sidebar drawer (visible <md uniquement) ----
+  openMobileSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('mobile-sidebar-overlay');
+    if (!sidebar || !overlay) return;
+    sidebar.classList.remove('-translate-x-full');
+    sidebar.classList.add('translate-x-0');
+    overlay.classList.remove('hidden');
+    document.body.classList.add('overflow-hidden');
+  },
+
+  closeMobileSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('mobile-sidebar-overlay');
+    if (!sidebar || !overlay) return;
+    // Sur desktop la sidebar est toujours visible (md:translate-x-0), pas besoin de toggle.
+    sidebar.classList.add('-translate-x-full');
+    sidebar.classList.remove('translate-x-0');
+    overlay.classList.add('hidden');
+    // Pas de unset overflow-hidden : le body est déjà overflow-hidden globalement
   },
 
   async applyThemeFromSettings() {
