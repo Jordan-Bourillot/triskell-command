@@ -948,6 +948,7 @@ const Mails = {
               <button data-cmd="insertOrderedList" title="Liste numérotée" class="cmp-tb-btn">1.</button>
               <div class="w-px h-5 bg-border mx-1"></div>
               <button data-cmd="createLink" title="Lien" class="cmp-tb-btn">🔗</button>
+              <button data-cmd="insert-image" title="Insérer une image dans le corps du mail" class="cmp-tb-btn">🖼</button>
               <button data-cmd="formatBlock-h2" title="Titre" class="cmp-tb-btn font-bold text-sm">H</button>
               <button data-cmd="formatBlock-blockquote" title="Citation" class="cmp-tb-btn">"</button>
               <div class="w-px h-5 bg-border mx-1"></div>
@@ -964,6 +965,20 @@ const Mails = {
             <div id="cmp-body-html" contenteditable="true"
                  class="hidden w-full min-h-[300px] px-4 py-3 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed"
                  style="white-space: pre-wrap;"></div>
+          </div>
+
+          <!-- Pièces jointes -->
+          <div id="cmp-attachments-section">
+            <div class="flex items-center justify-between mb-2">
+              <label class="text-[11px] font-medium text-text-secondary uppercase tracking-wider">Pièces jointes</label>
+              <button id="cmp-add-attachment" type="button" class="text-[11px] text-accent font-semibold hover:underline flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+                Joindre un fichier
+              </button>
+            </div>
+            <div id="cmp-attachments-list" class="space-y-1.5 text-xs"></div>
+            <input id="cmp-attachment-input" type="file" multiple class="hidden">
+            <div id="cmp-attachments-total" class="text-[10px] text-text-muted mt-1.5"></div>
           </div>
 
           <div id="cmp-status" class="text-xs text-text-muted"></div>
@@ -1042,6 +1057,146 @@ const Mails = {
     textBtn.onclick = () => setMode('text');
     htmlBtn.onclick = () => setMode('html');
 
+    // ----------------------------------------------------------------------
+    // Pièces jointes + images inline (CID)
+    // ----------------------------------------------------------------------
+    // Format d'une entrée : { filename, content_b64, content_type, size, inline, cid }
+    const attachments = [];
+    const MAX_TOTAL_BYTES = 22 * 1024 * 1024; // 22 Mo (la plupart des SMTP plafonnent à 25)
+
+    const attListEl   = overlay.querySelector('#cmp-attachments-list');
+    const attInputEl  = overlay.querySelector('#cmp-attachment-input');
+    const attAddBtn   = overlay.querySelector('#cmp-add-attachment');
+    const attTotalEl  = overlay.querySelector('#cmp-attachments-total');
+
+    const fmtSize = (n) => {
+      if (n == null) return '';
+      if (n < 1024) return `${n} o`;
+      if (n < 1024 * 1024) return `${Math.round(n / 1024)} Ko`;
+      return `${(n / 1024 / 1024).toFixed(1)} Mo`;
+    };
+
+    const totalSize = () => attachments.reduce((s, a) => s + (a.size || 0), 0);
+
+    const renderAttachments = () => {
+      const visible = attachments.filter(a => !a.inline);
+      if (!visible.length) {
+        attListEl.innerHTML = '<div class="text-text-muted italic">Aucune pièce jointe pour l\'instant.</div>';
+      } else {
+        attListEl.innerHTML = visible.map((a) => {
+          const realIdx = attachments.indexOf(a);
+          return `<div class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-bg border border-border">
+             <div class="flex items-center gap-2 min-w-0 flex-1">
+               <span class="shrink-0">📄</span>
+               <span class="truncate font-medium text-text">${this._escape(a.filename)}</span>
+               <span class="text-text-muted shrink-0">${fmtSize(a.size)}</span>
+             </div>
+             <button data-att-rm="${realIdx}" type="button" title="Retirer cette pièce jointe"
+                     class="text-text-muted hover:text-danger text-lg leading-none px-1">×</button>
+           </div>`;
+        }).join('');
+        attListEl.querySelectorAll('[data-att-rm]').forEach(b => {
+          b.onclick = () => {
+            attachments.splice(Number(b.dataset.attRm), 1);
+            renderAttachments();
+          };
+        });
+      }
+      const tot = totalSize();
+      if (tot > 0) {
+        const over = tot > MAX_TOTAL_BYTES;
+        attTotalEl.textContent = `Total : ${fmtSize(tot)}${over ? ' — limite SMTP dépassée, retire des fichiers.' : ' / 22 Mo max recommandé'}`;
+        attTotalEl.className = `text-[10px] mt-1.5 ${over ? 'text-danger font-semibold' : 'text-text-muted'}`;
+      } else {
+        attTotalEl.textContent = '';
+      }
+    };
+    renderAttachments();
+
+    const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => {
+        const dataUrl = String(r.result || '');
+        const idx = dataUrl.indexOf(',');
+        resolve(idx >= 0 ? dataUrl.slice(idx + 1) : '');
+      };
+      r.onerror = () => reject(r.error || new Error('Lecture du fichier impossible'));
+      r.readAsDataURL(file);
+    });
+
+    const addFiles = async (fileList) => {
+      for (const file of Array.from(fileList || [])) {
+        try {
+          const b64 = await readFileAsBase64(file);
+          attachments.push({
+            filename: file.name,
+            content_b64: b64,
+            content_type: file.type || 'application/octet-stream',
+            size: file.size,
+            inline: false,
+            cid: '',
+          });
+        } catch (e) {
+          console.error('Pièce jointe KO :', file.name, e);
+        }
+      }
+      renderAttachments();
+    };
+
+    attAddBtn.onclick = () => attInputEl.click();
+    attInputEl.onchange = async () => {
+      await addFiles(attInputEl.files);
+      attInputEl.value = '';
+    };
+
+    // Drag & drop sur la zone composer
+    overlay.addEventListener('dragover', (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+        e.preventDefault();
+      }
+    });
+    overlay.addEventListener('drop', async (e) => {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+        e.preventDefault();
+        await addFiles(e.dataTransfer.files);
+      }
+    });
+
+    // Insertion d'une image dans le corps (CID inline)
+    const insertImageInBody = async () => {
+      const picker = document.createElement('input');
+      picker.type = 'file';
+      picker.accept = 'image/*';
+      picker.onchange = async () => {
+        const file = picker.files && picker.files[0];
+        if (!file) return;
+        if (mode === 'text') setMode('html');
+        try {
+          const b64 = await readFileAsBase64(file);
+          const cid = 'img_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now().toString(36);
+          attachments.push({
+            filename: file.name || `image-${cid}.png`,
+            content_b64: b64,
+            content_type: file.type || 'image/png',
+            size: file.size,
+            inline: true,
+            cid,
+          });
+          // Insère un <img> qui pointe vers cid: — affiché en data-url côté éditeur
+          // pour l'aperçu, mais converti en cid: au moment de l'envoi.
+          const dataUrl = `data:${file.type || 'image/png'};base64,${b64}`;
+          htmlArea.focus();
+          document.execCommand('insertHTML', false,
+            `<img data-cid="${cid}" src="${dataUrl}" alt="${this._escape(file.name || 'image')}" style="max-width:100%; height:auto; display:block; margin:8px 0;">`);
+          renderAttachments();
+        } catch (e) {
+          console.error('Insertion image KO :', e);
+          alert('Impossible de lire cette image.');
+        }
+      };
+      picker.click();
+    };
+
     // Boutons toolbar HTML
     toolbar.querySelectorAll('[data-cmd]').forEach(btn => {
       btn.onclick = (e) => {
@@ -1051,6 +1206,8 @@ const Mails = {
         if (cmd === 'createLink') {
           const url = prompt('URL du lien :', 'https://');
           if (url) document.execCommand('createLink', false, url);
+        } else if (cmd === 'insert-image') {
+          insertImageInBody();
         } else if (cmd === 'paste-html') {
           this._openPasteHtmlDialog(htmlArea);
         } else if (cmd === 'preview') {
@@ -1262,7 +1419,17 @@ const Mails = {
       const subj = overlay.querySelector('#cmp-subject').value.trim();
       let body = '', body_html = '';
       if (mode === 'html') {
-        body_html = htmlArea.innerHTML.trim();
+        // Avant d'envoyer, convertit les <img data-cid="X" src="data:..."> en
+        // <img src="cid:X"> pour que le backend les attache en multipart/related.
+        // L'aperçu côté composer reste lisible (data-url), mais le mail envoyé
+        // utilise des références CID propres.
+        const clone = htmlArea.cloneNode(true);
+        clone.querySelectorAll('img[data-cid]').forEach(img => {
+          const cid = img.getAttribute('data-cid');
+          img.setAttribute('src', `cid:${cid}`);
+          img.removeAttribute('data-cid');
+        });
+        body_html = clone.innerHTML.trim();
         // Génère un fallback texte
         body = htmlArea.innerText.trim();
       } else {
@@ -1273,6 +1440,20 @@ const Mails = {
         status.className = 'text-xs text-danger';
         return;
       }
+      // Filtre les images inline qui ne sont plus référencées dans le body
+      // (l'utilisateur a peut-être supprimé l'<img> sans qu'on s'en rende compte)
+      const referencedCids = new Set();
+      (body_html.match(/cid:([a-zA-Z0-9_]+)/g) || []).forEach(m => {
+        referencedCids.add(m.slice(4));
+      });
+      const cleanAttachments = attachments.filter(a => !a.inline || referencedCids.has(a.cid));
+      // Vérification taille totale
+      const totBytes = cleanAttachments.reduce((s, a) => s + (a.size || 0), 0);
+      if (totBytes > MAX_TOTAL_BYTES) {
+        status.textContent = `✗ Pièces jointes trop lourdes (${fmtSize(totBytes)}). Limite : 22 Mo.`;
+        status.className = 'text-xs text-danger';
+        return;
+      }
       sendBtn.disabled = true;
       sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-9-9"/></svg>Envoi…';
       status.textContent = '';
@@ -1280,6 +1461,13 @@ const Mails = {
         const r = await App.api.mail_send({
           account_id, to, subject: subj, body, body_html,
           in_reply_to: opts.inReplyTo || '',
+          attachments: cleanAttachments.map(a => ({
+            filename: a.filename,
+            content_b64: a.content_b64,
+            content_type: a.content_type,
+            inline: !!a.inline,
+            cid: a.cid || '',
+          })),
         });
         if (r && r.ok) {
           status.textContent = '✓ Envoyé !';

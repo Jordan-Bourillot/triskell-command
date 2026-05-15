@@ -902,6 +902,10 @@ class Api:
           - body       : corps en texte simple (toujours requis pour le fallback)
           - body_html  (optionnel) : version HTML, envoyée en multipart/alternative
           - in_reply_to (optionnel) : Message-ID du mail d'origine pour le threading
+          - attachments (optionnel) : liste de { filename, content_b64, content_type,
+              inline (bool), cid (str si inline=True) }. Les pièces inline sont
+              attachées à la partie HTML via multipart/related ; les autres sont
+              attachées au mail global via multipart/mixed.
         """
         p = payload or {}
         account_id = (p.get("account_id") or "primary").strip()
@@ -910,6 +914,7 @@ class Api:
         body = (p.get("body") or "").strip()
         body_html = (p.get("body_html") or "").strip()
         in_reply_to = (p.get("in_reply_to") or "").strip()
+        attachments = p.get("attachments") or []
 
         if not to or not subject:
             return {"ok": False, "error": "Champs requis manquants (to/subject)."}
@@ -965,6 +970,71 @@ class Api:
             if body_html:
                 msg.add_alternative(body_html, subtype="html")
 
+            # ------------------------------------------------------------------
+            # Pièces jointes
+            # ------------------------------------------------------------------
+            # Deux catégories :
+            #   - inline (avec cid) : attachées à la partie HTML en multipart/related,
+            #     référencées dans le HTML via <img src="cid:XXX">
+            #   - normales : attachées au message global en multipart/mixed
+            if attachments:
+                import base64 as _b64
+                inline_atts = [a for a in attachments
+                               if isinstance(a, dict) and a.get("inline") and a.get("cid")]
+                other_atts = [a for a in attachments
+                              if isinstance(a, dict) and not (a.get("inline") and a.get("cid"))]
+
+                # --- Inline (CID) : attachées au sous-message HTML ---
+                if inline_atts and body_html:
+                    html_part = None
+                    try:
+                        # msg.iter_parts() retourne les parts du multipart/alternative
+                        for part in msg.iter_parts():
+                            if part.get_content_type() == "text/html":
+                                html_part = part
+                                break
+                    except Exception:
+                        html_part = None
+                    if html_part is not None:
+                        for att in inline_atts:
+                            try:
+                                data = _b64.b64decode(att.get("content_b64") or "")
+                            except Exception:
+                                continue
+                            if not data:
+                                continue
+                            ctype = (att.get("content_type") or "image/png").strip()
+                            maintype, _, subtype = ctype.partition("/")
+                            if not subtype:
+                                maintype, subtype = "image", "png"
+                            cid = att.get("cid") or ""
+                            html_part.add_related(
+                                data,
+                                maintype=maintype,
+                                subtype=subtype,
+                                cid=f"<{cid}>",
+                                filename=att.get("filename") or f"{cid}.{subtype}",
+                            )
+
+                # --- Pièces jointes normales (multipart/mixed) ---
+                for att in other_atts:
+                    try:
+                        data = _b64.b64decode(att.get("content_b64") or "")
+                    except Exception:
+                        continue
+                    if not data:
+                        continue
+                    ctype = (att.get("content_type") or "application/octet-stream").strip()
+                    maintype, _, subtype = ctype.partition("/")
+                    if not subtype:
+                        maintype, subtype = "application", "octet-stream"
+                    msg.add_attachment(
+                        data,
+                        maintype=maintype,
+                        subtype=subtype,
+                        filename=att.get("filename") or "fichier",
+                    )
+
             # Envoi
             if smtp_port == 465:
                 with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as s:
@@ -996,6 +1066,10 @@ class Api:
                                 "in_reply_to": in_reply_to,
                                 "manual_reply": bool(in_reply_to),
                                 "has_html": bool(body_html),
+                                "attachments_count": len([a for a in attachments
+                                    if isinstance(a, dict) and not a.get("inline")]),
+                                "inline_images_count": len([a for a in attachments
+                                    if isinstance(a, dict) and a.get("inline") and a.get("cid")]),
                             },
                             "created_by": getattr(client, "user_id", None),
                         }).execute()
