@@ -77,37 +77,38 @@ const Claude = {
   // ---- Modal builders ----
   _buildOverlay() {
     const overlay = document.createElement('div');
-    overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center p-6 transition-opacity duration-200';
+    // Mobile : full-screen (p-0). Desktop : centré avec marges (p-6).
+    overlay.className = 'fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center sm:p-6 transition-opacity duration-200';
     overlay.style.background = 'rgba(15,23,42,0.45)';
     overlay.style.backdropFilter = 'blur(6px)';
 
     overlay.innerHTML = `
-      <div class="modal-card relative bg-surface rounded-3xl shadow-hero
-                  w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
+      <div class="modal-card relative bg-surface sm:rounded-3xl shadow-hero
+                  w-full sm:max-w-2xl h-full sm:h-auto sm:max-h-[85vh] overflow-hidden flex flex-col"
            style="border: 1px solid hsl(var(--border));">
         <!-- Header -->
-        <div class="px-8 pt-8 pb-4 flex items-center gap-4 border-b border-border">
-          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-accent to-accent-glow
-                      flex items-center justify-center text-white shadow-soft">
-            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        <div class="px-5 pt-5 pb-3 sm:px-8 sm:pt-8 sm:pb-4 flex items-center gap-3 sm:gap-4 border-b border-border">
+          <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-br from-accent to-accent-glow
+                      flex items-center justify-center text-white shadow-soft shrink-0">
+            <svg class="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 12a8 8 0 0 1-11.7 7.1L4 20.5l1.4-5.3A8 8 0 1 1 21 12z" fill="currentColor" fill-opacity="0.18"/>
               <path d="M21 12a8 8 0 0 1-11.7 7.1L4 20.5l1.4-5.3A8 8 0 1 1 21 12z"/>
               <path d="M12 8.5v3M12 12.5v3M8.5 12h3M12.5 12h3" stroke-width="1.6"/>
             </svg>
           </div>
-          <div class="flex-1">
+          <div class="flex-1 min-w-0">
             <div class="hero-kicker mb-1">ALLÔ CLAUDE</div>
-            <div class="font-sans text-xl font-bold leading-tight tracking-tight">Quelle est ma prochaine action&nbsp;?</div>
+            <div class="font-sans text-base sm:text-xl font-bold leading-tight tracking-tight">Quelle est ma prochaine action&nbsp;?</div>
           </div>
-          <button class="text-text-muted hover:text-text text-2xl leading-none w-8 h-8" id="claude-close">×</button>
+          <button class="text-text-muted hover:text-text text-2xl leading-none w-8 h-8 shrink-0" id="claude-close">×</button>
         </div>
 
         <!-- Body -->
-        <div id="claude-body" class="flex-1 overflow-y-auto px-8 py-8"></div>
+        <div id="claude-body" class="flex-1 overflow-y-auto px-5 py-5 sm:px-8 sm:py-8"></div>
 
         <!-- Footer (question libre) -->
-        <div class="px-8 py-5 border-t border-border bg-surface-elevated/50">
+        <div class="px-5 py-4 sm:px-8 sm:py-5 border-t border-border bg-surface-elevated/50">
           <div class="hero-kicker mb-2">OU POSE UNE QUESTION LIBRE</div>
           <div class="flex gap-2">
             <input id="claude-question" type="text"
