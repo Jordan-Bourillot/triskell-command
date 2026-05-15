@@ -903,9 +903,11 @@ const Mails = {
               <label class="block text-[11px] font-medium text-text-secondary">Message</label>
               <div class="flex items-center gap-2 text-[11px] flex-wrap">
                 <!-- Dropdown signatures -->
-                <div class="flex items-center gap-1.5">
-                  <svg class="w-3.5 h-3.5 text-text-muted" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg>
-                  <select id="cmp-signature" class="px-2 py-1 rounded-lg bg-bg border border-border font-semibold text-text-muted">
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <svg class="w-3.5 h-3.5 text-text-muted shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"/><polygon points="18 2 22 6 12 16 8 16 8 12 18 2"/></svg>
+                  <select id="cmp-signature"
+                          class="px-2.5 py-1 rounded-lg bg-bg border border-border font-semibold text-text"
+                          style="min-width: 160px; max-width: 220px;">
                     <option value="">Sans signature</option>
                     ${signatures.map(s =>
                       `<option value="${this._escape(s.id)}" ${currentSig && s.id === currentSig.id ? 'selected' : ''}>${this._escape(s.name)}</option>`
