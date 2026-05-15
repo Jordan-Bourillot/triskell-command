@@ -176,21 +176,10 @@ class TriskellCommandApp(ctk.CTk):
         self._views: dict[str, BaseView] = {}
         self._current_view: BaseView | None = None
 
-        # Bouton flottant Claude — toujours visible, par-dessus tout.
-        # Placé sur self (la window) avec place(), donc indépendant des vues.
-        try:
-            from .widgets.claude_fab import ClaudeFAB
-            self.claude_fab = ClaudeFAB(
-                self, colors=self.colors,
-                on_click=lambda: self.show_view("claude"),
-            )
-            # Position : en bas à droite, marges généreuses
-            self.claude_fab.place(relx=1.0, rely=1.0, x=-32, y=-32, anchor="se")
-            # Lift par-dessus tout
-            self.claude_fab.lift()
-        except Exception as exc:
-            logger.debug("Claude FAB non créé : %s", exc)
-            self.claude_fab = None
+        # FAB Claude désactivé : remplacé par l'item sidebar "Allô Claude"
+        # (suffisamment visible dans la sidebar, pas besoin du bouton flottant).
+        # Le rest du code teste `if self.claude_fab is not None` partout.
+        self.claude_fab = None
 
         # Bouton flottant Chat Thomas — juste au-dessus du FAB Claude.
         # Même style, vert pour distinguer, badge avec compteur de non-lus.
@@ -480,28 +469,13 @@ class TriskellCommandApp(ctk.CTk):
 
     def _rebuild_claude_fab(self) -> None:
         """Recrée les FABs Claude + Thomas avec la nouvelle palette."""
-        had_attention = False
+        # FAB Claude désactivé (cf. __init__) — pas de rebuild.
         try:
             if getattr(self, "claude_fab", None) is not None:
-                had_attention = bool(getattr(self.claude_fab,
-                                              "_has_attention", False))
                 self.claude_fab.destroy()
         except Exception:
             pass
-        try:
-            from .widgets.claude_fab import ClaudeFAB
-            self.claude_fab = ClaudeFAB(
-                self, colors=self.colors,
-                on_click=lambda: self.show_view("claude"),
-            )
-            self.claude_fab.place(relx=1.0, rely=1.0,
-                                    x=-32, y=-32, anchor="se")
-            self.claude_fab.lift()
-            if had_attention:
-                self.claude_fab.set_attention(True)
-        except Exception as exc:
-            logger.debug("rebuild claude_fab: %s", exc)
-            self.claude_fab = None
+        self.claude_fab = None
         # FAB Thomas (rebuild miroir)
         prev_unread = 0
         try:
