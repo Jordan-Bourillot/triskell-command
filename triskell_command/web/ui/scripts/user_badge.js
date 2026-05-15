@@ -29,19 +29,16 @@ const UserBadge = {
 
     slot.innerHTML = `
       <button id="user-badge-btn"
-              class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl
-                     hover:bg-bg transition-colors text-left"
+              class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg
+                     hover:bg-bg transition-colors text-left group"
               title="Connecté en tant que ${this._esc(fullName)}${email ? ' (' + this._esc(email) + ')' : ''}\nCliquer pour ouvrir les Réglages">
-        <div class="w-9 h-9 rounded-full flex items-center justify-center
-                    text-xs font-bold text-white shrink-0 shadow-soft"
+        <div class="w-7 h-7 rounded-full flex items-center justify-center
+                    text-[10px] font-bold text-white shrink-0"
              style="background: ${color};">
           ${this._esc(initials)}
         </div>
-        <div class="flex-1 min-w-0">
-          <div class="text-[10px] font-bold tracking-widest text-text-muted">CONNECTÉ</div>
-          <div class="text-sm font-semibold truncate">${this._esc(firstName)}</div>
-        </div>
-        <svg class="w-4 h-4 text-text-muted shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <div class="flex-1 text-sm font-semibold truncate">${this._esc(firstName)}</div>
+        <svg class="w-3.5 h-3.5 text-text-muted shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="3"/>
           <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 008.18 19a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H2a2 2 0 010-4h.09A1.65 1.65 0 003.6 8.18a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H8a1.65 1.65 0 001-1.51V2a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V8a1.65 1.65 0 001.51 1H22a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
         </svg>

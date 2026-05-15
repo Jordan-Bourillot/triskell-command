@@ -115,6 +115,12 @@ const App = {
     const launcherBtn = document.getElementById('launcher-trigger');
     if (launcherBtn) launcherBtn.addEventListener('click', () => Launcher.open());
 
+    // Bind bouton "Brain" → ouvre direct la modale nouvelle note
+    const brainBtn = document.getElementById('brain-trigger');
+    if (brainBtn) brainBtn.addEventListener('click', () => {
+      if (typeof Brain !== 'undefined') Brain._openNew();
+    });
+
     // Bind bouton "Écosystème" → carte mentale interne dans le navigateur
     const ecoBtn = document.getElementById('ecosysteme-trigger');
     if (ecoBtn) ecoBtn.addEventListener('click', async () => {
@@ -135,6 +141,15 @@ const App = {
     window.addEventListener('keydown', (e) => {
       if (e.key === 'F12') { e.preventDefault(); Claude.open(); }
       if (e.ctrlKey && e.key === 't') { e.preventDefault(); this.cycleTheme(); }
+      // Ctrl+B → ouvre direct la modale Brain "Nouvelle note"
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+        // N'interfère pas avec Ctrl+B des éditeurs (textarea/input en focus)
+        const tag = (e.target && e.target.tagName) || '';
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target?.isContentEditable) {
+          e.preventDefault();
+          if (typeof Brain !== 'undefined') Brain._openNew();
+        }
+      }
       if (e.key === 'Escape') this.closeMobileSidebar();
       // Ctrl+Shift+M (ou Cmd+Shift+M sur Mac) → ouvre le composer Mails de Triskell Command
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'm') {
@@ -148,6 +163,11 @@ const App = {
       }
     });
 
+    // Push notifications : enregistre le Service Worker silencieusement
+    if (typeof Push !== 'undefined') {
+      Push.init().then(() => this._renderPushButton()).catch(() => {});
+    }
+
     // Lance la 1re vue
     this.show('morning');
 
@@ -158,6 +178,38 @@ const App = {
     if (typeof Mails !== 'undefined' && Mails.startDesktopNotifPolling) {
       Mails.startDesktopNotifPolling();
     }
+  },
+
+  // ---- Push notifications : insère un bouton dans le footer sidebar ----
+  _renderPushButton() {
+    if (typeof Push === 'undefined' || !Push.isSupported()) return;
+    const slot = document.getElementById('user-badge-slot');
+    if (!slot) return;
+    // Évite les doublons
+    if (document.getElementById('push-toggle-row')) return;
+    const row = document.createElement('div');
+    row.id = 'push-toggle-row';
+    row.className = 'mt-2 flex items-center gap-2';
+    const label = Push.isEnabled() ? '🔔 Notifs ON' : '🔕 Activer notifs';
+    const cls = Push.isEnabled()
+      ? 'flex-1 text-[11px] px-3 py-1.5 rounded-lg bg-accent/10 text-accent border border-accent/30 hover:bg-accent/20'
+      : 'flex-1 text-[11px] px-3 py-1.5 rounded-lg bg-bg text-text-muted border border-border hover:border-accent hover:text-accent';
+    row.innerHTML = `
+      <button id="push-toggle" class="${cls}">${label}</button>
+      <button id="push-test" class="text-[11px] px-2 py-1.5 rounded-lg bg-bg text-text-muted border border-border hover:border-accent hover:text-accent" title="Envoyer une notif de test">Test</button>
+    `;
+    slot.parentNode.insertBefore(row, slot.nextSibling);
+    document.getElementById('push-toggle').onclick = async () => {
+      if (Push.isEnabled()) {
+        await Push.disable();
+      } else {
+        await Push.enable();
+      }
+      // Re-render : retire et reinsère
+      row.remove();
+      this._renderPushButton();
+    };
+    document.getElementById('push-test').onclick = () => Push.test();
   },
 
   // ---- Mobile sidebar drawer (visible <md uniquement) ----

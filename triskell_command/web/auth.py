@@ -35,6 +35,7 @@ PUBLIC_API_PATHS = {
     "/api/_health",
     "/api/login",
     "/api/me",  # /me peut être appelé sans auth → renvoie {ok:true, connected:false}
+    "/api/push/public_key",  # clé VAPID publique (pas un secret)
 }
 
 # Utilisateurs reconnus (étendre ici si on ajoute du monde)

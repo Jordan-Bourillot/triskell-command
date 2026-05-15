@@ -16,7 +16,11 @@ const Morning = {
     if (!userName && App.api) {
       try { userName = await App.api.get_user_name(); } catch (e) {}
     }
-    const greetingFull = userName ? `${greeting} ${userName}.` : `${greeting}.`;
+    // Couronne accrochée à la dernière lettre du prénom (BOSS DE L'UNIVERS)
+    const nameWithCrown = userName
+      ? `${userName.slice(0, -1)}<span class="boss-letter">${userName.slice(-1)}<svg class="boss-crown" viewBox="0 0 32 22" aria-hidden="true"><defs><linearGradient id="bossCrownGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fde68a"/><stop offset="50%" stop-color="#facc15"/><stop offset="100%" stop-color="#b45309"/></linearGradient></defs><path fill="url(#bossCrownGrad)" stroke="#8a5a00" stroke-width="0.8" stroke-linejoin="round" d="M3 19 L5 7 L11 12 L16 4 L21 12 L27 7 L29 19 Z"/><circle cx="5" cy="6" r="1.6" fill="#dc2626" stroke="#7c2d12" stroke-width="0.5"/><circle cx="16" cy="3" r="1.8" fill="#7c3aed" stroke="#4c1d95" stroke-width="0.5"/><circle cx="27" cy="6" r="1.6" fill="#0ea5e9" stroke="#075985" stroke-width="0.5"/><rect x="3" y="18.5" width="26" height="2" fill="url(#bossCrownGrad)" stroke="#8a5a00" stroke-width="0.5"/></svg></span>`
+      : '';
+    const greetingFull = userName ? `${greeting} ${nameWithCrown}.` : `${greeting}.`;
 
     container.innerHTML = `
       <section class="animate-slide-up max-w-[1100px]">

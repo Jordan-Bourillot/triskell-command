@@ -5,6 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Triskell Command</title>
 
+  <!-- PWA : manifest + theme color + icônes pour l'écran d'accueil -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#6366F1" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Triskell" />
+  <link rel="apple-touch-icon" href="/assets/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="/assets/icon-512.png" />
+
   <!-- Tailwind via CDN (suffit pour le prototype, on packagera après) -->
   <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
   <link rel="stylesheet" href="styles/tokens.css" />
@@ -74,6 +84,132 @@
 </head>
 
 <body class="font-sans antialiased bg-bg text-text h-screen overflow-hidden md:overflow-hidden">
+
+  <!-- ============================================================
+       SPLASH SCREEN — Triskelion animé + texte qui apparaît
+       Affiché au boot, fade out après ~2.2s
+       ============================================================ -->
+  <div id="triskell-splash"
+       class="fixed inset-0 z-[9999] flex flex-col items-center justify-center"
+       style="background: radial-gradient(ellipse at center, #1c1d3a 0%, #0a0b1e 75%); transition: opacity 700ms ease-out;">
+
+    <!-- Triskelion animé -->
+    <div id="splash-mark" class="relative" style="width: 180px; height: 180px;">
+      <svg viewBox="0 0 200 200" class="w-full h-full" id="splash-svg">
+        <defs>
+          <filter id="splash-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="6" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#a78bfa"/>
+            <stop offset="100%" stop-color="#6366f1"/>
+          </linearGradient>
+          <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#c4b5fd"/>
+            <stop offset="100%" stop-color="#8b5cf6"/>
+          </linearGradient>
+          <linearGradient id="g3" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#fb923c"/>
+            <stop offset="100%" stop-color="#ea580c"/>
+          </linearGradient>
+        </defs>
+        <g transform-origin="100 100" filter="url(#splash-glow)" class="splash-rotor">
+          <!-- 3 spirales partant du centre, espacées de 120° -->
+          <path class="splash-branch branch-a" fill="url(#g1)"
+                d="M 100 100 Q 100 50 78 35 Q 100 60 110 80 Q 105 100 100 100 Z"/>
+          <path class="splash-branch branch-b" fill="url(#g2)"
+                transform="rotate(120 100 100)"
+                d="M 100 100 Q 100 50 78 35 Q 100 60 110 80 Q 105 100 100 100 Z"/>
+          <path class="splash-branch branch-c" fill="url(#g3)"
+                transform="rotate(240 100 100)"
+                d="M 100 100 Q 100 50 78 35 Q 100 60 110 80 Q 105 100 100 100 Z"/>
+          <!-- Cercle central -->
+          <circle cx="100" cy="100" r="6" fill="#0a0b1e"/>
+        </g>
+      </svg>
+    </div>
+
+    <!-- Texte qui apparaît après la rotation -->
+    <div class="splash-name font-display text-white text-5xl font-bold tracking-wider mt-8" style="opacity: 0;">
+      Triskell
+    </div>
+    <div class="splash-sub text-[10px] font-bold tracking-[0.5em] mt-2" style="color: #a78bfa; opacity: 0;">
+      COMMAND
+    </div>
+    <div class="splash-tag mt-10 text-xs" style="color: rgba(255,255,255,0.45); opacity: 0;">
+      🌊 Bretagne · 100 % français
+    </div>
+  </div>
+
+  <style>
+    /* === Splash animation === */
+    @keyframes splashSpinIn {
+      0%   { transform: rotate(-180deg) scale(0.3); opacity: 0; }
+      50%  { opacity: 1; }
+      100% { transform: rotate(0deg) scale(1); opacity: 1; }
+    }
+    @keyframes splashGlowPulse {
+      0%, 100% { filter: drop-shadow(0 0 25px rgba(139, 92, 246, 0.55)); }
+      50%      { filter: drop-shadow(0 0 50px rgba(139, 92, 246, 0.95)); }
+    }
+    @keyframes splashFadeUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes splashBranchIn {
+      from { opacity: 0; transform: scale(0); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    #triskell-splash .splash-rotor {
+      animation: splashSpinIn 1.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      transform-origin: 100px 100px;
+    }
+    #triskell-splash #splash-mark {
+      animation: splashGlowPulse 2.6s ease-in-out infinite 1.4s;
+    }
+    #triskell-splash .splash-branch {
+      transform-origin: 100px 100px;
+    }
+    #triskell-splash .branch-a { animation: splashBranchIn 0.6s 0.2s both ease-out; }
+    #triskell-splash .branch-b { animation: splashBranchIn 0.6s 0.4s both ease-out; }
+    #triskell-splash .branch-c { animation: splashBranchIn 0.6s 0.6s both ease-out; }
+    #triskell-splash .splash-name { animation: splashFadeUp 0.7s 1.0s forwards cubic-bezier(0.16, 1, 0.3, 1); }
+    #triskell-splash .splash-sub  { animation: splashFadeUp 0.7s 1.2s forwards cubic-bezier(0.16, 1, 0.3, 1); }
+    #triskell-splash .splash-tag  { animation: splashFadeUp 0.7s 1.7s forwards cubic-bezier(0.16, 1, 0.3, 1); }
+    #triskell-splash.is-fading { opacity: 0; pointer-events: none; }
+
+    /* Mobile : un peu plus petit */
+    @media (max-width: 640px) {
+      #triskell-splash #splash-mark { width: 140px !important; height: 140px !important; }
+      #triskell-splash .splash-name { font-size: 36px; }
+    }
+  </style>
+
+  <script>
+    // Cache le splash après ~2.4 sec, dès que le DOM est prêt
+    (function() {
+      const hideSplash = () => {
+        const s = document.getElementById('triskell-splash');
+        if (!s) return;
+        s.classList.add('is-fading');
+        setTimeout(() => s.remove(), 700);
+      };
+      // Au moins 2.4s pour qu'on profite de l'animation, et après DOMContentLoaded
+      const minDelay = 2400;
+      const start = Date.now();
+      const tryHide = () => {
+        const elapsed = Date.now() - start;
+        const wait = Math.max(0, minDelay - elapsed);
+        setTimeout(hideSplash, wait);
+      };
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', tryHide);
+      } else {
+        tryHide();
+      }
+    })();
+  </script>
 
   <!-- ===================== Header MOBILE (visible <md uniquement) ===================== -->
   <!-- Bouton burger + brand. Le bouton ouvre la sidebar en drawer (slide-in). -->
@@ -311,18 +447,21 @@
         </div>
       </nav>
 
-      <!-- Footer SYSTÈME -->
-      <div class="px-3 py-4 border-t border-border space-y-1">
-        <button data-view="tutorial" class="nav-item-sm"><span>Tuto</span></button>
-        <button data-view="config"   class="nav-item-sm"><span>Réglages</span></button>
-
-        <!-- Bandeau utilisateur connecté (rempli par user_badge.js) -->
-        <div id="user-badge-slot" class="mt-3"></div>
-
-        <div class="px-3 mt-3 text-[10px] text-text-muted">
-          🌊 Bretagne · 100 % français
+      <!-- Footer SYSTÈME (compact) -->
+      <div class="px-2 py-2 border-t border-border space-y-1">
+        <!-- Badge utilisateur (avatar + prénom + engrenage au hover) -->
+        <div id="user-badge-slot"></div>
+        <!-- Tuto · Réglages · Bretagne · v en une seule ligne discrète -->
+        <div class="flex items-center justify-between px-2 pt-1 text-[10px] text-text-muted">
+          <div class="flex gap-3">
+            <button data-view="tutorial" class="hover:text-text transition-colors">Tuto</button>
+            <button data-view="config"   class="hover:text-text transition-colors">Réglages</button>
+          </div>
+          <div class="flex items-center gap-2">
+            <span title="Bretagne · 100 % français">🌊</span>
+            <span class="font-bold">v0.6</span>
+          </div>
         </div>
-        <div class="px-3 text-[10px] font-bold text-text-muted">v0.5</div>
       </div>
     </aside>
 
@@ -485,5 +624,6 @@
   <script src="scripts/user_badge.js"></script>
   <script src="scripts/claude.js"></script>
   <script src="scripts/thomas.js"></script>
+  <script src="scripts/push.js"></script>
 </body>
 </html>

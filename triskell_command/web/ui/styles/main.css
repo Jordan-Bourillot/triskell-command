@@ -308,3 +308,27 @@ html, body {
   background: hsl(var(--accent));
   border-radius: 1px;
 }
+
+/* ============================
+ * Couronne BOSS DE L'UNIVERS — accrochée à la dernière lettre du prénom
+ * dans la Matinale (ex : "Bonjour JordaN.")
+ * ============================ */
+.boss-letter {
+  position: relative;
+  display: inline-block;
+}
+.boss-crown {
+  position: absolute;
+  left: 50%;
+  bottom: 85%;
+  transform: translateX(-50%) rotate(-6deg);
+  width: 0.65em;
+  height: auto;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(202, 138, 4, 0.35));
+  animation: bossCrownFloat 3.2s ease-in-out infinite;
+}
+@keyframes bossCrownFloat {
+  0%, 100% { transform: translateX(-50%) translateY(0) rotate(-6deg); }
+  50%      { transform: translateX(-50%) translateY(-3px) rotate(-2deg); }
+}

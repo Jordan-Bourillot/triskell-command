@@ -23,3 +23,6 @@ Pillow>=10.0
 openpyxl>=3.1
 python-docx>=1.1
 pypdf>=4.0
+
+# --- Web Push notifications (mobile/desktop) ---
+pywebpush>=2.0

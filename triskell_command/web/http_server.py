@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import auth as tcauth
+from . import push as tcpush
 from .api import Api
 
 logger = logging.getLogger(__name__)
@@ -166,6 +167,53 @@ def create_app() -> FastAPI:
             "user_id": user_id,
             "display_name": tcauth.get_display_name(user_id),
         })
+
+    # ---------------- Web Push notifications ----------------
+
+    @app.get("/api/push/public_key")
+    async def push_public_key() -> JSONResponse:
+        """Renvoie la clé publique VAPID pour que le navigateur puisse
+        souscrire aux push. Public (pas besoin d'être loggé pour la lire)."""
+        key = tcpush.get_public_key()
+        if not key:
+            return JSONResponse(content={"ok": False, "error": "vapid_not_configured"}, status_code=503)
+        return JSONResponse(content={"ok": True, "public_key": key})
+
+    @app.post("/api/push/subscribe")
+    async def push_subscribe(request: Request) -> JSONResponse:
+        user_id = getattr(request.state, "user_id", None)
+        if not user_id:
+            return JSONResponse(status_code=401, content={"ok": False, "error": "auth_required"})
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        sub = (payload or {}).get("subscription") or payload
+        result = tcpush.save_subscription(user_id, sub)
+        return JSONResponse(content=result)
+
+    @app.post("/api/push/unsubscribe")
+    async def push_unsubscribe(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        endpoint = (payload or {}).get("endpoint") or ""
+        return JSONResponse(content=tcpush.remove_subscription(endpoint))
+
+    @app.post("/api/push/test")
+    async def push_test(request: Request) -> JSONResponse:
+        """Envoie une notif de test à TOUTES les subs du user connecté."""
+        user_id = getattr(request.state, "user_id", None)
+        if not user_id:
+            return JSONResponse(status_code=401, content={"ok": False, "error": "auth_required"})
+        result = tcpush.send_push(
+            title="Triskell Command",
+            body=f"Notif de test pour {tcauth.get_display_name(user_id)} — ça marche !",
+            user_id=user_id,
+            tag="test",
+        )
+        return JSONResponse(content={"ok": True, **result})
 
     @app.get("/api/_methods")
     async def list_methods() -> dict:

@@ -217,9 +217,15 @@ function makePipelineView(config) {
       }
       listEl.innerHTML = this.state.intakes.map(i => this._intakeCard(i)).join('');
       listEl.querySelectorAll('[data-intake-id]').forEach(el => {
+        // Clic simple = sélection (panneau actions à droite)
         el.addEventListener('click', () => {
           this.state.selectedId = el.dataset.intakeId;
           this._loadIntakes();
+        });
+        // Double-clic = ouvre la modale détail complète
+        el.addEventListener('dblclick', () => {
+          const intake = this.state.intakes.find(i => i.id === el.dataset.intakeId);
+          if (intake) this._openIntakeDetail(intake);
         });
       });
       this._renderActionsPane();
@@ -297,6 +303,7 @@ function makePipelineView(config) {
       if (typeof this.config.extraActions === 'function') {
         this.config.extraActions(sel).forEach(a => buttons.push(a));
       }
+      buttons.push({ id: 'pv-act-detail', label: 'Ouvrir le détail complet', cls: 'btn-primary' });
       buttons.push({ id: 'pv-act-logs', label: 'Voir les logs de cette demande', cls: 'btn-secondary' });
 
       pane.innerHTML = `
@@ -361,6 +368,159 @@ function makePipelineView(config) {
 
       const logsBtn = document.getElementById('pv-act-logs');
       if (logsBtn) logsBtn.onclick = () => this.switchTab('logs');
+
+      const detailBtn = document.getElementById('pv-act-detail');
+      if (detailBtn) detailBtn.onclick = () => this._openIntakeDetail(sel);
+    },
+
+    // ------------------------------------------------------------------
+    // Modale détail complet d'une demande
+    // ------------------------------------------------------------------
+    _openIntakeDetail(intake) {
+      const payload = intake.payload || {};
+      const fullName = `${intake.client_first_name || ''} ${intake.client_last_name || ''}`.trim() || '(anonyme)';
+      const statusColor = this.config.statusColors[intake.status] || 'text-muted';
+      const statusLabel = this.config.statusLabels[intake.status] || intake.status;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 z-[200] flex items-center justify-center p-4';
+      overlay.style.background = 'rgba(15,23,42,0.7)';
+      overlay.style.backdropFilter = 'blur(8px)';
+      const dom = payload.domain || {};
+      const domLine = dom.option === 'deja' && dom.existing
+        ? `Domaine existant : <b>${this._escape(dom.existing)}</b>`
+        : dom.option === 'reserver' && (dom.propositions || []).length
+          ? `À réserver : ${(dom.propositions || []).map(p => this._escape(p)).join(', ')}`
+          : '—';
+
+      overlay.innerHTML = `
+        <div class="bg-surface rounded-2xl shadow-hero w-full max-w-3xl h-[88vh] overflow-hidden border border-border animate-slide-up flex flex-col">
+          <div class="px-6 pt-4 pb-3 flex items-center justify-between border-b border-border bg-surface-elevated">
+            <div>
+              <div class="hero-kicker mb-0.5">${this._escape(this.config.kicker)}</div>
+              <h3 class="text-base font-bold">${this._escape(fullName)} · ${this._escape(intake.company_name || '')}</h3>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-[10px] font-bold uppercase px-3 py-1.5 rounded"
+                    style="background: hsl(var(--${statusColor}) / 0.15); color: hsl(var(--${statusColor}));">
+                ${this._escape(statusLabel)}
+              </span>
+              <button id="pvd-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none">×</button>
+            </div>
+          </div>
+
+          <div class="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+            <!-- Coordonnées -->
+            <section>
+              <div class="hero-kicker mb-2">COORDONNÉES</div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-6 text-sm">
+                <div><span class="text-text-muted text-xs">Email :</span> ${this._escape(intake.client_email || '—')}</div>
+                <div><span class="text-text-muted text-xs">Téléphone :</span> ${this._escape(intake.client_phone || '—')}</div>
+                ${payload.fonction ? `<div><span class="text-text-muted text-xs">Fonction :</span> ${this._escape(payload.fonction)}</div>` : ''}
+                ${payload.site_actuel ? `<div><span class="text-text-muted text-xs">Site actuel :</span> <a href="${this._escape(payload.site_actuel)}" target="_blank" class="text-accent underline">${this._escape(payload.site_actuel)}</a></div>` : ''}
+              </div>
+            </section>
+
+            <!-- Qualification commerciale -->
+            ${payload.budget || payload.echeance || payload.nature_client || payload.nature_projet ? `
+              <section>
+                <div class="hero-kicker mb-2">QUALIFICATION</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-6 text-sm">
+                  ${payload.budget ? `<div><span class="text-text-muted text-xs">Budget :</span> <b>${this._escape(payload.budget)}</b></div>` : ''}
+                  ${payload.echeance ? `<div><span class="text-text-muted text-xs">Échéance :</span> ${this._escape(payload.echeance)}</div>` : ''}
+                  ${payload.nature_client ? `<div><span class="text-text-muted text-xs">Nature client :</span> ${this._escape(payload.nature_client)}</div>` : ''}
+                  ${payload.nature_projet ? `<div><span class="text-text-muted text-xs">Nature projet :</span> ${this._escape(payload.nature_projet)}</div>` : ''}
+                </div>
+                ${payload.nda_souhaite ? `<div class="mt-2 text-[11px] font-bold text-warning">⚠ NDA souhaité avant premier échange</div>` : ''}
+              </section>` : ''}
+
+            <!-- Préférences pipeline -->
+            ${payload.type_site || payload.ambiance || dom.option ? `
+              <section>
+                <div class="hero-kicker mb-2">PRÉFÉRENCES SITE</div>
+                <div class="space-y-1 text-sm">
+                  ${payload.type_site ? `<div><span class="text-text-muted text-xs">Type :</span> ${this._escape(payload.type_site)}</div>` : ''}
+                  ${payload.ambiance ? `<div><span class="text-text-muted text-xs">Ambiance :</span> ${this._escape(payload.ambiance)}</div>` : ''}
+                  <div><span class="text-text-muted text-xs">Domaine :</span> ${domLine}</div>
+                </div>
+              </section>` : ''}
+
+            <!-- Brief client -->
+            <section>
+              <div class="hero-kicker mb-2">BRIEF DU CLIENT</div>
+              <div class="p-4 rounded-xl bg-bg border border-border text-sm whitespace-pre-wrap leading-relaxed">${this._escape(intake.description || payload.message || '(brief vide)')}</div>
+            </section>
+
+            <!-- Special request -->
+            ${intake.special_request || payload.special_request ? `
+              <section>
+                <div class="hero-kicker mb-2">DEMANDE SPÉCIALE</div>
+                <div class="p-3 rounded-lg bg-warning/8 border border-warning/30 text-sm whitespace-pre-wrap">${this._escape(intake.special_request || payload.special_request)}</div>
+              </section>` : ''}
+
+            <!-- Preview / livraison -->
+            ${intake.mockup_url ? `
+              <section>
+                <div class="hero-kicker mb-2">LIVRABLE</div>
+                <div class="text-sm space-y-1">
+                  <div><span class="text-text-muted text-xs">URL preview :</span> <a href="${this._escape(intake.mockup_url)}" target="_blank" class="text-accent underline break-all">${this._escape(intake.mockup_url)}</a></div>
+                  ${intake.mockup_generated_at ? `<div><span class="text-text-muted text-xs">Généré le :</span> ${this._fmtDate(intake.mockup_generated_at)}</div>` : ''}
+                  ${intake.mockup_sent_at ? `<div><span class="text-text-muted text-xs">Envoyé au client :</span> ${this._fmtDate(intake.mockup_sent_at)}</div>` : ''}
+                </div>
+              </section>` : ''}
+
+            <!-- Feedback / assets client (Lagriffe surtout) -->
+            ${intake.client_feedback ? `
+              <section>
+                <div class="hero-kicker mb-2">RETOURS CLIENT</div>
+                <div class="p-4 rounded-xl bg-bg border border-border text-sm whitespace-pre-wrap leading-relaxed">${this._escape(intake.client_feedback)}</div>
+                ${intake.client_assets_url ? `<div class="text-xs mt-2"><span class="text-text-muted">Assets :</span> <a href="${this._escape(intake.client_assets_url)}" target="_blank" class="text-accent underline">${this._escape(intake.client_assets_url)}</a></div>` : ''}
+              </section>` : ''}
+
+            <!-- Erreur si présente -->
+            ${intake.error_message ? `
+              <section>
+                <div class="hero-kicker mb-2" style="color: hsl(var(--danger));">ERREUR</div>
+                <div class="p-3 rounded-lg bg-danger/8 border border-danger/30 text-sm text-danger">${this._escape(intake.error_message)}</div>
+              </section>` : ''}
+
+            <!-- Méta -->
+            <section class="text-[11px] text-text-muted border-t border-border pt-3">
+              <div>ID : <code>${this._escape(intake.id)}</code></div>
+              <div>Reçu le : ${this._fmtDateLong(intake.created_at)}</div>
+              ${intake.last_attempt_at ? `<div>Dernière tentative : ${this._fmtDateLong(intake.last_attempt_at)}</div>` : ''}
+            </section>
+          </div>
+
+          <div class="px-6 py-3 border-t border-border bg-surface-elevated flex items-center justify-between gap-2">
+            <button id="pvd-logs" class="text-xs text-text-muted hover:text-accent">→ Voir la chronologie</button>
+            <div class="flex gap-2">
+              <button id="pvd-close-2" class="btn btn-secondary">Fermer</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      const close = () => overlay.remove();
+      overlay.querySelector('#pvd-close').onclick = close;
+      overlay.querySelector('#pvd-close-2').onclick = close;
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+      overlay.querySelector('#pvd-logs').onclick = () => {
+        this.state.selectedId = intake.id;
+        close();
+        this.switchTab('logs');
+      };
+      document.addEventListener('keydown', function esc(e) {
+        if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
+      });
+    },
+
+    _fmtDateLong(iso) {
+      if (!iso) return '—';
+      try {
+        const d = new Date(iso);
+        return d.toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
+      } catch { return iso; }
     },
 
     // ------------------------------------------------------------------
