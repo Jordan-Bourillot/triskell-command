@@ -834,17 +834,27 @@ const Mails = {
     const isReply = !!opts.inReplyTo;
     const title = opts.title || (isReply ? 'Répondre' : 'Nouveau mail');
 
-    // Charge la signature locale (best-effort) — versions texte ET HTML
-    let signature = '', signatureHtml = '';
+    // Charge la liste de signatures + sélection auto selon le compte
+    let signatures = [];
     if (App.api) {
       try {
-        const sigR = await App.api.signature_get();
-        if (sigR && sigR.ok) {
-          signature = sigR.signature || '';
-          signatureHtml = sigR.signature_html || '';
-        }
+        const r = await App.api.signatures_list();
+        if (r && r.ok) signatures = r.signatures || [];
       } catch (e) {}
     }
+    // Détermine la signature à utiliser par défaut pour le compte courant
+    const pickSigForAccount = (accId) => {
+      if (!signatures.length) return null;
+      // 1) Signature explicitement attribuée au compte
+      let s = signatures.find(s => (s.account_ids || []).includes(accId));
+      // 2) Sinon signature "toutes adresses" (account_ids vide)
+      if (!s) s = signatures.find(s => !(s.account_ids || []).length);
+      // 3) Sinon la première
+      return s || signatures[0] || null;
+    };
+    let currentSig = pickSigForAccount(defaultAccountId);
+    let signature = currentSig?.body_text || '';
+    let signatureHtml = currentSig?.body_html || '';
 
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 z-[210] flex items-center justify-center p-4 sm:p-6';
@@ -887,11 +897,21 @@ const Mails = {
                    class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
           </div>
 
-          <!-- Toggle Texte / HTML + bouton Templates -->
+          <!-- Toggle Texte / HTML + bouton Templates + Signature -->
           <div>
             <div class="flex items-center justify-between mb-1 gap-2 flex-wrap">
               <label class="block text-[11px] font-medium text-text-secondary">Message</label>
-              <div class="flex items-center gap-2 text-[11px]">
+              <div class="flex items-center gap-2 text-[11px] flex-wrap">
+                <!-- Dropdown signatures -->
+                <div class="flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-text-muted" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg>
+                  <select id="cmp-signature" class="px-2 py-1 rounded-lg bg-bg border border-border font-semibold text-text-muted">
+                    <option value="">Sans signature</option>
+                    ${signatures.map(s =>
+                      `<option value="${this._escape(s.id)}" ${currentSig && s.id === currentSig.id ? 'selected' : ''}>${this._escape(s.name)}</option>`
+                    ).join('')}
+                  </select>
+                </div>
                 <!-- Dropdown templates -->
                 <div class="relative">
                   <button id="cmp-tpl-trigger" class="px-2.5 py-1 rounded-lg font-semibold text-text-muted hover:bg-bg flex items-center gap-1">
@@ -1144,19 +1164,84 @@ const Mails = {
       this._openTemplatesManager();
     };
 
-    // Pré-remplissage signature (auto-insérée à la fin du body)
-    if (signature) {
-      textArea.value = '\n\n' + signature;
-      setTimeout(() => textArea.setSelectionRange(0, 0), 100);
+    // ----- Gestion dynamique de la signature -----
+    // Le body est conceptuellement [partie écrite par le user] + [marker] + [signature]
+    // On marque la signature avec un commentaire HTML invisible pour pouvoir la
+    // remplacer proprement quand le user change de signature.
+    const SIG_MARK_HTML = '<div data-signature-block style="margin-top:1.5em;">';
+    const SIG_MARK_HTML_END = '</div>';
+
+    const applySignature = (sig) => {
+      const sigText = sig?.body_text || '';
+      const sigHtml = sig?.body_html || '';
+      // -- Texte --
+      // Stratégie : retire l'ancienne signature (après le dernier double-saut),
+      // remet la nouvelle. Si l'utilisateur n'a rien écrit avant, on garde tel quel.
+      const taVal = textArea.value;
+      // On retire l'ancienne signature en se basant sur celle qui était en place :
+      // si textArea finit par "\n\n{ancienne sig}", on la retire
+      let body = taVal;
+      if (signature && body.endsWith('\n\n' + signature)) {
+        body = body.slice(0, -(signature.length + 2));
+      } else if (signature && body.endsWith(signature)) {
+        body = body.slice(0, -signature.length);
+      }
+      // Ajoute la nouvelle
+      textArea.value = sigText ? (body || '') + (body && !body.endsWith('\n\n') ? '\n\n' : (body ? '\n' : '\n\n')) + sigText : body;
+      // -- HTML --
+      // On retire l'ancien bloc signature (marqué par data-signature-block) s'il existe
+      let html = htmlArea.innerHTML;
+      html = html.replace(/<div data-signature-block[\s\S]*?<\/div>\s*$/, '');
+      if (sigHtml) {
+        html = html + SIG_MARK_HTML + sigHtml + SIG_MARK_HTML_END;
+      } else if (sigText) {
+        const sigAsHtml = sigText.split(/\n\n+/)
+          .map(p => `<p>${this._escape(p).replace(/\n/g, '<br>')}</p>`).join('');
+        html = html + SIG_MARK_HTML + sigAsHtml + SIG_MARK_HTML_END;
+      }
+      htmlArea.innerHTML = html;
+      // Mémorise pour le prochain swap
+      signature = sigText;
+      signatureHtml = sigHtml;
+      currentSig = sig;
+    };
+
+    // Pré-remplissage initial avec la signature sélectionnée
+    if (currentSig) {
+      // applique sans wiper : textArea/htmlArea sont encore vides à ce stade
+      if (signature) {
+        textArea.value = '\n\n' + signature;
+        setTimeout(() => textArea.setSelectionRange(0, 0), 100);
+      }
+      if (signatureHtml) {
+        htmlArea.innerHTML = `<p><br></p><p><br></p>${SIG_MARK_HTML}${signatureHtml}${SIG_MARK_HTML_END}`;
+      } else if (signature) {
+        const sigAsHtml = signature.split(/\n\n+/)
+          .map(p => `<p>${this._escape(p).replace(/\n/g, '<br>')}</p>`).join('');
+        htmlArea.innerHTML = `<p><br></p><p><br></p>${SIG_MARK_HTML}${sigAsHtml}${SIG_MARK_HTML_END}`;
+      }
     }
-    // Pré-remplit aussi la zone HTML si on a une version HTML
-    if (signatureHtml) {
-      htmlArea.innerHTML = `<p><br></p><p><br></p>${signatureHtml}`;
-    } else if (signature) {
-      // Fallback : convertit la signature texte en HTML basique pour le mode HTML
-      const sigAsHtml = signature.split(/\n\n+/)
-        .map(p => `<p>${this._escape(p).replace(/\n/g, '<br>')}</p>`).join('');
-      htmlArea.innerHTML = `<p><br></p><p><br></p>${sigAsHtml}`;
+
+    // Bind du dropdown signature : remplace dans le body
+    const sigSelect = overlay.querySelector('#cmp-signature');
+    if (sigSelect) {
+      sigSelect.onchange = () => {
+        const id = sigSelect.value;
+        const sig = id ? signatures.find(s => s.id === id) : null;
+        applySignature(sig);
+      };
+    }
+
+    // Bind du dropdown compte expéditeur : auto-sélection de la signature
+    const fromSel = overlay.querySelector('#cmp-from');
+    if (fromSel) {
+      fromSel.addEventListener('change', () => {
+        const newSig = pickSigForAccount(fromSel.value);
+        if (newSig?.id !== currentSig?.id) {
+          if (sigSelect) sigSelect.value = newSig?.id || '';
+          applySignature(newSig);
+        }
+      });
     }
 
     // Focus initial

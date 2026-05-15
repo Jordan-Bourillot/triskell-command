@@ -596,27 +596,131 @@ class Api:
     # Vue Mails — lecture de la table email_history
     # ------------------------------------------------------------------
     # ------------------------------------------------------------------
-    # Signature mail (locale, par utilisateur de ce PC)
+    # Signatures mail (multiples, locales par utilisateur)
     # ------------------------------------------------------------------
-    # Stocke 2 versions : texte simple ET HTML enrichi.
-    # Le composer utilise la version adaptée au mode courant.
-    def signature_get(self) -> dict:
-        sig      = self._app_state.get("outreach", "signature", default="") or ""
-        sig_html = self._app_state.get("outreach", "signature_html", default="") or ""
-        return {"ok": True, "signature": sig, "signature_html": sig_html}
+    # Stocke dans settings.json -> outreach.signatures = [
+    #   {id, name, body_text, body_html, account_ids: ['primary', 'lagriffe']}
+    # ]
+    # Les anciens champs outreach.signature / signature_html servent toujours
+    # de fallback (rétrocompatibilité avec l'ancienne version mono-signature).
+
+    def _signatures_load(self) -> list[dict]:
+        raw = self._app_state.get("outreach", "signatures", default=None)
+        if isinstance(raw, list):
+            return [s for s in raw if isinstance(s, dict) and s.get("id")]
+        # Fallback : convertit l'ancienne signature unique en liste
+        legacy_text = self._app_state.get("outreach", "signature", default="") or ""
+        legacy_html = self._app_state.get("outreach", "signature_html", default="") or ""
+        if legacy_text or legacy_html:
+            return [{
+                "id": "default",
+                "name": "Ma signature",
+                "body_text": legacy_text,
+                "body_html": legacy_html,
+                "account_ids": [],   # vide = s'applique à tous les comptes
+            }]
+        return []
+
+    def _signatures_save(self, sigs: list[dict]) -> None:
+        clean = [s for s in (sigs or []) if isinstance(s, dict) and s.get("id")]
+        self._app_state.set("outreach", "signatures", value=clean)
+        # Sync l'ancien champ pour compat (= 1ère signature par défaut)
+        first = clean[0] if clean else {}
+        self._app_state.set("outreach", "signature", value=first.get("body_text", ""))
+        self._app_state.set("outreach", "signature_html", value=first.get("body_html", ""))
+        self._app_state.save()
+
+    def signatures_list(self) -> dict:
+        """Renvoie toutes les signatures configurées."""
+        return {"ok": True, "signatures": self._signatures_load()}
+
+    def signature_for_account(self, payload: dict) -> dict:
+        """Renvoie la signature à utiliser pour un compte donné.
+        Stratégie : 1ère signature dont account_ids contient le compte,
+        sinon 1ère signature sans contrainte (account_ids vide),
+        sinon vide.
+        """
+        account_id = ((payload or {}).get("account_id") or "primary").strip()
+        sigs = self._signatures_load()
+        match = next((s for s in sigs if account_id in (s.get("account_ids") or [])), None)
+        if match is None:
+            match = next((s for s in sigs if not (s.get("account_ids") or [])), None)
+        if match is None:
+            return {"ok": True, "signature": None}
+        return {"ok": True, "signature": match}
 
     def signature_save(self, payload: dict) -> dict:
+        """Crée ou met à jour une signature. Si pas d'id → en crée une nouvelle.
+
+        Payload : { signature: { id?, name, body_text?, body_html?, account_ids[] } }
+        Backward-compat : si payload contient signature/signature_html directs,
+        on les écrit dans la 1re signature ('default').
+        """
+        import uuid as _uuid
         p = payload or {}
-        try:
-            if "signature" in p:
-                self._app_state.set("outreach", "signature", value=p.get("signature", ""))
+
+        # Mode legacy : { signature: "text", signature_html: "html" } directs
+        if "signature" in p and isinstance(p.get("signature"), str):
+            sigs = self._signatures_load()
+            if not sigs:
+                sigs = [{"id": "default", "name": "Ma signature",
+                         "body_text": "", "body_html": "", "account_ids": []}]
+            sigs[0]["body_text"] = p.get("signature", "")
             if "signature_html" in p:
-                self._app_state.set("outreach", "signature_html",
-                                     value=p.get("signature_html", ""))
-            self._app_state.save()
+                sigs[0]["body_html"] = p.get("signature_html", "")
+            try:
+                self._signatures_save(sigs)
+                return {"ok": True}
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+
+        # Mode nouveau : { signature: {dict complet} }
+        sig = (p.get("signature") or {})
+        if not isinstance(sig, dict):
+            return {"ok": False, "error": "signature attendue (dict)"}
+        sid = (sig.get("id") or "").strip() or _uuid.uuid4().hex[:10]
+        name = (sig.get("name") or "").strip()
+        if not name:
+            return {"ok": False, "error": "Nom de signature requis."}
+        new = {
+            "id": sid,
+            "name": name,
+            "body_text": sig.get("body_text", ""),
+            "body_html": sig.get("body_html", ""),
+            "account_ids": [a for a in (sig.get("account_ids") or []) if isinstance(a, str)],
+        }
+        try:
+            sigs = self._signatures_load()
+            sigs = [s for s in sigs if s.get("id") != sid]
+            sigs.append(new)
+            self._signatures_save(sigs)
+            return {"ok": True, "id": sid}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def signature_remove(self, payload: dict) -> dict:
+        sid = ((payload or {}).get("id") or "").strip()
+        if not sid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            sigs = self._signatures_load()
+            sigs = [s for s in sigs if s.get("id") != sid]
+            self._signatures_save(sigs)
             return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    def signature_get(self) -> dict:
+        """Backward-compat : renvoie la 1re signature au format legacy."""
+        sigs = self._signatures_load()
+        if not sigs:
+            return {"ok": True, "signature": "", "signature_html": ""}
+        first = sigs[0]
+        return {
+            "ok": True,
+            "signature":      first.get("body_text", ""),
+            "signature_html": first.get("body_html", ""),
+        }
 
     # ------------------------------------------------------------------
     # Brain — boîte à idées partagée Jordan/Thomas (sync command-voice mobile)

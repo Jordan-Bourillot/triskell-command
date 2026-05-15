@@ -179,70 +179,182 @@ const Config = {
   _renderSignature() {
     return `
       <section>
-        <div class="section-label">Ma signature mail</div>
+        <div class="section-label">Mes signatures mail</div>
         <p class="text-sm text-text-muted mb-4">
-          Ajoutée automatiquement à la fin de chaque mail que tu envoies depuis Triskell Command.
-          Tu peux choisir une version texte simple OU une version HTML enrichie (logo, couleurs, liens).
-          Chaque utilisateur a sa propre signature, stockée localement sur ton PC.
+          Crée plusieurs signatures et attribue-les à tes différentes adresses
+          (ex : une pour Triskell Studio, une pour Lagriffe…). La bonne signature
+          sera proposée automatiquement quand tu composes un mail.
         </p>
-        <div class="card p-5 space-y-3">
-          <div class="flex items-center gap-1 text-[11px]">
-            <button id="sig-mode-text" class="px-3 py-1.5 rounded-lg font-semibold bg-accent/15 text-accent">Texte simple</button>
-            <button id="sig-mode-html" class="px-3 py-1.5 rounded-lg font-semibold text-text-muted hover:bg-bg">HTML enrichi (avec aperçu)</button>
-          </div>
-
-          <!-- Mode texte simple -->
-          <div id="sig-text-zone">
-            <textarea id="cfg-signature" rows="5"
-                      placeholder="ex :&#10;&#10;Jordan&#10;Triskell Studio · triskell-studio.fr&#10;06 12 34 56 78"
-                      class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed resize-y"></textarea>
-          </div>
-
-          <!-- Mode HTML : 2 colonnes (code + preview) -->
-          <div id="sig-html-zone" class="hidden">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3" style="min-height: 240px;">
-              <div class="flex flex-col">
-                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">Code HTML</div>
-                <textarea id="cfg-signature-html" rows="10" placeholder='<p>Bonjour…</p><p>—<br><strong>Jordan</strong></p>'
-                          class="flex-1 px-3 py-2 text-xs rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-mono leading-relaxed resize-y" style="min-height: 200px;"></textarea>
-              </div>
-              <div class="flex flex-col">
-                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">Aperçu (rendu mail)</div>
-                <iframe id="cfg-signature-preview" sandbox="allow-same-origin"
-                        class="flex-1 w-full rounded-lg border border-border bg-white" style="min-height: 200px;"></iframe>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex items-center gap-3">
-            <button id="cfg-signature-save" class="btn btn-primary">Sauvegarder</button>
-            <span id="cfg-signature-status" class="text-xs text-text-muted"></span>
-          </div>
+        <div id="cfg-sig-list" class="space-y-3 mb-4">
+          <div class="text-sm text-text-muted">Chargement…</div>
         </div>
+        <button id="cfg-sig-add" class="btn btn-primary">+ Nouvelle signature</button>
       </section>
     `;
   },
 
   async _bindSignature() {
     if (!App.api) return;
-    const ta       = document.getElementById('cfg-signature');
-    const htmlTa   = document.getElementById('cfg-signature-html');
-    const iframe   = document.getElementById('cfg-signature-preview');
-    const textZone = document.getElementById('sig-text-zone');
-    const htmlZone = document.getElementById('sig-html-zone');
-    const tBtn     = document.getElementById('sig-mode-text');
-    const hBtn     = document.getElementById('sig-mode-html');
-    if (!ta || !htmlTa) return;
+    await this._refreshSignaturesList();
+    const addBtn = document.getElementById('cfg-sig-add');
+    if (addBtn) addBtn.onclick = () => this._openSignatureEditor(null);
+  },
 
-    // Charge l'existant
+  async _refreshSignaturesList() {
+    const listEl = document.getElementById('cfg-sig-list');
+    if (!listEl || !App.api) return;
+    let signatures = [], accounts = [];
     try {
-      const r = await App.api.signature_get();
-      if (r && r.ok) {
-        ta.value     = r.signature      || '';
-        htmlTa.value = r.signature_html || '';
-        if (htmlTa.value) this._renderSigPreview(iframe, htmlTa.value);
-      }
+      const sr = await App.api.signatures_list();
+      if (sr && sr.ok) signatures = sr.signatures || [];
+      const ar = await App.api.mail_accounts_list();
+      if (ar && ar.ok) accounts = ar.accounts || [];
     } catch (e) {}
+    if (!signatures.length) {
+      listEl.innerHTML = `<div class="text-sm text-text-muted">Aucune signature configurée.</div>`;
+      return;
+    }
+    const accLabel = (id) => {
+      const a = accounts.find(x => x.id === id);
+      return a ? a.label || a.from_email || id : id;
+    };
+    listEl.innerHTML = signatures.map(s => {
+      const accIds = s.account_ids || [];
+      const accBadges = accIds.length
+        ? accIds.map(id => `<span class="text-[10px] px-2 py-0.5 rounded-full bg-accent/12 text-accent font-semibold">${this._escape(accLabel(id))}</span>`).join(' ')
+        : `<span class="text-[10px] px-2 py-0.5 rounded-full bg-text-muted/10 text-text-muted">Toutes les adresses</span>`;
+      return `
+        <div class="card p-4">
+          <div class="flex items-start justify-between gap-3 mb-2">
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-bold truncate">${this._escape(s.name)}</div>
+              <div class="flex flex-wrap gap-1 mt-1">${accBadges}</div>
+            </div>
+            <div class="flex gap-1 shrink-0">
+              <button data-sig-edit="${this._escape(s.id)}" class="text-[11px] px-2 py-1 rounded hover:bg-bg text-text-muted hover:text-accent">Modifier</button>
+              <button data-sig-rm="${this._escape(s.id)}" class="text-[11px] px-2 py-1 rounded hover:bg-bg text-text-muted hover:text-danger">Supprimer</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    // Bind actions
+    listEl.querySelectorAll('[data-sig-edit]').forEach(b => {
+      b.onclick = () => {
+        const id = b.dataset.sigEdit;
+        const sig = signatures.find(x => x.id === id);
+        if (sig) this._openSignatureEditor(sig);
+      };
+    });
+    listEl.querySelectorAll('[data-sig-rm]').forEach(b => {
+      b.onclick = async () => {
+        const id = b.dataset.sigRm;
+        const sig = signatures.find(x => x.id === id);
+        if (!confirm(`Supprimer la signature "${sig && sig.name}" ?`)) return;
+        const r = await App.api.signature_remove({ id });
+        if (r && r.ok) this._refreshSignaturesList();
+        else alert('Échec : ' + ((r && r.error) || 'inconnu'));
+      };
+    });
+  },
+
+  async _openSignatureEditor(existing) {
+    // Charge les comptes pour le multi-select
+    let accounts = [];
+    try {
+      const r = await App.api.mail_accounts_list();
+      if (r && r.ok) accounts = r.accounts || [];
+    } catch (e) {}
+    const sel = new Set((existing && existing.account_ids) || []);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[210] flex items-center justify-center p-4';
+    overlay.style.background = 'rgba(15,23,42,0.7)';
+    overlay.style.backdropFilter = 'blur(8px)';
+    overlay.innerHTML = `
+      <div class="bg-surface rounded-2xl shadow-hero w-full max-w-4xl h-[85vh] overflow-hidden border border-border animate-slide-up flex flex-col">
+        <div class="px-6 pt-4 pb-3 flex items-center justify-between border-b border-border bg-surface-elevated">
+          <div>
+            <div class="hero-kicker mb-0.5">${existing ? 'MODIFIER' : 'NOUVELLE'}</div>
+            <h3 class="text-base font-bold">Signature mail</h3>
+          </div>
+          <button id="se-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none">×</button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          <!-- Nom -->
+          <div>
+            <label class="block text-[11px] font-medium text-text-secondary mb-1">Nom de la signature</label>
+            <input id="se-name" type="text" value="${this._escape(existing?.name || '')}" placeholder="ex : Triskell · officielle, Lagriffe · client, Court"
+                   class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
+          </div>
+
+          <!-- Comptes attribués -->
+          <div>
+            <label class="block text-[11px] font-medium text-text-secondary mb-1">Adresses à laquelle cette signature est attribuée</label>
+            <div class="text-[11px] text-text-muted mb-2">Si rien n'est coché, cette signature est disponible pour <b>toutes</b> les adresses (utile pour une signature par défaut).</div>
+            <div class="flex flex-wrap gap-2">
+              ${accounts.map(a => `
+                <label class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border border-border cursor-pointer hover:border-accent">
+                  <input type="checkbox" value="${this._escape(a.id)}" ${sel.has(a.id) ? 'checked' : ''} class="se-acc"/>
+                  <span>${this._escape(a.from_email || a.label)}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Toggle Texte/HTML -->
+          <div>
+            <div class="flex items-center gap-1 text-[11px] mb-2">
+              <button id="se-mode-text" class="px-3 py-1.5 rounded-lg font-semibold bg-accent/15 text-accent">Texte simple</button>
+              <button id="se-mode-html" class="px-3 py-1.5 rounded-lg font-semibold text-text-muted hover:bg-bg">HTML enrichi</button>
+            </div>
+
+            <div id="se-text-zone">
+              <textarea id="se-body-text" rows="6" placeholder="Jordan&#10;Triskell Studio · triskell-studio.fr&#10;06 12 34 56 78"
+                        class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed resize-y">${this._escape(existing?.body_text || '')}</textarea>
+            </div>
+
+            <div id="se-html-zone" class="hidden">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3" style="min-height: 240px;">
+                <div class="flex flex-col">
+                  <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">Code HTML</div>
+                  <textarea id="se-body-html" rows="10" placeholder='<p>Cordialement,<br><strong>Jordan</strong></p>'
+                            class="flex-1 px-3 py-2 text-xs rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-mono leading-relaxed resize-y" style="min-height: 200px;">${this._escape(existing?.body_html || '')}</textarea>
+                </div>
+                <div class="flex flex-col">
+                  <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">Aperçu (rendu mail)</div>
+                  <iframe id="se-preview" sandbox="allow-same-origin"
+                          class="flex-1 w-full rounded-lg border border-border bg-white" style="min-height: 200px;"></iframe>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="se-status" class="text-xs text-text-muted"></div>
+        </div>
+
+        <div class="px-6 py-3 border-t border-border bg-surface-elevated flex items-center justify-end gap-2">
+          <button id="se-cancel" class="btn btn-secondary">Annuler</button>
+          <button id="se-save" class="btn btn-primary">${existing ? 'Mettre à jour' : 'Créer'}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector('#se-close').onclick = close;
+    overlay.querySelector('#se-cancel').onclick = close;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    const textTa = overlay.querySelector('#se-body-text');
+    const htmlTa = overlay.querySelector('#se-body-html');
+    const iframe = overlay.querySelector('#se-preview');
+    const textZone = overlay.querySelector('#se-text-zone');
+    const htmlZone = overlay.querySelector('#se-html-zone');
+    const tBtn = overlay.querySelector('#se-mode-text');
+    const hBtn = overlay.querySelector('#se-mode-html');
+
+    if (htmlTa.value) this._renderSigPreview(iframe, htmlTa.value);
 
     const setMode = (m) => {
       if (m === 'text') {
@@ -255,9 +367,8 @@ const Config = {
         hBtn.className = 'px-3 py-1.5 rounded-lg font-semibold bg-accent/15 text-accent';
         textZone.classList.add('hidden');
         htmlZone.classList.remove('hidden');
-        // Si HTML vide mais texte présent → propose une conversion basique
-        if (!htmlTa.value.trim() && ta.value.trim()) {
-          htmlTa.value = ta.value.split(/\n\n+/)
+        if (!htmlTa.value.trim() && textTa.value.trim()) {
+          htmlTa.value = textTa.value.split(/\n\n+/)
             .map(p => `<p>${this._escape(p).replace(/\n/g, '<br>')}</p>`).join('');
           this._renderSigPreview(iframe, htmlTa.value);
         }
@@ -266,25 +377,36 @@ const Config = {
     tBtn.onclick = () => setMode('text');
     hBtn.onclick = () => setMode('html');
 
-    // Live preview sur saisie HTML
     let timer = null;
     htmlTa.addEventListener('input', () => {
       clearTimeout(timer);
       timer = setTimeout(() => this._renderSigPreview(iframe, htmlTa.value), 200);
     });
 
-    const saveBtn = document.getElementById('cfg-signature-save');
-    if (saveBtn) saveBtn.onclick = async () => {
-      const status = document.getElementById('cfg-signature-status');
+    overlay.querySelector('#se-save').onclick = async () => {
+      const status = overlay.querySelector('#se-status');
+      const name = overlay.querySelector('#se-name').value.trim();
+      if (!name) {
+        status.textContent = '✗ Nom requis.';
+        status.className = 'text-xs text-danger';
+        return;
+      }
+      const account_ids = Array.from(overlay.querySelectorAll('.se-acc'))
+        .filter(c => c.checked).map(c => c.value);
+      const sigData = {
+        id: existing?.id,
+        name,
+        body_text: textTa.value,
+        body_html: htmlTa.value,
+        account_ids,
+      };
       status.textContent = 'Sauvegarde…';
       status.className = 'text-xs text-text-muted';
-      const r = await App.api.signature_save({
-        signature: ta.value,
-        signature_html: htmlTa.value,
-      });
+      const r = await App.api.signature_save({ signature: sigData });
       if (r && r.ok) {
-        status.textContent = '✓ Sauvegardé. Sera ajoutée à tes prochains mails.';
+        status.textContent = '✓ Sauvegardé.';
         status.className = 'text-xs text-success';
+        setTimeout(() => { close(); this._refreshSignaturesList(); }, 600);
       } else {
         status.textContent = `✗ ${(r && r.error) || 'Erreur'}`;
         status.className = 'text-xs text-danger';
