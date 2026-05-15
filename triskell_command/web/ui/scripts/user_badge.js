@@ -1,8 +1,12 @@
 /* UserBadge — bandeau "Connecté en tant que X" en bas de la sidebar.
  *
- * Lit App.currentUser (rempli par Onboarding.checkAndShow ou App.init),
- * affiche un avatar généré (initiales colorées) + nom complet.
- * Click sur le badge → ouvre Réglages.
+ * Lit App.currentUser (rempli par Onboarding.checkAndShow ou App.init,
+ * puis surchargé par /api/me pour donner le bon prénom selon le cookie
+ * de session — Jordan / Thomas — même quand le compte Supabase est
+ * partagé).
+ * Affiche soit la photo de profil (si uploadée via /api/avatar) soit
+ * un avatar généré (initiales colorées). Clic sur la photo = upload,
+ * clic sur le nom = ouvre Réglages.
  */
 
 const UserBadge = {
@@ -10,7 +14,18 @@ const UserBadge = {
     this.refresh();
   },
 
-  refresh() {
+  async _fetchUserId() {
+    // Récupère le user_id du cookie (jordan/thomas) — sert à savoir
+    // sous quel id stocker/lire l'avatar.
+    try {
+      const r = await fetch('/api/me', { credentials: 'same-origin' });
+      if (!r.ok) return null;
+      const j = await r.json();
+      return (j && j.connected) ? (j.user_id || null) : null;
+    } catch (e) { return null; }
+  },
+
+  async refresh() {
     const slot = document.getElementById('user-badge-slot');
     if (!slot) return;
     const u = App.currentUser || {};
@@ -24,28 +39,67 @@ const UserBadge = {
       return;
     }
 
+    const userId = await this._fetchUserId();
     const initials = this._initials(fullName);
     const color = this._colorFor(fullName);
+    const cacheBust = Date.now();
+    const avatarUrl = userId ? `/api/avatar/${encodeURIComponent(userId)}?v=${cacheBust}` : '';
 
     slot.innerHTML = `
-      <button id="user-badge-btn"
-              class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg
-                     hover:bg-bg transition-colors text-left group"
-              title="Connecté en tant que ${this._esc(fullName)}${email ? ' (' + this._esc(email) + ')' : ''}\nCliquer pour ouvrir les Réglages">
-        <div class="w-7 h-7 rounded-full flex items-center justify-center
-                    text-[10px] font-bold text-white shrink-0"
-             style="background: ${color};">
-          ${this._esc(initials)}
-        </div>
-        <div class="flex-1 text-sm font-semibold truncate">${this._esc(firstName)}</div>
-        <svg class="w-3.5 h-3.5 text-text-muted shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 008.18 19a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H2a2 2 0 010-4h.09A1.65 1.65 0 003.6 8.18a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H8a1.65 1.65 0 001-1.51V2a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V8a1.65 1.65 0 001.51 1H22a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
-        </svg>
-      </button>
+      <div class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-bg transition-colors">
+        <button id="user-badge-avatar"
+                class="relative w-7 h-7 rounded-full flex items-center justify-center
+                       text-[10px] font-bold text-white shrink-0 overflow-hidden group/avatar cursor-pointer"
+                style="background: ${color};"
+                title="Cliquer pour changer la photo">
+          <span id="user-badge-initials" class="${avatarUrl ? 'hidden' : ''}">${this._esc(initials)}</span>
+          ${avatarUrl ? `<img id="user-badge-img" src="${avatarUrl}" alt=""
+                              class="absolute inset-0 w-full h-full object-cover"
+                              onerror="this.style.display='none';document.getElementById('user-badge-initials').classList.remove('hidden');"/>` : ''}
+          <span class="absolute inset-0 bg-black/50 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center">
+            <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+          </span>
+        </button>
+        <button id="user-badge-name"
+                class="flex-1 text-sm font-semibold truncate text-left group"
+                title="Connecté en tant que ${this._esc(fullName)}${email ? ' (' + this._esc(email) + ')' : ''}\nCliquer pour ouvrir les Réglages">
+          ${this._esc(firstName)}
+        </button>
+        <input type="file" id="user-badge-file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden"/>
+      </div>
     `;
 
-    document.getElementById('user-badge-btn').onclick = () => App.show('config');
+    document.getElementById('user-badge-name').onclick = () => App.show('config');
+    document.getElementById('user-badge-avatar').onclick = () => {
+      document.getElementById('user-badge-file').click();
+    };
+    document.getElementById('user-badge-file').onchange = (e) => this._handleUpload(e);
+  },
+
+  async _handleUpload(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const r = await fetch('/api/avatar', {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin',
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) {
+        alert(j.error || 'Échec de l\'upload de la photo.');
+        return;
+      }
+      // Recharge le badge pour afficher la nouvelle photo
+      this.refresh();
+    } catch (e) {
+      alert('Erreur réseau : ' + (e.message || e));
+    }
   },
 
   _initials(fullName) {

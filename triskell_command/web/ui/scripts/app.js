@@ -132,6 +132,22 @@ const App = {
     if (typeof Onboarding !== 'undefined') {
       try { await Onboarding.checkAndShow(); } catch (e) {}
     }
+    // Override avec l'identité du cookie de session — permet à Jordan et
+    // Thomas d'avoir chacun leur prénom affiché même quand ils partagent
+    // le même compte Supabase côté serveur.
+    try {
+      const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+      if (meRes.ok) {
+        const me = await meRes.json();
+        if (me && me.connected && me.display_name) {
+          this.currentUser = {
+            ...(this.currentUser || {}),
+            first_name: me.display_name,
+            full_name: me.display_name,
+          };
+        }
+      }
+    } catch (e) { /* pas grave, on garde currentUser tel quel */ }
     // Met à jour le bandeau utilisateur
     if (typeof UserBadge !== 'undefined') UserBadge.refresh();
 

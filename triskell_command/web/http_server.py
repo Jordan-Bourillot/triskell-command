@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -231,6 +231,73 @@ def create_app() -> FastAPI:
         names = [n for n, m in inspect.getmembers(api_instance, inspect.ismethod)
                  if not n.startswith("_")]
         return {"ok": True, "methods": sorted(names)}
+
+    # ---------------- Avatars (photo de profil par utilisateur) ----------------
+    # Stockés dans ~/.triskell-command/avatars/{user_id}.{ext}. Chaque user du
+    # cookie de session (Jordan / Thomas) a sa propre photo, indépendamment du
+    # compte Supabase partagé.
+
+    AVATARS_DIR = Path.home() / ".triskell-command" / "avatars"
+    ALLOWED_AVATAR_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
+    MAX_AVATAR_SIZE = 4 * 1024 * 1024  # 4 Mo
+
+    def _find_avatar(user_id: str) -> Path | None:
+        if not AVATARS_DIR.exists():
+            return None
+        for ext in ALLOWED_AVATAR_EXTS:
+            p = AVATARS_DIR / f"{user_id}.{ext}"
+            if p.is_file():
+                return p
+        return None
+
+    @app.post("/api/avatar")
+    async def upload_avatar(request: Request, file: UploadFile = File(...)) -> JSONResponse:
+        user_id = getattr(request.state, "user_id", None)
+        if not user_id:
+            return JSONResponse(status_code=401, content={"ok": False, "error": "auth_required"})
+        filename = (file.filename or "").lower()
+        ext = filename.rsplit(".", 1)[-1] if "." in filename else ""
+        if ext not in ALLOWED_AVATAR_EXTS:
+            return JSONResponse(status_code=400, content={
+                "ok": False,
+                "error": f"Format non supporté. Utilise : {', '.join(sorted(ALLOWED_AVATAR_EXTS))}",
+            })
+        data = await file.read()
+        if len(data) > MAX_AVATAR_SIZE:
+            return JSONResponse(status_code=400, content={
+                "ok": False,
+                "error": "Image trop lourde (max 4 Mo).",
+            })
+        AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+        # Supprime les anciennes versions avec d'autres extensions
+        for old_ext in ALLOWED_AVATAR_EXTS:
+            old = AVATARS_DIR / f"{user_id}.{old_ext}"
+            if old.is_file() and old_ext != ext:
+                try: old.unlink()
+                except Exception: pass
+        target = AVATARS_DIR / f"{user_id}.{ext}"
+        target.write_bytes(data)
+        return JSONResponse(content={"ok": True, "url": f"/api/avatar/{user_id}?v={int(time.time())}"})
+
+    @app.delete("/api/avatar")
+    async def delete_avatar(request: Request) -> JSONResponse:
+        user_id = getattr(request.state, "user_id", None)
+        if not user_id:
+            return JSONResponse(status_code=401, content={"ok": False, "error": "auth_required"})
+        p = _find_avatar(user_id)
+        if p:
+            try: p.unlink()
+            except Exception: pass
+        return JSONResponse(content={"ok": True})
+
+    @app.get("/api/avatar/{user_id}")
+    async def get_avatar(user_id: str) -> FileResponse:
+        # Public — pas besoin d'auth pour lire (comme un favicon). Permet aux
+        # autres users connectés de voir la photo de l'autre dans le chat Thomas/Jordan.
+        p = _find_avatar(user_id)
+        if not p:
+            raise HTTPException(status_code=404, detail="Pas de photo")
+        return FileResponse(str(p))
 
     # ---------------- Static files (UI) ----------------
 
