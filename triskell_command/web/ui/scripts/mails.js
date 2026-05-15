@@ -1149,20 +1149,34 @@ const Mails = {
       attInputEl.value = '';
     };
 
-    // Drag & drop sur la zone composer
-    overlay.addEventListener('dragover', (e) => {
-      if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
-        e.preventDefault();
+    // Insère une image (déjà lue côté JS) dans le corps en mode CID inline.
+    // Utilisé par le bouton 🖼 toolbar ET par le drop d'image après choix
+    // utilisateur "Dans le corps du mail".
+    const insertImageFile = async (file) => {
+      if (mode === 'text') setMode('html');
+      try {
+        const b64 = await readFileAsBase64(file);
+        const cid = 'img_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now().toString(36);
+        attachments.push({
+          filename: file.name || `image-${cid}.png`,
+          content_b64: b64,
+          content_type: file.type || 'image/png',
+          size: file.size,
+          inline: true,
+          cid,
+        });
+        const dataUrl = `data:${file.type || 'image/png'};base64,${b64}`;
+        htmlArea.focus();
+        document.execCommand('insertHTML', false,
+          `<img data-cid="${cid}" src="${dataUrl}" alt="${this._escape(file.name || 'image')}" style="max-width:100%; height:auto; display:block; margin:8px 0;">`);
+        renderAttachments();
+      } catch (e) {
+        console.error('Insertion image KO :', e);
+        alert('Impossible de lire cette image.');
       }
-    });
-    overlay.addEventListener('drop', async (e) => {
-      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
-        e.preventDefault();
-        await addFiles(e.dataTransfer.files);
-      }
-    });
+    };
 
-    // Insertion d'une image dans le corps (CID inline)
+    // Insertion d'image depuis le bouton toolbar 🖼 → ouvre un file picker
     const insertImageInBody = async () => {
       const picker = document.createElement('input');
       picker.type = 'file';
@@ -1170,32 +1184,96 @@ const Mails = {
       picker.onchange = async () => {
         const file = picker.files && picker.files[0];
         if (!file) return;
-        if (mode === 'text') setMode('html');
-        try {
-          const b64 = await readFileAsBase64(file);
-          const cid = 'img_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now().toString(36);
-          attachments.push({
-            filename: file.name || `image-${cid}.png`,
-            content_b64: b64,
-            content_type: file.type || 'image/png',
-            size: file.size,
-            inline: true,
-            cid,
-          });
-          // Insère un <img> qui pointe vers cid: — affiché en data-url côté éditeur
-          // pour l'aperçu, mais converti en cid: au moment de l'envoi.
-          const dataUrl = `data:${file.type || 'image/png'};base64,${b64}`;
-          htmlArea.focus();
-          document.execCommand('insertHTML', false,
-            `<img data-cid="${cid}" src="${dataUrl}" alt="${this._escape(file.name || 'image')}" style="max-width:100%; height:auto; display:block; margin:8px 0;">`);
-          renderAttachments();
-        } catch (e) {
-          console.error('Insertion image KO :', e);
-          alert('Impossible de lire cette image.');
-        }
+        await insertImageFile(file);
       };
       picker.click();
     };
+
+    // Petite modale qui demande comment ajouter une (ou plusieurs) image(s)
+    // droppée(s) : dans le corps du mail OU en pièce jointe.
+    const askImageMode = (images) => new Promise((resolve) => {
+      const title = images.length === 1
+        ? this._escape(images[0].name || 'image')
+        : `${images.length} images`;
+      const subtitle = images.length === 1
+        ? 'Comment veux-tu ajouter cette image au mail ?'
+        : `Comment veux-tu ajouter ces ${images.length} images au mail ?`;
+      const ov = document.createElement('div');
+      ov.className = 'fixed inset-0 z-[230] flex items-center justify-center p-4';
+      ov.style.background = 'rgba(15,23,42,0.75)';
+      ov.style.backdropFilter = 'blur(8px)';
+      ov.innerHTML = `
+        <div class="bg-surface rounded-2xl shadow-hero w-full max-w-sm border border-border animate-slide-up flex flex-col overflow-hidden">
+          <div class="px-5 pt-4 pb-3 border-b border-border bg-surface-elevated">
+            <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">IMAGE DÉPOSÉE</div>
+            <h3 class="text-base font-bold leading-tight truncate">${title}</h3>
+            <p class="text-xs text-text-muted mt-1">${subtitle}</p>
+          </div>
+          <div class="p-4 space-y-2">
+            <button data-img-choice="inline"
+                    class="w-full text-left px-4 py-3 rounded-xl border-2 border-accent bg-accent/10 hover:bg-accent/20 transition-colors">
+              <div class="font-semibold text-text flex items-center gap-2">
+                <svg class="w-4 h-4 text-accent shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                <span>Dans le corps du mail</span>
+              </div>
+              <div class="text-xs text-text-muted mt-1">L'image s'affiche directement dans le texte — recommandé pour les visuels.</div>
+            </button>
+            <button data-img-choice="attach"
+                    class="w-full text-left px-4 py-3 rounded-xl border border-border hover:border-accent hover:bg-bg transition-colors">
+              <div class="font-semibold text-text flex items-center gap-2">
+                <svg class="w-4 h-4 text-text-muted shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+                <span>En pièce jointe</span>
+              </div>
+              <div class="text-xs text-text-muted mt-1">L'image est attachée au mail, le destinataire la télécharge.</div>
+            </button>
+          </div>
+          <div class="px-5 pb-4 flex items-center justify-end">
+            <button data-img-choice="cancel" class="text-xs text-text-muted hover:text-danger">Annuler</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(ov);
+      const finish = (choice) => {
+        document.removeEventListener('keydown', escListener);
+        ov.remove();
+        resolve(choice);
+      };
+      const escListener = (e) => { if (e.key === 'Escape') finish('cancel'); };
+      document.addEventListener('keydown', escListener);
+      ov.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-img-choice]');
+        if (btn) finish(btn.dataset.imgChoice);
+        else if (e.target === ov) finish('cancel');
+      });
+    });
+
+    // Drag & drop sur la zone composer.
+    // Images → on demande : corps du mail OU pièce jointe.
+    // Autres fichiers → pièce jointe directement.
+    overlay.addEventListener('dragover', (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+        e.preventDefault();
+      }
+    });
+    overlay.addEventListener('drop', async (e) => {
+      if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+      e.preventDefault();
+      const files = Array.from(e.dataTransfer.files);
+      const images = files.filter(f => f.type && f.type.startsWith('image/'));
+      const others = files.filter(f => !f.type || !f.type.startsWith('image/'));
+      if (others.length) await addFiles(others);
+      if (images.length) {
+        const choice = await askImageMode(images);
+        if (choice === 'inline') {
+          for (const img of images) {
+            await insertImageFile(img);
+          }
+        } else if (choice === 'attach') {
+          await addFiles(images);
+        }
+        // choice === 'cancel' → on ignore les images
+      }
+    });
 
     // Boutons toolbar HTML
     toolbar.querySelectorAll('[data-cmd]').forEach(btn => {
@@ -1403,11 +1481,16 @@ const Mails = {
       });
     }
 
+    // Par défaut, on ouvre directement le mode HTML enrichi (plus pratique
+    // pour insérer images / mise en forme). L'utilisateur peut basculer en
+    // mode "Texte" via le toggle s'il préfère.
+    setMode('html');
+
     // Focus initial
     setTimeout(() => {
       if (!opts.prefilledTo) overlay.querySelector('#cmp-to').focus();
       else if (!opts.prefilledSubject) overlay.querySelector('#cmp-subject').focus();
-      else textArea.focus();
+      else (mode === 'html' ? htmlArea : textArea).focus();
     }, 50);
 
     // Envoi
