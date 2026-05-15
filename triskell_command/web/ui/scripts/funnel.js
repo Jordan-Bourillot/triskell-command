@@ -16,18 +16,18 @@ const Funnel = {
   async render(container) {
     container.innerHTML = `
       <section class="animate-slide-up">
-        <div class="mb-8">
+        <div class="mb-6 sm:mb-8">
           <div class="flex items-start justify-between gap-3">
-            <div>
+            <div class="min-w-0 flex-1">
               <div class="hero-kicker mb-2">CONVERSIONS</div>
-              <h1 class="hero-title mb-3" style="font-size: 36px;">Tes taux de transformation.</h1>
+              <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Tes taux de transformation.</h1>
               <p class="hero-subtitle">Tu vois en un coup d'œil ce qui marche et ce qui coince.</p>
             </div>
             ${Help.button('funnel')}
           </div>
         </div>
 
-        <div id="f-filters" class="space-y-4 mb-10"></div>
+        <div id="f-filters" class="space-y-3 sm:space-y-4 mb-6 sm:mb-10"></div>
         <div id="f-content"></div>
       </section>
     `;

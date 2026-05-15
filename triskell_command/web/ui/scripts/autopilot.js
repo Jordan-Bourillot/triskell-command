@@ -13,16 +13,16 @@ const Autopilot = {
   async render(container) {
     container.innerHTML = `
       <section class="animate-slide-up max-w-4xl">
-        <div class="mb-8">
+        <div class="mb-6 sm:mb-8">
           <div class="flex items-start justify-between gap-3">
-            <div>
+            <div class="min-w-0 flex-1">
               <div class="hero-kicker mb-2">AUTO-PILOTE</div>
-              <h1 class="hero-title mb-3" style="font-size: 36px;">Décris ta cible une fois.</h1>
+              <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Décris ta cible une fois.</h1>
               <p class="hero-subtitle">L'app cherche, vérifie, rédige et envoie — pendant que tu fais autre chose.</p>
             </div>
             ${Help.button('autopilot')}
           </div>
-          <div class="flex gap-3 mt-6">
+          <div class="flex flex-wrap gap-2 sm:gap-3 mt-5 sm:mt-6">
             <button id="ap-save" class="btn btn-secondary">Enregistrer</button>
             <button id="ap-run"  class="btn btn-primary">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -137,13 +137,13 @@ const Autopilot = {
             ['dailymotion', 'Dailymotion'],
             ['apple_podcasts', 'Apple Podcasts'],
           ])}
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             ${this._input('Audience minimum (abonnés)', 'obelisk_min_subscribers',
               String(c.obelisk_min_subscribers || 0), '0 = pas de plancher')}
             ${this._input('Audience maximum (abonnés)', 'obelisk_max_subscribers',
               String(c.obelisk_max_subscribers || 0), '0 = pas de plafond')}
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             ${this._input('Pays (code ISO)', 'obelisk_country', c.obelisk_country || '',
               'ex : FR')}
             ${this._input('Langue (code ISO)', 'obelisk_language', c.obelisk_language || '',

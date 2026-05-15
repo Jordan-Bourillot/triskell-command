@@ -20,19 +20,19 @@ const Phare = {
   async render(container) {
     container.innerHTML = `
       <section class="animate-slide-up">
-        <div class="mb-6">
+        <div class="mb-5 sm:mb-6">
           <div class="flex items-start justify-between gap-3">
-            <div>
+            <div class="min-w-0 flex-1">
               <div class="hero-kicker mb-2">VISIBILITÉ — LE PHARE</div>
-              <h1 class="hero-title mb-3" style="font-size: 36px;">Ton agence SEO autonome.</h1>
+              <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Ton agence SEO autonome.</h1>
               <p class="hero-subtitle">8 agents Claude qui surveillent, optimisent et publient sur tes 13 sites Triskell.</p>
             </div>
             ${Help.button('phare')}
           </div>
         </div>
 
-        <!-- Onglets -->
-        <div class="flex gap-1 mb-8 border-b border-border" id="ph-tabs"></div>
+        <!-- Onglets : scrollable horizontalement sur mobile -->
+        <div class="flex gap-1 mb-6 sm:mb-8 border-b border-border overflow-x-auto -mx-1 px-1" id="ph-tabs"></div>
 
         <div id="ph-content"></div>
       </section>
@@ -108,7 +108,7 @@ const Phare = {
     const list = (sites && sites.ok) ? (sites.sites || []) : [];
 
     slot.innerHTML = `
-      <div class="grid grid-cols-4 gap-5 mb-10">
+      <div class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 mb-6 sm:mb-10">
         ${this._stat({label: 'Sites surveillés', value: ov.sites_count ?? list.length})}
         ${this._stat({label: 'Clics 30 jours',   value: this._fmt(ov.total_clicks_30d), accent: 'success'})}
         ${this._stat({label: 'Position moyenne', value: ov.avg_position_30d ? Number(ov.avg_position_30d).toFixed(1) : '—'})}
@@ -214,7 +214,7 @@ const Phare = {
         </div>
       </div>
 
-      <div class="grid grid-cols-3 gap-5 mb-10">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-5 mb-6 sm:mb-10">
         ${this._stat({label: 'Score audit', value: audit.score != null ? audit.score : '—'})}
         ${this._stat({label: 'Mots-clés suivis', value: kws.length})}
         ${this._stat({label: 'Actions ouvertes', value: acts.length, accent: acts.length > 0 ? 'warning' : ''})}
@@ -284,7 +284,7 @@ const Phare = {
     const acts = data.actions || [];
     if (acts.length === 0) {
       slot.innerHTML = `
-        <div class="card p-12 text-center">
+        <div class="card p-6 sm:p-12 text-center">
           <div class="text-4xl mb-3">✓</div>
           <h2 class="text-xl font-semibold mb-2">Aucune PR en attente</h2>
           <p class="text-text-secondary max-w-lg mx-auto">
@@ -327,7 +327,7 @@ const Phare = {
   // -------- Onglet 4 : Bulletins --------
   async _renderReports(slot) {
     slot.innerHTML = `
-      <div class="card p-12 text-center">
+      <div class="card p-6 sm:p-12 text-center">
         <div class="text-4xl mb-3">📰</div>
         <h2 class="text-xl font-semibold mb-2">Bulletins de l'Analyste</h2>
         <p class="text-text-secondary max-w-lg mx-auto">
@@ -371,7 +371,7 @@ const Phare = {
       { id: '3', name: 'Bobeez', domain: 'bobeez.triskell-studio.fr', clicks_30d: 410, avg_position_30d: 31.7 },
     ];
     return `
-      <div class="grid grid-cols-4 gap-5 mb-10">
+      <div class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 mb-6 sm:mb-10">
         ${this._stat({label: 'Sites surveillés', value: fake.sites_count})}
         ${this._stat({label: 'Clics 30 jours', value: this._fmt(fake.total_clicks_30d), accent: 'success'})}
         ${this._stat({label: 'Position moyenne', value: fake.avg_position_30d.toFixed(1)})}

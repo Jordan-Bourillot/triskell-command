@@ -11,16 +11,16 @@ const Clients = {
   async render(container) {
     container.innerHTML = `
       <section class="animate-slide-up">
-        <div class="mb-8 flex items-center justify-between">
+        <div class="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div class="flex items-start gap-3">
-            <div>
+            <div class="min-w-0 flex-1">
               <div class="hero-kicker mb-2">CLIENTS</div>
-              <h1 class="hero-title mb-3" style="font-size: 36px;">Tes projets clients en cours.</h1>
+              <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Tes projets clients en cours.</h1>
               <p class="hero-subtitle">De la commande à la clôture. Tu fais avancer les cartes au fil du travail.</p>
             </div>
             ${Help.button('clients')}
           </div>
-          <div class="flex gap-3">
+          <div class="flex flex-wrap gap-2 sm:gap-3">
             <button id="c-refresh" class="btn btn-secondary">Rafraîchir</button>
             <button id="c-new" class="btn btn-primary">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
@@ -28,7 +28,7 @@ const Clients = {
             </button>
           </div>
         </div>
-        <div id="c-board" class="grid grid-cols-4 gap-5 min-h-[60vh]"></div>
+        <div id="c-board" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 min-h-[60vh]"></div>
       </section>
     `;
     document.getElementById('c-refresh').onclick = () => this.refresh();

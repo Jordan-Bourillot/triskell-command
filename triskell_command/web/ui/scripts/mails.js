@@ -17,18 +17,20 @@ const Mails = {
     accountFilter: '',    // id du compte (vide = tous)
     accounts: [],
     mails: [],
+    lastKnownInboundId: null,  // pour la notif desktop
+    notifPollHandle: null,
   },
 
   async render(container) {
     container.innerHTML = `
       <section class="animate-slide-up">
-        <div class="mb-6 flex items-end justify-between">
-          <div>
+        <div class="mb-5 sm:mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+          <div class="min-w-0 flex-1">
             <div class="hero-kicker mb-2">MAILS</div>
-            <h1 class="hero-title mb-3" style="font-size: 36px;">Tous tes mails, un seul endroit.</h1>
+            <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Tous tes mails, un seul endroit.</h1>
             <p class="hero-subtitle">Réponses prospects, tous entrants, mails sortants — filtrables par adresse.</p>
           </div>
-          <div class="flex gap-2">
+          <div class="flex flex-wrap gap-2">
             <button id="m-new" class="btn btn-primary">
               <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
               Nouveau mail
@@ -43,12 +45,19 @@ const Mails = {
           <button data-mtab="sent"    class="m-tab">Tous sortants</button>
         </div>
 
-        <div class="flex items-center gap-3 mb-4">
+        <div class="flex items-center gap-3 mb-4 flex-wrap">
           <label class="text-xs text-text-muted">Compte :</label>
           <select id="m-account-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm">
             <option value="">— Tous —</option>
           </select>
-          <span id="m-count" class="text-xs text-text-muted ml-2"></span>
+          <div class="relative flex-1 min-w-[220px] max-w-md">
+            <input id="m-search" type="search" placeholder="Rechercher un mail (sujet, expéditeur, contenu)…"
+                   class="w-full pl-9 pr-3 py-1.5 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
+            <svg class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+          </div>
+          <span id="m-count" class="text-xs text-text-muted ml-auto"></span>
         </div>
 
         <div id="m-content"></div>
@@ -66,6 +75,16 @@ const Mails = {
       this.state.accountFilter = e.target.value;
       this._load();
     };
+    // Recherche : filtre côté client (debounced)
+    const searchInput = document.getElementById('m-search');
+    let searchTimer = null;
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        this.state.searchQuery = e.target.value.trim().toLowerCase();
+        this._applySearch();
+      }, 200);
+    });
 
     await this._loadAccounts();
     await this._load();
@@ -148,6 +167,11 @@ const Mails = {
           <p class="text-text-muted">Aucun mail dans cette catégorie.</p>
         </div>
       `;
+      return;
+    }
+    // Si une recherche est en cours, on délègue à _applySearch (qui filtre)
+    if (this.state.searchQuery) {
+      this._applySearch();
       return;
     }
     root.innerHTML = limitedBanner + `<div class="space-y-2">${this.state.mails.map(m => this._mailRow(m)).join('')}</div>`;
@@ -437,6 +461,116 @@ const Mails = {
       const d = new Date(iso);
       return d.toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
     } catch { return iso; }
+  },
+
+  // ----------------------------------------------------------------------
+  // Recherche côté client : filtre l'affichage sans recharger l'API
+  // ----------------------------------------------------------------------
+  _applySearch() {
+    const q = (this.state.searchQuery || '').toLowerCase();
+    const root = document.getElementById('m-content');
+    const countEl = document.getElementById('m-count');
+    if (!root) return;
+    const all = this.state.mails || [];
+    let visible = all;
+    if (q) {
+      visible = all.filter(m => {
+        const extra = m.extra || {};
+        const blob = [
+          m.subject || '',
+          m.body || '',
+          extra.body_excerpt || '',
+          extra.from || '',
+          extra.to || '',
+          extra.account_id || '',
+          extra.classification || '',
+        ].join(' ').toLowerCase();
+        return blob.includes(q);
+      });
+    }
+    countEl.textContent = q
+      ? `${visible.length} / ${all.length} mail(s) (recherche : "${q}")`
+      : `${all.length} mail(s)`;
+    if (!visible.length) {
+      root.innerHTML = `<div class="card p-10 text-center"><div class="text-3xl mb-3 opacity-60">∅</div><p class="text-text-muted">Aucun résultat pour "${this._escape(q)}".</p></div>`;
+      return;
+    }
+    root.innerHTML = `<div class="space-y-2">${visible.map(m => this._mailRow(m)).join('')}</div>`;
+    // Re-bind clic
+    root.querySelectorAll('[data-mail-open]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.dataset.mailOpen;
+        const mail = all.find(m => String(m.id) === String(id));
+        if (mail) this._openDetail(mail);
+      });
+    });
+  },
+
+  // ----------------------------------------------------------------------
+  // Notif desktop sur nouvel entrant (Web Notifications API)
+  // ----------------------------------------------------------------------
+  startDesktopNotifPolling() {
+    if (this.state.notifPollHandle) return;  // déjà actif
+    if (!('Notification' in window)) return; // navigateur ancien
+    // Demande permission au 1er passage
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+    // Init le baseline (= mail le plus récent connu, pour ne pas notifier l'historique)
+    this._initNotifBaseline();
+    // Poll toutes les 60s
+    this.state.notifPollHandle = setInterval(() => this._pollInbound(), 60_000);
+  },
+
+  async _initNotifBaseline() {
+    if (!App.api) return;
+    try {
+      const r = await App.api.mails_list({ kind: 'inbound', limit: 1 });
+      if (r && r.ok && r.mails && r.mails.length) {
+        this.state.lastKnownInboundId = r.mails[0].id;
+      }
+    } catch (e) {}
+  },
+
+  async _pollInbound() {
+    if (!App.api) return;
+    if (Notification.permission !== 'granted') return;
+    try {
+      const r = await App.api.mails_list({ kind: 'inbound', limit: 10 });
+      if (!r || !r.ok || !r.mails) return;
+      const mails = r.mails;
+      if (!mails.length) return;
+      // Tous les mails plus récents que le dernier connu = nouveaux
+      const lastKnown = this.state.lastKnownInboundId;
+      const newOnes = [];
+      for (const m of mails) {
+        if (m.id === lastKnown) break;
+        newOnes.push(m);
+      }
+      if (!newOnes.length) return;
+      // Met à jour le baseline
+      this.state.lastKnownInboundId = mails[0].id;
+      // Affiche les notifs (max 3 d'un coup pour ne pas spammer)
+      for (const m of newOnes.slice(0, 3)) {
+        const extra = m.extra || {};
+        const fromAddr = extra.from || '(inconnu)';
+        const accountId = extra.account_id || '';
+        const accountLabel = (this.state.accounts.find(a => a.id === accountId) || {}).label || accountId || '';
+        const subject = m.subject || '(sans sujet)';
+        const body = (extra.body_excerpt || m.body || '').slice(0, 100);
+        const notif = new Notification(`📬 ${fromAddr}`, {
+          body: `${subject}${accountLabel ? '\n→ ' + accountLabel : ''}${body ? '\n\n' + body : ''}`,
+          icon: 'https://rmaafrrseafghptlsgdz.supabase.co/storage/v1/object/public/chat-images/triskell-logo.png',
+          tag: `mail-${m.id}`,
+        });
+        notif.onclick = () => {
+          window.focus();
+          App.show('mails');
+          setTimeout(() => this._openDetail(m), 200);
+          notif.close();
+        };
+      }
+    } catch (e) {}
   },
 
   // ----------------------------------------------------------------------
