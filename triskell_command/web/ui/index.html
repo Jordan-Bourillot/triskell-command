@@ -538,45 +538,7 @@
     </div>
   </div>
 
-  <!-- ===================== FAB Allô Claude ===================== -->
-  <!-- Bloc flottant : label à gauche + bouton rond à droite.
-       Caché sur mobile (utiliser le bouton "Allô Claude" du menu) car il
-       chevauchait les autres boutons de la sidebar. Visible >= md. -->
-  <div id="claude-fab-wrap"
-       class="fixed bottom-8 right-8 hidden md:flex items-center gap-3 z-50">
-    <!-- Label "Allô Claude" -->
-    <span id="claude-fab-label"
-          class="px-3 py-1.5 rounded-full text-sm font-semibold
-                 bg-surface text-accent
-                 shadow-soft border border-border
-                 select-none cursor-pointer
-                 transition-all duration-200
-                 hover:scale-105 hover:shadow-lift">
-      Allô Claude
-    </span>
-    <!-- Bouton rond -->
-    <button id="claude-fab"
-            class="relative w-16 h-16 rounded-full
-                   bg-gradient-to-br from-accent to-accent-glow
-                   shadow-fab flex items-center justify-center
-                   text-white
-                   transition-all duration-200
-                   hover:scale-110 hover:shadow-hero
-                   animate-breathe
-                   cursor-pointer"
-            title="Allô Claude · F12">
-      <!-- Icône custom : bulle de dialogue + étincelle à l'intérieur -->
-      <svg id="claude-fab-icon" class="w-7 h-7" viewBox="0 0 24 24" fill="none"
-           stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 12a8 8 0 0 1-11.7 7.1L4 20.5l1.4-5.3A8 8 0 1 1 21 12z" fill="currentColor" fill-opacity="0.18"/>
-        <path d="M21 12a8 8 0 0 1-11.7 7.1L4 20.5l1.4-5.3A8 8 0 1 1 21 12z"/>
-        <path d="M12 8.5v3M12 12.5v3M8.5 12h3M12.5 12h3" stroke-width="1.6"/>
-      </svg>
-      <span id="claude-fab-dot"
-            class="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full
-                   bg-danger ring-2 ring-bg hidden"></span>
-    </button>
-  </div>
+  <!-- Bouton flottant Allô Claude supprimé — accessible via l'item sidebar. -->
 
   <!-- ===================== Bus de templates de vues ===================== -->
   <template id="view-morning"></template>
