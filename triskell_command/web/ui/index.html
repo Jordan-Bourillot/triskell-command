@@ -214,7 +214,9 @@
                   transition-transform duration-200 ease-out">
       <!-- Brand + bouton fermer (mobile uniquement) -->
       <div class="px-6 pt-6 pb-4 flex items-center justify-between gap-3">
-        <div class="flex items-center gap-3">
+        <button type="button" onclick="App.show('morning')"
+                title="Retour à la Matinale"
+                class="flex items-center gap-3 -mx-2 px-2 py-1.5 rounded-xl hover:bg-bg transition-colors text-left cursor-pointer">
           <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-accent to-accent-glow shadow-soft flex items-center justify-center text-white font-bold">
             ⛯
           </div>
@@ -222,7 +224,7 @@
             <div class="font-display text-lg font-bold leading-none">Triskell</div>
             <div class="text-[10px] tracking-widest font-bold text-accent mt-1">COMMAND</div>
           </div>
-        </div>
+        </button>
         <button id="mobile-sidebar-close"
                 aria-label="Fermer le menu"
                 class="md:hidden w-9 h-9 flex items-center justify-center rounded-lg
