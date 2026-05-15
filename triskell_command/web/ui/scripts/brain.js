@@ -18,25 +18,44 @@ const Brain = {
   async render(container) {
     container.innerHTML = `
       <section class="animate-slide-up">
-        <div class="mb-6 flex items-end justify-between flex-wrap gap-3">
-          <div>
+        <div class="mb-5 sm:mb-6 flex items-end justify-between flex-wrap gap-3">
+          <div class="min-w-0 flex-1">
             <div class="hero-kicker mb-2">BRAIN</div>
-            <h1 class="hero-title mb-3" style="font-size: 36px;">Vide ton cerveau ici.</h1>
+            <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Vide ton cerveau ici.</h1>
             <p class="hero-subtitle">Idées, tâches, infos en vrac. Claude classe et te rappelle au bon moment. Partagé avec Thomas.</p>
           </div>
-          <div class="flex gap-2">
-            <button id="b-new" class="btn btn-primary">
+          <div class="flex gap-2 w-full sm:w-auto">
+            <button id="b-new" class="btn btn-primary flex-1 sm:flex-none justify-center">
               <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
               Nouvelle note
             </button>
-            <button id="b-refresh" class="btn btn-secondary">Rafraîchir</button>
+            <button id="b-refresh" class="btn btn-secondary justify-center">Rafraîchir</button>
           </div>
         </div>
 
-        <div class="flex gap-2 mb-5 text-[11px]">
-          <button data-bfilter="open"     class="b-filter is-active">À traiter</button>
-          <button data-bfilter="done"     class="b-filter">Fait</button>
-          <button data-bfilter="archived" class="b-filter">Archivé</button>
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-5 gap-3">
+          <!-- Filtre status -->
+          <div class="flex gap-2 text-[11px] overflow-x-auto -mx-1 px-1">
+            <button data-bfilter="open"     class="b-filter is-active whitespace-nowrap">À traiter</button>
+            <button data-bfilter="done"     class="b-filter whitespace-nowrap">Fait</button>
+            <button data-bfilter="archived" class="b-filter whitespace-nowrap">Archivé</button>
+          </div>
+          <!-- Filtre auteur + tri -->
+          <div class="flex flex-wrap gap-2 items-center text-[11px]">
+            <label class="text-text-muted">Auteur :</label>
+            <select id="b-author-filter" class="px-2 py-1 rounded-lg bg-bg border border-border">
+              <option value="">Tous</option>
+              <option value="jordan">Moi (Jordan)</option>
+              <option value="thomas">Thomas</option>
+            </select>
+            <label class="text-text-muted ml-2">Tri :</label>
+            <select id="b-sort" class="px-2 py-1 rounded-lg bg-bg border border-border">
+              <option value="date_desc">Récentes d'abord</option>
+              <option value="date_asc">Anciennes d'abord</option>
+              <option value="cat">Par catégorie (A→Z)</option>
+              <option value="tag">Par tag</option>
+            </select>
+          </div>
         </div>
 
         <div id="b-content"></div>
@@ -48,7 +67,28 @@ const Brain = {
     document.querySelectorAll('[data-bfilter]').forEach(btn => {
       btn.onclick = () => this._switchFilter(btn.dataset.bfilter);
     });
+    document.getElementById('b-author-filter').onchange = (e) => {
+      this.state.authorFilter = e.target.value;
+      this._load();
+    };
+    document.getElementById('b-sort').onchange = (e) => {
+      this.state.sortBy = e.target.value;
+      this._load();
+    };
     await this._load();
+  },
+
+  _applyAuthorAndSort(notes) {
+    let out = notes.slice();
+    if (this.state.authorFilter) {
+      out = out.filter(n => (n.author || '').toLowerCase() === this.state.authorFilter);
+    }
+    const sort = this.state.sortBy || 'date_desc';
+    if (sort === 'date_asc')  out.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+    else if (sort === 'cat')  out.sort((a, b) => (a.category || 'zzz').localeCompare(b.category || 'zzz'));
+    else if (sort === 'tag')  out.sort((a, b) => ((a.tags || [])[0] || 'zzz').localeCompare((b.tags || [])[0] || 'zzz'));
+    else                       out.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    return out;
   },
 
   _injectStyles() {
@@ -95,21 +135,31 @@ const Brain = {
     root.innerHTML = `<div class="card p-6 text-text-muted text-sm">Chargement…</div>`;
     const filter = this.currentFilter || 'open';
     try {
-      if (filter === 'open') {
-        const r = await App.api.brain_list_by_category();
-        if (!r || !r.ok) {
-          root.innerHTML = `<div class="card p-6 text-danger">${(r && r.error) || 'Erreur'}</div>`;
-          return;
+      // On charge toutes les notes (status courant) puis on applique
+      // les filtres (auteur, tri) côté front pour éviter d'aller-retour.
+      const r = await App.api.brain_list({ status: filter, limit: 300 });
+      if (!r || !r.ok) {
+        root.innerHTML = `<div class="card p-6 text-danger">${(r && r.error) || 'Erreur'}</div>`;
+        return;
+      }
+      const notes = this._applyAuthorAndSort(r.notes || []);
+      if (filter === 'open' && !this.state.authorFilter
+          && (!this.state.sortBy || this.state.sortBy === 'date_desc' || this.state.sortBy === 'cat')) {
+        // Vue groupée par catégorie (mode par défaut)
+        const byCat = {};
+        for (const n of notes) {
+          const k = n.category || 'Sans catégorie';
+          (byCat[k] = byCat[k] || []).push(n);
         }
-        this.state.groups = r.groups || [];
+        this.state.groups = Object.entries(byCat)
+          .map(([category, notes]) => ({ category, count: notes.length, notes }))
+          .sort((a, b) => this.state.sortBy === 'cat'
+                ? a.category.localeCompare(b.category)
+                : b.count - a.count);
         this._renderGrouped();
       } else {
-        const r = await App.api.brain_list({ status: filter, limit: 100 });
-        if (!r || !r.ok) {
-          root.innerHTML = `<div class="card p-6 text-danger">${(r && r.error) || 'Erreur'}</div>`;
-          return;
-        }
-        this._renderFlat(r.notes || []);
+        // Vue plate (filtre auteur actif ou tri custom)
+        this._renderFlat(notes);
       }
     } catch (e) {
       root.innerHTML = `<div class="card p-6 text-danger">Erreur : ${e}</div>`;
@@ -120,7 +170,7 @@ const Brain = {
     const root = document.getElementById('b-content');
     if (!this.state.groups.length) {
       root.innerHTML = `
-        <div class="card p-12 text-center">
+        <div class="card p-6 sm:p-12 text-center">
           <div class="text-3xl mb-3 opacity-60">∅</div>
           <p class="text-text-muted">Aucune idée en cours.</p>
           <button class="btn btn-primary mt-4" onclick="Brain._openNew()">Lance-toi : ajoute ta première note</button>
@@ -145,7 +195,7 @@ const Brain = {
   _renderFlat(notes) {
     const root = document.getElementById('b-content');
     if (!notes.length) {
-      root.innerHTML = `<div class="card p-12 text-center text-text-muted">Aucune note dans ce filtre.</div>`;
+      root.innerHTML = `<div class="card p-6 sm:p-12 text-center text-text-muted">Aucune note dans ce filtre.</div>`;
       return;
     }
     root.innerHTML = `<div class="space-y-2">${notes.map(n => this._renderNoteCard(n)).join('')}</div>`;
@@ -265,23 +315,24 @@ const Brain = {
   // ----------------------------------------------------------------------
   _openDetail(n) {
     const overlay = document.createElement('div');
-    overlay.className = 'fixed inset-0 z-[200] flex items-center justify-center p-4';
+    // Mobile : full-screen (p-0), desktop : centré avec marges (p-4)
+    overlay.className = 'fixed inset-0 z-[200] flex items-stretch sm:items-center justify-center sm:p-4';
     overlay.style.background = 'rgba(15,23,42,0.7)';
     overlay.style.backdropFilter = 'blur(8px)';
     const author = (n.author || 'jordan').toLowerCase();
     const replies = n.replies || [];
     overlay.innerHTML = `
-      <div class="bg-surface rounded-2xl shadow-hero w-full max-w-xl max-h-[85vh] overflow-hidden border border-border animate-slide-up flex flex-col">
-        <div class="px-6 pt-4 pb-3 border-b border-border bg-surface-elevated flex items-center justify-between">
+      <div class="bg-surface sm:rounded-2xl shadow-hero w-full sm:max-w-xl h-full sm:h-auto sm:max-h-[85vh] overflow-hidden sm:border border-border animate-slide-up flex flex-col">
+        <div class="px-4 sm:px-6 pt-4 pb-3 border-b border-border bg-surface-elevated flex items-center justify-between">
           <div class="flex items-center gap-2 flex-wrap">
             <span class="b-author ${author}">${this._escape(author)}</span>
             <span class="text-xs text-text-muted">${this._fmtDate(n.created_at)}</span>
             ${n.category ? `<span class="b-tag">${this._escape(n.category)}</span>` : ''}
           </div>
-          <button id="bd-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none">×</button>
+          <button id="bd-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
         </div>
 
-        <div class="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+        <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-5 space-y-4">
           <!-- Note originale -->
           <div class="text-sm whitespace-pre-wrap leading-relaxed">${this._escape(n.content)}</div>
 
@@ -317,7 +368,7 @@ const Brain = {
           </div>
         </div>
 
-        <div class="px-6 py-3 border-t border-border bg-surface-elevated flex items-center justify-between gap-2">
+        <div class="px-4 sm:px-6 py-3 border-t border-border bg-surface-elevated flex items-center justify-between gap-2">
           <button id="bd-delete" class="text-xs text-text-muted hover:text-danger">Supprimer</button>
           <div class="flex gap-2">
             ${n.status !== 'archived' ? `<button id="bd-archive" class="btn btn-secondary text-xs">Archiver</button>` : ''}

@@ -14,16 +14,16 @@ const Replies = {
   async render(container) {
     container.innerHTML = `
       <section class="animate-slide-up">
-        <div class="mb-8">
+        <div class="mb-6 sm:mb-8">
           <div class="flex items-start justify-between gap-3">
-            <div>
+            <div class="min-w-0 flex-1">
               <div class="hero-kicker mb-2">RÉPONSES</div>
-              <h1 class="hero-title mb-3" style="font-size: 36px;">Les prospects qui te répondent.</h1>
+              <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Les prospects qui te répondent.</h1>
               <p class="hero-subtitle">Déjà triés, déjà classés. Pas besoin d'ouvrir ta boîte mail.</p>
             </div>
             ${Help.button('replies')}
           </div>
-          <div class="flex gap-3 mt-6 items-center">
+          <div class="flex flex-wrap gap-2 sm:gap-3 mt-5 sm:mt-6 items-center">
             <button id="r-poll" class="btn btn-primary">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0114-7.4M21 12a9 9 0 01-14 7.4"/><path d="M21 4v5h-5M3 20v-5h5"/></svg>
               Vérifier maintenant
@@ -32,8 +32,8 @@ const Replies = {
           </div>
         </div>
 
-        <div id="r-filters" class="flex flex-wrap gap-2 mb-8"></div>
-        <div id="r-list" class="space-y-4"></div>
+        <div id="r-filters" class="flex flex-wrap gap-2 mb-5 sm:mb-8"></div>
+        <div id="r-list" class="space-y-3 sm:space-y-4"></div>
       </section>
     `;
 
@@ -92,7 +92,7 @@ const Replies = {
     }
     if (!data || !data.ok) {
       list.innerHTML = `
-        <div class="card p-10 text-center">
+        <div class="card p-6 sm:p-10 text-center">
           <div class="text-3xl mb-3">🔌</div>
           <h2 class="text-xl font-semibold mb-2">Connexion requise</h2>
           <p class="text-text-secondary mb-6">
@@ -105,8 +105,8 @@ const Replies = {
     }
     if (!data.rows || data.rows.length === 0) {
       list.innerHTML = `
-        <div class="card p-12 text-center">
-          <div class="text-4xl mb-3">✓</div>
+        <div class="card p-6 sm:p-12 text-center">
+          <div class="text-3xl sm:text-4xl mb-3">✓</div>
           <h2 class="text-xl font-semibold mb-2">Aucune réponse en attente</h2>
           <p class="text-text-secondary max-w-md mx-auto">
             L'app vérifie ta boîte mail toutes les 5 minutes.
@@ -154,15 +154,15 @@ const Replies = {
     });
 
     return `
-      <article class="card p-6">
-        <header class="flex items-start justify-between mb-3 gap-4">
-          <div>
-            <div class="font-semibold text-base">${this._esc(name)}</div>
-            <div class="text-sm text-text-muted">${this._esc(email)} · ${ts}</div>
+      <article class="card p-4 sm:p-6">
+        <header class="flex items-start justify-between mb-3 gap-3">
+          <div class="min-w-0">
+            <div class="font-semibold text-sm sm:text-base truncate">${this._esc(name)}</div>
+            <div class="text-xs sm:text-sm text-text-muted break-all">${this._esc(email)} · ${ts}</div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
-            ${conf ? `<span class="text-xs text-text-muted">${Math.round(conf*100)}%</span>` : ''}
-            <span class="text-[10px] font-bold tracking-widest px-2.5 py-1 rounded-full
+            ${conf ? `<span class="text-xs text-text-muted hidden sm:inline">${Math.round(conf*100)}%</span>` : ''}
+            <span class="text-[10px] font-bold tracking-widest px-2 py-1 rounded-full whitespace-nowrap
                          ${catInfo.color === 'success' ? 'bg-success/15 text-success' : ''}
                          ${catInfo.color === 'warning' ? 'bg-warning/15 text-warning' : ''}
                          ${catInfo.color === 'danger'  ? 'bg-danger/15 text-danger'  : ''}

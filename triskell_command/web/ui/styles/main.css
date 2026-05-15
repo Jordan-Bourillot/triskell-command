@@ -264,6 +264,9 @@ html, body {
   color: hsl(var(--text));
   word-break: break-word;
 }
+/* Variante "medium" pour les vues secondaires (Drafts, Replies, Brain, etc.)
+   où la matinale écrase tout. */
+.hero-title.hero-title--md { font-size: 36px; }
 .hero-subtitle {
   font-size: 17px;
   line-height: 1.5;
@@ -273,6 +276,7 @@ html, body {
 /* Responsive : tailles réduites sur mobile (<640px) */
 @media (max-width: 640px) {
   .hero-title { font-size: 28px; }
+  .hero-title.hero-title--md { font-size: 24px; }
   .hero-subtitle { font-size: 15px; }
   .stat-card { padding: 16px; border-radius: 12px; }
   .stat-card .value { font-size: 28px; }
