@@ -996,6 +996,15 @@ const Mails = {
     `;
     document.body.appendChild(overlay);
 
+    // Pastilles "NEW" sur les nouveautés du composer (mai 2026).
+    // Restent visibles jusqu'à ce que l'utilisateur clique la croix.
+    if (window.NewBadge) {
+      const imgBtn = overlay.querySelector('[data-cmd="insert-image"]');
+      if (imgBtn) window.NewBadge.attach(imgBtn, 'mail-insert-image-v1');
+      const attBtn = overlay.querySelector('#cmp-add-attachment');
+      if (attBtn) window.NewBadge.attach(attBtn, 'mail-attachments-v1');
+    }
+
     // Style pour les boutons toolbar (injecté une fois)
     if (!document.getElementById('cmp-toolbar-styles')) {
       const s = document.createElement('style');

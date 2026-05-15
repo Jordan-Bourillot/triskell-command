@@ -328,6 +328,12 @@ const App = {
     }
     const testBtn = document.getElementById('push-test');
     if (testBtn) testBtn.onclick = () => Push.test();
+
+    // Pastille "NEW" sur le bouton notifs (refonte 3 états : OFF / ON / Bloqué)
+    if (window.NewBadge) {
+      const target = toggleBtn || row.firstElementChild;
+      if (target) window.NewBadge.attach(target, 'notifs-button-v1');
+    }
   },
 
   // ---- Mobile sidebar drawer (visible <md uniquement) ----

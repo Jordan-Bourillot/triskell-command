@@ -72,6 +72,12 @@ const UserBadge = {
       fullName, firstName, email, userId, avatarUrl, color, initials,
     });
     document.getElementById('user-badge-file').onchange = (e) => this._handleUpload(e);
+
+    // Pastille "NEW" : clic sur le bandeau = nouvelle modale Profil (vs Réglages avant)
+    if (window.NewBadge) {
+      const row = document.getElementById('user-badge-row');
+      if (row) window.NewBadge.attach(row, 'user-profile-modal-v1');
+    }
   },
 
   /** Modale "Mon profil personnel" — différente des Réglages app. */
