@@ -26,8 +26,135 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
-SMTP_KEY = "smtp_config"      # déjà utilisé par post_sale_runner
+SMTP_KEY = "smtp_config"      # déjà utilisé par post_sale_runner (compte principal)
 AI_KEY   = "ai_keys"          # nouveau
+MAIL_ACCOUNTS_KEY = "mail_accounts"   # liste des comptes mail secondaires
+                                       # (en plus du compte principal smtp_config)
+
+
+# ---------------------------------------------------------------------------
+# Multi-comptes mail — comptes secondaires (en plus du compte principal)
+# ---------------------------------------------------------------------------
+# Schéma stocké dans `shared_settings.mail_accounts` :
+#   { "accounts": [ { "id": "lagriffe", "label": "Lagriffe Studio",
+#                     "from_email": "contact@lagriffe-studio.fr",
+#                     "from_name": "Lagriffe Studio",
+#                     "smtp_host": "smtp.ionos.fr", "smtp_port": 587,
+#                     "smtp_user": "...", "smtp_password": "...",
+#                     "imap_host": "imap.ionos.fr", "imap_port": 993,
+#                     "imap_user": "...", "imap_password": "..." }, ... ] }
+#
+# Le compte "primary" (= smtp_config principal) n'est PAS dans cette liste —
+# get_all_mail_accounts() le rajoute virtuellement en tête pour les vues.
+
+def list_secondary_accounts(client=None) -> list[dict]:
+    """Renvoie la liste des comptes mail secondaires (sans le principal)."""
+    if client is None:
+        return []
+    try:
+        raw = client.get_shared_setting(MAIL_ACCOUNTS_KEY, {}) or {}
+        if isinstance(raw, str):
+            try: raw = json.loads(raw)
+            except Exception: raw = {}
+        accounts = (raw.get("accounts") if isinstance(raw, dict) else None) or []
+        return [a for a in accounts if isinstance(a, dict) and a.get("id")]
+    except Exception as exc:
+        logger.debug("list_secondary_accounts: %s", exc)
+        return []
+
+
+def get_all_mail_accounts(client=None, app_state=None) -> list[dict]:
+    """Renvoie tous les comptes mail (principal + secondaires) au format
+    uniforme. Le principal a toujours id='primary'.
+    """
+    out: list[dict] = []
+    primary = get_smtp_config(client=client, app_state=app_state) or {}
+    if primary.get("from_email") or primary.get("smtp_host"):
+        out.append({
+            "id": "primary",
+            "label": primary.get("from_name") or primary.get("from_email") or "Compte principal",
+            "from_email": primary.get("from_email", ""),
+            "from_name": primary.get("from_name", ""),
+            "smtp_host": primary.get("smtp_host", ""),
+            "smtp_port": int(primary.get("smtp_port") or 587),
+            "smtp_user": primary.get("smtp_user", ""),
+            "imap_host": primary.get("imap_host", ""),
+            "imap_port": int(primary.get("imap_port") or 993),
+            "imap_user": primary.get("imap_user", ""),
+            "is_primary": True,
+            "_has_smtp_pwd": bool(primary.get("smtp_password")),
+            "_has_imap_pwd": bool(primary.get("imap_password")),
+        })
+    for a in list_secondary_accounts(client=client):
+        out.append({
+            "id": a.get("id"),
+            "label": a.get("label") or a.get("from_email") or a.get("id"),
+            "from_email": a.get("from_email", ""),
+            "from_name": a.get("from_name", ""),
+            "smtp_host": a.get("smtp_host", ""),
+            "smtp_port": int(a.get("smtp_port") or 587),
+            "smtp_user": a.get("smtp_user", ""),
+            "imap_host": a.get("imap_host", ""),
+            "imap_port": int(a.get("imap_port") or 993),
+            "imap_user": a.get("imap_user", ""),
+            "is_primary": False,
+            "_has_smtp_pwd": bool(a.get("smtp_password")),
+            "_has_imap_pwd": bool(a.get("imap_password")),
+        })
+    return out
+
+
+def add_or_update_mail_account(account: dict, client=None) -> bool:
+    """Ajoute ou met à jour un compte secondaire (par id).
+    Le compte principal (id='primary') n'est PAS modifiable ici — utiliser
+    save_smtp_config() pour ça.
+    """
+    if client is None:
+        return False
+    aid = (account.get("id") or "").strip()
+    if not aid or aid == "primary":
+        return False
+    accounts = list_secondary_accounts(client=client)
+    # Si pas de password fourni, conserver l'existant
+    existing = next((a for a in accounts if a.get("id") == aid), None)
+    if existing:
+        for pwd_field in ("smtp_password", "imap_password"):
+            if not (account.get(pwd_field) or "").strip() and existing.get(pwd_field):
+                account[pwd_field] = existing[pwd_field]
+    # Remplace ou ajoute
+    accounts = [a for a in accounts if a.get("id") != aid]
+    accounts.append(account)
+    try:
+        client.set_shared_setting(MAIL_ACCOUNTS_KEY, {"accounts": accounts})
+        return True
+    except Exception as exc:
+        logger.warning("add_or_update_mail_account: %s", exc)
+        return False
+
+
+def remove_mail_account(account_id: str, client=None) -> bool:
+    if client is None or not account_id or account_id == "primary":
+        return False
+    accounts = list_secondary_accounts(client=client)
+    accounts = [a for a in accounts if a.get("id") != account_id]
+    try:
+        client.set_shared_setting(MAIL_ACCOUNTS_KEY, {"accounts": accounts})
+        return True
+    except Exception as exc:
+        logger.warning("remove_mail_account: %s", exc)
+        return False
+
+
+def get_account_by_id(account_id: str, client=None, app_state=None) -> Optional[dict]:
+    """Renvoie le compte (avec mots de passe) par id, ou None.
+    Inclut les mots de passe — usage backend uniquement.
+    """
+    if account_id == "primary":
+        return get_smtp_config(client=client, app_state=app_state) or None
+    for a in list_secondary_accounts(client=client):
+        if a.get("id") == account_id:
+            return a
+    return None
 
 
 # ---------------------------------------------------------------------------

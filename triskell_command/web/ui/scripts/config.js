@@ -28,8 +28,10 @@ const Config = {
     let calendlyCfg = null;
     let phantomCfg = null;
     let trackerCfg = null;
+    let authStatus = null;
     if (App.api) {
       try { s = await App.api.get_settings(); } catch (e) {}
+      try { authStatus = await App.api.auth_status(); } catch (e) {}
       try {
         const r = await App.api.lead_to_client_get_config();
         if (r && r.ok) l2c = r.config;
@@ -52,9 +54,12 @@ const Config = {
       } catch (e) {}
     }
     const slot = document.getElementById('cfg-content');
-    slot.innerHTML = this._renderAppearance(s) +
+    slot.innerHTML = this._renderAuth(authStatus) +
+                     this._renderAppearance(s) +
                      this._renderAi(s) +
                      this._renderOutreach(s) +
+                     this._renderMailAccounts() +
+                     this._renderSignature() +
                      this._renderStripe(stripeCfg) +
                      this._renderCalendly(calendlyCfg) +
                      this._renderPhantombuster(phantomCfg) +
@@ -63,11 +68,419 @@ const Config = {
                      this._renderDelivery() +
                      this._renderTutorial();
     this._bind();
+    this._bindAuth();
+    this._bindMailAccounts();
+    this._bindSignature();
     this._bindLeadToClient();
     this._bindStripe();
     this._bindCalendly();
     this._bindPhantombuster();
     this._bindTracker();
+  },
+
+  _renderAuth(authStatus) {
+    const connected = authStatus && authStatus.connected;
+    const displayName = (authStatus && authStatus.display_name) || '';
+    const reason = authStatus && authStatus.reason;
+    if (connected) {
+      return `
+        <section>
+          <div class="section-label">Connexion Supabase</div>
+          <p class="text-sm text-text-muted mb-4">
+            Ta session vers la base partagée Triskell. Indispensable pour Matinale,
+            Brouillons, Réponses, Projets clients, etc.
+          </p>
+          <div class="card p-5 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-full bg-success/15 text-success
+                          flex items-center justify-center font-bold text-lg">✓</div>
+              <div>
+                <div class="text-sm font-semibold">Connecté</div>
+                <div class="text-xs text-text-muted">${this._escape(displayName) || 'Compte Supabase actif'}</div>
+              </div>
+            </div>
+            <button id="cfg-auth-signout" class="btn btn-secondary">Se déconnecter</button>
+          </div>
+        </section>
+      `;
+    }
+    const reasonMsg = reason === 'supabase_not_configured'
+      ? "Supabase n'est pas configuré (manque url/anon_key dans settings.json)."
+      : "Aucune session active. Connecte-toi pour activer les pages qui en ont besoin.";
+    return `
+      <section>
+        <div class="section-label">Connexion Supabase</div>
+        <p class="text-sm text-text-muted mb-4">${reasonMsg}</p>
+        <div class="card p-5 space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-text-secondary mb-1.5">Email</label>
+            <input type="email" id="cfg-auth-email"
+                   placeholder="jordan@triskell-studio.fr"
+                   class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border
+                          focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-text-secondary mb-1.5">Mot de passe</label>
+            <input type="password" id="cfg-auth-password"
+                   placeholder="••••••••"
+                   class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border
+                          focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
+          </div>
+          <div class="flex items-center gap-3">
+            <button id="cfg-auth-signin" class="btn btn-primary">Se connecter</button>
+            <span id="cfg-auth-status" class="text-xs text-text-muted"></span>
+          </div>
+        </div>
+      </section>
+    `;
+  },
+
+  _bindAuth() {
+    const signinBtn = document.getElementById('cfg-auth-signin');
+    if (signinBtn) signinBtn.onclick = async () => {
+      const email = document.getElementById('cfg-auth-email').value.trim();
+      const password = document.getElementById('cfg-auth-password').value;
+      const status = document.getElementById('cfg-auth-status');
+      if (!email || !password) {
+        status.textContent = 'Email et mot de passe requis.';
+        status.className = 'text-xs text-danger';
+        return;
+      }
+      status.textContent = 'Connexion…';
+      status.className = 'text-xs text-text-muted';
+      const r = await App.api.auth_sign_in({ email, password });
+      if (r && r.ok) {
+        status.textContent = 'Connecté. Rechargement…';
+        status.className = 'text-xs text-success';
+        setTimeout(() => this.refresh(), 600);
+      } else {
+        status.textContent = `Échec : ${(r && r.error) || 'inconnu'}`;
+        status.className = 'text-xs text-danger';
+      }
+    };
+
+    const signoutBtn = document.getElementById('cfg-auth-signout');
+    if (signoutBtn) signoutBtn.onclick = async () => {
+      if (!confirm('Se déconnecter de Supabase ?\n\nLes pages Matinale, Brouillons, Réponses, etc. ne fonctionneront plus tant que tu ne te reconnectes pas.')) return;
+      await App.api.auth_sign_out();
+      this.refresh();
+    };
+  },
+
+  _escape(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  },
+
+  // ----------------------------------------------------------------------
+  // Section Signature mail (locale à ce PC, par utilisateur)
+  // ----------------------------------------------------------------------
+  _renderSignature() {
+    return `
+      <section>
+        <div class="section-label">Ma signature mail</div>
+        <p class="text-sm text-text-muted mb-4">
+          Ajoutée automatiquement à la fin de chaque mail que tu envoies depuis Triskell Command.
+          Tu peux choisir une version texte simple OU une version HTML enrichie (logo, couleurs, liens).
+          Chaque utilisateur a sa propre signature, stockée localement sur ton PC.
+        </p>
+        <div class="card p-5 space-y-3">
+          <div class="flex items-center gap-1 text-[11px]">
+            <button id="sig-mode-text" class="px-3 py-1.5 rounded-lg font-semibold bg-accent/15 text-accent">Texte simple</button>
+            <button id="sig-mode-html" class="px-3 py-1.5 rounded-lg font-semibold text-text-muted hover:bg-bg">HTML enrichi (avec aperçu)</button>
+          </div>
+
+          <!-- Mode texte simple -->
+          <div id="sig-text-zone">
+            <textarea id="cfg-signature" rows="5"
+                      placeholder="ex :&#10;&#10;Jordan&#10;Triskell Studio · triskell-studio.fr&#10;06 12 34 56 78"
+                      class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed resize-y"></textarea>
+          </div>
+
+          <!-- Mode HTML : 2 colonnes (code + preview) -->
+          <div id="sig-html-zone" class="hidden">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3" style="min-height: 240px;">
+              <div class="flex flex-col">
+                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">Code HTML</div>
+                <textarea id="cfg-signature-html" rows="10" placeholder='<p>Bonjour…</p><p>—<br><strong>Jordan</strong></p>'
+                          class="flex-1 px-3 py-2 text-xs rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-mono leading-relaxed resize-y" style="min-height: 200px;"></textarea>
+              </div>
+              <div class="flex flex-col">
+                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">Aperçu (rendu mail)</div>
+                <iframe id="cfg-signature-preview" sandbox="allow-same-origin"
+                        class="flex-1 w-full rounded-lg border border-border bg-white" style="min-height: 200px;"></iframe>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <button id="cfg-signature-save" class="btn btn-primary">Sauvegarder</button>
+            <span id="cfg-signature-status" class="text-xs text-text-muted"></span>
+          </div>
+        </div>
+      </section>
+    `;
+  },
+
+  async _bindSignature() {
+    if (!App.api) return;
+    const ta       = document.getElementById('cfg-signature');
+    const htmlTa   = document.getElementById('cfg-signature-html');
+    const iframe   = document.getElementById('cfg-signature-preview');
+    const textZone = document.getElementById('sig-text-zone');
+    const htmlZone = document.getElementById('sig-html-zone');
+    const tBtn     = document.getElementById('sig-mode-text');
+    const hBtn     = document.getElementById('sig-mode-html');
+    if (!ta || !htmlTa) return;
+
+    // Charge l'existant
+    try {
+      const r = await App.api.signature_get();
+      if (r && r.ok) {
+        ta.value     = r.signature      || '';
+        htmlTa.value = r.signature_html || '';
+        if (htmlTa.value) this._renderSigPreview(iframe, htmlTa.value);
+      }
+    } catch (e) {}
+
+    const setMode = (m) => {
+      if (m === 'text') {
+        tBtn.className = 'px-3 py-1.5 rounded-lg font-semibold bg-accent/15 text-accent';
+        hBtn.className = 'px-3 py-1.5 rounded-lg font-semibold text-text-muted hover:bg-bg';
+        textZone.classList.remove('hidden');
+        htmlZone.classList.add('hidden');
+      } else {
+        tBtn.className = 'px-3 py-1.5 rounded-lg font-semibold text-text-muted hover:bg-bg';
+        hBtn.className = 'px-3 py-1.5 rounded-lg font-semibold bg-accent/15 text-accent';
+        textZone.classList.add('hidden');
+        htmlZone.classList.remove('hidden');
+        // Si HTML vide mais texte présent → propose une conversion basique
+        if (!htmlTa.value.trim() && ta.value.trim()) {
+          htmlTa.value = ta.value.split(/\n\n+/)
+            .map(p => `<p>${this._escape(p).replace(/\n/g, '<br>')}</p>`).join('');
+          this._renderSigPreview(iframe, htmlTa.value);
+        }
+      }
+    };
+    tBtn.onclick = () => setMode('text');
+    hBtn.onclick = () => setMode('html');
+
+    // Live preview sur saisie HTML
+    let timer = null;
+    htmlTa.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => this._renderSigPreview(iframe, htmlTa.value), 200);
+    });
+
+    const saveBtn = document.getElementById('cfg-signature-save');
+    if (saveBtn) saveBtn.onclick = async () => {
+      const status = document.getElementById('cfg-signature-status');
+      status.textContent = 'Sauvegarde…';
+      status.className = 'text-xs text-text-muted';
+      const r = await App.api.signature_save({
+        signature: ta.value,
+        signature_html: htmlTa.value,
+      });
+      if (r && r.ok) {
+        status.textContent = '✓ Sauvegardé. Sera ajoutée à tes prochains mails.';
+        status.className = 'text-xs text-success';
+      } else {
+        status.textContent = `✗ ${(r && r.error) || 'Erreur'}`;
+        status.className = 'text-xs text-danger';
+      }
+    };
+  },
+
+  _renderSigPreview(iframe, html) {
+    if (!iframe) return;
+    if (!html.trim()) { iframe.srcdoc = ''; return; }
+    iframe.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>body{margin:0;padding:14px;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.55;color:#1a1a20;background:#fff;}
+p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
+</head><body>${html}</body></html>`;
+  },
+
+  // ----------------------------------------------------------------------
+  // Section Comptes mail secondaires
+  // ----------------------------------------------------------------------
+  _renderMailAccounts() {
+    return `
+      <section id="cfg-mail-accounts">
+        <div class="section-label">Adresses mail secondaires</div>
+        <p class="text-sm text-text-muted mb-4">
+          En plus du compte principal (au-dessus), tu peux ajouter d'autres adresses
+          (ex : <code class="text-xs">contact@lagriffe-studio.fr</code>,
+          <code class="text-xs">contact@studio-wow.fr</code>) pour envoyer ou recevoir
+          des mails depuis chacune.
+        </p>
+        <div id="cfg-mail-accounts-list" class="space-y-3 mb-4">
+          <div class="text-sm text-text-muted">Chargement…</div>
+        </div>
+        <button id="cfg-mail-account-add" class="btn btn-primary">+ Ajouter une adresse</button>
+      </section>
+    `;
+  },
+
+  async _bindMailAccounts() {
+    const listEl = document.getElementById('cfg-mail-accounts-list');
+    if (!listEl) return;
+    if (!App.api) {
+      listEl.innerHTML = `<div class="text-xs text-text-muted">Backend non disponible.</div>`;
+      return;
+    }
+    let r;
+    try { r = await App.api.mail_accounts_list(); }
+    catch (e) { r = null; }
+    if (!r || !r.ok) {
+      listEl.innerHTML = `<div class="text-xs text-danger">Erreur : ${(r && r.error) || 'inconnu'}</div>`;
+      return;
+    }
+    const accounts = r.accounts || [];
+    if (!accounts.length) {
+      listEl.innerHTML = `<div class="text-sm text-text-muted">Aucune adresse configurée.</div>`;
+    } else {
+      listEl.innerHTML = accounts.map(a => this._mailAccountRow(a)).join('');
+    }
+    // Bind suppression
+    listEl.querySelectorAll('[data-mail-remove]').forEach(btn => {
+      btn.onclick = async () => {
+        const aid = btn.dataset.mailRemove;
+        if (!confirm(`Supprimer l'adresse "${aid}" ?\n\nLa boîte ne sera plus consultée et tu ne pourras plus envoyer depuis cette adresse.`)) return;
+        const resp = await App.api.mail_account_remove({ id: aid });
+        if (resp && resp.ok) this._bindMailAccounts();
+        else alert(`Échec : ${resp && resp.error || 'inconnu'}`);
+      };
+    });
+    // Bind test connexion
+    listEl.querySelectorAll('[data-mail-test]').forEach(btn => {
+      btn.onclick = async () => {
+        const aid = btn.dataset.mailTest;
+        const status = document.getElementById(`mail-test-${aid}`);
+        status.textContent = 'Test en cours…';
+        const resp = await App.api.mail_account_test({ id: aid });
+        if (resp && resp.ok) {
+          status.textContent = `✓ SMTP + IMAP OK`;
+          status.className = 'text-xs text-success';
+        } else {
+          status.textContent = `✗ ${(resp && resp.error) || 'échec'}`;
+          status.className = 'text-xs text-danger';
+        }
+      };
+    });
+    // Bind bouton ajouter
+    const addBtn = document.getElementById('cfg-mail-account-add');
+    if (addBtn) addBtn.onclick = () => this._openMailAccountForm();
+  },
+
+  _mailAccountRow(a) {
+    const primary = a.is_primary;
+    const pwdOk = a._has_smtp_pwd && a._has_imap_pwd;
+    return `
+      <div class="card p-4">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <div class="text-sm font-bold truncate">${this._escape(a.label)}</div>
+              ${primary ? '<span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-accent/15 text-accent">Principal</span>' : ''}
+              ${!pwdOk ? '<span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-warning/15 text-warning">Mot de passe manquant</span>' : ''}
+            </div>
+            <div class="text-xs text-text-muted truncate">${this._escape(a.from_email)}</div>
+            <div class="text-[11px] text-text-muted mt-1">
+              SMTP ${this._escape(a.smtp_host)}:${a.smtp_port} · IMAP ${this._escape(a.imap_host)}:${a.imap_port}
+            </div>
+            <div id="mail-test-${this._escape(a.id)}" class="text-xs text-text-muted mt-2"></div>
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <button data-mail-test="${this._escape(a.id)}" class="btn btn-secondary text-xs px-3 py-1">Tester</button>
+            ${primary ? '' : `<button data-mail-remove="${this._escape(a.id)}" class="btn btn-secondary text-xs px-3 py-1 text-danger">Supprimer</button>`}
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  _openMailAccountForm(existing = null) {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[200] flex items-center justify-center p-6';
+    overlay.style.background = 'rgba(15,23,42,0.6)';
+    overlay.style.backdropFilter = 'blur(6px)';
+    overlay.innerHTML = `
+      <div class="bg-surface rounded-2xl shadow-hero w-full max-w-lg overflow-hidden border border-border animate-slide-up">
+        <div class="px-6 pt-5 pb-3 border-b border-border">
+          <div class="hero-kicker mb-1">${existing ? 'MODIFIER' : 'AJOUTER'}</div>
+          <h3 class="text-lg font-bold">Adresse mail secondaire</h3>
+        </div>
+        <div class="px-6 py-5 space-y-3 max-h-[70vh] overflow-y-auto">
+          ${this._mailField('id',           'Identifiant interne (ex: lagriffe)', existing?.id || '', 'text', existing != null)}
+          ${this._mailField('label',        'Nom affiché',                        existing?.label || '')}
+          ${this._mailField('from_email',   'Adresse mail (envoi & réception)',   existing?.from_email || '', 'email')}
+          ${this._mailField('from_name',    'Signature expéditeur (ex: Lagriffe Studio)', existing?.from_name || '')}
+          <div class="grid grid-cols-2 gap-3">
+            ${this._mailField('smtp_host',  'SMTP host',  existing?.smtp_host || 'smtp.ionos.fr')}
+            ${this._mailField('smtp_port',  'SMTP port',  existing?.smtp_port || 587, 'number')}
+          </div>
+          ${this._mailField('smtp_user',    'SMTP user (souvent = adresse mail)',  existing?.smtp_user || existing?.from_email || '')}
+          ${this._mailField('smtp_password', existing && existing._has_smtp_pwd ? "SMTP mot de passe (laisser vide pour conserver l'actuel)" : 'SMTP mot de passe', '', 'password')}
+          <div class="grid grid-cols-2 gap-3">
+            ${this._mailField('imap_host',  'IMAP host',  existing?.imap_host || 'imap.ionos.fr')}
+            ${this._mailField('imap_port',  'IMAP port',  existing?.imap_port || 993, 'number')}
+          </div>
+          ${this._mailField('imap_user',    'IMAP user (souvent = adresse mail)',  existing?.imap_user || existing?.from_email || '')}
+          ${this._mailField('imap_password', existing && existing._has_imap_pwd ? "IMAP mot de passe (laisser vide pour conserver l'actuel)" : 'IMAP mot de passe', '', 'password')}
+          <div id="mail-form-status" class="text-xs text-text-muted"></div>
+        </div>
+        <div class="px-6 py-4 border-t border-border flex justify-end gap-2">
+          <button id="mail-form-cancel" class="btn btn-secondary">Annuler</button>
+          <button id="mail-form-save"   class="btn btn-primary">Enregistrer</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    document.getElementById('mail-form-cancel').onclick = close;
+    document.getElementById('mail-form-save').onclick = async () => {
+      const acc = {};
+      ['id','label','from_email','from_name','smtp_host','smtp_user','smtp_password',
+       'imap_host','imap_user','imap_password'].forEach(k => {
+        const el = overlay.querySelector(`[data-mail-field="${k}"]`);
+        acc[k] = el ? el.value.trim() : '';
+      });
+      acc.smtp_port = parseInt(overlay.querySelector('[data-mail-field="smtp_port"]').value, 10) || 587;
+      acc.imap_port = parseInt(overlay.querySelector('[data-mail-field="imap_port"]').value, 10) || 993;
+      const status = document.getElementById('mail-form-status');
+      // Validation basique
+      if (!acc.id || !/^[a-z0-9_-]+$/.test(acc.id)) {
+        status.textContent = 'Identifiant invalide (lettres minuscules, chiffres, - et _).';
+        status.className = 'text-xs text-danger'; return;
+      }
+      if (!acc.from_email || !acc.from_email.includes('@')) {
+        status.textContent = 'Adresse mail invalide.';
+        status.className = 'text-xs text-danger'; return;
+      }
+      status.textContent = 'Enregistrement…';
+      status.className = 'text-xs text-text-muted';
+      const r = await App.api.mail_account_save({ account: acc });
+      if (r && r.ok) {
+        status.textContent = 'Enregistré.';
+        status.className = 'text-xs text-success';
+        setTimeout(() => { close(); this._bindMailAccounts(); }, 400);
+      } else {
+        status.textContent = `Échec : ${(r && r.error) || 'inconnu'}`;
+        status.className = 'text-xs text-danger';
+      }
+    };
+  },
+
+  _mailField(name, label, value, type = 'text', readonly = false) {
+    const safeVal = String(value ?? '').replace(/"/g, '&quot;');
+    return `
+      <div>
+        <label class="block text-xs font-medium text-text-secondary mb-1">${this._escape(label)}</label>
+        <input data-mail-field="${name}" type="${type}" value="${safeVal}" ${readonly ? 'readonly' : ''}
+               class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent ${readonly ? 'opacity-60' : ''}"/>
+      </div>
+    `;
   },
 
   _renderAppearance(s) {

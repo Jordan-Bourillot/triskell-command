@@ -276,7 +276,7 @@ BRAND_PRODUCT = "Command"
 BRAND_TAGLINE = "Le tableau de bord de Triskell."
 BRAND_LOCATION = "🌊 Bretagne · 100 % français"
 BRAND_WEB = "triskell-studio.fr"
-APP_VERSION_LABEL = "v0.4"
+APP_VERSION_LABEL = "v0.6"
 
 # Microcopie signature (tutoiement, ton chaleureux)
 COPY_LOADING_GENERIC = "Préparation en cours…"

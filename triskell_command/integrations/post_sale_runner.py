@@ -477,6 +477,34 @@ def _create_post_sale_draft(client, app_state, proj: dict,
             except Exception:
                 pass
             out["auto_sent"] = True
+
+            # ------------------------------------------------------------
+            # Notif interne : si le mail welcome est tombé sur le kit
+            # générique `_default` (= produit Stripe sans kit Triskell),
+            # prévenir Jordan/Thomas qu'une livraison manuelle est à faire.
+            # ------------------------------------------------------------
+            if stage == "welcome_at_paid" and product_key in ("", "_default"):
+                try:
+                    internal_to = (smtp_cfg.get("from_email")
+                                    or "contact@triskell-studio.fr")
+                    internal_body = (
+                        f"Un paiement Stripe vient d'arriver sur un produit "
+                        f"qui n'a pas de kit de livraison Triskell mappé.\n\n"
+                        f"  Client   : {client_name} <{client_email}>\n"
+                        f"  Produit  : {product_name}\n"
+                        f"  Projet   : {proj.get('id')}\n\n"
+                        f"Le client vient de recevoir un mail \"je prépare tes "
+                        f"accès, tu les reçois sous 24h ouvrées\". À toi de "
+                        f"jouer : envoie-lui ses accès et marque le projet "
+                        f"comme livré dans Triskell Command."
+                    )
+                    send_email(smtp_cfg, to=internal_to,
+                               subject=f"[Triskell] Livraison manuelle à faire — {client_name}",
+                               body=internal_body)
+                except Exception as notify_exc:
+                    # Non bloquant : la notif interne ne doit jamais empêcher
+                    # le mail client de partir (déjà parti à ce stade).
+                    logger.debug("notif interne _default failed: %s", notify_exc)
         except Exception as exc:
             out["error"] = f"smtp: {exc}"
 

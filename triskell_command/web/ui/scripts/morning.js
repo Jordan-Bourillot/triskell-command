@@ -66,7 +66,12 @@ const Morning = {
     document.getElementById('m-refresh').onclick = () => this.render(container);
     document.getElementById('m-ask-claude').onclick = () => Claude.open();
     document.getElementById('m-open-teddy').onclick = () => Teddy.open();
-    document.getElementById('m-compose-mail').onclick = () => Teddy.compose();
+    document.getElementById('m-compose-mail').onclick = () => {
+      // Bascule sur la vue Mails et ouvre directement le composer
+      App.show('mails');
+      // Petit délai pour que la vue Mails ait le temps de charger les comptes
+      setTimeout(() => Mails._openComposer({}), 200);
+    };
 
     // 2. Charge le digest et hydrate
     const slot = document.getElementById('m-content');

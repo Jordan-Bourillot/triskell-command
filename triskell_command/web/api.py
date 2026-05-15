@@ -505,6 +505,725 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
+    # Studio WoW — validations et plomberie
+    # ------------------------------------------------------------------
+    def wow_list_intakes(self, payload: dict | None = None) -> dict:
+        """Liste les intakes WoW. Payload optionnel : {status, limit}.
+
+        Renvoie {ok: True, intakes: [...]}.
+        """
+        p = payload or {}
+        status = (p.get("status") or "").strip() or None
+        try:
+            limit = int(p.get("limit") or 100)
+        except (TypeError, ValueError):
+            limit = 100
+        try:
+            from ..integrations.wow import repo as wow_repo
+            rows = wow_repo.list_intakes(status=status, limit=limit)
+            return {"ok": True, "intakes": rows}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def wow_get_intake(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.wow import repo as wow_repo
+            intake = wow_repo.get_intake(iid)
+            if intake is None:
+                return {"ok": False, "error": "intake introuvable"}
+            timeline = wow_repo.intake_timeline(iid)
+            return {"ok": True, "intake": intake, "timeline": timeline}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def wow_approve_intake(self, payload: dict) -> dict:
+        """Approuve un intake : status → 'approved'. Le cron Netlify
+        le ramassera dans les 5 minutes prochaines (ou on peut forcer
+        avec wow_dispatch_now).
+        """
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.wow import repo as wow_repo
+            ok = wow_repo.approve_intake(iid)
+            return {"ok": bool(ok)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def wow_reject_intake(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        reason = ((payload or {}).get("reason") or "").strip()
+        if not iid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.wow import repo as wow_repo
+            ok = wow_repo.reject_intake(iid, reason)
+            return {"ok": bool(ok)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def wow_dispatch_now(self, payload: dict) -> dict:
+        """Force le déclenchement immédiat du pipeline preview pour un
+        intake déjà approved (sans attendre le cron 5 min).
+        """
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.wow import repo as wow_repo
+            ok, msg = wow_repo.dispatch_now(iid)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def wow_pipeline_state(self) -> dict:
+        """Renvoie l'état agrégé du pipeline WoW : compteurs par status
+        + 5 dernières activités. Utilisé par la vue Plomberie en polling.
+        """
+        try:
+            from ..integrations.wow import repo as wow_repo
+            counts = wow_repo.count_by_status()
+            recent = wow_repo.list_intakes(limit=5)
+            return {"ok": True, "counts": counts, "recent": recent}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Vue Mails — lecture de la table email_history
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Signature mail (locale, par utilisateur de ce PC)
+    # ------------------------------------------------------------------
+    # Stocke 2 versions : texte simple ET HTML enrichi.
+    # Le composer utilise la version adaptée au mode courant.
+    def signature_get(self) -> dict:
+        sig      = self._app_state.get("outreach", "signature", default="") or ""
+        sig_html = self._app_state.get("outreach", "signature_html", default="") or ""
+        return {"ok": True, "signature": sig, "signature_html": sig_html}
+
+    def signature_save(self, payload: dict) -> dict:
+        p = payload or {}
+        try:
+            if "signature" in p:
+                self._app_state.set("outreach", "signature", value=p.get("signature", ""))
+            if "signature_html" in p:
+                self._app_state.set("outreach", "signature_html",
+                                     value=p.get("signature_html", ""))
+            self._app_state.save()
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Brain — boîte à idées partagée Jordan/Thomas (sync command-voice mobile)
+    # ------------------------------------------------------------------
+    def _brain_ai_keys(self) -> dict:
+        try:
+            from ..integrations import shared_secrets
+            return shared_secrets.get_ai_keys(
+                client=self._supabase(), app_state=self._app_state) or {}
+        except Exception:
+            return {}
+
+    def brain_list(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        try:
+            from ..integrations import brain
+            client = self._supabase()
+            notes = brain.list_notes(
+                status=p.get("status") or None,
+                category=p.get("category") or None,
+                limit=int(p.get("limit") or 100),
+                client=client,
+            )
+            return {"ok": True, "notes": notes}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def brain_list_by_category(self) -> dict:
+        try:
+            from ..integrations import brain
+            return {"ok": True, "groups": brain.list_by_category(client=self._supabase())}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def brain_add(self, payload: dict) -> dict:
+        content = ((payload or {}).get("content") or "").strip()
+        if not content:
+            return {"ok": False, "error": "Contenu vide."}
+        try:
+            from ..integrations import brain
+            client = self._supabase()
+            author = brain._user_alias(client)
+            note = brain.add_note(content, author=author, client=client,
+                                   ai_keys=self._brain_ai_keys())
+            if note is None:
+                return {"ok": False, "error": "Insertion échouée"}
+            return {"ok": True, "note": note}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def brain_update(self, payload: dict) -> dict:
+        p = payload or {}
+        nid = (p.get("id") or "").strip()
+        if not nid:
+            return {"ok": False, "error": "id manquant"}
+        patch = {}
+        if "status" in p:   patch["status"] = p["status"]
+        if "category" in p: patch["category"] = p["category"]
+        if "remind_at" in p: patch["remind_at"] = p["remind_at"]
+        if not patch:
+            return {"ok": False, "error": "Rien à mettre à jour"}
+        try:
+            from ..integrations import brain
+            ok = brain.update_note(nid, patch, client=self._supabase())
+            return {"ok": bool(ok)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def brain_delete(self, payload: dict) -> dict:
+        nid = ((payload or {}).get("id") or "").strip()
+        if not nid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations import brain
+            return {"ok": bool(brain.delete_note(nid, client=self._supabase()))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def brain_reply(self, payload: dict) -> dict:
+        p = payload or {}
+        nid = (p.get("id") or "").strip()
+        content = (p.get("content") or "").strip()
+        if not nid or not content:
+            return {"ok": False, "error": "id et content requis"}
+        try:
+            from ..integrations import brain
+            client = self._supabase()
+            author = brain._user_alias(client)
+            note = brain.add_reply(nid, content, author=author, client=client,
+                                    ai_keys=self._brain_ai_keys())
+            if note is None:
+                return {"ok": False, "error": "Réponse échouée"}
+            return {"ok": True, "note": note}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Templates HTML pour mails (réutilisables, partagés Jordan/Thomas)
+    # ------------------------------------------------------------------
+    # Stockage : shared_settings.mail_templates = {"templates": [...]}
+    # Chaque template : { id, name, subject_default, body_html, updated_at }
+    def mail_templates_list(self) -> dict:
+        try:
+            client = self._supabase()
+            if not client:
+                return {"ok": False, "error": "Base partagée non connectée"}
+            raw = client.get_shared_setting("mail_templates", {}) or {}
+            if isinstance(raw, str):
+                import json as _json
+                try: raw = _json.loads(raw)
+                except Exception: raw = {}
+            templates = (raw.get("templates") if isinstance(raw, dict) else None) or []
+            templates = [t for t in templates if isinstance(t, dict) and t.get("id")]
+            templates.sort(key=lambda t: (t.get("name") or "").lower())
+            return {"ok": True, "templates": templates}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_template_save(self, payload: dict) -> dict:
+        """Crée ou met à jour un template par id. Si id absent, génère un nouveau."""
+        import uuid
+        from datetime import datetime
+        p = (payload or {}).get("template") or {}
+        tid = (p.get("id") or "").strip() or uuid.uuid4().hex[:12]
+        name = (p.get("name") or "").strip()
+        body_html = p.get("body_html") or ""
+        subject_default = (p.get("subject_default") or "").strip()
+        if not name:
+            return {"ok": False, "error": "Le nom du template est requis."}
+        if not body_html.strip():
+            return {"ok": False, "error": "Le contenu du template est vide."}
+        try:
+            client = self._supabase()
+            if not client:
+                return {"ok": False, "error": "Base partagée non connectée"}
+            cur = self.mail_templates_list()
+            templates = cur.get("templates", []) if cur.get("ok") else []
+            templates = [t for t in templates if t.get("id") != tid]
+            templates.append({
+                "id": tid,
+                "name": name,
+                "subject_default": subject_default,
+                "body_html": body_html,
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            })
+            client.set_shared_setting("mail_templates", {"templates": templates})
+            return {"ok": True, "id": tid}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_template_remove(self, payload: dict) -> dict:
+        tid = ((payload or {}).get("id") or "").strip()
+        if not tid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            client = self._supabase()
+            if not client:
+                return {"ok": False, "error": "Base partagée non connectée"}
+            cur = self.mail_templates_list()
+            templates = cur.get("templates", []) if cur.get("ok") else []
+            templates = [t for t in templates if t.get("id") != tid]
+            client.set_shared_setting("mail_templates", {"templates": templates})
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_send_reply(self, payload: dict) -> dict:
+        """Backward-compat wrapper — utilise mail_send. À garder tant que la
+        modale Mails > Répondre référence cet endpoint."""
+        return self.mail_send(payload)
+
+    def mail_send(self, payload: dict) -> dict:
+        """Envoie un mail depuis l'un des comptes configurés.
+
+        Payload :
+          - account_id : id du compte expéditeur ('primary' ou autre)
+          - to         : email destinataire (1 adresse, ou "a@x.fr, b@y.fr")
+          - subject    : sujet
+          - body       : corps en texte simple (toujours requis pour le fallback)
+          - body_html  (optionnel) : version HTML, envoyée en multipart/alternative
+          - in_reply_to (optionnel) : Message-ID du mail d'origine pour le threading
+        """
+        p = payload or {}
+        account_id = (p.get("account_id") or "primary").strip()
+        to = (p.get("to") or "").strip()
+        subject = (p.get("subject") or "").strip()
+        body = (p.get("body") or "").strip()
+        body_html = (p.get("body_html") or "").strip()
+        in_reply_to = (p.get("in_reply_to") or "").strip()
+
+        if not to or not subject:
+            return {"ok": False, "error": "Champs requis manquants (to/subject)."}
+        if not body and not body_html:
+            return {"ok": False, "error": "Le message est vide."}
+        if "@" not in to:
+            return {"ok": False, "error": "Adresse destinataire invalide."}
+        # Si HTML fourni mais pas de body texte, génère un fallback simple en
+        # strippant les balises (les clients mail très anciens ne lisent que le plain)
+        if body_html and not body:
+            import re as _re
+            body = _re.sub(r"<[^>]+>", "", body_html).strip()
+
+        try:
+            from ..integrations import shared_secrets
+            client = self._supabase()
+
+            acc = shared_secrets.get_account_by_id(
+                account_id, client=client, app_state=self._app_state)
+            if not acc:
+                return {"ok": False, "error": f"Compte '{account_id}' introuvable."}
+            smtp_host = acc.get("smtp_host", "")
+            smtp_port = int(acc.get("smtp_port") or 587)
+            smtp_user = acc.get("smtp_user", "")
+            smtp_password = acc.get("smtp_password", "")
+            from_email = acc.get("from_email", "")
+            from_name = acc.get("from_name", "") or from_email
+            for k, v in (("smtp_host", smtp_host), ("smtp_user", smtp_user),
+                         ("smtp_password", smtp_password), ("from_email", from_email)):
+                if not v:
+                    return {"ok": False, "error": f"Config SMTP incomplète pour '{account_id}' (manque {k})."}
+
+            # Construit l'EmailMessage (multipart/alternative si body_html dispo)
+            from email.message import EmailMessage
+            from email.utils import formatdate, make_msgid
+            import smtplib, ssl
+
+            msg = EmailMessage()
+            msg["From"] = f"{from_name} <{from_email}>" if from_name else from_email
+            msg["To"] = to
+            msg["Subject"] = subject
+            msg["Date"] = formatdate(localtime=True)
+            domain = from_email.split("@", 1)[1]
+            msg_id = make_msgid(domain=domain)
+            msg["Message-ID"] = msg_id
+            msg["Reply-To"] = from_email
+            if in_reply_to:
+                irt = in_reply_to if in_reply_to.startswith("<") else f"<{in_reply_to}>"
+                msg["In-Reply-To"] = irt
+                msg["References"] = irt
+            # Texte d'abord, HTML en alternative
+            msg.set_content(body or " ")
+            if body_html:
+                msg.add_alternative(body_html, subtype="html")
+
+            # Envoi
+            if smtp_port == 465:
+                with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as s:
+                    s.login(smtp_user, smtp_password)
+                    s.send_message(msg)
+            else:
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as s:
+                    s.ehlo()
+                    s.starttls(context=ssl.create_default_context())
+                    s.ehlo()
+                    s.login(smtp_user, smtp_password)
+                    s.send_message(msg)
+
+            # Log dans email_history (best-effort)
+            if client:
+                try:
+                    sb = getattr(client, "client", None) or getattr(client, "_client", None)
+                    if sb is not None:
+                        sb.table("email_history").insert({
+                            "kind": "email_sent",
+                            "ts":   __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+                            "subject": subject[:200],
+                            "body":    body[:5000],
+                            "message_id": msg_id,
+                            "extra": {
+                                "to": to,
+                                "from": from_email,
+                                "account_id": account_id,
+                                "in_reply_to": in_reply_to,
+                                "manual_reply": bool(in_reply_to),
+                                "has_html": bool(body_html),
+                            },
+                            "created_by": getattr(client, "user_id", None),
+                        }).execute()
+                except Exception as exc:
+                    logger.debug("log email_sent KO: %s", exc)
+
+            return {"ok": True, "message_id": msg_id}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mails_list(self, payload: dict | None = None) -> dict:
+        """Liste les mails enregistrés dans email_history.
+
+        Payload :
+          - kind : 'sent' | 'reply' | 'all'
+          - limit : nombre max (défaut 50)
+          - account_id : filtre sur extra.account_id (depuis phase 2 multi-comptes)
+        """
+        p = payload or {}
+        kind = (p.get("kind") or "all").strip()
+        account_id = (p.get("account_id") or "").strip()
+        try: limit = int(p.get("limit") or 50)
+        except (TypeError, ValueError): limit = 50
+        try:
+            client = self._supabase()
+            if not client:
+                return {"ok": False, "error": "Base partagée non connectée"}
+            sb = getattr(client, "client", None) or getattr(client, "_client", None)
+            if sb is None:
+                return {"ok": False, "error": "Client Supabase introuvable"}
+            q = (sb.table("email_history")
+                 .select("id,kind,ts,subject,body,prospect_id,message_id,extra")
+                 .order("ts", desc=True).limit(limit))
+            if kind == "sent":
+                q = q.eq("kind", "email_sent")
+            elif kind == "reply":
+                q = q.eq("kind", "reply_received")
+            elif kind == "inbound":
+                # Tous entrants = réponses prospects + autres entrants logs
+                q = q.in_("kind", ["reply_received", "inbox_received"])
+            if account_id:
+                # PostgREST : filtre sur un champ d'un JSON column
+                q = q.eq("extra->>account_id", account_id)
+            mails = q.execute().data or []
+            return {"ok": True, "mails": mails}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Comptes mail secondaires (en plus du compte principal smtp_config)
+    # ------------------------------------------------------------------
+    def mail_accounts_list(self) -> dict:
+        """Renvoie tous les comptes mail (primary + secondaires), sans
+        les mots de passe (juste un flag _has_smtp_pwd / _has_imap_pwd).
+        """
+        try:
+            from ..integrations import shared_secrets
+            client = self._supabase()
+            return {"ok": True, "accounts": shared_secrets.get_all_mail_accounts(
+                client=client, app_state=self._app_state)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_account_save(self, payload: dict) -> dict:
+        """Ajoute ou met à jour un compte secondaire. Pour le compte
+        principal (id=primary), utiliser save_outreach_config().
+        """
+        try:
+            from ..integrations import shared_secrets
+            client = self._supabase()
+            if not client:
+                return {"ok": False, "error": "Base partagée non connectée"}
+            acc = (payload or {}).get("account") or {}
+            if not acc.get("id"):
+                return {"ok": False, "error": "id manquant"}
+            if acc.get("id") == "primary":
+                return {"ok": False, "error": "Le compte principal se modifie via les Réglages SMTP/IMAP existants."}
+            ok = shared_secrets.add_or_update_mail_account(acc, client=client)
+            return {"ok": bool(ok)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_account_remove(self, payload: dict) -> dict:
+        try:
+            from ..integrations import shared_secrets
+            client = self._supabase()
+            if not client:
+                return {"ok": False, "error": "Base partagée non connectée"}
+            aid = ((payload or {}).get("id") or "").strip()
+            if not aid:
+                return {"ok": False, "error": "id manquant"}
+            ok = shared_secrets.remove_mail_account(aid, client=client)
+            return {"ok": bool(ok)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_account_test(self, payload: dict) -> dict:
+        """Teste la connexion SMTP+IMAP d'un compte (par id ou par dict).
+        Renvoie {ok: bool, smtp: bool, imap: bool, error: str}.
+        """
+        import smtplib, imaplib, ssl
+        try:
+            from ..integrations import shared_secrets
+            client = self._supabase()
+            payload = payload or {}
+            acc = payload.get("account")
+            if not acc and payload.get("id"):
+                acc = shared_secrets.get_account_by_id(
+                    payload["id"], client=client, app_state=self._app_state)
+            if not acc:
+                return {"ok": False, "error": "compte introuvable"}
+            out = {"ok": True, "smtp": False, "imap": False, "error": ""}
+            ctx = ssl.create_default_context()
+            # SMTP
+            try:
+                with smtplib.SMTP(acc.get("smtp_host", ""),
+                                   int(acc.get("smtp_port") or 587), timeout=10) as s:
+                    s.starttls(context=ctx)
+                    s.login(acc.get("smtp_user", ""), acc.get("smtp_password", ""))
+                out["smtp"] = True
+            except Exception as exc:
+                out["error"] = f"SMTP: {exc}"
+            # IMAP
+            try:
+                with imaplib.IMAP4_SSL(acc.get("imap_host", ""),
+                                        int(acc.get("imap_port") or 993)) as i:
+                    i.login(acc.get("imap_user", ""), acc.get("imap_password", ""))
+                out["imap"] = True
+            except Exception as exc:
+                out["error"] = (out["error"] + f" · IMAP: {exc}").strip(" ·")
+            out["ok"] = out["smtp"] and out["imap"]
+            return out
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Auth Supabase — login utilisateur, restore session, sign out
+    # ------------------------------------------------------------------
+    def auth_status(self) -> dict:
+        """Renvoie l'état de la session Supabase. Essaie de restaurer si
+        non authentifié mais des tokens existent sur disque.
+        """
+        try:
+            from triskell_core.db import get_client, SupabaseNotConfigured
+            try:
+                c = get_client()
+            except SupabaseNotConfigured:
+                return {"ok": True, "connected": False, "reason": "supabase_not_configured"}
+            if not c.is_authenticated:
+                try: c.restore_session()
+                except Exception as exc:
+                    logger.debug("auth_status restore: %s", exc)
+            if not c.is_authenticated:
+                return {"ok": True, "connected": False, "reason": "no_session"}
+            return {
+                "ok": True,
+                "connected": True,
+                "user_id": getattr(c, "user_id", None),
+                "display_name": getattr(c, "user_display_name", None),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def auth_sign_in(self, payload: dict) -> dict:
+        """Connecte un utilisateur Supabase via email/mot de passe."""
+        email = ((payload or {}).get("email") or "").strip()
+        password = ((payload or {}).get("password") or "").strip()
+        if not email or not password:
+            return {"ok": False, "error": "email et mot de passe requis"}
+        try:
+            from triskell_core.db import get_client, SupabaseNotConfigured
+            try:
+                c = get_client()
+            except SupabaseNotConfigured:
+                return {"ok": False, "error": "Supabase non configuré (manque url/anon_key dans settings.json)"}
+            try:
+                info = c.sign_in(email, password)
+                return {"ok": True, **(info or {})}
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def auth_sign_out(self) -> dict:
+        try:
+            from triskell_core.db import get_client, SupabaseNotConfigured
+            try:
+                c = get_client()
+            except SupabaseNotConfigured:
+                return {"ok": True, "connected": False}
+            c.sign_out()
+            return {"ok": True, "connected": False}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # RankUs Studio — mêmes endpoints que WoW, sur la table rankus_intakes
+    # ------------------------------------------------------------------
+    def rankus_list_intakes(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        status = (p.get("status") or "").strip() or None
+        try: limit = int(p.get("limit") or 100)
+        except (TypeError, ValueError): limit = 100
+        try:
+            from ..integrations.rankus import repo as r
+            return {"ok": True, "intakes": r.list_intakes(status=status, limit=limit)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def rankus_get_intake(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.rankus import repo as r
+            intake = r.get_intake(iid)
+            if intake is None: return {"ok": False, "error": "intake introuvable"}
+            return {"ok": True, "intake": intake, "timeline": r.intake_timeline(iid)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def rankus_approve_intake(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.rankus import repo as r
+            return {"ok": bool(r.approve_intake(iid))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def rankus_reject_intake(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        reason = ((payload or {}).get("reason") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.rankus import repo as r
+            return {"ok": bool(r.reject_intake(iid, reason))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def rankus_dispatch_now(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.rankus import repo as r
+            ok, msg = r.dispatch_now(iid)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def rankus_pipeline_state(self) -> dict:
+        try:
+            from ..integrations.rankus import repo as r
+            return {"ok": True, "counts": r.count_by_status(), "recent": r.list_intakes(limit=5)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Lagriffe Studio — mêmes endpoints + approve_final_and_send (validation
+    # humaine du site final avant envoi du mail au client)
+    # ------------------------------------------------------------------
+    def lagriffe_list_intakes(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        status = (p.get("status") or "").strip() or None
+        try: limit = int(p.get("limit") or 100)
+        except (TypeError, ValueError): limit = 100
+        try:
+            from ..integrations.lagriffe import repo as r
+            return {"ok": True, "intakes": r.list_intakes(status=status, limit=limit)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def lagriffe_get_intake(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.lagriffe import repo as r
+            intake = r.get_intake(iid)
+            if intake is None: return {"ok": False, "error": "intake introuvable"}
+            return {"ok": True, "intake": intake, "timeline": r.intake_timeline(iid)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def lagriffe_approve_intake(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.lagriffe import repo as r
+            return {"ok": bool(r.approve_intake(iid))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def lagriffe_reject_intake(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        reason = ((payload or {}).get("reason") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.lagriffe import repo as r
+            return {"ok": bool(r.reject_intake(iid, reason))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def lagriffe_dispatch_now(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.lagriffe import repo as r
+            ok, msg = r.dispatch_now(iid)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def lagriffe_pipeline_state(self) -> dict:
+        try:
+            from ..integrations.lagriffe import repo as r
+            return {"ok": True, "counts": r.count_by_status(), "recent": r.list_intakes(limit=5)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def lagriffe_approve_final(self, payload: dict) -> dict:
+        """Valide le site final (status final_ready_review) et déclenche
+        l'envoi du mail final au client. Status → 'live'.
+        """
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.lagriffe import repo as r
+            ok, msg = r.approve_final_and_send(iid)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
     # Catalogue des outils Triskell (pour le launcher Ctrl+K)
     # ------------------------------------------------------------------
     def get_apps_catalog(self) -> dict:

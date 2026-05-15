@@ -194,6 +194,64 @@ def save_client_feedback(
         return False
 
 
+def count_by_status() -> dict[str, int]:
+    """Renvoie le nombre d'intakes pour chaque status connu.
+
+    Utilisé par la vue Plomberie pour allumer les étages du pipeline en
+    fonction du nombre d'intakes qui s'y trouvent. Renvoie un dict avec
+    TOUTES les clés (à zéro si vide) pour simplifier le rendu côté JS.
+    """
+    keys = [
+        "pending_validation", "approved", "processing", "sent",
+        "paid", "finalizing", "live", "rejected", "failed", "final_failed",
+    ]
+    out = {k: 0 for k in keys}
+    sb = _sb()
+    if sb is None:
+        return out
+    try:
+        # Supabase n'a pas de COUNT GROUP BY simple via PostgREST sans RPC,
+        # donc on fait n petits SELECT count=exact (rapide, indexé sur status).
+        for k in keys:
+            r = (sb.table("wow_intakes").select("id", count="exact", head=True)
+                 .eq("status", k).execute())
+            out[k] = int(getattr(r, "count", 0) or 0)
+    except Exception as exc:
+        logger.warning("wow.count_by_status: %s", exc)
+    return out
+
+
+def intake_timeline(intake_id: str) -> list[dict]:
+    """Reconstruit la chronologie d'un intake à partir des colonnes
+    horodatées de wow_intakes. Ordre : du plus ancien au plus récent.
+
+    Chaque événement : { kind, ts, label }.
+    """
+    intake = get_intake(intake_id)
+    if intake is None:
+        return []
+    events: list[dict] = []
+    def _push(kind: str, ts: Optional[str], label: str):
+        if ts:
+            events.append({"kind": kind, "ts": ts, "label": label})
+    _push("submitted", intake.get("created_at"), "Brief soumis (pending_validation)")
+    _push("attempt",   intake.get("last_attempt_at"), "Dernière tentative pipeline")
+    _push("generated", intake.get("mockup_generated_at"),
+          f"Preview générée → {intake.get('mockup_url') or '(URL absente)'}")
+    _push("sent",      intake.get("mockup_sent_at"), "Mail preview envoyé au client")
+    if intake.get("status") in ("rejected", "failed", "final_failed"):
+        _push("error", intake.get("last_attempt_at"),
+              intake.get("error_message") or "Erreur (sans message)")
+    events.sort(key=lambda e: e["ts"] or "")
+    # Toujours ajouter l'état courant en synthèse à la fin
+    events.append({
+        "kind": "current",
+        "ts": intake.get("last_attempt_at") or intake.get("created_at"),
+        "label": f"Status courant : {intake.get('status')}",
+    })
+    return events
+
+
 def launch_finalization(intake_id: str) -> tuple[bool, str]:
     """Déclenche le workflow de finalisation pour un intake en status 'paid'.
     Code TOUTES les pages, intègre les retours + visuels du client, déploie.

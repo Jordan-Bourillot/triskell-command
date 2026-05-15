@@ -126,10 +126,16 @@ def _poller_loop(app_state) -> None:
 
 
 def _do_one_poll(app_state) -> dict:
-    """Un cycle complet : IMAP fetch → classify → write Supabase."""
+    """Un cycle complet : IMAP fetch → classify → write Supabase.
+
+    Depuis la phase 2 multi-comptes : itère sur tous les comptes mail
+    configurés (compte principal + comptes secondaires via shared_secrets).
+    Chaque compte a son propre last_uid pour ne pas mélanger les UIDs.
+    """
     global _LAST_RUN_AT, _LAST_RUN_RESULT
     counters = {"scanned": 0, "matched": 0, "classified": 0,
-                "written": 0, "errors": 0, "skipped": 0}
+                "written": 0, "errors": 0, "skipped": 0,
+                "accounts_scanned": 0, "per_account": {}}
 
     client = _get_supabase_client()
     if client is None:
@@ -138,20 +144,137 @@ def _do_one_poll(app_state) -> dict:
         _LAST_RUN_AT = datetime.now().isoformat(timespec="seconds")
         return counters
 
-    imap_cfg = _resolve_imap_config(app_state, client)
-    if not imap_cfg:
-        counters["error"] = "imap_not_configured"
+    accounts = _list_imap_accounts_to_scan(app_state, client)
+    if not accounts:
+        counters["error"] = "no_imap_account_configured"
         _LAST_RUN_RESULT = counters
         _LAST_RUN_AT = datetime.now().isoformat(timespec="seconds")
         return counters
 
-    # last_uid : on le persiste dans shared_settings pour partager entre Jordan et Thomas
-    last_uid = int(client.get_shared_setting("imap_last_uid", 0) or 0)
+    # Index prospects + AI settings — communs à tous les comptes
+    msgid_to_prospect, from_to_prospect = _build_prospect_index(client)
+    ai_settings = _resolve_ai_settings(app_state, client)
+
+    for acc in accounts:
+        try:
+            sub = _poll_one_account(
+                client, app_state, acc, ai_settings,
+                msgid_to_prospect, from_to_prospect,
+            )
+        except Exception as exc:
+            logger.warning("poll account %s failed: %s", acc.get("id"), exc)
+            sub = {"error": str(exc)}
+        counters["per_account"][acc.get("id", "?")] = sub
+        counters["accounts_scanned"] += 1
+        for k in ("scanned", "matched", "classified", "written", "errors", "skipped"):
+            counters[k] = counters.get(k, 0) + sub.get(k, 0)
+
+    _LAST_RUN_RESULT = counters
+    _LAST_RUN_AT = datetime.now().isoformat(timespec="seconds")
+    return counters
+
+
+def _log_inbox_mail(client, account_id: str, *, from_addr: str, subject: str,
+                     body: str, in_reply_to: str) -> None:
+    """Loggue dans email_history un mail entrant qui n'est pas une réponse
+    prospect (kind='inbox_received'). Anti-doublon : si un mail avec même
+    sujet + même from + même in_reply_to existe déjà sur ce compte, on saute.
+    """
+    sb = client.raw
+    try:
+        # Anti-doublon léger
+        check = (sb.table("email_history")
+                 .select("id").eq("kind", "inbox_received")
+                 .eq("subject", subject[:200])
+                 .eq("extra->>account_id", account_id)
+                 .eq("extra->>from", from_addr)
+                 .limit(1).execute())
+        if check.data:
+            return
+    except Exception:
+        pass  # si le check fail, on continue, l'insert peut échouer mais best-effort
+    extra = {
+        "account_id": account_id,
+        "from": from_addr,
+        "in_reply_to": in_reply_to,
+        "body_excerpt": (body or "")[:1500],
+    }
+    row = {
+        "kind": "inbox_received",
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "subject": subject[:200],
+        "body": "",
+        "extra": extra,
+        "created_by": client.user_id,
+    }
+    try:
+        sb.table("email_history").insert(row).execute()
+    except Exception as exc:
+        logger.debug("log inbox mail insert: %s", exc)
+
+
+def _list_imap_accounts_to_scan(app_state, client) -> list[dict]:
+    """Renvoie tous les comptes IMAP à scanner.
+
+    Format renvoyé : [{id, host, port, user, password, last_uid_key}, ...].
+    Le compte principal a id='primary' et utilise la clé legacy 'imap_last_uid'
+    (pour ne pas perdre l'historique des UIDs déjà scannés). Les comptes
+    secondaires utilisent 'imap_last_uid_{id}'.
+    """
+    out: list[dict] = []
+
+    # 1) Compte principal — réutilise _resolve_imap_config (compat)
+    primary = _resolve_imap_config(app_state, client)
+    if primary:
+        out.append({
+            "id": "primary",
+            "host": primary["host"], "port": primary["port"],
+            "user": primary["user"], "password": primary["password"],
+            "last_uid_key": "imap_last_uid",   # legacy
+        })
+
+    # 2) Comptes secondaires depuis shared_secrets
+    try:
+        from . import shared_secrets
+        for a in shared_secrets.list_secondary_accounts(client=client):
+            host = (a.get("imap_host") or "").strip()
+            user = (a.get("imap_user") or "").strip()
+            pwd  = a.get("imap_password") or ""
+            if not (host and user and pwd):
+                continue   # pas encore complètement configuré
+            aid = a.get("id")
+            if not aid:
+                continue
+            out.append({
+                "id": aid,
+                "host": host, "port": int(a.get("imap_port") or 993),
+                "user": user, "password": pwd,
+                "last_uid_key": f"imap_last_uid_{aid}",
+            })
+    except Exception as exc:
+        logger.warning("list secondary mail accounts: %s", exc)
+
+    return out
+
+
+def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
+                       msgid_to_prospect: dict, from_to_prospect: dict) -> dict:
+    """Scanne UNE boîte IMAP. Renvoie les compteurs locaux.
+
+    Ne lève pas — toute erreur est capturée et renvoyée dans counters['error'].
+    Le account_id est tracé dans email_history.extra.account_id pour le filtre
+    par compte côté UI.
+    """
+    counters = {"scanned": 0, "matched": 0, "classified": 0,
+                "written": 0, "errors": 0, "skipped": 0}
+    last_uid_key = account["last_uid_key"]
+    account_id = account.get("id", "primary")
+    last_uid = int(client.get_shared_setting(last_uid_key, 0) or 0)
 
     try:
-        M = imaplib.IMAP4_SSL(imap_cfg["host"], imap_cfg["port"])
+        M = imaplib.IMAP4_SSL(account["host"], account["port"])
         try:
-            M.login(imap_cfg["user"], imap_cfg["password"])
+            M.login(account["user"], account["password"])
             M.select("INBOX", readonly=True)
 
             criteria = f"UID {last_uid + 1}:*" if last_uid else "ALL"
@@ -163,9 +286,6 @@ def _do_one_poll(app_state) -> dict:
             if not uids:
                 return counters
 
-            # Index prospects pour matching
-            msgid_to_prospect, from_to_prospect = _build_prospect_index(client)
-            ai_settings = _resolve_ai_settings(app_state, client)
             max_uid_seen = last_uid
 
             for uid in uids:
@@ -173,10 +293,7 @@ def _do_one_poll(app_state) -> dict:
                 max_uid_seen = max(max_uid_seen, uid_int)
                 counters["scanned"] += 1
                 try:
-                    typ, msg_data = M.uid(
-                        "fetch", uid,
-                        "(BODY.PEEK[HEADER.FIELDS (FROM IN-REPLY-TO REFERENCES SUBJECT DATE)] BODY.PEEK[TEXT])",
-                    )
+                    typ, msg_data = M.uid("fetch", uid, "(BODY.PEEK[])")
                     if typ != "OK" or not msg_data:
                         counters["errors"] += 1
                         continue
@@ -197,37 +314,45 @@ def _do_one_poll(app_state) -> dict:
                     if prospect_id is None and from_addr:
                         prospect_id = from_to_prospect.get(from_addr.lower())
                     if prospect_id is None:
+                        # Phase 3 : logger quand même comme entrant général
+                        # (pour la vue Mails "Tous entrants"). On filtre juste
+                        # le bruit minimum (vide, pas d'expéditeur).
+                        if from_addr and (subject or body):
+                            try:
+                                _log_inbox_mail(client, account_id,
+                                                 from_addr=from_addr,
+                                                 subject=subject, body=body,
+                                                 in_reply_to=in_reply_to)
+                            except Exception as exc:
+                                logger.debug("log_inbox_mail KO: %s", exc)
                         counters["skipped"] += 1
                         continue
                     counters["matched"] += 1
 
-                    # Anti-doublon : si on a déjà un reply_received avec ce
-                    # message_id pour ce prospect, on saute.
                     if _already_logged(client, prospect_id, in_reply_to,
                                         from_addr, subject):
                         counters["skipped"] += 1
                         continue
 
-                    # Classification IA (best-effort)
                     classification = _classify_reply(
                         ai_settings, subject=subject, body=body, from_addr=from_addr,
                     )
                     counters["classified"] += 1
 
-                    # Écriture email_history
                     extra = {
                         "classification": classification,
                         "body_excerpt": (body or "")[:1500],
                         "from": from_addr,
                         "in_reply_to": in_reply_to,
                         "handled": False,
+                        "account_id": account_id,        # phase 2 : trace l'origine
                     }
                     row = {
                         "prospect_id": prospect_id,
                         "kind": "reply_received",
                         "ts": datetime.now().isoformat(timespec="seconds"),
                         "subject": subject[:200],
-                        "body": "",  # body excerpt va dans extra
+                        "body": "",
                         "extra": extra,
                         "created_by": client.user_id,
                     }
@@ -240,11 +365,9 @@ def _do_one_poll(app_state) -> dict:
                         counters["errors"] += 1
                         continue
 
-                    # Génère un draft de réponse suggéré (best-effort)
                     if history_row_id:
                         try:
                             from . import reply_responder
-                            # Récupère le prospect pour personnalisation
                             pres = (client.raw.table("prospects")
                                     .select("name,legal_name,emails")
                                     .eq("id", prospect_id).limit(1).execute())
@@ -261,9 +384,7 @@ def _do_one_poll(app_state) -> dict:
                         except Exception as exc:
                             logger.debug("ensure_suggested_reply: %s", exc)
 
-                    # Mise à jour status prospect
                     try:
-                        # On ne dégrade pas un status final (won/lost/refused)
                         sb = client.raw
                         cur = (sb.table("prospects").select("status")
                                .eq("id", prospect_id).limit(1).execute())
@@ -278,15 +399,15 @@ def _do_one_poll(app_state) -> dict:
                         logger.debug("update status KO: %s", exc)
 
                 except Exception as exc:
-                    logger.warning("UID %s: %s", uid_int, exc)
+                    logger.warning("UID %s [%s]: %s", uid_int, account_id, exc)
                     counters["errors"] += 1
 
-            # Persiste le dernier UID vu
+            # Persiste le dernier UID vu pour ce compte
             if max_uid_seen > last_uid:
                 try:
-                    client.set_shared_setting("imap_last_uid", max_uid_seen)
+                    client.set_shared_setting(last_uid_key, max_uid_seen)
                 except Exception as exc:
-                    logger.debug("save last_uid KO: %s", exc)
+                    logger.debug("save %s KO: %s", last_uid_key, exc)
         finally:
             try:
                 M.logout()
@@ -297,49 +418,147 @@ def _do_one_poll(app_state) -> dict:
     except Exception as exc:
         counters["error"] = str(exc)
 
-    _LAST_RUN_RESULT = counters
-    _LAST_RUN_AT = datetime.now().isoformat(timespec="seconds")
     return counters
 
 
 # ---------------------------------------------------------------------------
 # Helpers IMAP / parsing
 # ---------------------------------------------------------------------------
+def _mime_decode(s: str) -> str:
+    """Décode une string MIME (RFC 2047) du genre =?UTF-8?Q?...?=
+    Renvoie la string décodée propre. Robuste aux entrées vides/None.
+    """
+    if not s:
+        return ""
+    try:
+        from email.header import decode_header
+        out = []
+        for chunk, enc in decode_header(s):
+            if isinstance(chunk, bytes):
+                out.append(chunk.decode(enc or "utf-8", errors="replace"))
+            else:
+                out.append(chunk)
+        return "".join(out).strip()
+    except Exception:
+        return s
+
+
+def _extract_plain_body(raw: str) -> str:
+    """Extrait le texte plain d'un body MIME multipart.
+    Si pas de structure multipart détectable, renvoie le raw nettoyé.
+    """
+    if not raw:
+        return ""
+    try:
+        msg = email.message_from_string(raw)
+        if msg.is_multipart():
+            for part in msg.walk():
+                ctype = (part.get_content_type() or "").lower()
+                if ctype == "text/plain":
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or "utf-8"
+                        return payload.decode(charset, errors="replace").strip()
+            # Fallback : prendre la première partie text/* trouvée
+            for part in msg.walk():
+                ctype = (part.get_content_type() or "").lower()
+                if ctype.startswith("text/"):
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or "utf-8"
+                        text = payload.decode(charset, errors="replace")
+                        # Si HTML, strip les balises grossièrement
+                        text = re.sub(r"<[^>]+>", " ", text)
+                        return text.strip()
+        else:
+            payload = msg.get_payload(decode=True)
+            if payload:
+                charset = msg.get_content_charset() or "utf-8"
+                text = payload.decode(charset, errors="replace")
+                text = re.sub(r"<[^>]+>", " ", text)
+                return text.strip()
+    except Exception:
+        pass
+    # Fallback ultime : nettoyer le raw (HTML grossier + boundaries)
+    text = re.sub(r"<[^>]+>", " ", raw)
+    text = re.sub(r"^------=_Part_.*$", "", text, flags=re.M)
+    text = re.sub(r"^Content-(Type|Transfer-Encoding|Disposition):.*$", "", text, flags=re.M | re.I)
+    text = re.sub(r"^boundary=.*$", "", text, flags=re.M)
+    text = re.sub(r"\s+\n", "\n", text)
+    text = re.sub(r"[ \t]+", " ", text).strip()
+    return text
+
+
 def _parse_fetch_response(msg_data) -> tuple[dict, str]:
-    """Renvoie (dict_headers, str_body_text). Robuste aux réponses imaplib
-    multi-tuple (cas Office365 / certains serveurs)."""
-    headers: dict = {}
-    body_parts: list[str] = []
+    """Parse une réponse IMAP `BODY.PEEK[]` (message complet : headers + body).
+    Renvoie (dict_headers, str_body_text).
+
+    Les en-têtes (Subject, From) sont décodés depuis le MIME (RFC 2047).
+    Le body est extrait de la partie text/plain si multipart.
+    """
+    # Concatène tous les chunks de la réponse IMAP en une seule string
+    raw_full = ""
     for part in msg_data:
         if not isinstance(part, tuple):
             continue
-        raw = part[1]
-        if isinstance(raw, bytes):
-            text = raw.decode("utf-8", errors="ignore")
+        chunk = part[1]
+        if isinstance(chunk, bytes):
+            raw_full += chunk.decode("utf-8", errors="ignore")
+        elif chunk:
+            raw_full += str(chunk)
+    if not raw_full:
+        return {}, ""
+
+    headers: dict = {}
+    try:
+        msg = email.message_from_string(raw_full)
+        for k in ("From", "In-Reply-To", "References", "Subject", "Date"):
+            v = msg.get(k)
+            if v:
+                headers[k] = _mime_decode(v) if k in ("Subject", "From") else v
+    except Exception:
+        pass
+
+    # Body : extraction text/plain avec Content-Type connu
+    try:
+        msg = email.message_from_string(raw_full)
+        body = ""
+        if msg.is_multipart():
+            for sub in msg.walk():
+                ctype = (sub.get_content_type() or "").lower()
+                if ctype == "text/plain":
+                    payload = sub.get_payload(decode=True)
+                    if payload:
+                        charset = sub.get_content_charset() or "utf-8"
+                        body = payload.decode(charset, errors="replace").strip()
+                        break
+            # Fallback : prendre le premier text/* trouvé
+            if not body:
+                for sub in msg.walk():
+                    ctype = (sub.get_content_type() or "").lower()
+                    if ctype.startswith("text/"):
+                        payload = sub.get_payload(decode=True)
+                        if payload:
+                            charset = sub.get_content_charset() or "utf-8"
+                            text = payload.decode(charset, errors="replace")
+                            text = re.sub(r"<[^>]+>", " ", text)
+                            body = text.strip()
+                            break
         else:
-            text = str(raw or "")
-        if not text:
-            continue
-        # Heuristique : si ça commence par un header connu, c'est l'en-tête,
-        # sinon c'est du body (text/plain).
-        first = text.lstrip().split(":", 1)[0].lower()
-        if first in ("from", "in-reply-to", "references", "subject", "date"):
-            try:
-                m = email.message_from_string(text)
-                for k in ("From", "In-Reply-To", "References", "Subject", "Date"):
-                    v = m.get(k)
-                    if v and k not in headers:
-                        headers[k] = v
-            except Exception:
-                pass
-        else:
-            body_parts.append(text)
-    body = "\n".join(body_parts).strip()
-    # Body sans HTML grossier — on enlève les balises pour rester lisible
-    body = re.sub(r"<[^>]+>", " ", body)
-    body = re.sub(r"\s+\n", "\n", body)
-    body = re.sub(r"[ \t]+", " ", body).strip()
-    return headers, body
+            payload = msg.get_payload(decode=True)
+            if payload:
+                charset = msg.get_content_charset() or "utf-8"
+                text = payload.decode(charset, errors="replace")
+                if (msg.get_content_type() or "").lower() == "text/html":
+                    text = re.sub(r"<[^>]+>", " ", text)
+                body = text.strip()
+        # Compact whitespace
+        body = re.sub(r"\n{3,}", "\n\n", body)
+        body = re.sub(r"[ \t]+", " ", body).strip()
+        return headers, body
+    except Exception as exc:
+        logger.debug("parse body failed: %s", exc)
+        return headers, ""
 
 
 def _extract_msg_id(raw: str) -> str:

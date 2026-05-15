@@ -1,0 +1,49 @@
+# Exclus du context Docker pour build léger / sécurisé.
+
+# Git
+.git
+.gitignore
+
+# Secrets — JAMAIS dans l'image
+.env
+.env.*
+!.env.http.example
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.python-version
+*.egg-info
+
+# IDEs
+.vscode
+.idea
+.cursor
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Builds desktop (PyInstaller)
+build
+dist
+*.spec
+TriskellCommand.iss
+
+# Logs et caches
+*.log
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Données utilisateur (ne pas embarquer dans l'image)
+.triskell-command
+*.json.bak
+
+# Documentation lourde
+*.pdf
+docs/screenshots

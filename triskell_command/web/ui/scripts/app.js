@@ -10,17 +10,62 @@ const App = {
   currentView: 'morning',
   currentUser: {},   // {first_name, full_name, email} — rempli au boot
 
-  // ---- Wait for pywebview API to be ready ----
-  async waitForApi(timeoutMs = 6000) {
+  // ---- Wait for API to be ready ----
+  // Stratégie :
+  // 1. Si on est dans pywebview (fenêtre native locale), attendre window.pywebview.api
+  // 2. Sinon (navigateur Chrome/Firefox/mobile), utiliser un Proxy HTTP qui
+  //    appelle POST /api/<method_name> sur le serveur FastAPI.
+  // Détection : on attend un peu pywebview, sinon on bascule HTTP.
+  // L'interface pour le reste du code est identique : App.api.method_name(payload).
+  async waitForApi(timeoutMs = 1500) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       if (window.pywebview && window.pywebview.api) {
         this.api = window.pywebview.api;
+        this.apiMode = 'pywebview';
         return true;
       }
       await new Promise(r => setTimeout(r, 80));
     }
-    return false;
+    // Pas de pywebview détecté → mode HTTP
+    this.api = this._buildHttpApiProxy();
+    this.apiMode = 'http';
+    console.info('Mode API : HTTP (FastAPI). pywebview non détecté.');
+    return true;
+  },
+
+  // ---- Proxy HTTP : App.api.foo(payload) → POST /api/foo body=payload ----
+  _buildHttpApiProxy() {
+    return new Proxy({}, {
+      get: (_target, method) => {
+        // Évite les pièges : si le code fait `if (App.api.foo)` ou JSON.stringify(App.api),
+        // on doit renvoyer undefined pour les symboles spéciaux.
+        if (typeof method !== 'string') return undefined;
+        if (method === 'then' || method === 'toJSON') return undefined;
+        return async (payload) => {
+          const body = (payload === undefined || payload === null) ? null : JSON.stringify(payload);
+          const r = await fetch(`/api/${method}`, {
+            method: 'POST',
+            headers: body ? { 'Content-Type': 'application/json' } : {},
+            body,
+            credentials: 'same-origin',
+          });
+          // Session expirée ou pas connecté → rediriger vers le login
+          if (r.status === 401) {
+            if (!window.location.pathname.endsWith('/login.html')) {
+              window.location.href = '/login.html';
+            }
+            throw new Error('auth_required');
+          }
+          if (!r.ok) {
+            let detail = '';
+            try { detail = JSON.stringify(await r.json()); } catch {}
+            throw new Error(`API ${method} ${r.status} ${detail}`);
+          }
+          return r.json();
+        };
+      },
+    });
   },
 
   async init() {
@@ -79,10 +124,15 @@ const App = {
     window.addEventListener('keydown', (e) => {
       if (e.key === 'F12') { e.preventDefault(); Claude.open(); }
       if (e.ctrlKey && e.key === 't') { e.preventDefault(); this.cycleTheme(); }
-      // Ctrl+Shift+M (ou Cmd+Shift+M sur Mac) → composer un mail via Teddy/client défaut
+      // Ctrl+Shift+M (ou Cmd+Shift+M sur Mac) → ouvre le composer Mails de Triskell Command
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
-        if (typeof Teddy !== 'undefined') Teddy.compose();
+        if (typeof Mails !== 'undefined') {
+          this.show('mails');
+          setTimeout(() => Mails._openComposer({}), 200);
+        } else if (typeof Teddy !== 'undefined') {
+          Teddy.compose();
+        }
       }
     });
 
@@ -127,10 +177,15 @@ const App = {
     switch (viewId) {
       case 'morning':   return Morning.render(target);
       case 'replies':   return Replies.render(target);
+      case 'mails':     return Mails.render(target);
+      case 'brain':     return Brain.render(target);
       case 'drafts':    return Drafts.render(target);
       case 'funnel':    return Funnel.render(target);
       case 'clients':   return Clients.render(target);
       case 'phare':     return Phare.render(target);
+      case 'wow':       return Wow.render(target);
+      case 'rankus':    return Rankus.render(target);
+      case 'lagriffe':  return Lagriffe.render(target);
       case 'config':    return Config.render(target);
       case 'tutorial':  return Tutorial.render(target);
       case 'autopilot': return Autopilot.render(target);

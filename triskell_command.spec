@@ -10,7 +10,13 @@ from PyInstaller.utils.hooks import collect_all
 
 # Racine du projet
 ROOT = Path(SPECPATH).resolve()
-CORE_ROOT = ROOT.parent / "Triskell Core"
+# Le repo a été renommé "triskell-core" (sans espace) — on garde un fallback
+# sur l'ancien nom "Triskell Core" pour rétrocompatibilité.
+_CORE_CANDIDATES = [
+    ROOT.parent / "triskell-core",
+    ROOT.parent / "Triskell Core",
+]
+CORE_ROOT = next((p for p in _CORE_CANDIDATES if p.exists()), _CORE_CANDIDATES[0])
 
 # Inclut le mega_prompts.json du Core pour la couche IA + l'icône Triskell
 datas = [

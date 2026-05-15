@@ -877,12 +877,16 @@ class TriskellCommandApp(ctk.CTk):
             logger.debug("RepliesPoller non démarré : %s", exc)
         # Worker des réponses auto (envoie les drafts pending dont le délai
         # configuré est expiré, mode delay_30m / instant).
-        try:
-            from .integrations import reply_responder
-            reply_responder.start_worker(self.app_state)
-            logger.info("ReplyResponder actif (worker auto-envoi 60 s).")
-        except Exception as exc:
-            logger.debug("ReplyResponder non démarré : %s", exc)
+        # SAV désactivé manuellement : aucun bot ne répond aux mails reçus sur
+        # contact@triskell-studio.fr. Les drafts continuent d'être générés par
+        # replies_poller, mais l'envoi auto est coupé. Réactiver en
+        # décommentant les 4 lignes ci-dessous quand le SAV est prêt.
+        # try:
+        #     from .integrations import reply_responder
+        #     reply_responder.start_worker(self.app_state)
+        #     logger.info("ReplyResponder actif (worker auto-envoi 60 s).")
+        # except Exception as exc:
+        #     logger.debug("ReplyResponder non démarré : %s", exc)
         # Drip runner — relances J+7 / J+30 sur les envois sans réponse.
         try:
             from .integrations import drip_runner
