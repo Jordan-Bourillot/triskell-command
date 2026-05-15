@@ -254,30 +254,80 @@ const App = {
     const slot = document.getElementById('user-badge-slot');
     if (!slot) return;
     // Évite les doublons
-    if (document.getElementById('push-toggle-row')) return;
+    const existing = document.getElementById('push-toggle-row');
+    if (existing) existing.remove();
+
+    const isOn = Push.isEnabled();
+    const denied = (typeof Notification !== 'undefined' && Notification.permission === 'denied');
+
     const row = document.createElement('div');
     row.id = 'push-toggle-row';
-    row.className = 'mt-2 flex items-center gap-2';
-    const label = Push.isEnabled() ? '🔔 Notifs ON' : '🔕 Activer notifs';
-    const cls = Push.isEnabled()
-      ? 'flex-1 text-[11px] px-3 py-1.5 rounded-lg bg-accent/10 text-accent border border-accent/30 hover:bg-accent/20'
-      : 'flex-1 text-[11px] px-3 py-1.5 rounded-lg bg-bg text-text-muted border border-border hover:border-accent hover:text-accent';
-    row.innerHTML = `
-      <button id="push-toggle" class="${cls}">${label}</button>
-      <button id="push-test" class="text-[11px] px-2 py-1.5 rounded-lg bg-bg text-text-muted border border-border hover:border-accent hover:text-accent" title="Envoyer une notif de test">Test</button>
-    `;
+    row.className = 'mt-2';
+
+    // 3 états visuels distincts pour qu'on voie clairement OFF / ON / BLOQUÉ
+    if (denied && !isOn) {
+      // BLOQUÉ par le navigateur — l'utilisateur doit aller dans les paramètres
+      row.innerHTML = `
+        <div class="w-full px-3 py-2 rounded-lg bg-danger/10 text-danger border border-danger/30 text-[11px] flex items-center gap-2">
+          <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <line x1="3" y1="3" x2="21" y2="21"/>
+          </svg>
+          <div class="flex-1 leading-tight">
+            <div class="font-semibold">Notifs bloquées</div>
+            <div class="opacity-80">Débloque dans les réglages du navigateur (icône cadenas dans la barre d'adresse).</div>
+          </div>
+        </div>
+      `;
+    } else if (isOn) {
+      // ACTIVÉES — vert success franc, état clairement positif
+      row.innerHTML = `
+        <div class="flex items-center gap-2">
+          <button id="push-toggle"
+                  class="flex-1 text-xs px-3 py-2 rounded-lg bg-success/15 text-success border border-success/40 hover:bg-success/25 font-semibold flex items-center justify-center gap-1.5"
+                  title="Cliquer pour désactiver les notifications">
+            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 22a2 2 0 002-2h-4a2 2 0 002 2zM18 16v-5a6 6 0 10-12 0v5l-2 2v1h16v-1l-2-2z"/>
+            </svg>
+            <span>Notifications activées</span>
+          </button>
+          <button id="push-test"
+                  class="text-[11px] px-2.5 py-2 rounded-lg bg-bg text-text-muted border border-border hover:border-success hover:text-success"
+                  title="Envoyer une notif de test">
+            Test
+          </button>
+        </div>
+      `;
+    } else {
+      // DÉSACTIVÉES — bouton clairement "appel à action" (accent vif), pas un grisaille
+      row.innerHTML = `
+        <button id="push-toggle"
+                class="w-full text-xs px-3 py-2 rounded-lg bg-accent/10 text-accent border border-accent/40 hover:bg-accent hover:text-white font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                title="Cliquer pour activer les notifications">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <line x1="3" y1="3" x2="21" y2="21"/>
+          </svg>
+          <span>Activer les notifications</span>
+        </button>
+      `;
+    }
+
     slot.parentNode.insertBefore(row, slot.nextSibling);
-    document.getElementById('push-toggle').onclick = async () => {
-      if (Push.isEnabled()) {
-        await Push.disable();
-      } else {
-        await Push.enable();
-      }
-      // Re-render : retire et reinsère
-      row.remove();
-      this._renderPushButton();
-    };
-    document.getElementById('push-test').onclick = () => Push.test();
+
+    const toggleBtn = document.getElementById('push-toggle');
+    if (toggleBtn) {
+      toggleBtn.onclick = async () => {
+        if (Push.isEnabled()) {
+          await Push.disable();
+        } else {
+          await Push.enable();
+        }
+        this._renderPushButton();
+      };
+    }
+    const testBtn = document.getElementById('push-test');
+    if (testBtn) testBtn.onclick = () => Push.test();
   },
 
   // ---- Mobile sidebar drawer (visible <md uniquement) ----
