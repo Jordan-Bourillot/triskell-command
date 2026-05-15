@@ -34,14 +34,60 @@ const App = {
     return true;
   },
 
+  // ---- Méthodes desktop-only : interception côté front en mode HTTP ----
+  // Ces méthodes existent côté Api Python mais sont conçues pour pywebview
+  // local (lancer un .exe, ouvrir un browser sur la machine). Sur le serveur
+  // HTTP, les appeler ne ferait rien d'utile. On fait l'action côté navigateur
+  // à la place (window.open, mailto:, etc.).
+  _httpDesktopFallback(method, payload) {
+    const p = payload || {};
+    if (method === 'open_url') {
+      if (p.url) window.open(p.url, '_blank', 'noopener,noreferrer');
+      return { ok: true, client_action: 'open_url' };
+    }
+    if (method === 'compose_mail') {
+      // Construit un mailto: et l'ouvre dans le client mail par défaut
+      // du device de l'utilisateur (Gmail web, Apple Mail, etc.)
+      const join = v => Array.isArray(v) ? v.filter(Boolean).join(',') : String(v || '');
+      const params = [];
+      if (p.subject) params.push('subject=' + encodeURIComponent(p.subject));
+      if (p.body)    params.push('body=' + encodeURIComponent(p.body));
+      if (p.cc)      params.push('cc=' + encodeURIComponent(join(p.cc)));
+      if (p.bcc)     params.push('bcc=' + encodeURIComponent(join(p.bcc)));
+      const url = `mailto:${join(p.to)}` + (params.length ? '?' + params.join('&') : '');
+      window.location.href = url;
+      return { ok: true, client_action: 'mailto' };
+    }
+    if (method === 'open_teddy_mail' || method === 'launch_app') {
+      // Pas de Teddy Mail / .exe sur le serveur → si on a une URL, l'ouvrir.
+      if (p.url) {
+        window.open(p.url, '_blank', 'noopener,noreferrer');
+        return { ok: true, client_action: 'open_url' };
+      }
+      return {
+        ok: false,
+        error: 'Cette action est disponible uniquement en mode desktop local. ' +
+               'Lance Triskell Command sur ton PC pour ouvrir cette app.',
+      };
+    }
+    return null; // pas un fallback → laisse passer l'appel HTTP normal
+  },
+
   // ---- Proxy HTTP : App.api.foo(payload) → POST /api/foo body=payload ----
   _buildHttpApiProxy() {
+    const desktopOnlyMethods = new Set([
+      'open_url', 'compose_mail', 'open_teddy_mail', 'launch_app',
+    ]);
     return new Proxy({}, {
       get: (_target, method) => {
         // Évite les pièges : si le code fait `if (App.api.foo)` ou JSON.stringify(App.api),
         // on doit renvoyer undefined pour les symboles spéciaux.
         if (typeof method !== 'string') return undefined;
         if (method === 'then' || method === 'toJSON') return undefined;
+        // Méthodes desktop-only : court-circuit côté navigateur
+        if (desktopOnlyMethods.has(method)) {
+          return async (payload) => this._httpDesktopFallback(method, payload);
+        }
         return async (payload) => {
           const body = (payload === undefined || payload === null) ? null : JSON.stringify(payload);
           const r = await fetch(`/api/${method}`, {
