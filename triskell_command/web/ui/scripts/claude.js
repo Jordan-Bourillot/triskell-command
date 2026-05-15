@@ -110,13 +110,13 @@ const Claude = {
         <!-- Footer (question libre) -->
         <div class="px-5 py-4 sm:px-8 sm:py-5 border-t border-border bg-surface-elevated/50">
           <div class="hero-kicker mb-2">OU POSE UNE QUESTION LIBRE</div>
-          <div class="flex gap-2">
+          <div class="flex flex-col sm:flex-row gap-2">
             <input id="claude-question" type="text"
-                   class="flex-1 px-4 py-2.5 text-sm rounded-xl bg-surface border border-border
+                   class="flex-1 min-w-0 px-4 py-2.5 text-sm rounded-xl bg-surface border border-border
                           focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent
                           text-text placeholder:text-text-muted"
                    placeholder="ex: comment booster mes réponses cette semaine ?" />
-            <button id="claude-ask-free" class="btn btn-primary">Demander</button>
+            <button id="claude-ask-free" class="btn btn-primary w-full sm:w-auto justify-center shrink-0">Demander</button>
           </div>
         </div>
       </div>
