@@ -273,6 +273,14 @@ html, body {
   color: hsl(var(--text-secondary));
 }
 
+/* Mobile : cache les FAB flottants (Claude/Thomas) — utiliser le bouton
+   "Allô Claude" / "Chat Thomas" du menu sidebar à la place pour ne pas
+   chevaucher les autres contrôles. Note : !important nécessaire car
+   thomas-fab utilise display:flex via JS quand il devient actif. */
+@media (max-width: 767px) {
+  #claude-fab-wrap, #thomas-fab { display: none !important; }
+}
+
 /* Responsive : tailles réduites sur mobile (<640px) */
 @media (max-width: 640px) {
   .hero-title { font-size: 28px; }

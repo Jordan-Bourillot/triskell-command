@@ -151,11 +151,17 @@ const App = {
     const mobileOverlay = document.getElementById('mobile-sidebar-overlay');
     if (mobileOverlay) mobileOverlay.addEventListener('click', () => this.closeMobileSidebar());
 
-    // Bind FAB Claude (rond + label cliquables)
+    // Bind FAB Claude (rond + label cliquables) — visible desktop uniquement
     const fab = document.getElementById('claude-fab');
     if (fab) fab.addEventListener('click', () => Claude.open());
     const fabLabel = document.getElementById('claude-fab-label');
     if (fabLabel) fabLabel.addEventListener('click', () => Claude.open());
+    // Bouton "Allô Claude" dans la sidebar (mobile + desktop)
+    const claudeMenuBtn = document.getElementById('claude-menu-trigger');
+    if (claudeMenuBtn) claudeMenuBtn.addEventListener('click', () => {
+      Claude.open();
+      this.closeMobileSidebar();
+    });
 
     // Bind bouton "Outils Triskell" → launcher Spotlight
     const launcherBtn = document.getElementById('launcher-trigger');

@@ -12,15 +12,21 @@ const Claude = {
     this.isAttention = !!on;
     const fab = document.getElementById('claude-fab');
     const dot = document.getElementById('claude-fab-dot');
-    if (!fab) return;
+    const menuDot = document.getElementById('claude-menu-dot');
     if (on) {
-      fab.classList.remove('animate-breathe');
-      fab.classList.add('animate-pulse-fast');
+      if (fab) {
+        fab.classList.remove('animate-breathe');
+        fab.classList.add('animate-pulse-fast');
+      }
       if (dot) dot.classList.remove('hidden');
+      if (menuDot) menuDot.classList.remove('hidden');
     } else {
-      fab.classList.add('animate-breathe');
-      fab.classList.remove('animate-pulse-fast');
+      if (fab) {
+        fab.classList.add('animate-breathe');
+        fab.classList.remove('animate-pulse-fast');
+      }
       if (dot) dot.classList.add('hidden');
+      if (menuDot) menuDot.classList.add('hidden');
     }
   },
 
