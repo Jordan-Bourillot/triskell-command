@@ -686,8 +686,8 @@ const Mails = {
         <!-- Iframe rendu -->
         <iframe id="hp-frame" sandbox="allow-same-origin" class="flex-1 w-full bg-white border-0"></iframe>
         <div class="px-6 py-3 border-t border-border bg-surface-elevated flex items-center justify-between gap-2">
-          <div class="text-[11px] text-text-muted">ⓘ Rendu isolé (sandbox). Les vrais clients mail (Gmail, Outlook…) peuvent légèrement différer.</div>
           <button id="hp-ok" class="btn btn-primary">Fermer l'aperçu</button>
+          <div class="text-[11px] text-text-muted text-right">ⓘ Rendu isolé (sandbox). Les vrais clients mail (Gmail, Outlook…) peuvent légèrement différer.</div>
         </div>
       </div>
     `;
