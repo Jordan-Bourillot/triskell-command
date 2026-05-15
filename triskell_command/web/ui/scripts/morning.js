@@ -21,16 +21,16 @@ const Morning = {
     container.innerHTML = `
       <section class="animate-slide-up max-w-[1100px]">
         <!-- Hero -->
-        <div class="mb-12">
+        <div class="mb-6 sm:mb-12">
           <div class="flex items-start justify-between gap-3">
-            <div>
+            <div class="min-w-0 flex-1">
               <div class="hero-kicker mb-2">${dateStr.toUpperCase()}</div>
-              <h1 class="hero-title mb-3">${greetingFull}</h1>
+              <h1 class="hero-title mb-2 sm:mb-3">${greetingFull}</h1>
               <p class="hero-subtitle">Voilà ce qui t'attend aujourd'hui.</p>
             </div>
             ${Help.button('morning')}
           </div>
-          <div class="flex flex-wrap gap-3 mt-6">
+          <div class="flex flex-wrap gap-2 sm:gap-3 mt-5 sm:mt-6">
             <button id="m-refresh" class="btn btn-secondary">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0114-7.4M21 12a9 9 0 01-14 7.4"/><path d="M21 4v5h-5M3 20v-5h5"/></svg>
               Rafraîchir
@@ -59,7 +59,7 @@ const Morning = {
           </div>
         </div>
 
-        <div id="m-content" class="space-y-12"></div>
+        <div id="m-content" class="space-y-6 sm:space-y-12"></div>
       </section>
     `;
 
@@ -294,11 +294,11 @@ const Morning = {
     }
 
     return `
-      <div class="card-hero p-12 mb-8" data-accent="${accent}">
-        <div class="hero-kicker text-${accent === 'accent' ? 'accent' : accent} mb-3">${kicker}</div>
-        <h2 class="font-display text-3xl font-bold mb-3 leading-tight">${title}</h2>
-        <p class="text-text-secondary text-base mb-6 max-w-2xl">${body}</p>
-        <button class="btn btn-primary" onclick="App.show('${target}')">${cta} →</button>
+      <div class="card-hero p-5 sm:p-8 md:p-12 mb-6 sm:mb-8" data-accent="${accent}">
+        <div class="hero-kicker text-${accent === 'accent' ? 'accent' : accent} mb-2 sm:mb-3">${kicker}</div>
+        <h2 class="font-display text-xl sm:text-2xl md:text-3xl font-bold mb-2 sm:mb-3 leading-tight">${title}</h2>
+        <p class="text-text-secondary text-sm sm:text-base mb-4 sm:mb-6 max-w-2xl">${body}</p>
+        <button class="btn btn-primary w-full sm:w-auto justify-center" onclick="App.show('${target}')">${cta} →</button>
       </div>
     `;
   },
@@ -314,7 +314,7 @@ const Morning = {
     return `
       <div>
         <div class="section-label">Hier en chiffres</div>
-        <div class="grid grid-cols-3 gap-5">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-5">
           ${this._stat({label: 'Mails envoyés', value: sentY, delta: `${last7} sur les 7 derniers jours`})}
           ${this._stat({
             label: 'Réponses reçues',
@@ -339,7 +339,7 @@ const Morning = {
     return `
       <div>
         <div class="section-label">Aujourd'hui</div>
-        <div class="grid grid-cols-2 gap-5">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5">
           ${this._stat({label: 'Envoyés depuis 00:00', value: sentT, delta: sentT === 0 ? '—' : "L'auto-pilote tourne"})}
           ${this._stat({label: 'Réponses depuis 00:00', value: repT, delta: repT === 0 ? '—' : 'À examiner', accent: repT > 0 ? 'success' : ''})}
         </div>

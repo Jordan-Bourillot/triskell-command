@@ -262,11 +262,25 @@ html, body {
   line-height: 1.1;
   letter-spacing: -0.02em;
   color: hsl(var(--text));
+  word-break: break-word;
 }
 .hero-subtitle {
   font-size: 17px;
   line-height: 1.5;
   color: hsl(var(--text-secondary));
+}
+
+/* Responsive : tailles réduites sur mobile (<640px) */
+@media (max-width: 640px) {
+  .hero-title { font-size: 28px; }
+  .hero-subtitle { font-size: 15px; }
+  .stat-card { padding: 16px; border-radius: 12px; }
+  .stat-card .value { font-size: 28px; }
+  .card { border-radius: 12px; }
+  .card-hero { border-radius: 16px; }
+  .section-label { margin-bottom: 12px; }
+  .btn { padding: 9px 13px; font-size: 12.5px; }
+  .nav-item { padding: 11px 12px; font-size: 14px; }
 }
 
 /* ============================
