@@ -99,6 +99,16 @@ def create_app() -> FastAPI:
     # Empêche l'expiration de l'access_token (durée typique : 1h).
     _start_supabase_refresh_thread()
 
+    # Démarre les workers backend (pollers IMAP, autopilot, drip, etc.)
+    # SANS attendre que le front se connecte. Comme ça, le serveur fait son
+    # boulot même si personne n'a la page ouverte.
+    try:
+        boot_result = api_instance.boot()
+        if boot_result.get("ok"):
+            logger.info("Workers backend démarrés au boot du serveur HTTP.")
+    except Exception as exc:
+        logger.warning("boot() au démarrage HTTP a échoué : %s", exc)
+
     # Auto-génération des routes depuis les méthodes publiques
     method_count = 0
     for name, method in inspect.getmembers(api_instance, inspect.ismethod):
