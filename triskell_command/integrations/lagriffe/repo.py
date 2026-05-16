@@ -314,3 +314,65 @@ def approve_final_and_send(intake_id: str) -> tuple[bool, str]:
         return False, f"HTTP {r.status_code}: {r.text[:200]}"
     except Exception as exc:
         return False, str(exc)
+
+
+def trigger_finalize(intake_id: str) -> tuple[bool, str]:
+    """Déclenche manuellement la fabrication finale pour un intake 'paid'
+    (utilisé quand le toggle 'paid' est en mode MANUEL).
+    """
+    import requests
+    url = "https://lagriffe-studio.fr/.netlify/functions/finalize-site-build"
+    try:
+        r = requests.post(url, json={"intake_id": intake_id}, timeout=30)
+        if r.ok:
+            return True, "Fabrication finale lancée."
+        return False, f"HTTP {r.status_code}: {r.text[:200]}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+# ---------------------------------------------------------------------------
+# Pipeline settings (toggles AUTO/MANUEL par produit × étape)
+# ---------------------------------------------------------------------------
+def pipeline_settings_read(product: str) -> dict:
+    """Lit les modes auto/manuel pour un produit depuis Supabase
+    (triskell_pipeline_settings). Retourne {ok, product, settings: {stage: mode}}.
+    """
+    defaults = {"approved": "auto", "paid": "auto", "final_ready_review": "manual"}
+    sb = _sb()
+    if sb is None:
+        return {"ok": True, "product": product, "settings": defaults, "fallback": True}
+    try:
+        rows = (sb.table("triskell_pipeline_settings")
+                  .select("stage, mode")
+                  .eq("product", product)
+                  .execute().data or [])
+        settings = dict(defaults)
+        for r in rows:
+            stage = r.get("stage")
+            mode = r.get("mode")
+            if stage in defaults and mode in ("auto", "manual"):
+                settings[stage] = mode
+        return {"ok": True, "product": product, "settings": settings}
+    except Exception as exc:
+        logger.warning("pipeline_settings_read: %s", exc)
+        return {"ok": False, "error": str(exc), "settings": defaults}
+
+
+def pipeline_settings_write(product: str, stage: str, mode: str, updated_by: str = "") -> dict:
+    """Upsert (product, stage) → mode dans triskell_pipeline_settings."""
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré"}
+    try:
+        sb.table("triskell_pipeline_settings").upsert({
+            "product": product,
+            "stage": stage,
+            "mode": mode,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_by": (updated_by or "")[:200],
+        }, on_conflict="product,stage").execute()
+        return {"ok": True, "product": product, "stage": stage, "mode": mode}
+    except Exception as exc:
+        logger.warning("pipeline_settings_write: %s", exc)
+        return {"ok": False, "error": str(exc)}

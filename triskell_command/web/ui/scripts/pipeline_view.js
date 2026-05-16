@@ -576,17 +576,16 @@ function makePipelineView(config) {
           <div id="pv-pipe-recent" class="space-y-2"></div>
         </div>
       `;
+      await this._syncModesFromBackend();
       await this._loadPipeline();
       this.state.pollHandle = setInterval(() => this._loadPipeline(true), 5000);
     },
 
-    // ─── Préférences AUTO / MANUEL persistées en localStorage ────────────
-    //  Note : pour l'instant ces toggles sont COSMÉTIQUES côté UI
-    //  (l'étape passe en orange "attend ton action" si manuelle ET non vide),
-    //  ET t'offrent un panneau d'action directe sous le pipeline.
-    //  L'avancement reste automatique côté backend tant que ce n'est pas
-    //  branché aux fonctions Netlify (process-intakes, stripe-webhook).
-    //  Pour activer le vrai blocage automatique, voir OPERATIONS.md.
+    // ─── Préférences AUTO / MANUEL persistées en Supabase ─────────────────
+    //  Source de vérité : table triskell_pipeline_settings (Supabase).
+    //  Le backend Netlify (process-intakes, stripe-webhook) lit cette table
+    //  et bloque l'avancement automatique si l'étape est en MANUEL.
+    //  Cache localStorage pour un affichage immédiat même hors-ligne.
     _modesKey() { return `pv-modes-${this.config.apiPrefix}`; },
     _loadModes() {
       try {
@@ -594,10 +593,23 @@ function makePipelineView(config) {
         return raw ? JSON.parse(raw) : {};
       } catch { return {}; }
     },
-    _saveMode(stageKey, mode) {
+    async _saveMode(stageKey, mode) {
+      // 1. Optimistic update localStorage (UI réactive)
       const modes = this._loadModes();
       modes[stageKey] = mode;
       try { localStorage.setItem(this._modesKey(), JSON.stringify(modes)); } catch {}
+      // 2. Persistance backend (Triskell Command → Supabase via pipeline-settings-api Lagriffe)
+      if (App.api && typeof App.api.pipeline_settings_write === 'function') {
+        try {
+          await App.api.pipeline_settings_write({
+            product: this.config.apiPrefix,
+            stage: stageKey,
+            mode,
+          });
+        } catch (e) {
+          console.warn(`[pipeline-view] persistance backend failed pour ${stageKey}=${mode}:`, e);
+        }
+      }
     },
     _isManual(stageKey) {
       const modes = this._loadModes();
@@ -605,6 +617,18 @@ function makePipelineView(config) {
       // Le reste est AUTO sauf si l'utilisateur a basculé.
       if (modes[stageKey] !== undefined) return modes[stageKey] === 'manual';
       return stageKey === 'final_ready_review';
+    },
+    // Charge les settings depuis Supabase au démarrage, met à jour le cache localStorage.
+    async _syncModesFromBackend() {
+      if (!App.api || typeof App.api.pipeline_settings_read !== 'function') return;
+      try {
+        const r = await App.api.pipeline_settings_read({ product: this.config.apiPrefix });
+        if (r && r.ok && r.settings) {
+          try { localStorage.setItem(this._modesKey(), JSON.stringify(r.settings)); } catch {}
+        }
+      } catch (e) {
+        console.warn('[pipeline-view] sync modes failed:', e);
+      }
     },
 
     async _loadPipeline(silent = false) {

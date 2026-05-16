@@ -2018,6 +2018,54 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def lagriffe_finalize_now(self, payload: dict) -> dict:
+        """Forcer la finalisation manuelle d'un intake 'paid' (utilisé quand
+        le toggle 'paid' est en mode MANUEL, Jordan déclenche depuis la vue
+        Pipeline → panneau 'En attente de ton action').
+        """
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.lagriffe import repo as r
+            # On appelle directement l'endpoint Netlify finalize-site-build
+            ok, msg = r.trigger_finalize(iid)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Pipeline settings (toggles AUTO/MANUEL par produit × étape)
+    # ------------------------------------------------------------------
+    def pipeline_settings_read(self, payload: dict | None = None) -> dict:
+        """Lit les modes auto/manuel pour un produit (lagriffe / rankus / wow)
+        depuis Supabase via la table triskell_pipeline_settings."""
+        product = ((payload or {}).get("product") or "lagriffe").strip()
+        try:
+            from ..integrations.lagriffe import repo as r
+            return r.pipeline_settings_read(product)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pipeline_settings_write(self, payload: dict) -> dict:
+        """Met à jour le mode auto/manuel pour (product, stage).
+        Synchrone avec Supabase — le backend Netlify lira cette valeur au
+        prochain check (cache 60s)."""
+        product = ((payload or {}).get("product") or "").strip()
+        stage   = ((payload or {}).get("stage") or "").strip()
+        mode    = ((payload or {}).get("mode") or "").strip()
+        if product not in ("lagriffe", "rankus", "wow"):
+            return {"ok": False, "error": "product invalide"}
+        if stage not in ("approved", "paid", "final_ready_review"):
+            return {"ok": False, "error": "stage invalide"}
+        if mode not in ("auto", "manual"):
+            return {"ok": False, "error": "mode invalide"}
+        try:
+            from ..integrations.lagriffe import repo as r
+            updated_by = self.get_user_name() or "triskell-command"
+            return r.pipeline_settings_write(product, stage, mode, updated_by)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ------------------------------------------------------------------
     # Catalogue des outils Triskell (pour le launcher Ctrl+K)
     # ------------------------------------------------------------------
