@@ -2212,13 +2212,13 @@ const Mails = {
                       class="text-left p-5 rounded-2xl border-2 border-border hover:border-accent hover:bg-accent/5 transition-all">
                 <div class="text-3xl mb-2">📐</div>
                 <div class="text-base font-bold text-text">Site modèle pour leur métier</div>
-                <div class="text-xs text-text-muted mt-1 leading-snug">Une démo générique adaptée à leur secteur (ex : "site type pour une boulangerie"). Le mail dit : "voici à quoi ressemblerait votre site dans ce style, on peut le personnaliser".</div>
+                <div class="text-xs text-text-muted mt-1 leading-snug">Une démo générique adaptée à leur secteur (ex : "site type pour une boulangerie"). Le mail invite à imaginer la version qu'on ferait pour eux.</div>
               </button>
               <button data-sub="personalized"
                       class="text-left p-5 rounded-2xl border-2 border-border hover:border-accent hover:bg-accent/5 transition-all">
                 <div class="text-3xl mb-2">🎯</div>
-                <div class="text-base font-bold text-text">Site déjà personnalisé</div>
-                <div class="text-xs text-text-muted mt-1 leading-snug">Tu as déjà adapté le site avec leur nom, leurs services, leurs couleurs. Le mail dit : "voici votre site, prêt à être déployé sur votre vrai domaine".</div>
+                <div class="text-base font-bold text-text">Première personnalisation</div>
+                <div class="text-xs text-text-muted mt-1 leading-snug">Tu as déjà intégré ce que tu as trouvé en public (nom, services, ville, ambiance). Le mail dit : "voici une première version, on affine ensemble sur un brief".</div>
               </button>
             </div>
             <div class="px-5 pb-4 flex items-center">
@@ -2246,9 +2246,9 @@ const Mails = {
           urlTitle = '📐 URL du site modèle';
           urlHint = "Colle l'adresse de ton site modèle générique adapté à leur métier. Le mail expliquera que c'est un modèle qu'on peut personnaliser pour eux.";
         } else if (chosenCategory === 'business' && chosenSubtype === 'personalized') {
-          kicker = 'PROSPECTION ENTREPRISE · PERSONNALISÉ';
-          urlTitle = '🎯 URL du site personnalisé';
-          urlHint = "Colle l'adresse du site que tu as déjà adapté à leurs infos. Le mail dira qu'il est prêt à être déployé sur leur vrai domaine.";
+          kicker = 'PROSPECTION ENTREPRISE · 1ʳᵉ PERSONNALISATION';
+          urlTitle = '🎯 URL du site déjà ébauché pour eux';
+          urlHint = "Colle l'adresse du site où tu as déjà intégré les infos publiques que tu as trouvées (nom, services, ville). Le mail invitera à un brief pour finaliser les derniers détails.";
         } else if (chosenCategory === 'celebrity' && chosenSubtype === 'sport') {
           kicker = 'PROSPECTION CÉLÉBRITÉ · SPORTIF';
           urlTitle = '🏆 URL du site que tu as réalisé';

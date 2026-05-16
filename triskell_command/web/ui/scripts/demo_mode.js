@@ -538,12 +538,12 @@ const DemoMode = {
         ok: true,
         target_name: 'Boulangerie Lefèvre',
         used_template: 'Approche commerce local',
-        subject: 'Boulangerie Lefèvre — votre nouveau site, prêt à découvrir',
+        subject: 'Boulangerie Lefèvre — une première ébauche pour vous',
         body_html: '<p>Bonjour Marc,</p>'
-          + '<p>J\'ai pris quelques heures pour vous <strong>concevoir un site qui met en valeur votre boulangerie</strong> : votre kouign-amann breton en page d\'accueil, vos horaires bien visibles, un bloc avis Google et la prise de commande en ligne pour les fêtes.</p>'
+          + '<p>J\'ai commencé à ébaucher un site pour votre boulangerie en m\'appuyant sur ce que j\'ai trouvé en public — votre fiche Google, vos horaires, votre adresse à Plérin et quelques produits visibles sur vos réseaux. <strong>C\'est une première version</strong>, pas un site finalisé : il manque vos vraies photos, vos textes définitifs et les détails qu\'on caleraient ensemble.</p>'
           + '<p><img src="cid:prospect_preview" alt="Aperçu du site" style="max-width:100%;height:auto;display:block;border-radius:8px;border:1px solid #e5e7eb;"></p>'
-          + `<p>Voilà à quoi ça ressemble : <a href="${url}"><strong>Voir le site</strong></a>.</p>`
-          + '<p>Si ça vous plaît, en 1 journée on bascule sur votre vrai domaine. Sinon, vous repartez avec les idées et c\'est cadeau.</p>',
+          + `<p><a href="${url}"><strong>Voir l\'ébauche</strong></a></p>`
+          + '<p>Si l\'idée vous plaît, on prend <strong>15 min en visio</strong> pour affiner ensemble (un brief court, j\'intègre vos vraies infos), et seulement après on bascule sur votre vrai domaine. Sinon, vous repartez avec les idées et c\'est cadeau.</p>',
         source_url: url, category: cat,
         screenshot_b64: '',
         screenshot_content_type: '',
