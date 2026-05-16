@@ -29,7 +29,7 @@ from . import repo
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_EMAIL = "jordan@triskell-studio.fr"
+DEFAULT_EMAIL = "contact@triskell-studio.fr"
 DEFAULT_USER_ID = "jordan"
 
 
