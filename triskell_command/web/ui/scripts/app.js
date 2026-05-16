@@ -95,12 +95,25 @@ const App = {
             if (intercepted.handled) return intercepted.result;
           }
           const body = (payload === undefined || payload === null) ? null : JSON.stringify(payload);
-          const r = await fetch(`/api/${method}`, {
-            method: 'POST',
-            headers: body ? { 'Content-Type': 'application/json' } : {},
-            body,
-            credentials: 'same-origin',
-          });
+          const t0 = performance.now();
+          let r;
+          try {
+            r = await fetch(`/api/${method}`, {
+              method: 'POST',
+              headers: body ? { 'Content-Type': 'application/json' } : {},
+              body,
+              credentials: 'same-origin',
+            });
+          } catch (netErr) {
+            // Erreur réseau brute (offline, CORS, DNS, etc.)
+            if (typeof HealthCheck !== 'undefined') {
+              HealthCheck.record({ kind: 'api_network', method, msg: String(netErr) });
+              HealthCheck.toast('Réseau indisponible',
+                `Impossible de joindre /api/${method}. Le serveur tourne ?`, 'error');
+            }
+            throw netErr;
+          }
+          const elapsed = Math.round(performance.now() - t0);
           // Session expirée ou pas connecté → rediriger vers le login
           if (r.status === 401) {
             if (!window.location.pathname.endsWith('/login.html')) {
@@ -111,7 +124,14 @@ const App = {
           if (!r.ok) {
             let detail = '';
             try { detail = JSON.stringify(await r.json()); } catch {}
+            if (typeof HealthCheck !== 'undefined') {
+              HealthCheck.record({ kind: 'api_http_error', method, status: r.status, detail, elapsed });
+            }
             throw new Error(`API ${method} ${r.status} ${detail}`);
+          }
+          // Log les appels lents (>3 sec) pour anticiper les soucis de perf
+          if (elapsed > 3000 && typeof HealthCheck !== 'undefined') {
+            HealthCheck.record({ kind: 'api_slow', method, elapsed_ms: elapsed });
           }
           return r.json();
         };
