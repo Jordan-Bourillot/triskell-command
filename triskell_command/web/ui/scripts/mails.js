@@ -884,9 +884,37 @@ const Mails = {
               </select>
             </div>
             <div>
-              <label class="block text-[11px] font-medium text-text-secondary mb-1">Destinataire</label>
-              <input id="cmp-to" type="email" value="${this._escape(opts.prefilledTo || '')}" placeholder="email@exemple.fr"
-                     class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
+              <div class="flex items-center justify-between mb-1 gap-2">
+                <label class="block text-[11px] font-medium text-text-secondary">Destinataires</label>
+                <div class="flex items-center gap-1 text-[10px] font-semibold">
+                  <button id="cmp-toggle-cc" type="button" class="px-1.5 py-0.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Afficher le champ Cc">+ Cc</button>
+                  <button id="cmp-toggle-bcc" type="button" class="px-1.5 py-0.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Afficher le champ Cci (copie cachée)">+ Cci</button>
+                </div>
+              </div>
+              <div id="cmp-to-wrap" class="chips-input chips-input--to"
+                   data-input-id="cmp-to-input"
+                   data-placeholder="email@exemple.fr">
+                <input id="cmp-to-input" type="text" autocomplete="off"
+                       class="chips-text" placeholder="email@exemple.fr"/>
+              </div>
+            </div>
+          </div>
+
+          <!-- Cc / Cci (masqués par défaut) -->
+          <div id="cmp-cc-row" class="hidden">
+            <label class="block text-[11px] font-medium text-text-secondary mb-1">Cc <span class="text-text-muted font-normal">(copie visible)</span></label>
+            <div id="cmp-cc-wrap" class="chips-input"
+                 data-input-id="cmp-cc-input">
+              <input id="cmp-cc-input" type="text" autocomplete="off"
+                     class="chips-text" placeholder="email@exemple.fr"/>
+            </div>
+          </div>
+          <div id="cmp-bcc-row" class="hidden">
+            <label class="block text-[11px] font-medium text-text-secondary mb-1">Cci <span class="text-text-muted font-normal">(copie cachée — les autres destinataires ne la voient pas)</span></label>
+            <div id="cmp-bcc-wrap" class="chips-input"
+                 data-input-id="cmp-bcc-input">
+              <input id="cmp-bcc-input" type="text" autocomplete="off"
+                     class="chips-text" placeholder="email@exemple.fr"/>
             </div>
           </div>
 
@@ -1049,6 +1077,63 @@ const Mails = {
         #cmp-body-html a > img::after {
           content: '🔗';
         }
+        /* Chips destinataires (To / Cc / Cci) */
+        .chips-input {
+          display: flex; flex-wrap: wrap; gap: 5px;
+          padding: 5px 8px;
+          border-radius: 8px;
+          background: hsl(var(--bg));
+          border: 1px solid hsl(var(--border));
+          min-height: 40px;
+          align-items: center;
+          font-size: 13px;
+          cursor: text;
+          transition: border-color 120ms, box-shadow 120ms;
+        }
+        .chips-input:focus-within {
+          border-color: hsl(var(--accent));
+          box-shadow: 0 0 0 2px hsl(var(--accent) / 0.25);
+        }
+        .chips-input .chip {
+          display: inline-flex; align-items: center; gap: 3px;
+          padding: 2px 4px 2px 9px;
+          border-radius: 5px;
+          background: hsl(var(--accent) / 0.15);
+          color: hsl(var(--accent));
+          font-size: 12px; font-weight: 600;
+          line-height: 1.3;
+          max-width: 100%;
+        }
+        .chips-input .chip span {
+          max-width: 280px;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .chips-input .chip.invalid {
+          background: rgba(239, 68, 68, 0.15);
+          color: #ef4444;
+        }
+        .chips-input .chip button {
+          appearance: none;
+          background: transparent;
+          border: 0;
+          color: inherit;
+          opacity: 0.65;
+          font-size: 14px;
+          line-height: 1;
+          padding: 0 4px;
+          cursor: pointer;
+        }
+        .chips-input .chip button:hover { opacity: 1; }
+        .chips-input .chips-text {
+          flex: 1;
+          min-width: 140px;
+          background: transparent;
+          border: 0;
+          outline: 0;
+          color: inherit;
+          font-size: 13px;
+          padding: 4px 0;
+        }
       `;
       document.head.appendChild(s);
     }
@@ -1059,6 +1144,115 @@ const Mails = {
     // Volontairement PAS de fermeture sur clic en dehors : Jordan a perdu
     // des mails ainsi. La modale ne se ferme que via × ou Annuler.
     // Idem pour Escape : on retire pour éviter une fermeture accidentelle.
+
+    // ----------------------------------------------------------------------
+    // Chips destinataires (To / Cc / Cci)
+    // ----------------------------------------------------------------------
+    const _isValidEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+
+    const makeChips = (wrapEl) => {
+      const inputEl = wrapEl.querySelector('.chips-text');
+      let chips = [];
+      const escape = (s) => this._escape(s);
+
+      const renderChips = () => {
+        [...wrapEl.querySelectorAll('.chip')].forEach(el => el.remove());
+        chips.forEach((email, i) => {
+          const valid = _isValidEmail(email);
+          const chipEl = document.createElement('span');
+          chipEl.className = 'chip' + (valid ? '' : ' invalid');
+          chipEl.innerHTML = `<span title="${escape(email)}">${escape(email)}</span>` +
+                             `<button type="button" data-i="${i}" title="Retirer">×</button>`;
+          wrapEl.insertBefore(chipEl, inputEl);
+          chipEl.querySelector('button').onclick = (e) => {
+            e.preventDefault(); e.stopPropagation();
+            chips.splice(i, 1);
+            renderChips();
+          };
+        });
+      };
+
+      const tryCommit = () => {
+        const raw = inputEl.value.trim().replace(/[,;]+$/, '').trim();
+        if (!raw) return;
+        // Permet de coller "a@x.fr, b@y.fr" et de splitter
+        const parts = raw.split(/[\s,;]+/).filter(Boolean);
+        parts.forEach(p => {
+          if (!chips.some(c => c.toLowerCase() === p.toLowerCase())) {
+            chips.push(p);
+          }
+        });
+        inputEl.value = '';
+        renderChips();
+      };
+
+      inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ',' || e.key === ';' || e.key === 'Tab') {
+          if (inputEl.value.trim()) {
+            e.preventDefault();
+            tryCommit();
+          }
+        } else if (e.key === ' ' && _isValidEmail(inputEl.value.trim())) {
+          // Espace après email valide → commit auto
+          e.preventDefault();
+          tryCommit();
+        } else if (e.key === 'Backspace' && inputEl.value === '' && chips.length > 0) {
+          chips.pop();
+          renderChips();
+        }
+      });
+      inputEl.addEventListener('blur', () => {
+        if (inputEl.value.trim()) tryCommit();
+      });
+      // Coller : si plusieurs adresses, splitter
+      inputEl.addEventListener('paste', (e) => {
+        const text = (e.clipboardData || window.clipboardData).getData('text');
+        if (text && /[,;\s]/.test(text)) {
+          e.preventDefault();
+          inputEl.value = text;
+          tryCommit();
+        }
+      });
+      // Click sur le wrap (hors chip / input) → focus input
+      wrapEl.addEventListener('click', (e) => {
+        if (e.target === wrapEl) inputEl.focus();
+      });
+
+      return {
+        getValues: () => chips.slice(),
+        setValues: (arr) => {
+          chips = (arr || []).map(String).filter(Boolean);
+          renderChips();
+        },
+        commitPending: () => tryCommit(),
+        isEmpty: () => chips.length === 0 && !inputEl.value.trim(),
+        anyInvalid: () => chips.some(c => !_isValidEmail(c)),
+        focus: () => inputEl.focus(),
+        wrapEl, inputEl,
+      };
+    };
+
+    const chipsTo  = makeChips(overlay.querySelector('#cmp-to-wrap'));
+    const chipsCc  = makeChips(overlay.querySelector('#cmp-cc-wrap'));
+    const chipsBcc = makeChips(overlay.querySelector('#cmp-bcc-wrap'));
+
+    // Pré-remplissage destinataire (ex : depuis "Répondre à X")
+    if (opts.prefilledTo) {
+      const parts = String(opts.prefilledTo).split(/[\s,;]+/).filter(Boolean);
+      chipsTo.setValues(parts);
+    }
+
+    // Toggle des lignes Cc / Cci
+    overlay.querySelector('#cmp-toggle-cc').onclick = () => {
+      const row = overlay.querySelector('#cmp-cc-row');
+      row.classList.remove('hidden');
+      chipsCc.focus();
+    };
+    overlay.querySelector('#cmp-toggle-bcc').onclick = () => {
+      const row = overlay.querySelector('#cmp-bcc-row');
+      row.classList.remove('hidden');
+      chipsBcc.focus();
+    };
 
     // Gestion mode Texte / HTML
     let mode = 'text';
@@ -1332,7 +1526,7 @@ const Mails = {
           const subj = (overlay.querySelector('#cmp-subject').value || '').trim();
           const fromSel = overlay.querySelector('#cmp-from');
           const fromLabel = fromSel.options[fromSel.selectedIndex]?.text || '';
-          const to = (overlay.querySelector('#cmp-to').value || '').trim();
+          const to = chipsTo.getValues().join(', ');
           this._openHtmlPreview(htmlArea.innerHTML, { subject: subj, from: fromLabel, to });
         } else if (cmd.startsWith('formatBlock-')) {
           const tag = cmd.split('-')[1];
@@ -1547,7 +1741,9 @@ const Mails = {
         body_html_val = clone.innerHTML;
       }
       return {
-        to: overlay.querySelector('#cmp-to').value,
+        to: chipsTo.getValues().join(', '),
+        cc: chipsCc.getValues().join(', '),
+        bcc: chipsBcc.getValues().join(', '),
         subject: overlay.querySelector('#cmp-subject').value,
         account_id: overlay.querySelector('#cmp-from').value,
         signature_id: overlay.querySelector('#cmp-signature').value,
@@ -1620,8 +1816,13 @@ const Mails = {
     // Helper : construit le payload pour mail_send / mail_schedule
     // (utilisé par le bouton Envoyer ET le bouton Plus tard)
     const buildSendPayload = () => {
+      // Commit toute saisie en attente dans les chips avant de récupérer
+      chipsTo.commitPending(); chipsCc.commitPending(); chipsBcc.commitPending();
       const account_id = overlay.querySelector('#cmp-from').value;
-      const to = overlay.querySelector('#cmp-to').value.trim();
+      const toList = chipsTo.getValues();
+      const ccList = chipsCc.getValues();
+      const bccList = chipsBcc.getValues();
+      const to = toList.join(', ');
       const subj = overlay.querySelector('#cmp-subject').value.trim();
       let body = '', body_html = '';
       if (mode === 'html') {
@@ -1642,7 +1843,7 @@ const Mails = {
         referencedCids.add(m.slice(4));
       });
       const cleanAttachments = attachments.filter(a => !a.inline || referencedCids.has(a.cid));
-      return { account_id, to, subj, body, body_html, cleanAttachments };
+      return { account_id, to, ccList, bccList, subj, body, body_html, cleanAttachments };
     };
 
     // Bouton "Plus tard" → programme l'envoi à une date/heure choisie
@@ -1669,6 +1870,8 @@ const Mails = {
             const r = await App.api.mail_schedule({
               account_id: p.account_id,
               to: p.to,
+              cc: p.ccList,
+              bcc: p.bccList,
               subject: p.subj,
               body: p.body,
               body_html: p.body_html,
@@ -1736,7 +1939,18 @@ const Mails = {
           const d = JSON.parse(raw);
           if (d && d.ts && (Date.now() - d.ts < 30 * 24 * 3600 * 1000)) {
             this._showDraftRestoreBanner(overlay, d, () => {
-              overlay.querySelector('#cmp-to').value = d.to || '';
+              const splitAddrs = (s) => (s || '').split(/[\s,;]+/).filter(Boolean);
+              chipsTo.setValues(splitAddrs(d.to));
+              const ccArr = splitAddrs(d.cc);
+              const bccArr = splitAddrs(d.bcc);
+              if (ccArr.length) {
+                chipsCc.setValues(ccArr);
+                overlay.querySelector('#cmp-cc-row').classList.remove('hidden');
+              }
+              if (bccArr.length) {
+                chipsBcc.setValues(bccArr);
+                overlay.querySelector('#cmp-bcc-row').classList.remove('hidden');
+              }
               overlay.querySelector('#cmp-subject').value = d.subject || '';
               if (d.account_id) {
                 const fs = overlay.querySelector('#cmp-from');
@@ -1762,7 +1976,7 @@ const Mails = {
 
     // Focus initial
     setTimeout(() => {
-      if (!opts.prefilledTo) overlay.querySelector('#cmp-to').focus();
+      if (!opts.prefilledTo) chipsTo.focus();
       else if (!opts.prefilledSubject) overlay.querySelector('#cmp-subject').focus();
       else (mode === 'html' ? htmlArea : textArea).focus();
     }, 50);
@@ -1771,8 +1985,13 @@ const Mails = {
     const sendBtn = overlay.querySelector('#cmp-send');
     sendBtn.onclick = async () => {
       const status = overlay.querySelector('#cmp-status');
+      // Commit toute saisie en attente dans les chips
+      chipsTo.commitPending(); chipsCc.commitPending(); chipsBcc.commitPending();
       const account_id = overlay.querySelector('#cmp-from').value;
-      const to = overlay.querySelector('#cmp-to').value.trim();
+      const toList = chipsTo.getValues();
+      const ccList = chipsCc.getValues();
+      const bccList = chipsBcc.getValues();
+      const to = toList.join(', ');
       const subj = overlay.querySelector('#cmp-subject').value.trim();
       let body = '', body_html = '';
       if (mode === 'html') {
@@ -1792,8 +2011,16 @@ const Mails = {
       } else {
         body = textArea.value;
       }
-      if (!to || !subj || (!body.trim() && !body_html)) {
-        status.textContent = '✗ Destinataire, sujet et message requis.';
+      if (!toList.length || !subj || (!body.trim() && !body_html)) {
+        status.textContent = '✗ Au moins un destinataire, l\'objet et le message sont requis.';
+        status.className = 'text-xs text-danger';
+        return;
+      }
+      // Validation emails (To + Cc + Bcc)
+      const allAddrs = [...toList, ...ccList, ...bccList];
+      const badAddr = allAddrs.find(a => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a));
+      if (badAddr) {
+        status.textContent = `✗ Adresse invalide : ${badAddr}`;
         status.className = 'text-xs text-danger';
         return;
       }
@@ -1816,7 +2043,8 @@ const Mails = {
       status.textContent = '';
       try {
         const r = await App.api.mail_send({
-          account_id, to, subject: subj, body, body_html,
+          account_id, to, cc: ccList, bcc: bccList,
+          subject: subj, body, body_html,
           in_reply_to: opts.inReplyTo || '',
           attachments: cleanAttachments.map(a => ({
             filename: a.filename,

@@ -887,6 +887,25 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    @staticmethod
+    def _normalize_addr_list(val) -> list:
+        """Normalise un champ cc/bcc en liste d'adresses uniques.
+        Accepte : str ("a@x.fr, b@y.fr"), list, None."""
+        if not val:
+            return []
+        if isinstance(val, str):
+            parts = [p.strip() for p in val.replace(";", ",").split(",")]
+        elif isinstance(val, (list, tuple)):
+            parts = [str(p).strip() for p in val]
+        else:
+            return []
+        out, seen = [], set()
+        for p in parts:
+            if p and "@" in p and p.lower() not in seen:
+                seen.add(p.lower())
+                out.append(p)
+        return out
+
     def mail_send_reply(self, payload: dict) -> dict:
         """Backward-compat wrapper — utilise mail_send. À garder tant que la
         modale Mails > Répondre référence cet endpoint."""
@@ -898,6 +917,8 @@ class Api:
         Payload :
           - account_id : id du compte expéditeur ('primary' ou autre)
           - to         : email destinataire (1 adresse, ou "a@x.fr, b@y.fr")
+          - cc         (optionnel) : copies — string ou liste
+          - bcc        (optionnel) : copies cachées — string ou liste
           - subject    : sujet
           - body       : corps en texte simple (toujours requis pour le fallback)
           - body_html  (optionnel) : version HTML, envoyée en multipart/alternative
@@ -910,6 +931,8 @@ class Api:
         p = payload or {}
         account_id = (p.get("account_id") or "primary").strip()
         to = (p.get("to") or "").strip()
+        cc = self._normalize_addr_list(p.get("cc"))
+        bcc = self._normalize_addr_list(p.get("bcc"))
         subject = (p.get("subject") or "").strip()
         body = (p.get("body") or "").strip()
         body_html = (p.get("body_html") or "").strip()
@@ -955,6 +978,12 @@ class Api:
             msg = EmailMessage()
             msg["From"] = f"{from_name} <{from_email}>" if from_name else from_email
             msg["To"] = to
+            if cc:
+                msg["Cc"] = ", ".join(cc)
+            if bcc:
+                # smtplib.send_message lit Bcc pour les destinataires SMTP
+                # puis retire le header avant envoi (RFC 5322 compliant).
+                msg["Bcc"] = ", ".join(bcc)
             msg["Subject"] = subject
             msg["Date"] = formatdate(localtime=True)
             domain = from_email.split("@", 1)[1]
@@ -1092,6 +1121,8 @@ class Api:
         """
         p = payload or {}
         to = (p.get("to") or "").strip()
+        cc = self._normalize_addr_list(p.get("cc"))
+        bcc = self._normalize_addr_list(p.get("bcc"))
         subject = (p.get("subject") or "").strip()
         body = (p.get("body") or "").strip()
         body_html = (p.get("body_html") or "").strip()
@@ -1118,6 +1149,8 @@ class Api:
         entry = {
             "account_id":   (p.get("account_id") or "primary").strip(),
             "to":           to,
+            "cc":           cc,
+            "bcc":          bcc,
             "subject":      subject,
             "body":         body,
             "body_html":    body_html,

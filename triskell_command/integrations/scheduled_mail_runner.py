@@ -170,6 +170,12 @@ def _send_now(entry: dict, get_account) -> tuple[bool, str | None]:
         msg = EmailMessage()
         msg["From"] = f"{from_name} <{from_email}>" if from_name else from_email
         msg["To"] = entry.get("to") or ""
+        cc = entry.get("cc") or []
+        bcc = entry.get("bcc") or []
+        if cc:
+            msg["Cc"] = ", ".join(cc) if isinstance(cc, list) else str(cc)
+        if bcc:
+            msg["Bcc"] = ", ".join(bcc) if isinstance(bcc, list) else str(bcc)
         msg["Subject"] = entry.get("subject") or ""
         msg["Date"] = formatdate(localtime=True)
         domain = from_email.split("@", 1)[1] if "@" in from_email else "triskell-studio.fr"
