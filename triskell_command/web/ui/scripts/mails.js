@@ -990,10 +990,19 @@ const Mails = {
             </div>
 
             <!-- Mini barre d'outils HTML (cachée par défaut) -->
-            <div id="cmp-toolbar" class="hidden flex items-center gap-1 mb-2 p-1.5 rounded-lg bg-bg border border-border">
+            <div id="cmp-toolbar" class="hidden flex items-center flex-wrap gap-1 mb-2 p-1.5 rounded-lg bg-bg border border-border">
               <button data-cmd="bold" title="Gras (Ctrl+B)" class="cmp-tb-btn font-bold">B</button>
               <button data-cmd="italic" title="Italique (Ctrl+I)" class="cmp-tb-btn italic">I</button>
               <button data-cmd="underline" title="Souligné (Ctrl+U)" class="cmp-tb-btn underline">U</button>
+              <div class="w-px h-5 bg-border mx-1"></div>
+              <button data-cmd="text-color" title="Couleur du texte" class="cmp-tb-btn cmp-color-btn"><span>A</span><span class="cmp-color-bar" id="cmp-text-color-bar"></span></button>
+              <input type="color" id="cmp-text-color-input" class="hidden" value="#1f1f1f">
+              <button data-cmd="bg-color" title="Couleur d'arrière-plan" class="cmp-tb-btn cmp-color-btn cmp-color-bg"><span>A</span><span class="cmp-color-bar" id="cmp-bg-color-bar" style="background:#ffeb3b"></span></button>
+              <input type="color" id="cmp-bg-color-input" class="hidden" value="#ffeb3b">
+              <div class="w-px h-5 bg-border mx-1"></div>
+              <button data-cmd="justifyLeft" title="Aligner à gauche" class="cmp-tb-btn">⇤</button>
+              <button data-cmd="justifyCenter" title="Centrer" class="cmp-tb-btn">↔</button>
+              <button data-cmd="justifyRight" title="Aligner à droite" class="cmp-tb-btn">⇥</button>
               <div class="w-px h-5 bg-border mx-1"></div>
               <button data-cmd="insertUnorderedList" title="Liste à puces" class="cmp-tb-btn">•</button>
               <button data-cmd="insertOrderedList" title="Liste numérotée" class="cmp-tb-btn">1.</button>
@@ -1077,6 +1086,10 @@ const Mails = {
                       color: hsl(var(--text)); transition: background 120ms; }
         .cmp-tb-btn:hover { background: hsl(var(--accent) / 0.12);
                             color: hsl(var(--accent)); }
+        .cmp-color-btn { position: relative; padding-bottom: 8px; }
+        .cmp-color-bar { position: absolute; bottom: 3px; left: 6px; right: 6px;
+                         height: 3px; border-radius: 1px; background: #1f1f1f;
+                         pointer-events: none; }
         #cmp-body-html:empty:before {
           content: 'Tape ton message ici…';
           color: hsl(var(--text-muted));
@@ -1548,11 +1561,56 @@ const Mails = {
       }
     });
 
+    // Sauvegarde de la sélection (pour les pickers de couleur qui volent le focus)
+    let savedRange = null;
+    const saveSelection = () => {
+      const sel = window.getSelection();
+      if (sel.rangeCount > 0 && htmlArea.contains(sel.anchorNode)) {
+        savedRange = sel.getRangeAt(0).cloneRange();
+      }
+    };
+    const restoreSelection = () => {
+      if (!savedRange) return;
+      htmlArea.focus();
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedRange);
+    };
+    htmlArea.addEventListener('mouseup', saveSelection);
+    htmlArea.addEventListener('keyup', saveSelection);
+
+    // Inputs couleur natifs : appliquent foreColor / hiliteColor sur la sélection sauvée
+    const textColorInput = overlay.querySelector('#cmp-text-color-input');
+    const bgColorInput   = overlay.querySelector('#cmp-bg-color-input');
+    const textColorBar   = overlay.querySelector('#cmp-text-color-bar');
+    const bgColorBar     = overlay.querySelector('#cmp-bg-color-bar');
+    textColorInput.addEventListener('input', (e) => {
+      restoreSelection();
+      document.execCommand('foreColor', false, e.target.value);
+      textColorBar.style.background = e.target.value;
+    });
+    bgColorInput.addEventListener('input', (e) => {
+      restoreSelection();
+      document.execCommand('hiliteColor', false, e.target.value);
+      bgColorBar.style.background = e.target.value;
+    });
+
     // Boutons toolbar HTML
     toolbar.querySelectorAll('[data-cmd]').forEach(btn => {
       btn.onclick = (e) => {
         e.preventDefault();
         const cmd = btn.dataset.cmd;
+        // Pour les pickers de couleur on sauve la sélection AVANT d'ouvrir
+        if (cmd === 'text-color') {
+          saveSelection();
+          textColorInput.click();
+          return;
+        }
+        if (cmd === 'bg-color') {
+          saveSelection();
+          bgColorInput.click();
+          return;
+        }
         htmlArea.focus();
         if (cmd === 'createLink') {
           const url = prompt('URL du lien :', 'https://');
