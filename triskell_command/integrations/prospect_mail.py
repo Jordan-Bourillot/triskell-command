@@ -202,14 +202,38 @@ CATEGORY_HINTS = {
         "- CTA douce type \"Ouvrez quand vous avez 30 secondes, dites-moi ce que\n"
         "  vous en pensez\". Pas de pression commerciale."
     ),
-    "business": (
-        "CATÉGORIE : ENTREPRISE / COMMERCE.\n"
-        "- Ton chaleureux et concret, comme un voisin qui montre une démo.\n"
-        "- Identifie clairement le secteur (boulangerie, cabinet, restaurant…)\n"
-        "  d'après le site que tu as fait pour eux.\n"
+    "business_template": (
+        "CATÉGORIE : ENTREPRISE / COMMERCE — SITE MODÈLE GÉNÉRIQUE.\n"
+        "Contexte précis : ce que Jordan a réalisé est un site MODÈLE générique\n"
+        "adapté au métier de la cible (ex : un site type pour une boulangerie,\n"
+        "envoyé à toutes les boulangeries que Jordan prospecte). Il n'est PAS\n"
+        "encore personnalisé avec leurs vraies infos.\n"
+        "- Le mail doit être honnête : présenter le site comme une démo / vitrine\n"
+        "  de style pour leur métier, pas comme un site déjà adapté à eux.\n"
+        "- Inviter à imaginer la version personnalisée : \"voici à quoi pourrait\n"
+        "  ressembler votre site dans ce style, je peux le personnaliser avec\n"
+        "  vos infos, vos photos, votre carte/services en 1 à 2 jours\".\n"
+        "- Pas de \"votre prise de RDV est déjà en ligne\" — ça serait faux.\n"
+        "- Mentionne le secteur (boulangerie, cabinet, restaurant…) mais ne\n"
+        "  prétends pas avoir adapté à leur nom / leur ville / leurs produits.\n"
+        "- CTA : \"15 min pour vous montrer la version personnalisée que je\n"
+        "  ferais pour vous\" ou \"si l'idée vous plaît, je l'adapte à vos\n"
+        "  vraies infos\"."
+    ),
+    "business_personalized": (
+        "CATÉGORIE : ENTREPRISE / COMMERCE — SITE DÉJÀ PERSONNALISÉ.\n"
+        "Contexte précis : Jordan a DÉJÀ adapté le site avec leurs vraies infos\n"
+        "(leur nom, leurs services, leurs photos, leur ville, leur secteur).\n"
+        "Le site est concret, prêt à être déployé sur leur vrai domaine.\n"
+        "- Insiste sur le fait que le site est TAILLÉ pour eux : nom de leur\n"
+        "  établissement visible, services / produits intégrés, identité\n"
+        "  reprise.\n"
+        "- Identifie clairement le secteur d'après le site, et cite 1-2\n"
+        "  éléments concrets que tu vois dans le contenu (un produit phare, un\n"
+        "  service, une mention de leur ville, etc.).\n"
         "- Mentionne ce que le site permet de faire mieux que ce qu'ils ont\n"
-        "  actuellement (ex : prise de RDV en ligne, mise en avant des avis\n"
-        "  Google, fiche Maps optimisée…).\n"
+        "  actuellement (prise de RDV en ligne, mise en avant des avis Google,\n"
+        "  fiche Maps optimisée…).\n"
         "- CTA claire : \"Si ça vous plaît, en 1 jour on bascule sur votre vrai\n"
         "  domaine. Sinon, vous repartez avec les idées\"."
     ),
@@ -232,10 +256,15 @@ def _model_first_provider(ai_keys: dict) -> tuple[str, str] | None:
 
 
 def generate(url: str, category: str, templates: list[dict],
-             ai_keys: dict) -> dict:
+             ai_keys: dict, subtype: str = "personalized") -> dict:
     """Pipeline complet : fetch + prompt Claude + parse JSON.
     Renvoie {ok, subject, body_html, target_name, used_template, ...} ou
-    {ok: False, error: ...}."""
+    {ok: False, error: ...}.
+
+    subtype : 'template' = site modèle générique pour le métier,
+              'personalized' = site déjà adapté à la cible (défaut).
+              Pour celebrity, c'est toujours 'personalized'.
+    """
     if not ai_keys or not ai_keys.get("anthropic"):
         return {"ok": False, "error": "Clé API Anthropic manquante (Réglages → Services IA)."}
 
@@ -271,8 +300,14 @@ def generate(url: str, category: str, templates: list[dict],
             )
         tpl_block = "\n\n".join(chunks)
 
+    # Choisit le bon prompt selon catégorie + subtype
+    hint_key = category
+    if category == "business":
+        hint_key = f"business_{subtype}" if subtype in ("template", "personalized") else "business_personalized"
+    category_hint = CATEGORY_HINTS.get(hint_key) or CATEGORY_HINTS.get("celebrity", "")
+
     user_prompt = (
-        f"{CATEGORY_HINTS.get(category, '')}\n\n"
+        f"{category_hint}\n\n"
         f"MODÈLES DISPONIBLES (choisis-en un ou pars de zéro si rien ne colle) :\n"
         f"{tpl_block}\n\n"
         f"SITE DÉJÀ RÉALISÉ POUR LA CIBLE (à présenter dans le mail) :\n"
@@ -355,6 +390,7 @@ def generate(url: str, category: str, templates: list[dict],
         "body_html":      body_html,
         "source_url":     url,
         "category":       category,
+        "subtype":        subtype,
         "screenshot_b64": (screenshot or {}).get("b64") or "",
         "screenshot_content_type": (screenshot or {}).get("content_type") or "",
     }

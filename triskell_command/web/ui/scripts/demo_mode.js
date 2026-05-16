@@ -472,7 +472,23 @@ const DemoMode = {
     // ============ Prospection en direct (démo) ============
     prospect_generate_mail(payload) {
       const cat = (payload && payload.category) || 'business';
+      const sub = (payload && payload.subtype) || 'personalized';
       const url = (payload && payload.url) || 'https://demo.lagriffe-studio.fr';
+      if (cat === 'business' && sub === 'template') {
+        return {
+          ok: true,
+          target_name: 'Boulangerie Lefèvre',
+          used_template: 'Démo générique boulangerie',
+          subject: 'Une démo de site pensée pour les boulangeries comme la vôtre',
+          body_html: '<p>Bonjour Marc,</p>'
+            + '<p>Je vous écris parce que je viens de boucler un <strong>modèle de site spécialement pensé pour les boulangeries artisanales</strong>. Pas votre site personnalisé pour l\'instant — c\'est un modèle générique qui montre le style et les fonctionnalités possibles (catalogue produits, prise de commande pour les fêtes, mise en avant Avis Google, fiche Maps optimisée).</p>'
+            + '<p><img src="cid:prospect_preview" alt="Aperçu du site modèle" style="max-width:100%;height:auto;display:block;border-radius:8px;border:1px solid #e5e7eb;"></p>'
+            + `<p>Découvrez le modèle : <a href="${url}"><strong>Voir la démo</strong></a>.</p>`
+            + '<p>Si l\'esprit vous plaît, je peux le <strong>personnaliser avec vos vraies infos</strong> (nom, photos, vos kouign-amann préférés, vos horaires) en 1 ou 2 jours. 15 min pour qu\'on en discute ?</p>',
+          source_url: url, category: cat, subtype: sub,
+          screenshot_b64: '', screenshot_content_type: '',
+        };
+      }
       if (cat === 'celebrity') {
         return {
           ok: true,

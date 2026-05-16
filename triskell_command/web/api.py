@@ -1192,10 +1192,13 @@ class Api:
         p = payload or {}
         url = (p.get("url") or "").strip()
         category = (p.get("category") or "business").strip()
+        subtype = (p.get("subtype") or "").strip()
         if not url:
             return {"ok": False, "error": "URL manquante."}
         if category not in ("celebrity", "business"):
             category = "business"
+        if subtype not in ("template", "personalized"):
+            subtype = "personalized" if category == "celebrity" else "personalized"
         # Récupère les modèles (best-effort)
         templates = []
         try:
@@ -1214,7 +1217,8 @@ class Api:
             logger.debug("ai_keys: %s", exc)
         try:
             from ..integrations import prospect_mail
-            return prospect_mail.generate(url, category, templates, ai_keys)
+            return prospect_mail.generate(url, category, templates, ai_keys,
+                                          subtype=subtype)
         except Exception as exc:
             logger.exception("prospect_generate_mail failed")
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}

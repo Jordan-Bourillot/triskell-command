@@ -2113,8 +2113,9 @@ const Mails = {
     ov.className = 'fixed inset-0 z-[210] flex items-center justify-center p-4';
     ov.style.background = 'rgba(15,23,42,0.78)';
     ov.style.backdropFilter = 'blur(10px)';
-    let step = 'category'; // 'category' | 'url' | 'loading'
+    let step = 'category'; // 'category' | 'businessKind' | 'url' | 'loading'
     let chosenCategory = null;
+    let chosenSubtype = null; // 'template' | 'personalized' (uniquement si business)
 
     const render = () => {
       if (step === 'category') {
@@ -2148,6 +2149,52 @@ const Mails = {
         ov.querySelectorAll('[data-cat]').forEach(b => {
           b.onclick = () => {
             chosenCategory = b.dataset.cat;
+            // Pour les entreprises : étape intermédiaire (modèle vs perso)
+            // Pour les célébrités : on saute direct à l'URL (toujours perso)
+            if (chosenCategory === 'business') {
+              step = 'businessKind';
+            } else {
+              chosenSubtype = 'personalized';
+              step = 'url';
+            }
+            render();
+          };
+        });
+      } else if (step === 'businessKind') {
+        ov.innerHTML = `
+          <div class="bg-surface rounded-2xl shadow-hero w-full max-w-lg border border-border animate-slide-up overflow-hidden">
+            <div class="px-6 pt-5 pb-4 flex items-start justify-between border-b border-border bg-surface-elevated">
+              <div>
+                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">PROSPECTION ENTREPRISE</div>
+                <h3 class="text-lg font-bold">🏢 Quel type de site présentes-tu ?</h3>
+                <p class="text-xs text-text-muted mt-1">Le ton du mail change selon que c'est un modèle générique ou un site déjà adapté pour eux.</p>
+              </div>
+              <button id="pf-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
+            </div>
+            <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button data-sub="template"
+                      class="text-left p-5 rounded-2xl border-2 border-border hover:border-accent hover:bg-accent/5 transition-all">
+                <div class="text-3xl mb-2">📐</div>
+                <div class="text-base font-bold text-text">Site modèle pour leur métier</div>
+                <div class="text-xs text-text-muted mt-1 leading-snug">Une démo générique adaptée à leur secteur (ex : "site type pour une boulangerie"). Le mail dit : "voici à quoi ressemblerait votre site dans ce style, on peut le personnaliser".</div>
+              </button>
+              <button data-sub="personalized"
+                      class="text-left p-5 rounded-2xl border-2 border-border hover:border-accent hover:bg-accent/5 transition-all">
+                <div class="text-3xl mb-2">🎯</div>
+                <div class="text-base font-bold text-text">Site déjà personnalisé</div>
+                <div class="text-xs text-text-muted mt-1 leading-snug">Tu as déjà adapté le site avec leur nom, leurs services, leurs couleurs. Le mail dit : "voici votre site, prêt à être déployé sur votre vrai domaine".</div>
+              </button>
+            </div>
+            <div class="px-5 pb-4 flex items-center">
+              <button id="pf-back" class="text-xs text-text-muted hover:text-text">← Changer de catégorie</button>
+            </div>
+          </div>
+        `;
+        ov.querySelector('#pf-close').onclick = close;
+        ov.querySelector('#pf-back').onclick = () => { step = 'category'; render(); };
+        ov.querySelectorAll('[data-sub]').forEach(b => {
+          b.onclick = () => {
+            chosenSubtype = b.dataset.sub;
             step = 'url';
             render();
           };
@@ -2155,13 +2202,25 @@ const Mails = {
       } else if (step === 'url') {
         const catLabel = chosenCategory === 'celebrity' ? 'Célébrité' : 'Entreprise';
         const catIcon = chosenCategory === 'celebrity' ? '⭐' : '🏢';
+        let kicker = `PROSPECTION ${catLabel.toUpperCase()}`;
+        let urlTitle = `${catIcon} URL du site que tu as réalisé`;
+        let urlHint = "Colle l'adresse du site que tu as fait pour eux (souvent un sous-domaine de démo). Claude va l'analyser, capturer un aperçu et rédiger le mail de présentation.";
+        if (chosenCategory === 'business' && chosenSubtype === 'template') {
+          kicker = 'PROSPECTION ENTREPRISE · MODÈLE';
+          urlTitle = '📐 URL du site modèle';
+          urlHint = "Colle l'adresse de ton site modèle générique adapté à leur métier. Le mail expliquera que c'est un modèle qu'on peut personnaliser pour eux.";
+        } else if (chosenCategory === 'business' && chosenSubtype === 'personalized') {
+          kicker = 'PROSPECTION ENTREPRISE · PERSONNALISÉ';
+          urlTitle = '🎯 URL du site personnalisé';
+          urlHint = "Colle l'adresse du site que tu as déjà adapté à leurs infos. Le mail dira qu'il est prêt à être déployé sur leur vrai domaine.";
+        }
         ov.innerHTML = `
           <div class="bg-surface rounded-2xl shadow-hero w-full max-w-lg border border-border animate-slide-up overflow-hidden">
             <div class="px-6 pt-5 pb-4 flex items-start justify-between border-b border-border bg-surface-elevated">
               <div>
-                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">PROSPECTION ${catLabel.toUpperCase()}</div>
-                <h3 class="text-lg font-bold">${catIcon} URL du site que tu as réalisé</h3>
-                <p class="text-xs text-text-muted mt-1">Colle l'adresse du site que tu as fait pour eux (souvent un sous-domaine de démo). Claude va l'analyser, capturer un aperçu et rédiger le mail de présentation.</p>
+                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">${kicker}</div>
+                <h3 class="text-lg font-bold">${urlTitle}</h3>
+                <p class="text-xs text-text-muted mt-1">${urlHint}</p>
               </div>
               <button id="pf-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
             </div>
@@ -2184,7 +2243,11 @@ const Mails = {
         `;
         ov.querySelector('#pf-close').onclick = close;
         ov.querySelector('#pf-cancel').onclick = close;
-        ov.querySelector('#pf-back').onclick = () => { step = 'category'; render(); };
+        ov.querySelector('#pf-back').onclick = () => {
+          // Si business → retour au choix Modèle/Perso. Sinon → choix catégorie.
+          step = (chosenCategory === 'business') ? 'businessKind' : 'category';
+          render();
+        };
         const urlInput = ov.querySelector('#pf-url');
         setTimeout(() => urlInput.focus(), 50);
         urlInput.addEventListener('keydown', (e) => {
@@ -2202,7 +2265,9 @@ const Mails = {
           render();
           try {
             const r = await App.api.prospect_generate_mail({
-              url, category: chosenCategory,
+              url,
+              category: chosenCategory,
+              subtype: chosenSubtype || '',
             });
             if (r && r.ok) {
               close();
