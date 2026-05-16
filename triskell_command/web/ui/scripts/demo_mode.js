@@ -144,30 +144,25 @@ const DemoMode = {
 
   // ----- Données fictives (méthodes appelées par le frontend) -----
   _fake: {
-    // ============ Matinale : KPIs gonflés + priorités fictives ============
+    // ============ Matinale : digest avec gros chiffres ============
+    // Format attendu par morning.js : sent / replies / queue / alerts
     get_morning_digest() {
       return {
         ok: true,
-        digest: {
-          generated_at: new Date().toISOString(),
-          greeting: 'Bonjour Jordan',
-          weather_hint: 'Belle journée pour closer 🚀',
-          kpis: {
-            clients_actifs:      { value: 214, delta: '+12 ce mois', positive: true },
-            mrr:                 { value: '83 240 €', delta: '+8.4%', positive: true },
-            taux_conversion:     { value: '34%', delta: '+3 pts',  positive: true },
-            mails_envoyes_mois:  { value: 1247, delta: '+156', positive: true },
-            reponses_attente:    { value: 18,   delta: '+5 aujourd\'hui', positive: false },
-            rdv_planifies:       { value: 9,    delta: 'cette semaine', positive: true },
-          },
-          priorities: [
-            { id: 'p1', kind: 'reply', label: 'Répondre à Sophie Dupont (Cabinet Dupont & Co)', urgency: 'haute', meta: 'Devis 4 200 € en attente' },
-            { id: 'p2', kind: 'rdv',   label: 'RDV signature avec Marc Lefèvre dans 1 h', urgency: 'haute', meta: 'Boulangerie Lefèvre — pack Sites + SEO' },
-            { id: 'p3', kind: 'follow',label: 'Relance Atelier Missor (sans réponse depuis 5 j)', urgency: 'moyenne', meta: 'Pack 1 800 €' },
-            { id: 'p4', kind: 'task',  label: 'Livrer la maquette Boulangerie Aubert avant 18 h', urgency: 'moyenne', meta: 'Deadline aujourd\'hui' },
-            { id: 'p5', kind: 'info',  label: '4 nouveaux prospects qualifiés ajoutés par Le Phare', urgency: 'basse', meta: 'Voir Pipeline' },
-          ],
+        sent: { yesterday: 89, today: 18, last_7d: 624 },
+        replies: {
+          yesterday_total: 21,
+          yesterday_breakdown: { interested: 8, not_now: 6, no: 5, unsubscribe: 2 },
+          today_total: 4,
+          today_breakdown: { interested: 1, not_now: 2, no: 1 },
         },
+        queue: {
+          replies_unhandled_interested: 12,   // Priorité du jour = 12 intéressés (en vert)
+          replies_unhandled_total: 18,
+          drafts_prospect_pending: 8,
+          drafts_convoy_pending: 3,
+        },
+        alerts: { convoy_failed_yesterday: 0, convoy_failed_today: 0 },
       };
     },
 
@@ -227,57 +222,82 @@ const DemoMode = {
     },
 
     // ============ Brouillons à valider ============
+    // Format attendu : { ok, rows: [{key, name, email, city, ts, provider, model, subject, body}, ...] }
     get_drafts() {
       const now = Date.now();
-      const drafts = [];
+      const rows = [];
       const prospects = [
-        ['Sophie Dupont', 'Cabinet Dupont & Co', 'sophie@dupont-co.fr', 'Refonte site + SEO'],
-        ['Marc Lefèvre', 'Boulangerie Lefèvre', 'marc@boulangerie-lefevre.fr', 'Pack Sites'],
-        ['Camille Bernard', 'Atelier Missor', 'camille@missor.fr', 'Site vitrine + SEO'],
-        ['Antoine Petit', 'Garage Auto Plus', 'antoine@autoplus.fr', 'Pack visibilité Maps'],
-        ['Léa Durand', 'Pharmacie Centrale', 'lea@pharmacie-centrale.fr', 'Site + prise RDV'],
-        ['Thomas Moreau', 'Studio Yoga Soleil', 'thomas@yogasoleil.fr', 'Refonte + booking'],
-        ['Julie Lambert', 'Restaurant Le Bistrot', 'julie@bistrot.fr', 'Carte en ligne + SEO'],
-        ['Nicolas Rousseau', 'Salon Élégance', 'nicolas@elegance-coiffure.fr', 'Pack Sites'],
-        ['Manon Vincent', 'École Andante', 'manon@andante-musique.fr', 'Site école + paiement'],
-        ['Pierre Fontaine', 'Cabinet vétérinaire Animo', 'pierre@animo-veto.fr', 'Site + prise RDV'],
-        ['Émilie Dubois', 'Pâtisserie Sucré Salé', 'emilie@sucresale.fr', 'Catalogue en ligne'],
-        ['Hugo Robin', 'Optique Vision', 'hugo@optique-vision.fr', 'Pack visibilité Maps + Sites'],
+        ['Sophie Dupont',    'Cabinet Dupont & Co',       'sophie@dupont-co.fr',           'Paris',     'Refonte site + SEO'],
+        ['Marc Lefèvre',     'Boulangerie Lefèvre',       'marc@boulangerie-lefevre.fr',   'Plérin',    'Pack Sites'],
+        ['Camille Bernard',  'Atelier Missor',            'camille@missor.fr',             'Nantes',    'Site vitrine + SEO'],
+        ['Antoine Petit',    'Garage Auto Plus',          'antoine@autoplus.fr',           'Rennes',    'Pack visibilité Maps'],
+        ['Léa Durand',       'Pharmacie Centrale',        'lea@pharmacie-centrale.fr',     'Saint-Brieuc', 'Site + prise RDV'],
+        ['Thomas Moreau',    'Studio Yoga Soleil',        'thomas@yogasoleil.fr',          'Brest',     'Refonte + booking'],
+        ['Julie Lambert',    'Restaurant Le Bistrot',     'julie@bistrot.fr',              'Lannion',   'Carte en ligne + SEO'],
+        ['Nicolas Rousseau', 'Salon Élégance',            'nicolas@elegance-coiffure.fr',  'Vannes',    'Pack Sites'],
+        ['Manon Vincent',    'École Andante',             'manon@andante-musique.fr',      'Quimper',   'Site école + paiement'],
+        ['Pierre Fontaine',  'Cabinet vétérinaire Animo', 'pierre@animo-veto.fr',          'Dinan',     'Site + prise RDV'],
+        ['Émilie Dubois',    'Pâtisserie Sucré Salé',     'emilie@sucresale.fr',           'Lorient',   'Catalogue en ligne'],
+        ['Hugo Robin',       'Optique Vision',            'hugo@optique-vision.fr',        'Pontivy',   'Pack visibilité Maps'],
       ];
       for (let i = 0; i < prospects.length; i++) {
-        const [name, company, email, project] = prospects[i];
-        drafts.push({
-          id: `draft-${i}`,
-          created_at: new Date(now - i * 7200_000).toISOString(),
-          prospect_name: name,
-          prospect_email: email,
-          prospect_company: company,
-          subject: `Bonjour ${name.split(' ')[0]}, à propos de ${project}`,
-          body_preview: `Bonjour ${name.split(' ')[0]}, suite à votre demande pour ${project.toLowerCase()}, voici une proposition adaptée à ${company}…`,
-          score: 85 + (i % 10),
-          status: 'pending',
+        const [name, company, email, city, project] = prospects[i];
+        const firstName = name.split(' ')[0];
+        rows.push({
+          key: `draft-${i}`,
+          name: `${name} (${company})`,
+          email,
+          city,
+          ts: new Date(now - i * 7200_000).toISOString(),
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-5',
+          subject: `${company} — votre projet ${project.toLowerCase()}`,
+          body: `Bonjour ${firstName},\n\n`
+              + `Je suis tombé sur ${company} en regardant les ${project.toLowerCase().includes('seo') ? 'avis Google de votre secteur à ' + city : 'commerces locaux de ' + city}. Votre activité m'a marqué par la qualité de vos services.\n\n`
+              + `Chez Triskell Studio, nous accompagnons des structures comme la vôtre pour ${project.toLowerCase()}, avec un délai court et un budget calibré.\n\n`
+              + `Si l'idée vous parle, 15 min en visio pour qu'on en discute ?\n\n`
+              + `Bonne journée,\n`,
         });
       }
-      return { ok: true, drafts };
+      return { ok: true, rows };
     },
 
     // ============ Réponses prospects ============
+    // Format attendu : { ok, rows: [...], prospects: {[id]: {name, emails}} }
     get_replies(payload) {
-      const cat = (payload && payload.category) || 'all';
+      const filter = (payload && payload.category) || 'all';
+      const cats = ['interested', 'not_now', 'no', 'unsubscribe', 'unknown'];
       const all = DemoMode._fakeMails().filter(m => m.kind === 'reply_received');
-      const out = all.map((m, i) => ({
-        id: m.id,
-        ts: m.ts,
-        from: m.extra.from,
-        sender_name: m.extra.sender_name,
-        subject: m.subject,
-        body_preview: m.body,
-        category: ['interested', 'not_now', 'no', 'rdv', 'question'][i % 5],
-        category_label: m.extra.classification,
-        handled: i % 6 === 0,
-      }));
-      if (cat === 'all') return { ok: true, replies: out };
-      return { ok: true, replies: out.filter(r => r.category === cat) };
+      const prospects = {};
+      const rows = all.slice(0, 30).map((m, i) => {
+        const cat = cats[i % cats.length];
+        const pid = `prospect-${i}`;
+        prospects[pid] = {
+          name: m.extra.sender_name.split(' (')[0],
+          legal_name: m.extra.sender_name.split('(')[1]?.replace(')', '') || '',
+          emails: [m.extra.from],
+        };
+        return {
+          id: m.id,
+          ts: m.ts,
+          subject: m.subject,
+          prospect_id: pid,
+          extra: {
+            from: m.extra.from,
+            body_excerpt: m.body,
+            classification: { category: cat, confidence: 0.78 + (i % 20) / 100 },
+            sender_name: m.extra.sender_name,
+            // Pour les intéressés : suggestion de réponse pré-rédigée
+            suggested_reply: cat === 'interested' ? {
+              status: 'pending',
+              subject: 'Re: ' + m.subject,
+              body: 'Bonjour, ravi de votre retour. Voici un créneau Calendly...',
+            } : null,
+          },
+        };
+      });
+      const filtered = filter === 'all' ? rows : rows.filter(r => r.extra.classification.category === filter);
+      return { ok: true, rows: filtered, prospects };
     },
 
     // ============ Funnel (entonnoir de conversion) ============
@@ -374,16 +394,38 @@ const DemoMode = {
       };
     },
 
-    // ============ Multichannel actions ============
+    // ============ Multichannel actions (relances LinkedIn) ============
+    // Format attendu par morning.js : prospect_name, prospect_city, prospect_industry, message
     multichannel_get_actions() {
+      const items = [
+        ['Sophie Dupont',    'Paris',         'Cabinet juridique',
+         "Bonjour Sophie, j'ai vu votre cabinet à Paris — votre approche \"justice accessible\" résonne avec ce qu'on fait chez Triskell. Vous seriez ouverte à un échange de 15 min ?"],
+        ['Marc Lefèvre',     'Plérin',        'Boulangerie artisanale',
+         "Bonjour Marc, je suis passé devant votre boulangerie — votre vitrine est superbe. J'aide les commerces locaux à doubler leurs commandes en ligne. 15 min ?"],
+        ['Camille Bernard',  'Nantes',        'Tatouage artistique',
+         "Bonjour Camille, votre style néo-traditionnel est dingue. Je conçois des sites pour des artistes comme vous (cf. Atelier Missor). On en parle ?"],
+        ['Antoine Petit',    'Rennes',        'Garage automobile',
+         "Bonjour Antoine, j'ai vu votre garage sur Maps — top notes mais site daté. J'aide des garages à doubler leurs RDV. 15 min ?"],
+        ['Léa Durand',       'Saint-Brieuc',  'Pharmacie',
+         "Bonjour Léa, votre pharmacie a 4.8★ sur Google mais aucune prise de RDV en ligne. C'est exactement ce qu'on fait chez Triskell. On en parle ?"],
+        ['Thomas Moreau',    'Brest',         'Studio yoga',
+         "Bonjour Thomas, votre studio Yoga Soleil a une belle énergie sur Insta. Je conçois des sites qui convertissent vos abonnés en élèves. Intéressé ?"],
+        ['Julie Lambert',    'Lannion',       'Restaurant',
+         "Bonjour Julie, votre carte du Bistrot m'a fait saliver. J'aide les restos à booster leurs réservations en ligne. 15 min cette semaine ?"],
+        ['Nicolas Rousseau', 'Vannes',        'Salon de coiffure',
+         "Bonjour Nicolas, votre salon Élégance a un super bouche-à-oreille. Et si on traduisait ça en visibilité web ? 15 min pour vous montrer."],
+      ];
       return {
         ok: true,
-        actions: [
-          { id: 'mc1', kind: 'linkedin_invite', target: 'Sophie Dupont', label: 'Inviter en relation LinkedIn', context: 'A vu ton site 3 fois cette semaine', ready: true },
-          { id: 'mc2', kind: 'instagram_dm', target: 'Boulangerie Lefèvre', label: 'DM Instagram pour reprendre contact', context: 'A liké tes 5 derniers posts', ready: true },
-          { id: 'mc3', kind: 'phone_call', target: 'Marc Lefèvre', label: 'Appel de relance', context: 'A ouvert ton dernier mail 4 fois', ready: true },
-          { id: 'mc4', kind: 'follow_up_mail', target: 'Atelier Missor', label: 'Relance mail (3e tentative)', context: 'Pas de réponse depuis 6 jours', ready: true },
-        ],
+        actions: items.map((it, i) => ({
+          id: `act-${i}`,
+          prospect_name:     it[0],
+          prospect_city:     it[1],
+          prospect_industry: it[2],
+          message:           it[3],
+          search_url:        `https://www.google.com/search?q=${encodeURIComponent(it[0] + ' ' + it[1] + ' linkedin')}`,
+          platform_url:      '',
+        })),
       };
     },
 
