@@ -578,7 +578,9 @@ function makePipelineView(config) {
       `;
       await this._syncModesFromBackend();
       await this._loadPipeline();
-      this.state.pollHandle = setInterval(() => this._loadPipeline(true), 5000);
+      // Polling toutes les 30s (vue qui change rarement, on évite le flash visuel).
+      // Le bouton "Rafraîchir" en header force un refresh immédiat si besoin.
+      this.state.pollHandle = setInterval(() => this._loadPipeline(true), 30000);
     },
 
     // ─── Préférences AUTO / MANUEL persistées en Supabase ─────────────────
@@ -638,12 +640,33 @@ function makePipelineView(config) {
         return;
       }
       const r = await this._call('pipeline_state');
+      // Si la réponse est KO ou vide, on garde l'affichage actuel (évite
+      // le flash "tous les compteurs à 0" pendant une erreur API passagère).
       if (!r || !r.ok) return;
+      // Diff : si les données sont identiques à la dernière, on skip le
+      // re-render complet (cas habituel en polling silencieux). Ça empêche
+      // le clignotement et préserve les états visuels (hover, focus).
+      const newSig = this._pipelineSignature(r);
+      if (silent && newSig === this.state._lastPipelineSig) {
+        return;
+      }
+      this.state._lastPipelineSig = newSig;
       this.state.pipeline = r;
       this._renderPipelineFlow(r);
       this._renderPipelineRecent(r.recent || []);
       const clock = document.getElementById('pv-pipe-clock');
       if (clock) clock.textContent = `Mise à jour : ${new Date().toLocaleTimeString('fr-FR')}`;
+    },
+
+    _pipelineSignature(r) {
+      // Signature légère pour détecter un changement de pipeline sans
+      // comparer toute la structure. Inclut counts + ids des 5 demandes
+      // récentes + leur statut.
+      const counts = r.counts || {};
+      const recent = (r.recent || []).slice(0, 5)
+        .map(d => `${d.id || d.email || '?'}:${d.status || '?'}`)
+        .join('|');
+      return JSON.stringify(counts) + '#' + recent;
     },
 
     _renderPipelineFlow(state) {
