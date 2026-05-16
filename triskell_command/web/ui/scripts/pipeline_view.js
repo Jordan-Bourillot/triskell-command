@@ -708,11 +708,27 @@ function makePipelineView(config) {
                   title="Cliquer pour basculer entre Auto et Manuel sur cette étape">
             ${isManual ? '✋ Manuel' : '🤖 Auto'}
           </button>` : '';
+        // Mapping étape → clé template mail (4 mails clients dans le pipeline)
+        const STAGE_TO_MAIL_TEMPLATE = {
+          pending_validation: 'brief_received',
+          sent:               'preview_ready',
+          paid:               'payment_confirmed',
+          live:               'site_delivered',
+        };
+        const mailTplKey = STAGE_TO_MAIL_TEMPLATE[st.key];
+        const mailIconHtml = mailTplKey ? `
+          <button class="pv-mail-icon absolute top-2 right-2 text-[14px] leading-none p-1 rounded hover:bg-accent/10 transition-colors"
+                  data-pv-mail-template="${this._escape(mailTplKey)}"
+                  title="Éditer le mail envoyé à cette étape"
+                  style="color: hsl(var(--accent)); z-index: 2;">
+            ✉️
+          </button>` : '';
         html.push(`
           <div class="pv-pipe-stage card flex-1 basis-0 min-w-0 sm:min-w-[140px] md:min-w-0 p-2.5 ${stateClass} relative group"
                style="border-color: ${borderColor};${needsIntervention ? ' background: hsl(var(--warning) / 0.06);' : ''}"
                data-pv-stage-key="${this._escape(st.key)}">
-            <div class="flex items-baseline justify-between mb-1">
+            ${mailIconHtml}
+            <div class="flex items-baseline justify-between mb-1 ${mailTplKey ? 'pr-6' : ''}">
               <div class="text-[9px] font-bold tracking-widest text-text-muted">ÉTAPE ${idx + 1}</div>
               <div class="text-2xl font-bold ${counterClass}">${n}</div>
             </div>
@@ -748,6 +764,15 @@ function makePipelineView(config) {
           const next = current === 'manual' ? 'auto' : 'manual';
           this._saveMode(key, next);
           this._loadPipeline(true);   // refresh visuel
+        });
+      });
+
+      // Bind des icônes ✉️ : ouvre l'éditeur du mail correspondant à l'étape
+      flow.querySelectorAll('[data-pv-mail-template]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const tplKey = btn.dataset.pvMailTemplate;
+          this._openMailTemplateEditor(tplKey);
         });
       });
 
@@ -1061,6 +1086,124 @@ function makePipelineView(config) {
       return String(s ?? '')
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    },
+
+    // ─── Éditeur de templates de mail (icônes ✉️ du pipeline) ────────────
+    async _openMailTemplateEditor(tplKey) {
+      if (!App.api || typeof App.api.lagriffe_mail_templates_list !== 'function') {
+        this._toast('API indisponible', 'error');
+        return;
+      }
+      let templates = [];
+      try {
+        const r = await App.api.lagriffe_mail_templates_list();
+        if (r && r.ok) templates = r.templates || [];
+      } catch (e) {
+        this._toast('Erreur de chargement : ' + e, 'error');
+        return;
+      }
+      const tpl = templates.find(t => t.key === tplKey);
+      if (!tpl) { this._toast('Template introuvable', 'error'); return; }
+      this._renderMailEditorModal(tpl);
+    },
+
+    _renderMailEditorModal(tpl) {
+      const esc = this._escape.bind(this);
+      const variables = (tpl.variables || []).map(v => `<code class="px-1.5 py-0.5 rounded bg-bg text-xs">${esc(v)}</code>`).join(' ');
+      const dlg = document.createElement('div');
+      dlg.className = 'pv-mail-modal';
+      dlg.innerHTML = `
+        <div class="pv-mail-modal-backdrop" data-close></div>
+        <div class="pv-mail-modal-card">
+          <header class="pv-mail-modal-head">
+            <div>
+              <div class="hero-kicker mb-1">MAIL CLIENT</div>
+              <h2 class="text-xl font-semibold">${esc(tpl.label)}</h2>
+              <div class="text-xs text-text-muted mt-1">${esc(tpl.trigger)}</div>
+            </div>
+            <button class="pv-mail-modal-close" data-close aria-label="Fermer">×</button>
+          </header>
+          <div class="pv-mail-modal-body">
+            <div class="text-xs text-text-muted mb-3">
+              Variables disponibles (remplacées automatiquement à l'envoi) : ${variables || '<em>aucune</em>'}
+            </div>
+            <form id="pv-mail-form" class="space-y-3">
+              <div>
+                <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">Sujet *</label>
+                <input type="text" name="subject" required value="${esc(tpl.subject || '')}" class="phare-input">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">Aperçu en boîte de réception (preheader)</label>
+                <input type="text" name="preheader" value="${esc(tpl.preheader || '')}" placeholder="Texte court qui apparaît dans la liste des mails" class="phare-input">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">Petit badge (eyebrow)</label>
+                <input type="text" name="eyebrow" value="${esc(tpl.eyebrow || '')}" placeholder="ex : Paiement validé" class="phare-input">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">Titre principal *</label>
+                <textarea name="title" required rows="2" placeholder="Peut contenir &lt;br&gt; pour une césure" class="phare-input" style="font-family: ui-monospace, monospace; font-size: 13px;">${esc(tpl.title || '')}</textarea>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">Bouton — texte</label>
+                  <input type="text" name="cta_label" value="${esc(tpl.cta_label || '')}" placeholder="Voir mon site →" class="phare-input">
+                </div>
+                <div>
+                  <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">Bouton — URL</label>
+                  <input type="text" name="cta_url" value="${esc(tpl.cta_url || '')}" placeholder="{site_url} ou https://..." class="phare-input">
+                </div>
+              </div>
+              <div class="text-xs text-text-muted pt-2">
+                Le corps détaillé du mail (paragraphes, blocs colorés…) reste géré dans le code Netlify pour l'instant. Tu peux régler ici les éléments les plus visibles : sujet, titre, badge, bouton.
+                ${tpl.updated_at ? `<div class="mt-1">Dernière modif : ${esc(this._fmtDate(tpl.updated_at))}${tpl.updated_by ? ' par ' + esc(tpl.updated_by) : ''}</div>` : ''}
+              </div>
+            </form>
+          </div>
+          <footer class="pv-mail-modal-foot">
+            <button class="btn btn-secondary" data-close>Annuler</button>
+            <button class="btn btn-primary" data-save>Enregistrer</button>
+          </footer>
+        </div>
+      `;
+      document.body.appendChild(dlg);
+      const close = () => dlg.remove();
+      dlg.querySelectorAll('[data-close]').forEach(el => el.onclick = close);
+      dlg.querySelector('[data-save]').onclick = async () => {
+        const fd = new FormData(dlg.querySelector('#pv-mail-form'));
+        const payload = {
+          key: tpl.key,
+          subject:   (fd.get('subject') || '').toString().trim(),
+          preheader: (fd.get('preheader') || '').toString().trim(),
+          eyebrow:   (fd.get('eyebrow') || '').toString().trim(),
+          title:     (fd.get('title') || '').toString().trim(),
+          cta_label: (fd.get('cta_label') || '').toString().trim(),
+          cta_url:   (fd.get('cta_url') || '').toString().trim(),
+        };
+        if (!payload.subject || !payload.title) {
+          this._toast('Sujet et titre sont obligatoires.', 'error');
+          return;
+        }
+        try {
+          const r = await App.api.lagriffe_mail_template_save(payload);
+          if (r && r.ok) {
+            this._toast('✓ Mail enregistré');
+            close();
+          } else {
+            this._toast('Erreur : ' + (r?.error || 'inconnue'), 'error');
+          }
+        } catch (e) { this._toast('Erreur : ' + e, 'error'); }
+      };
+      setTimeout(() => dlg.querySelector('input[name="subject"]').focus(), 50);
+    },
+
+    _toast(msg, kind = 'success') {
+      const t = document.createElement('div');
+      t.textContent = msg;
+      const bg = kind === 'error' ? 'hsl(var(--danger))' : 'hsl(var(--success))';
+      t.style.cssText = `position:fixed;bottom:32px;right:32px;background:${bg};color:white;padding:12px 20px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.18);z-index:9999;font-weight:600;font-size:14px;`;
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 3500);
     },
 
     _fmtDate(iso) {

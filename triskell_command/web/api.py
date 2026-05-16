@@ -713,6 +713,54 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
+    # Lagriffe — éditeur de templates de mail (4 mails du pipeline)
+    # ------------------------------------------------------------------
+    def lagriffe_mail_templates_list(self) -> dict:
+        """Liste les 4 templates de mail Lagriffe, fusionnés avec les
+        overrides Supabase et enrichis de leurs métadonnées (label, trigger,
+        variables dispos)."""
+        try:
+            from ..integrations.lagriffe import mail_templates
+            return {"ok": True, "templates": mail_templates.list_templates()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def lagriffe_mail_template_save(self, payload: dict) -> dict:
+        """Sauvegarde un template de mail Lagriffe.
+
+        Payload requis :
+          - key (str)   : brief_received | preview_ready | payment_confirmed | site_delivered
+          - subject (str)
+          - preheader (str, optionnel)
+          - eyebrow (str, optionnel)
+          - title (str)
+          - cta_label (str, optionnel)
+          - cta_url (str, optionnel)
+        """
+        p = payload or {}
+        key = (p.get("key") or "").strip()
+        if not key:
+            return {"ok": False, "error": "clé template manquante"}
+        if not (p.get("subject") or "").strip():
+            return {"ok": False, "error": "le sujet est obligatoire"}
+        if not (p.get("title") or "").strip():
+            return {"ok": False, "error": "le titre est obligatoire"}
+        try:
+            from ..integrations.lagriffe import mail_templates
+            updated_by = ""
+            try:
+                cu = self.get_current_user() or {}
+                updated_by = cu.get("display_name") or cu.get("email") or ""
+            except Exception:
+                pass
+            row = mail_templates.save_template(key, p, updated_by=updated_by)
+            if not row:
+                return {"ok": False, "error": "impossible d'enregistrer (Supabase indispo ou clé inconnue)"}
+            return {"ok": True, "template": row}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
     # Studio WoW — validations et plomberie
     # ------------------------------------------------------------------
     def wow_list_intakes(self, payload: dict | None = None) -> dict:
@@ -2063,6 +2111,57 @@ class Api:
             from ..integrations.lagriffe import repo as r
             updated_by = self.get_user_name() or "triskell-command"
             return r.pipeline_settings_write(product, stage, mode, updated_by)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Modèles mails éditables (zone "Modèles Mails" dans la sidebar)
+    # ------------------------------------------------------------------
+    def mail_templates_list(self, payload: dict | None = None) -> dict:
+        """Liste tous les templates mail groupés par product/expéditeur."""
+        try:
+            from ..integrations.lagriffe import repo as r
+            return r.mail_templates_list()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_templates_get(self, payload: dict) -> dict:
+        """Charge un template complet (sujet + corps HTML)."""
+        product = ((payload or {}).get("product") or "").strip()
+        key     = ((payload or {}).get("key") or "").strip()
+        if not product or not key:
+            return {"ok": False, "error": "product/key requis"}
+        try:
+            from ..integrations.lagriffe import repo as r
+            return r.mail_templates_get(product, key)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_templates_save(self, payload: dict) -> dict:
+        """Enregistre les modifs d'un template (sujet, corps, expéditeur…)."""
+        product = ((payload or {}).get("product") or "").strip()
+        key     = ((payload or {}).get("key") or "").strip()
+        fields  = (payload or {}).get("fields") or {}
+        if not product or not key:
+            return {"ok": False, "error": "product/key requis"}
+        if not isinstance(fields, dict):
+            return {"ok": False, "error": "fields doit être un objet"}
+        try:
+            from ..integrations.lagriffe import repo as r
+            updated_by = self.get_user_name() or "triskell-command"
+            return r.mail_templates_save(product, key, fields, updated_by)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_templates_delete(self, payload: dict) -> dict:
+        """Supprime un template (la fonction Netlify retombe sur son fallback)."""
+        product = ((payload or {}).get("product") or "").strip()
+        key     = ((payload or {}).get("key") or "").strip()
+        if not product or not key:
+            return {"ok": False, "error": "product/key requis"}
+        try:
+            from ..integrations.lagriffe import repo as r
+            return r.mail_templates_delete(product, key)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

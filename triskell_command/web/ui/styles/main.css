@@ -1091,3 +1091,81 @@ html, body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   PIPELINE — éditeur de templates de mail (icônes ✉️ sur les étapes)
+   ════════════════════════════════════════════════════════════════════ */
+.pv-mail-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.pv-mail-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(4px);
+}
+.pv-mail-modal-card {
+  position: relative;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: 16px;
+  width: 100%;
+  max-width: 640px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.25);
+  animation: fadeIn 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.pv-mail-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px 12px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.pv-mail-modal-close {
+  background: transparent;
+  border: 0;
+  font-size: 24px;
+  line-height: 1;
+  color: hsl(var(--text-muted));
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+.pv-mail-modal-close:hover {
+  background: hsl(var(--bg));
+  color: hsl(var(--text));
+}
+.pv-mail-modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+.pv-mail-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 24px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+/* Icône ✉️ sur les cartes pipeline : visible mais discrète */
+.pv-mail-icon {
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1;
+}
+.pv-mail-icon:hover {
+  background: hsl(var(--accent) / 0.12);
+}
+
