@@ -135,23 +135,8 @@ const Replies = {
 
     // Sujet de réponse (préfixe Re: si pas déjà présent)
     const replySubject = /^re\s*:/i.test(subject) ? subject : `Re: ${subject}`;
-    // Bouton compose Teddy (visible uniquement si on a un destinataire)
-    const teddyComposeBtn = email
-      ? Teddy.button({
-          label: 'Répondre via Teddy Mail',
-          action: 'compose',
-          to: email,
-          subject: replySubject,
-          body: '',
-          size: 'sm',
-        })
-      : '';
-    // Bouton ouvrir Teddy (toujours visible)
-    const teddyOpenBtn = Teddy.button({
-      label: 'Ouvrir Teddy Mail',
-      action: 'open',
-      size: 'sm',
-    });
+    // Teddy Mail externe retiré : le composer interne fait tout
+    // (réponse, mise en forme HTML, pièces jointes, programmation).
 
     return `
       <article class="card p-4 sm:p-6">
@@ -175,8 +160,6 @@ const Replies = {
         ${body ? `<p class="text-sm text-text-secondary leading-relaxed mb-4 whitespace-pre-line">${this._esc(body)}</p>` : ''}
         ${sug && (sug.status === 'pending' || sug.status === 'sent') ? this._suggested(row, sug) : ''}
         <footer class="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-border">
-          ${teddyComposeBtn}
-          ${teddyOpenBtn}
           ${cat === 'interested' && !extra.lead_converted_at ? `
             <button class="text-xs px-2.5 py-1.5 rounded-lg bg-success/10 text-success
                           border border-success/30 hover:bg-success/20 transition-colors font-medium"

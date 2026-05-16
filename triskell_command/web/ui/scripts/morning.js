@@ -43,16 +43,6 @@ const Morning = {
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2l1.5 4.5L18 8l-4.5 1.5L12 14l-1.5-4.5L6 8l4.5-1.5L12 2z"/></svg>
               Demander conseil à Claude
             </button>
-            <button id="m-open-teddy" class="btn btn-secondary" title="Ouvre Teddy Mail">
-              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="6.5" cy="6.5" r="2.5"/>
-                <circle cx="17.5" cy="6.5" r="2.5"/>
-                <path d="M4 14a8 8 0 0116 0v3a4 4 0 01-4 4H8a4 4 0 01-4-4v-3z"/>
-                <circle cx="9" cy="14" r="0.8" fill="currentColor"/>
-                <circle cx="15" cy="14" r="0.8" fill="currentColor"/>
-              </svg>
-              Ouvrir Teddy Mail
-            </button>
             <button id="m-compose-mail" class="btn btn-secondary" title="Composer (Ctrl+Shift+M)">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 20h9"/>
@@ -69,7 +59,6 @@ const Morning = {
 
     document.getElementById('m-refresh').onclick = () => this.render(container);
     document.getElementById('m-ask-claude').onclick = () => Claude.open();
-    document.getElementById('m-open-teddy').onclick = () => Teddy.open();
     document.getElementById('m-compose-mail').onclick = () => {
       // Bascule sur la vue Mails et ouvre directement le composer
       App.show('mails');
