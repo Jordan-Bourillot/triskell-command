@@ -76,6 +76,47 @@ const Tutorial = {
             "ici : premiers contacts, relances, réponses, suivi après-vente, " +
             "recyclage de dormants. Tu corriges si besoin et tu approuves." },
 
+    // ---- 5 bis. Composer mail moderne (mai 2026) ----
+    { icon: '✉️', title: 'Le composer mail moderne',
+      lead: 'Un vrai client mail intégré, pas besoin d\'app externe.',
+      goto: 'mails',
+      body: "Bouton « Nouveau mail » dans la vue Mails. Tu y trouves :\n" +
+            "• Destinataires en pastilles colorées (avec Entrée pour valider). " +
+            "Plus de doute, on voit clairement chaque adresse prise en compte.\n" +
+            "• Champs Cc et Cci (révélés au clic sur « + Cc » / « + Cci »).\n" +
+            "• Mode HTML enrichi par défaut : gras, italique, listes, liens, " +
+            "titres, citations, coller du HTML brut, aperçu du rendu réel.\n" +
+            "• Bouton 🖼 pour insérer une image directement dans le corps.\n" +
+            "• Glisser-déposer un fichier → choix « En pièce jointe » ou " +
+            "« Dans le corps du mail ».\n" +
+            "• Clic sur une image insérée → la rendre cliquable (URL de redirection).\n" +
+            "• Brouillons sauvegardés dans le navigateur : tu fermes, tu " +
+            "reviens, un bandeau te propose de restaurer.\n" +
+            "• Bouton « ⏱ Plus tard » : programme l'envoi à une date/heure " +
+            "(raccourcis « Dans 1h », « Demain 9h », etc.). Le mail part tout " +
+            "seul à l'heure dite, même si tu as fermé l'app.\n" +
+            "• Signatures multi-comptes auto-sélectionnées selon l'expéditeur, " +
+            "et bouton ✏ pour aller gérer les signatures dans Réglages." },
+
+    // ---- 5 ter. Prospection en direct ----
+    { icon: '⚡', title: 'Prospection en direct — site fait pour eux',
+      lead: 'Tu colles l\'URL, Claude rédige le mail de présentation.',
+      goto: 'mails',
+      body: "Bouton « ⚡ Prospection en direct » à côté de « Nouveau mail ». " +
+            "Le scénario : tu as réalisé un site (souvent un sous-domaine " +
+            "Triskell) pour une célébrité ou une entreprise locale. Tu veux " +
+            "leur envoyer un mail pour leur présenter ce site.\n\n" +
+            "1. Tu choisis le type de cible : Célébrité ou Entreprise.\n" +
+            "2. Tu colles l'URL du site que tu as fait pour eux.\n" +
+            "3. Claude (15-40 sec) télécharge le contenu du site, capture " +
+            "une image en 1280×720, lit tes modèles HTML enregistrés, choisit " +
+            "celui qui colle le mieux et l'adapte avec des éléments précis " +
+            "vus sur le site.\n" +
+            "4. Le composer s'ouvre pré-rempli : objet + corps HTML qui " +
+            "reprend la mise en forme de ton modèle (couleurs, blocs, " +
+            "boutons), avec l'aperçu du site intégré et un lien cliquable.\n\n" +
+            "Tu corriges si besoin et tu envoies (ou tu programmes plus tard)." },
+
     // ---- 6. Bascule auto vers projet client ----
     { icon: '🎯', title: '6. Bascule auto « intéressé → projet client »',
       lead: 'Quand quelqu\'un dit oui, une carte projet se crée toute seule.',
@@ -205,17 +246,49 @@ const Tutorial = {
             "6. (Optionnel) Phantombuster + tracking d'ouvertures.\n" +
             "7. Personnaliser tes kits de livraison par produit." },
 
+    // ---- 18 bis. Mon profil personnel ----
+    { icon: '👤', title: 'Ton profil personnel',
+      lead: 'Photo, nom, email — séparé des Réglages app.',
+      body: "Clic sur ton prénom + photo en bas de la sidebar → modale " +
+            "« Mon profil personnel ». Tu y modifies :\n" +
+            "• Ta photo de profil (PNG/JPG/WebP, 4 Mo max).\n" +
+            "• Ton nom complet (le prénom apparaît en bas de sidebar).\n" +
+            "• Ton email d'expéditeur par défaut.\n\n" +
+            "Toi et Thomas avez chacun votre profil distinct (même quand " +
+            "vous partagez le même compte Supabase côté serveur), grâce au " +
+            "cookie de session.\n\n" +
+            "💡 À ne pas confondre avec les Réglages app (juste en dessous), " +
+            "qui gèrent comptes mail, clés API, intégrations, etc." },
+
+    // ---- 18 ter. Mode démo ----
+    { icon: '🎬', title: 'Mode démo — pour les visuels promotionnels',
+      lead: 'Une boîte qui tourne à plein régime, sans toucher à tes vraies données.',
+      goto: 'config',
+      body: "Réglages → « Activer le mode démo ». L'app se recharge et :\n" +
+            "• Toutes tes vraies données sont masquées et remplacées par " +
+            "des données fictives crédibles : 214 clients actifs, 83 k€/mois, " +
+            "60 mails échangés, pipelines remplis, KPIs gonflés.\n" +
+            "• Aucune action n'est réelle : tu peux cliquer « Envoyer », " +
+            "« Sauvegarder », tout ce que tu veux — rien ne part au serveur.\n" +
+            "• Bandeau rouge/orange « MODE DÉMO » en haut, masquable 30 sec " +
+            "pour une capture d'écran propre.\n\n" +
+            "Tu désactives, tes vraies données reviennent intactes. Idéal " +
+            "pour des screenshots de promo ou pour montrer l'app à quelqu'un " +
+            "sans exposer tes clients." },
+
     // ---- 19. Outro ----
     { icon: '🎉', title: 'C\'est tout pour la visite !',
       lead: 'Le pipeline est désormais bouclé bout en bout.',
-      body: "Tu as vu les 10 modules autonomes qui tournent en arrière-plan " +
-            "+ les outils transverses (santé, A/B, tracking).\n\n" +
+      body: "Tu as vu les modules autonomes qui tournent en arrière-plan " +
+            "(prospection, tri des réponses, recyclage, livraisons, Phare SEO…) " +
+            "+ les outils transverses (santé, A/B, tracking) + le composer " +
+            "mail intégré avec prospection en direct.\n\n" +
             "Le scénario zéro-toi : Auto-pilote prospecte → IA rédige & " +
             "envoie → IMAP lit & classe → bascule projet auto → kit de " +
             "livraison part → suivis programmés → demande d'avis → " +
             "cross-sell → NPS → recyclage si dormant.\n\n" +
             "💡 N'oublie pas le bouton « ? » sur chaque écran pour les " +
-            "détails contextuels.\n\n" +
+            "détails contextuels, et le mode démo pour les screenshots.\n\n" +
             "Bonne chasse." },
   ],
 
