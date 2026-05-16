@@ -223,9 +223,53 @@ def resolve_smtp_for_send(client=None, app_state=None) -> Optional[dict]:
 PROVIDERS = ("google", "anthropic", "openai", "mistral", "xai")
 
 
-def get_ai_keys(client=None, app_state=None) -> dict[str, str]:
-    """Renvoie {provider: api_key}. Supabase d'abord, fallback local."""
+def _env_keys() -> dict[str, str]:
+    """Lit les clés IA depuis les variables d'environnement (priorité haute).
+    Permet de figer les clés côté serveur (Coolify, .env) pour qu'aucune
+    écriture côté app ne puisse les écraser.
+
+    Variables reconnues :
+      ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY (ou GEMINI_API_KEY),
+      MISTRAL_API_KEY, XAI_API_KEY (ou GROK_API_KEY).
+    """
+    import os
+    aliases = {
+        "anthropic": ("ANTHROPIC_API_KEY",),
+        "openai":    ("OPENAI_API_KEY",),
+        "google":    ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+        "mistral":   ("MISTRAL_API_KEY",),
+        "xai":       ("XAI_API_KEY", "GROK_API_KEY"),
+    }
     out: dict[str, str] = {}
+    for provider, vars_ in aliases.items():
+        for var in vars_:
+            v = (os.environ.get(var) or "").strip()
+            if v:
+                out[provider] = v
+                break
+    return out
+
+
+def _clean_key(v) -> str:
+    """Strip whitespace/newlines invisibles. Anthropic refuse une clé avec
+    un espace en début/fin et renvoie 401 'invalid x-api-key'."""
+    if not v:
+        return ""
+    return str(v).strip().replace("​", "").replace("﻿", "")
+
+
+def get_ai_keys(client=None, app_state=None) -> dict[str, str]:
+    """Renvoie {provider: api_key}. Ordre de priorité :
+       1. Variables d'environnement (figées côté hébergeur) — IMMUABLES.
+       2. Supabase shared_settings.
+       3. ~/.triskell-command/settings.json (app_state local).
+       4. Triskell Core config.json (héritage)."""
+    out: dict[str, str] = {}
+    # 1. ENV — priorité absolue, ne peut PAS être écrasée par l'app
+    env_out = _env_keys()
+    out.update(env_out)
+
+    # 2. Supabase
     if client is not None:
         try:
             raw = client.get_shared_setting(AI_KEY, {}) or {}
@@ -234,46 +278,75 @@ def get_ai_keys(client=None, app_state=None) -> dict[str, str]:
                 except Exception: raw = {}
             if isinstance(raw, dict):
                 for p in PROVIDERS:
-                    v = raw.get(p)
+                    if p in out:  # déjà fourni par env
+                        continue
+                    v = _clean_key(raw.get(p))
                     if v:
-                        out[p] = str(v)
-                if out:
-                    return out
+                        out[p] = v
         except Exception as exc:
             logger.debug("get_ai_keys supabase: %s", exc)
 
-    # Local fallback (state.json puis Triskell Core config.json)
+    # 3. Local fallback (state.json)
     if app_state is not None:
         ai = app_state.get("ai", default={}) or {}
         keys = ai.get("api_keys") or {}
         for p in PROVIDERS:
-            v = keys.get(p)
+            if p in out:
+                continue
+            v = _clean_key(keys.get(p))
             if v:
-                out[p] = str(v)
-    if not out:
-        # Dernier fallback : Triskell Core config.json (héritage)
+                out[p] = v
+
+    # 4. Triskell Core config.json (héritage)
+    if not all(p in out for p in PROVIDERS):
         try:
             from triskell_core.prospect.core.crm import CONFIG_FILE
             if CONFIG_FILE.exists():
                 cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
                 for p in PROVIDERS:
-                    v = cfg.get(f"{p}_api_key")
+                    if p in out:
+                        continue
+                    v = _clean_key(cfg.get(f"{p}_api_key"))
                     if v:
-                        out[p] = str(v)
+                        out[p] = v
         except Exception:
             pass
     return out
 
 
 def save_ai_keys(keys: dict[str, str], client=None, app_state=None) -> None:
-    """Sauve dans Supabase + miroir local."""
-    clean = {p: keys.get(p, "") for p in PROVIDERS if keys.get(p)}
-    if client is not None:
+    """Sauve dans Supabase + miroir local. Ne touche PAS aux clés fournies
+    par les variables d'environnement (elles sont immuables, prennent
+    toujours le pas sur ce qu'on stocke ici).
+
+    Strip systématique du whitespace pour éviter les 401 invisibles.
+    """
+    env_locked = set(_env_keys().keys())
+    if env_locked:
+        logger.info("save_ai_keys: clés en env vars (immuables): %s",
+                    sorted(env_locked))
+    clean: dict[str, str] = {}
+    for p in PROVIDERS:
+        v = _clean_key(keys.get(p))
+        if v:
+            clean[p] = v
+    # On retire les providers verrouillés par env du payload Supabase
+    # (pas la peine de stocker un fallback pour une clé immuable)
+    to_store = {p: v for p, v in clean.items() if p not in env_locked}
+    if client is not None and to_store:
         try:
-            client.set_shared_setting(AI_KEY, clean)
+            # Merge avec l'existant pour ne pas effacer les autres providers
+            existing_raw = client.get_shared_setting(AI_KEY, {}) or {}
+            if isinstance(existing_raw, str):
+                try: existing_raw = json.loads(existing_raw)
+                except Exception: existing_raw = {}
+            if not isinstance(existing_raw, dict):
+                existing_raw = {}
+            merged = {**existing_raw, **to_store}
+            client.set_shared_setting(AI_KEY, merged)
         except Exception as exc:
             logger.warning("save_ai_keys supabase: %s", exc)
-    if app_state is not None:
+    if app_state is not None and clean:
         try:
             existing = (app_state.get("ai", "api_keys", default={}) or {})
             existing.update(clean)
