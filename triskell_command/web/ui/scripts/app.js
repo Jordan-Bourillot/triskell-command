@@ -427,6 +427,8 @@ const App = {
       case 'wow':       return Wow.render(target);
       case 'rankus':    return Rankus.render(target);
       case 'lagriffe':  return Lagriffe.render(target);
+      case 'mail_templates': return MailTemplates.render(target);
+      case 'obelisk':   return Obelisk.render(target);
       case 'config':    return Config.render(target);
       case 'tutorial':  return Tutorial.render(target);
       case 'autopilot': return Autopilot.render(target);

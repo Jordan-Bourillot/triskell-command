@@ -376,3 +376,122 @@ def pipeline_settings_write(product: str, stage: str, mode: str, updated_by: str
     except Exception as exc:
         logger.warning("pipeline_settings_write: %s", exc)
         return {"ok": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Modèles mails éditables (table triskell_email_templates)
+# ---------------------------------------------------------------------------
+# Liste les expéditeurs reconnus + leur libellé Triskell Command. Si on ajoute
+# un nouveau produit/expéditeur, c'est ici qu'on le déclare.
+MAIL_TEMPLATE_PRODUCTS = {
+    "lagriffe": "Lagriffe Studio",
+    "rankus":   "RankUs Studio",
+    "wow":      "Studio WoW",
+    "shared":   "Triskell (transversal)",
+}
+
+
+def mail_templates_list() -> dict:
+    """Retourne tous les templates groupés par product (pour l'écran Triskell
+    Command). Chaque template renvoie aussi sa liste de placeholders."""
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré", "products": {}}
+    try:
+        rows = (sb.table("triskell_email_templates")
+                  .select("product, key, from_address, from_name, subject, "
+                          "description, placeholders, enabled, updated_at, updated_by")
+                  .order("product")
+                  .order("key")
+                  .execute().data or [])
+        # Group by product
+        products: dict[str, dict] = {}
+        for p, label in MAIL_TEMPLATE_PRODUCTS.items():
+            products[p] = {"label": label, "templates": []}
+        for r in rows:
+            p = r.get("product") or "shared"
+            if p not in products:
+                products[p] = {"label": p, "templates": []}
+            products[p]["templates"].append(r)
+        return {"ok": True, "products": products}
+    except Exception as exc:
+        logger.warning("mail_templates_list: %s", exc)
+        return {"ok": False, "error": str(exc), "products": {}}
+
+
+def mail_templates_get(product: str, key: str) -> dict:
+    """Retourne le template complet (avec body_html / body_text)."""
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré"}
+    try:
+        rows = (sb.table("triskell_email_templates")
+                  .select("*")
+                  .eq("product", product)
+                  .eq("key", key)
+                  .limit(1)
+                  .execute().data or [])
+        if not rows:
+            return {"ok": False, "error": "introuvable"}
+        return {"ok": True, "template": rows[0]}
+    except Exception as exc:
+        logger.warning("mail_templates_get: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+def mail_templates_save(product: str, key: str, fields: dict, updated_by: str = "") -> dict:
+    """Upsert d'un template. Les champs autorisés sont filtrés ici pour
+    éviter qu'un client malveillant n'écrive n'importe quoi en base."""
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré"}
+    if not product or not key:
+        return {"ok": False, "error": "product/key manquants"}
+
+    ALLOWED = ("from_address", "from_name", "subject",
+               "body_html", "body_text", "description",
+               "placeholders", "enabled")
+    payload = {"product": product, "key": key}
+    for k in ALLOWED:
+        if k in fields:
+            payload[k] = fields[k]
+    # Limites raisonnables
+    if "subject" in payload and isinstance(payload["subject"], str):
+        payload["subject"] = payload["subject"][:300]
+    if "from_name" in payload and isinstance(payload["from_name"], str):
+        payload["from_name"] = payload["from_name"][:120]
+    if "from_address" in payload and isinstance(payload["from_address"], str):
+        payload["from_address"] = payload["from_address"][:200]
+    if "description" in payload and isinstance(payload["description"], str):
+        payload["description"] = payload["description"][:1000]
+    if "body_html" in payload and isinstance(payload["body_html"], str):
+        payload["body_html"] = payload["body_html"][:200_000]
+    if "body_text" in payload and isinstance(payload["body_text"], str):
+        payload["body_text"] = payload["body_text"][:200_000]
+    if "enabled" in payload:
+        payload["enabled"] = bool(payload["enabled"])
+
+    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    payload["updated_by"] = (updated_by or "")[:200]
+
+    try:
+        sb.table("triskell_email_templates").upsert(
+            payload, on_conflict="product,key").execute()
+        return {"ok": True, "product": product, "key": key}
+    except Exception as exc:
+        logger.warning("mail_templates_save: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+def mail_templates_delete(product: str, key: str) -> dict:
+    """Supprime un template (la function Netlify retombe alors sur son
+    fallback hardcodé)."""
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré"}
+    try:
+        sb.table("triskell_email_templates").delete().eq("product", product).eq("key", key).execute()
+        return {"ok": True}
+    except Exception as exc:
+        logger.warning("mail_templates_delete: %s", exc)
+        return {"ok": False, "error": str(exc)}

@@ -2165,6 +2165,151 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    # ==================================================================
+    # OBELISK — Prospection créateurs (ex-app standalone, fusionnée 2026-05-16)
+    # ==================================================================
+    def obelisk_list_creators(self, payload: dict | None = None) -> dict:
+        """Liste paginée des créateurs trouvés (filtres possibles)."""
+        p = payload or {}
+        try:
+            from ..integrations.obelisk import repo as r
+            has_email = p.get("has_email")
+            if has_email == "yes":   has_email = True
+            elif has_email == "no":  has_email = False
+            else:                    has_email = None
+            return r.list_creators(
+                platform=str(p.get("platform") or "").strip(),
+                status=str(p.get("status") or "").strip(),
+                min_score=int(p.get("min_score") or 0),
+                city=str(p.get("city") or "").strip(),
+                q=str(p.get("q") or "").strip(),
+                has_email=has_email,
+                limit=int(p.get("limit") or 100),
+                offset=int(p.get("offset") or 0),
+            )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "rows": [], "count": 0}
+
+    def obelisk_get_creator(self, payload: dict) -> dict:
+        pid = ((payload or {}).get("id") or "").strip()
+        if not pid:
+            return {"ok": False, "error": "id requis"}
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.get_creator(pid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def obelisk_update_creator(self, payload: dict) -> dict:
+        pid = ((payload or {}).get("id") or "").strip()
+        fields = (payload or {}).get("fields") or {}
+        if not pid:
+            return {"ok": False, "error": "id requis"}
+        if not isinstance(fields, dict):
+            return {"ok": False, "error": "fields doit être un objet"}
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.update_creator(pid, fields)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def obelisk_delete_creator(self, payload: dict) -> dict:
+        pid = ((payload or {}).get("id") or "").strip()
+        if not pid:
+            return {"ok": False, "error": "id requis"}
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.delete_creator(pid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def obelisk_stats(self, payload: dict | None = None) -> dict:
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.stats()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "stats": {}}
+
+    def obelisk_get_config(self, payload: dict | None = None) -> dict:
+        try:
+            from ..integrations.obelisk import repo as r
+            user_email = self._safe_user_email()
+            return r.get_user_config(user_email)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def obelisk_save_config(self, payload: dict) -> dict:
+        cfg = (payload or {}).get("config") or {}
+        if not isinstance(cfg, dict):
+            return {"ok": False, "error": "config doit être un objet"}
+        try:
+            from ..integrations.obelisk import repo as r
+            user_email = self._safe_user_email()
+            return r.save_user_config(user_email, cfg)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def obelisk_start_search(self, payload: dict) -> dict:
+        """Lance une recherche dans un thread background. Retourne le job_id
+        à poller via obelisk_get_job."""
+        p = payload or {}
+        niche = (p.get("niche") or "").strip()
+        platforms = p.get("platforms") or []
+        if not isinstance(platforms, list):
+            platforms = []
+        max_pp = int(p.get("max_per_platform") or 30)
+        if not niche:
+            return {"ok": False, "error": "niche requise"}
+        if not platforms:
+            return {"ok": False, "error": "au moins une plateforme requise"}
+        try:
+            from ..integrations.obelisk import runner
+            user_email = self._safe_user_email()
+            return runner.start_search(user_email, niche, platforms, max_pp)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def obelisk_get_job(self, payload: dict) -> dict:
+        jid = ((payload or {}).get("job_id") or "").strip()
+        if not jid:
+            return {"ok": False, "error": "job_id requis"}
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.get_search_job(jid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def obelisk_list_jobs(self, payload: dict | None = None) -> dict:
+        try:
+            from ..integrations.obelisk import repo as r
+            user_email = self._safe_user_email()
+            limit = int((payload or {}).get("limit") or 10)
+            return r.list_recent_jobs(user_email, limit=limit)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "jobs": []}
+
+    def _safe_user_email(self) -> str:
+        """Récupère l'email user de manière défensive (les méthodes
+        existantes varient selon le mode pywebview/HTTP). Fallback sur
+        outreach.from_email (settings classique de Triskell Command)."""
+        try:
+            val = (self._app_state.get("outreach", "from_email", default="")
+                   or "").strip()
+            if val:
+                return val
+        except Exception:
+            pass
+        for meth in ("get_user_email", "current_user_email"):
+            fn = getattr(self, meth, None)
+            if callable(fn):
+                try:
+                    v = fn()
+                    if isinstance(v, str) and v:
+                        return v
+                except Exception:
+                    pass
+        return ""
+
     # ------------------------------------------------------------------
     # Catalogue des outils Triskell (pour le launcher Ctrl+K)
     # ------------------------------------------------------------------
