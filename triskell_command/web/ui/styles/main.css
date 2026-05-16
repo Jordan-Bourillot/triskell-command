@@ -659,11 +659,11 @@ html, body {
 .phare-hub {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(0, 1.4fr);
-  gap: 48px;
+  grid-template-columns: minmax(200px, 1fr) minmax(0, 1.5fr);
+  gap: 40px;
   align-items: center;
-  min-height: calc(100vh - 140px);
-  padding: 24px 0;
+  min-height: 0;
+  padding: 8px 0 16px;
   overflow: hidden;
 }
 @media (max-width: 880px) {
@@ -708,11 +708,11 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-bottom: 20px;
+  padding-bottom: 0;
 }
 .phare-svg {
   width: 100%;
-  max-width: 280px;
+  max-width: 210px;
   height: auto;
   filter: drop-shadow(0 12px 32px hsl(var(--accent) / 0.18));
   animation: phareGlow 4s ease-in-out infinite;
@@ -723,7 +723,7 @@ html, body {
 }
 .phare-tower-caption {
   text-align: center;
-  margin-top: 16px;
+  margin-top: 4px;
   max-width: 360px;
 }
 .phare-kicker {
@@ -736,12 +736,12 @@ html, body {
 }
 .phare-title {
   font-family: 'Cinzel', ui-serif, serif;
-  font-size: clamp(36px, 5vw, 56px);
+  font-size: clamp(30px, 4vw, 44px);
   font-weight: 700;
   color: hsl(var(--text));
   letter-spacing: -0.01em;
   line-height: 1;
-  margin: 8px 0 12px;
+  margin: 6px 0 8px;
 }
 .phare-subtitle {
   font-size: 15px;
