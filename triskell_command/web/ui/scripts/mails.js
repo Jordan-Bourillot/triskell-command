@@ -902,9 +902,13 @@ const Mails = {
             <div class="flex items-center justify-between mb-1 gap-2 flex-wrap">
               <label class="block text-[11px] font-medium text-text-secondary">Message</label>
               <div class="flex items-center gap-2 text-[11px] flex-wrap">
-                <!-- Dropdown signatures -->
+                <!-- Dropdown signatures + bouton "gérer" -->
                 <div class="flex items-center gap-1.5 shrink-0">
-                  <svg class="w-3.5 h-3.5 text-text-muted shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"/><polygon points="18 2 22 6 12 16 8 16 8 12 18 2"/></svg>
+                  <button id="cmp-sig-edit" type="button"
+                          title="Gérer mes signatures (ouvre les Réglages)"
+                          class="w-6 h-6 rounded-md flex items-center justify-center text-text-muted hover:text-accent hover:bg-accent/10 transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"/><polygon points="18 2 22 6 12 16 8 16 8 12 18 2"/></svg>
+                  </button>
                   <select id="cmp-signature"
                           class="px-2.5 py-1 rounded-lg bg-bg border border-border font-semibold text-text"
                           style="min-width: 160px; max-width: 220px;">
@@ -985,12 +989,19 @@ const Mails = {
         </div>
 
         <!-- Footer sticky -->
-        <div class="px-6 py-4 border-t border-border bg-surface-elevated flex items-center justify-end gap-2 shrink-0">
+        <div class="px-6 py-4 border-t border-border bg-surface-elevated flex items-center justify-between gap-2 shrink-0">
           <button id="cmp-cancel" class="btn btn-secondary">Annuler</button>
-          <button id="cmp-send" class="btn btn-primary">
-            <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>
-            Envoyer
-          </button>
+          <div class="flex items-center gap-2">
+            <button id="cmp-draft" type="button" class="btn btn-secondary"
+                    title="Enregistrer en brouillon pour reprendre plus tard">
+              <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              Brouillon
+            </button>
+            <button id="cmp-send" class="btn btn-primary">
+              <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>
+              Envoyer
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -1040,9 +1051,9 @@ const Mails = {
     const close = () => overlay.remove();
     overlay.querySelector('#cmp-close').onclick = close;
     overlay.querySelector('#cmp-cancel').onclick = close;
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    const escListener = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escListener); } };
-    document.addEventListener('keydown', escListener);
+    // Volontairement PAS de fermeture sur clic en dehors : Jordan a perdu
+    // des mails ainsi. La modale ne se ferme que via × ou Annuler.
+    // Idem pour Escape : on retire pour éviter une fermeture accidentelle.
 
     // Gestion mode Texte / HTML
     let mode = 'text';
@@ -1516,6 +1527,145 @@ const Mails = {
       }
     });
 
+    // ----------------------------------------------------------------------
+    // Brouillons (localStorage)
+    // ----------------------------------------------------------------------
+    // Permet de quitter le composer sans perdre ce qu'on a écrit. Stocké
+    // dans le navigateur (pas synchronisé entre PC pour l'instant).
+    // Limite : les pièces jointes ne sont PAS sauvegardées (trop lourd).
+    const DRAFT_KEY = 'tc-mail-draft';
+
+    const captureDraftState = () => {
+      let body_html_val = '';
+      if (mode === 'html') {
+        const clone = htmlArea.cloneNode(true);
+        body_html_val = clone.innerHTML;
+      }
+      return {
+        to: overlay.querySelector('#cmp-to').value,
+        subject: overlay.querySelector('#cmp-subject').value,
+        account_id: overlay.querySelector('#cmp-from').value,
+        signature_id: overlay.querySelector('#cmp-signature').value,
+        mode,
+        body_text: textArea.value,
+        body_html: body_html_val,
+        ts: Date.now(),
+      };
+    };
+    const isDraftMeaningful = (d) => {
+      if ((d.to || '').trim()) return true;
+      if ((d.subject || '').trim()) return true;
+      const txt = (d.body_text || '').trim();
+      if (txt && (!signature || txt !== signature)) return true;
+      // Pour HTML : on retire les espaces et tags vides
+      const compactHtml = (d.body_html || '').replace(/\s+/g, '');
+      const sigCompact = (signatureHtml || '').replace(/\s+/g, '');
+      // Si HTML contient autre chose que les <p><br></p> initiaux + la signature
+      const stripped = compactHtml
+        .replace(/<p><br><\/p>/g, '')
+        .replace(/<divdata-signature-block[^>]*>.*?<\/div>/g, '')
+        .replace(sigCompact, '');
+      if (stripped.length > 0) return true;
+      return false;
+    };
+
+    // Bouton "Brouillon" du footer
+    const draftBtn = overlay.querySelector('#cmp-draft');
+    if (draftBtn) {
+      draftBtn.onclick = () => {
+        const d = captureDraftState();
+        if (!isDraftMeaningful(d)) {
+          alert('Rien à enregistrer en brouillon — écris d\'abord ton mail.');
+          return;
+        }
+        try {
+          localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+          const orig = draftBtn.innerHTML;
+          draftBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Brouillon enregistré';
+          setTimeout(close, 700);
+        } catch (e) {
+          alert('Impossible d\'enregistrer le brouillon : ' + e.message);
+        }
+      };
+    }
+
+    // Annuler : si du contenu rédigé, propose Brouillon ou Perdre
+    const cancelBtn = overlay.querySelector('#cmp-cancel');
+    if (cancelBtn) {
+      cancelBtn.onclick = () => {
+        const d = captureDraftState();
+        if (!isDraftMeaningful(d)) {
+          close();
+          return;
+        }
+        const choice = confirm(
+          'Tu as commencé à rédiger un mail.\n\n' +
+          'OK   → enregistrer en brouillon (tu pourras reprendre plus tard)\n' +
+          'Annuler → perdre le contenu'
+        );
+        if (choice) {
+          try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch (e) {}
+          close();
+        } else {
+          if (confirm('Confirmer la perte de ce que tu as écrit ?')) close();
+        }
+      };
+    }
+
+    // Bouton "Gérer mes signatures" (icône crayon à côté du select)
+    const sigEditBtn = overlay.querySelector('#cmp-sig-edit');
+    if (sigEditBtn) {
+      sigEditBtn.onclick = () => {
+        const d = captureDraftState();
+        if (isDraftMeaningful(d)) {
+          try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch (e) {}
+        }
+        close();
+        if (typeof App !== 'undefined' && App.show) {
+          App.show('config');
+          // Le rendu Config est async (fetch settings), on retente jusqu'à
+          // ce que la liste signatures soit dans le DOM (max 2 sec).
+          let tries = 20;
+          const tryScroll = () => {
+            const sigSection = document.getElementById('cfg-sig-list');
+            if (sigSection) {
+              sigSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              return;
+            }
+            if (--tries > 0) setTimeout(tryScroll, 100);
+          };
+          setTimeout(tryScroll, 100);
+        }
+      };
+    }
+
+    // Restauration brouillon à l'ouverture (si présent et < 30 jours)
+    if (!opts.prefilledTo && !opts.prefilledSubject && !opts.inReplyTo) {
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (raw) {
+          const d = JSON.parse(raw);
+          if (d && d.ts && (Date.now() - d.ts < 30 * 24 * 3600 * 1000)) {
+            this._showDraftRestoreBanner(overlay, d, () => {
+              overlay.querySelector('#cmp-to').value = d.to || '';
+              overlay.querySelector('#cmp-subject').value = d.subject || '';
+              if (d.account_id) {
+                const fs = overlay.querySelector('#cmp-from');
+                if (fs && [...fs.options].some(o => o.value === d.account_id)) fs.value = d.account_id;
+              }
+              if (d.signature_id !== undefined) {
+                const ss = overlay.querySelector('#cmp-signature');
+                if (ss && [...ss.options].some(o => o.value === d.signature_id)) ss.value = d.signature_id;
+              }
+              if (d.body_text) textArea.value = d.body_text;
+              if (d.body_html) htmlArea.innerHTML = d.body_html;
+              setMode(d.mode === 'text' ? 'text' : 'html');
+            });
+          }
+        }
+      } catch (e) {}
+    }
+
     // Par défaut, on ouvre directement le mode HTML enrichi (plus pratique
     // pour insérer images / mise en forme). L'utilisateur peut basculer en
     // mode "Texte" via le toggle s'il préfère.
@@ -1591,6 +1741,8 @@ const Mails = {
           status.textContent = '✓ Envoyé !';
           status.className = 'text-xs text-success';
           sendBtn.innerHTML = '✓ Envoyé';
+          // Le brouillon n'a plus de raison d'être après envoi
+          try { localStorage.removeItem('tc-mail-draft'); } catch (e) {}
           setTimeout(() => { close(); this._load(); }, 1200);
         } else {
           status.textContent = `✗ ${(r && r.error) || 'Erreur inconnue'}`;
@@ -1604,6 +1756,47 @@ const Mails = {
         sendBtn.disabled = false;
         sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>Envoyer';
       }
+    };
+  },
+
+  /** Affiche un bandeau "Brouillon trouvé" en haut du composer.
+   *  onRestore : callback appelée si l'utilisateur clique "Restaurer". */
+  _showDraftRestoreBanner(overlay, draft, onRestore) {
+    const scrollContainer = overlay.querySelector('.flex-1.overflow-y-auto');
+    if (!scrollContainer) return;
+    const banner = document.createElement('div');
+    banner.className = 'mb-3 p-3 rounded-xl border border-accent/40 bg-accent/10 flex items-start gap-3';
+    const ago = (() => {
+      const min = Math.floor((Date.now() - (draft.ts || Date.now())) / 60_000);
+      if (min < 1) return 'à l\'instant';
+      if (min < 60) return `il y a ${min} min`;
+      const h = Math.floor(min / 60);
+      if (h < 24) return `il y a ${h} h`;
+      return `il y a ${Math.floor(h / 24)} j`;
+    })();
+    const preview = (draft.subject || draft.to || '(sans objet)').slice(0, 60);
+    banner.innerHTML = `
+      <svg class="w-5 h-5 text-accent shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+        <polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+      </svg>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-semibold text-text">Brouillon trouvé (${ago})</div>
+        <div class="text-xs text-text-muted truncate">${this._escape(preview)}</div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button type="button" data-draft-restore class="text-xs font-semibold text-accent hover:underline">Restaurer</button>
+        <button type="button" data-draft-discard class="text-xs text-text-muted hover:text-danger">Ignorer</button>
+      </div>
+    `;
+    scrollContainer.insertBefore(banner, scrollContainer.firstChild);
+    banner.querySelector('[data-draft-restore]').onclick = () => {
+      try { onRestore && onRestore(); } catch (e) { console.error('draft restore', e); }
+      banner.remove();
+    };
+    banner.querySelector('[data-draft-discard]').onclick = () => {
+      try { localStorage.removeItem('tc-mail-draft'); } catch (e) {}
+      banner.remove();
     };
   },
 
