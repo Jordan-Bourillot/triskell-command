@@ -56,6 +56,7 @@ const Config = {
     const slot = document.getElementById('cfg-content');
     slot.innerHTML = this._renderAuth(authStatus) +
                      this._renderDemoMode() +
+                     this._renderBackups() +
                      this._renderAppearance(s) +
                      this._renderAi(s) +
                      this._renderOutreach(s) +
@@ -78,6 +79,98 @@ const Config = {
     this._bindPhantombuster();
     this._bindTracker();
     this._bindDemoMode();
+    this._bindBackups();
+  },
+
+  _renderBackups() {
+    return `
+      <section>
+        <div class="section-label">Sauvegardes automatiques</div>
+        <p class="text-sm text-text-muted mb-4">
+          L'app sauvegarde toutes les semaines tes données critiques
+          (modèles d'emails, signatures, comptes mail, notes Brain, projets
+          clients, mails programmés) dans un fichier local — au cas où la
+          base partagée tomberait ou si tu fais une bourde. Les 12 derniers
+          backups sont conservés (~3 mois d'historique).
+        </p>
+        <div class="card p-6 space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="text-sm font-semibold">Backups disponibles</div>
+              <div class="text-xs text-text-muted">Stockés dans <code>~/.triskell-command/backups/</code></div>
+            </div>
+            <button id="cfg-backup-now" class="btn btn-secondary text-sm">Faire un backup maintenant</button>
+          </div>
+          <div id="cfg-backup-list" class="text-xs">
+            <div class="text-text-muted italic">Chargement…</div>
+          </div>
+        </div>
+      </section>
+    `;
+  },
+
+  async _bindBackups() {
+    const btn = document.getElementById('cfg-backup-now');
+    const list = document.getElementById('cfg-backup-list');
+    if (!btn || !list) return;
+
+    const reload = async () => {
+      if (!App.api) {
+        list.innerHTML = '<div class="text-text-muted italic">API indisponible.</div>';
+        return;
+      }
+      try {
+        const r = await App.api.backup_list();
+        if (!r || !r.ok || !r.backups || r.backups.length === 0) {
+          list.innerHTML = '<div class="text-text-muted italic">Aucun backup encore. Le premier sera fait dans 7 jours, ou tu peux le forcer maintenant.</div>';
+          return;
+        }
+        list.innerHTML = `
+          <table class="w-full">
+            <thead>
+              <tr class="text-text-muted text-[10px] uppercase tracking-widest">
+                <th class="text-left py-2 font-semibold">Fichier</th>
+                <th class="text-left py-2 font-semibold">Date</th>
+                <th class="text-right py-2 font-semibold">Taille</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${r.backups.map(b => `
+                <tr class="border-t border-border">
+                  <td class="py-2 font-mono text-text">${this._esc(b.filename)}</td>
+                  <td class="py-2 text-text-muted">${(b.ts || '').slice(0, 16).replace('T', ' ')}</td>
+                  <td class="py-2 text-right text-text-muted">${Math.round(b.size_bytes / 1024)} Ko</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (e) {
+        list.innerHTML = `<div class="text-danger">Erreur : ${e.message || e}</div>`;
+      }
+    };
+
+    btn.onclick = async () => {
+      if (!App.api) return;
+      btn.disabled = true;
+      btn.textContent = 'Backup en cours…';
+      try {
+        const r = await App.api.backup_run_now();
+        if (r && r.ok) {
+          btn.textContent = '✓ Backup créé';
+          setTimeout(() => { btn.textContent = 'Faire un backup maintenant'; btn.disabled = false; }, 1500);
+          reload();
+        } else {
+          btn.textContent = '✗ Échec';
+          setTimeout(() => { btn.textContent = 'Faire un backup maintenant'; btn.disabled = false; }, 2500);
+        }
+      } catch (e) {
+        btn.textContent = `✗ ${e.message || e}`;
+        setTimeout(() => { btn.textContent = 'Faire un backup maintenant'; btn.disabled = false; }, 3000);
+      }
+    };
+
+    reload();
   },
 
   _renderDemoMode() {

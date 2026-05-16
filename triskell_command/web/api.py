@@ -1243,6 +1243,81 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    # ------------------------------------------------------------------
+    # Backups locaux
+    # ------------------------------------------------------------------
+    def backup_run_now(self, payload: dict | None = None) -> dict:
+        """Force un backup immédiat des données critiques."""
+        try:
+            from ..integrations import backup_runner
+            return backup_runner.run_now(self._app_state)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def backup_list(self, payload: dict | None = None) -> dict:
+        """Liste les backups disponibles."""
+        try:
+            from ..integrations import backup_runner
+            return {"ok": True, "backups": backup_runner.list_backups()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def backup_preview(self, payload: dict) -> dict:
+        """Renvoie un aperçu d'un backup donné (résumé, pas tout le contenu)."""
+        p = payload or {}
+        filename = (p.get("filename") or "").strip()
+        try:
+            from ..integrations import backup_runner
+            data = backup_runner.read_backup(filename)
+            if not data:
+                return {"ok": False, "error": "Backup introuvable"}
+            summary = {
+                "ts": data.get("ts"),
+                "templates_count":    len(data.get("mail_templates") or []),
+                "signatures_count":   len(data.get("signatures") or []),
+                "accounts_count":     len(data.get("mail_accounts") or []),
+                "brain_notes_count":  len(data.get("brain_notes") or []),
+                "scheduled_mails_count": len(data.get("scheduled_mails") or []) if isinstance(data.get("scheduled_mails"), list) else 0,
+                "has_settings": bool(data.get("settings")),
+                "has_display_names": bool(data.get("display_names")),
+            }
+            return {"ok": True, "summary": summary}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Signalement de bug (depuis le bouton flottant côté front)
+    # ------------------------------------------------------------------
+    def bug_report(self, payload: dict) -> dict:
+        """Enregistre un rapport de bug envoyé depuis l'UI.
+
+        Stocké dans ~/.triskell-command/bug_reports/YYYY-MM-DD-HHMMSS.txt
+        (best-effort). On peut brancher un envoi mail/Supabase plus tard.
+        """
+        try:
+            from datetime import datetime as _dt
+            from pathlib import Path as _P
+            p = payload or {}
+            base = _P.home() / ".triskell-command" / "bug_reports"
+            base.mkdir(parents=True, exist_ok=True)
+            ts = _dt.now().strftime("%Y-%m-%d-%H%M%S")
+            path = base / f"bug-{ts}.txt"
+            full = (p.get("full_report") or "").strip()
+            if not full:
+                # Reconstruit un rapport minimal depuis context+message
+                full = (
+                    f"Date : {ts}\n\n"
+                    f"Message : {p.get('message') or '(vide)'}\n\n"
+                    f"Context : {p.get('context') or {}}\n"
+                )
+            path.write_text(full, encoding="utf-8")
+            logger.info("bug_report écrit : %s", path.name)
+            # TODO V2 : envoyer un mail à contact@triskell-studio.fr
+            return {"ok": True, "filename": path.name}
+        except Exception as exc:
+            logger.exception("bug_report")
+            return {"ok": False, "error": str(exc)}
+
     def mails_list(self, payload: dict | None = None) -> dict:
         """Liste les mails enregistrés dans email_history.
 
@@ -2776,6 +2851,7 @@ class Api:
             ("stripe_poller",          "start_worker", "stripe_poller"),
             ("claude_proactive",       "start_worker", "claude_proactive"),
             ("scheduled_mail_runner",  "start_worker", "scheduled_mails"),
+            ("backup_runner",          "start_worker", "backup_runner"),
         ]:
             try:
                 mod = __import__(
