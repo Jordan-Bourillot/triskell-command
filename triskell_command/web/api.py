@@ -1080,6 +1080,85 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    # ------------------------------------------------------------------
+    # Mails programmés (envoi différé)
+    # ------------------------------------------------------------------
+    def mail_schedule(self, payload: dict) -> dict:
+        """Programme un mail à envoyer plus tard. Mêmes champs que mail_send,
+        avec en plus :
+          - scheduled_at : ISO 8601 (avec timezone) — quand envoyer
+        Le mail est stocké localement et envoyé par le worker
+        scheduled_mail_runner quand l'heure est venue.
+        """
+        p = payload or {}
+        to = (p.get("to") or "").strip()
+        subject = (p.get("subject") or "").strip()
+        body = (p.get("body") or "").strip()
+        body_html = (p.get("body_html") or "").strip()
+        scheduled_at = (p.get("scheduled_at") or "").strip()
+        if not to or not subject:
+            return {"ok": False, "error": "Champs requis manquants (to/subject)."}
+        if not body and not body_html:
+            return {"ok": False, "error": "Le message est vide."}
+        if "@" not in to:
+            return {"ok": False, "error": "Adresse destinataire invalide."}
+        if not scheduled_at:
+            return {"ok": False, "error": "Date d'envoi manquante."}
+        # Validation de scheduled_at + futur
+        try:
+            from datetime import datetime, timezone
+            dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if dt <= datetime.now(timezone.utc):
+                return {"ok": False, "error": "La date doit être dans le futur."}
+        except Exception:
+            return {"ok": False, "error": "Date d'envoi invalide (format ISO 8601 attendu)."}
+
+        entry = {
+            "account_id":   (p.get("account_id") or "primary").strip(),
+            "to":           to,
+            "subject":      subject,
+            "body":         body,
+            "body_html":    body_html,
+            "in_reply_to":  (p.get("in_reply_to") or "").strip(),
+            "attachments":  p.get("attachments") or [],
+            "scheduled_at": scheduled_at,
+            "status":       "pending",
+        }
+        try:
+            from ..integrations import scheduled_mail_runner
+            saved = scheduled_mail_runner.add(entry)
+            if saved is None:
+                return {"ok": False, "error": "Sauvegarde impossible."}
+            return {"ok": True, "id": saved.get("id"), "scheduled_at": scheduled_at}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_scheduled_list(self, payload: dict | None = None) -> dict:
+        """Liste les mails programmés (pending). Si payload.include_done=True,
+        inclut aussi sent / failed / cancelled."""
+        p = payload or {}
+        include_done = bool(p.get("include_done"))
+        try:
+            from ..integrations import scheduled_mail_runner
+            return {"ok": True, "mails": scheduled_mail_runner.list_pending(include_done)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_scheduled_cancel(self, payload: dict) -> dict:
+        """Annule un mail programmé (s'il est encore pending)."""
+        p = payload or {}
+        mail_id = (p.get("id") or "").strip()
+        if not mail_id:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations import scheduled_mail_runner
+            ok = scheduled_mail_runner.cancel(mail_id)
+            return {"ok": ok, "cancelled": ok}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def mails_list(self, payload: dict | None = None) -> dict:
         """Liste les mails enregistrés dans email_history.
 
@@ -2612,6 +2691,7 @@ class Api:
             ("dormant_recycler",       "start_worker", "dormant_recycler"),
             ("stripe_poller",          "start_worker", "stripe_poller"),
             ("claude_proactive",       "start_worker", "claude_proactive"),
+            ("scheduled_mail_runner",  "start_worker", "scheduled_mails"),
         ]:
             try:
                 mod = __import__(

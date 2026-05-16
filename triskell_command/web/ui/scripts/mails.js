@@ -997,6 +997,11 @@ const Mails = {
               <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
               Brouillon
             </button>
+            <button id="cmp-schedule" type="button" class="btn btn-secondary"
+                    title="Programmer l'envoi à une date/heure précise">
+              <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Plus tard
+            </button>
             <button id="cmp-send" class="btn btn-primary">
               <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>
               Envoyer
@@ -1612,6 +1617,90 @@ const Mails = {
       };
     }
 
+    // Helper : construit le payload pour mail_send / mail_schedule
+    // (utilisé par le bouton Envoyer ET le bouton Plus tard)
+    const buildSendPayload = () => {
+      const account_id = overlay.querySelector('#cmp-from').value;
+      const to = overlay.querySelector('#cmp-to').value.trim();
+      const subj = overlay.querySelector('#cmp-subject').value.trim();
+      let body = '', body_html = '';
+      if (mode === 'html') {
+        const clone = htmlArea.cloneNode(true);
+        clone.querySelectorAll('img[data-cid]').forEach(img => {
+          const cid = img.getAttribute('data-cid');
+          img.setAttribute('src', `cid:${cid}`);
+          img.removeAttribute('data-cid');
+        });
+        body_html = clone.innerHTML.trim();
+        body = htmlArea.innerText.trim();
+      } else {
+        body = textArea.value;
+      }
+      // Filtre attachments inline non référencées
+      const referencedCids = new Set();
+      (body_html.match(/cid:([a-zA-Z0-9_]+)/g) || []).forEach(m => {
+        referencedCids.add(m.slice(4));
+      });
+      const cleanAttachments = attachments.filter(a => !a.inline || referencedCids.has(a.cid));
+      return { account_id, to, subj, body, body_html, cleanAttachments };
+    };
+
+    // Bouton "Plus tard" → programme l'envoi à une date/heure choisie
+    const scheduleBtn = overlay.querySelector('#cmp-schedule');
+    if (scheduleBtn) {
+      scheduleBtn.onclick = () => {
+        const status = overlay.querySelector('#cmp-status');
+        const p = buildSendPayload();
+        if (!p.to || !p.subj || (!p.body.trim() && !p.body_html)) {
+          status.textContent = '✗ Destinataire, objet et message requis avant de programmer.';
+          status.className = 'text-xs text-danger';
+          return;
+        }
+        const totBytes = p.cleanAttachments.reduce((s, a) => s + (a.size || 0), 0);
+        if (totBytes > MAX_TOTAL_BYTES) {
+          status.textContent = `✗ Pièces jointes trop lourdes (${fmtSize(totBytes)}). Max 22 Mo.`;
+          status.className = 'text-xs text-danger';
+          return;
+        }
+        this._openScheduleDialog(async (scheduledAtISO, prettyDate) => {
+          scheduleBtn.disabled = true;
+          scheduleBtn.innerHTML = 'Programmation…';
+          try {
+            const r = await App.api.mail_schedule({
+              account_id: p.account_id,
+              to: p.to,
+              subject: p.subj,
+              body: p.body,
+              body_html: p.body_html,
+              in_reply_to: opts.inReplyTo || '',
+              scheduled_at: scheduledAtISO,
+              attachments: p.cleanAttachments.map(a => ({
+                filename: a.filename, content_b64: a.content_b64,
+                content_type: a.content_type,
+                inline: !!a.inline, cid: a.cid || '',
+              })),
+            });
+            if (r && r.ok) {
+              status.textContent = `✓ Mail programmé pour ${prettyDate}`;
+              status.className = 'text-xs text-success';
+              try { localStorage.removeItem('tc-mail-draft'); } catch (e) {}
+              setTimeout(close, 1200);
+            } else {
+              status.textContent = `✗ ${(r && r.error) || 'Erreur inconnue'}`;
+              status.className = 'text-xs text-danger';
+              scheduleBtn.disabled = false;
+              scheduleBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Plus tard';
+            }
+          } catch (e) {
+            status.textContent = `✗ ${e.message || e}`;
+            status.className = 'text-xs text-danger';
+            scheduleBtn.disabled = false;
+            scheduleBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Plus tard';
+          }
+        });
+      };
+    }
+
     // Bouton "Gérer mes signatures" (icône crayon à côté du select)
     const sigEditBtn = overlay.querySelector('#cmp-sig-edit');
     if (sigEditBtn) {
@@ -1797,6 +1886,135 @@ const Mails = {
     banner.querySelector('[data-draft-discard]').onclick = () => {
       try { localStorage.removeItem('tc-mail-draft'); } catch (e) {}
       banner.remove();
+    };
+  },
+
+  /** Modale "Envoyer plus tard" : choix date/heure + raccourcis rapides.
+   *  Appelle onConfirm(scheduledAtISO, prettyDate) si l'utilisateur valide. */
+  _openScheduleDialog(onConfirm) {
+    // Helpers de date — toutes en heure locale
+    const pad = (n) => String(n).padStart(2, '0');
+    const isoFromDate = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const prettyFR = (d) => {
+      const days = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+      const months = ['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
+      return `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]} à ${pad(d.getHours())}h${pad(d.getMinutes())}`;
+    };
+
+    const now = new Date();
+    // Raccourcis : Dans 1h / Ce soir 18h / Demain 9h / Lundi 9h
+    const in1h = new Date(now.getTime() + 60*60*1000);
+    const tonight = new Date(now); tonight.setHours(18, 0, 0, 0);
+    if (tonight <= now) tonight.setDate(tonight.getDate() + 1);
+    const tomorrow9 = new Date(now); tomorrow9.setDate(tomorrow9.getDate() + 1); tomorrow9.setHours(9, 0, 0, 0);
+    // Lundi prochain à 9h : si on est lundi, on prend lundi prochain (J+7)
+    const nextMonday = new Date(now);
+    const dow = nextMonday.getDay(); // 0=dim, 1=lun
+    const daysToMonday = ((1 - dow + 7) % 7) || 7;
+    nextMonday.setDate(nextMonday.getDate() + daysToMonday);
+    nextMonday.setHours(9, 0, 0, 0);
+
+    const presets = [
+      { label: 'Dans 1 heure',   date: in1h,        kicker: prettyFR(in1h) },
+      { label: 'Ce soir 18 h',   date: tonight,     kicker: prettyFR(tonight) },
+      { label: 'Demain 9 h',     date: tomorrow9,   kicker: prettyFR(tomorrow9) },
+      { label: 'Lundi 9 h',      date: nextMonday,  kicker: prettyFR(nextMonday) },
+    ];
+
+    // Valeur initiale du datetime-local : "demain à 9h"
+    const defaultDt = isoFromDate(tomorrow9);
+
+    const ov = document.createElement('div');
+    ov.className = 'fixed inset-0 z-[230] flex items-center justify-center p-4';
+    ov.style.background = 'rgba(15,23,42,0.75)';
+    ov.style.backdropFilter = 'blur(8px)';
+    ov.innerHTML = `
+      <div class="bg-surface rounded-2xl shadow-hero w-full max-w-md border border-border animate-slide-up flex flex-col overflow-hidden">
+        <div class="px-5 pt-4 pb-3 border-b border-border bg-surface-elevated">
+          <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">PROGRAMMER L'ENVOI</div>
+          <h3 class="text-base font-bold">Quand envoyer ce mail ?</h3>
+          <p class="text-xs text-text-muted mt-1">Le mail partira automatiquement à l'heure choisie, même si tu fermes l'app.</p>
+        </div>
+        <div class="p-4 space-y-3">
+          <!-- Raccourcis -->
+          <div class="grid grid-cols-2 gap-2">
+            ${presets.map((p, i) => `
+              <button data-preset="${i}" type="button"
+                      class="text-left px-3 py-2.5 rounded-xl border border-border hover:border-accent hover:bg-accent/5 transition-colors">
+                <div class="text-sm font-semibold text-text">${p.label}</div>
+                <div class="text-[10px] text-text-muted mt-0.5">${p.kicker}</div>
+              </button>
+            `).join('')}
+          </div>
+          <!-- Sélecteur custom -->
+          <div class="pt-2 border-t border-border">
+            <label class="block text-[11px] font-medium text-text-secondary mb-1 uppercase tracking-wider">Ou choisis une date / heure</label>
+            <input id="sched-dt" type="datetime-local" value="${defaultDt}"
+                   class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
+            <div id="sched-preview" class="text-[11px] text-text-muted mt-1.5"></div>
+          </div>
+        </div>
+        <div class="px-5 py-4 border-t border-border bg-surface-elevated flex items-center justify-end gap-2">
+          <button id="sched-cancel" type="button" class="btn btn-secondary">Annuler</button>
+          <button id="sched-confirm" type="button" class="btn btn-primary">
+            <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Programmer
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(ov);
+
+    const close = () => {
+      document.removeEventListener('keydown', escListener);
+      ov.remove();
+    };
+    const escListener = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', escListener);
+    ov.querySelector('#sched-cancel').onclick = close;
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+
+    const dtInput = ov.querySelector('#sched-dt');
+    const previewEl = ov.querySelector('#sched-preview');
+    const updatePreview = () => {
+      try {
+        const v = dtInput.value;
+        if (!v) { previewEl.textContent = ''; return; }
+        const d = new Date(v);
+        if (isNaN(d.getTime())) { previewEl.textContent = ''; return; }
+        if (d <= new Date()) {
+          previewEl.textContent = '⚠ Cette date est passée. Choisis un moment dans le futur.';
+          previewEl.className = 'text-[11px] text-danger mt-1.5';
+        } else {
+          previewEl.textContent = `→ ${prettyFR(d)}`;
+          previewEl.className = 'text-[11px] text-success mt-1.5';
+        }
+      } catch (e) {}
+    };
+    dtInput.addEventListener('input', updatePreview);
+    updatePreview();
+
+    // Raccourcis : pré-remplit le datetime-local
+    ov.querySelectorAll('[data-preset]').forEach(btn => {
+      btn.onclick = () => {
+        const idx = parseInt(btn.dataset.preset, 10);
+        dtInput.value = isoFromDate(presets[idx].date);
+        updatePreview();
+      };
+    });
+
+    ov.querySelector('#sched-confirm').onclick = () => {
+      const v = dtInput.value;
+      if (!v) return;
+      const d = new Date(v);
+      if (isNaN(d.getTime()) || d <= new Date()) {
+        previewEl.textContent = '⚠ Date invalide ou déjà passée.';
+        previewEl.className = 'text-[11px] text-danger mt-1.5';
+        return;
+      }
+      close();
+      try { onConfirm(d.toISOString(), prettyFR(d)); }
+      catch (e) { console.error('schedule onConfirm', e); }
     };
   },
 

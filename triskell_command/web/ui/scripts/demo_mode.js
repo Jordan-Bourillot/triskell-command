@@ -110,9 +110,11 @@ const DemoMode = {
   isWriteMethod(method) {
     if (!method) return false;
     return /^(save|delete|remove|set|create|add|push|migrate|reset|sync|seed)_/.test(method)
-        || /_(save|delete|remove|send|set|create|add|upload|update|reset|migrate)$/.test(method)
+        || /_(save|delete|remove|send|set|create|add|upload|update|reset|migrate|schedule|cancel)$/.test(method)
         || method === 'mail_send'
         || method === 'mail_send_reply'
+        || method === 'mail_schedule'
+        || method === 'mail_scheduled_cancel'
         || method.includes('_send_')
         || ['avatar_upload', 'push_subscribe', 'push_test', 'push_unsubscribe',
             'claude_ask', 'claude_consume_pending'].includes(method);
