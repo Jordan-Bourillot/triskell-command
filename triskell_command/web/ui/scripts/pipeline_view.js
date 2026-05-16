@@ -536,9 +536,12 @@ function makePipelineView(config) {
             </div>
             <div class="text-[11px] text-text-muted" id="pv-pipe-clock">Mise à jour : —</div>
           </div>
-          <p class="text-text-muted text-sm mb-3">Un étage clignote dès qu'au moins une demande s'y trouve. Clic sur une étape = voir les demandes correspondantes.</p>
+          <p class="text-text-muted text-sm mb-3">
+            🤖 <b>Auto</b> = la demande avance toute seule. ✋ <b>Manuel</b> = tu valides à la main.
+            Bascule le toggle sur les étapes où tu veux garder le contrôle.
+          </p>
           <!-- Légende code couleur -->
-          <div class="flex items-center gap-4 mb-5 text-[11px] text-text-muted">
+          <div class="flex items-center gap-4 mb-5 text-[11px] text-text-muted flex-wrap">
             <div class="flex items-center gap-1.5">
               <span class="inline-block w-2.5 h-2.5 rounded-full" style="background: hsl(var(--text-muted) / 0.3);"></span>
               <span>vide</span>
@@ -549,11 +552,23 @@ function makePipelineView(config) {
             </div>
             <div class="flex items-center gap-1.5">
               <span class="inline-block w-2.5 h-2.5 rounded-full" style="background: hsl(var(--warning));"></span>
-              <span class="font-semibold" style="color: hsl(var(--warning));">action requise</span>
+              <span class="font-semibold" style="color: hsl(var(--warning));">attend ton action</span>
             </div>
           </div>
           <div id="pv-pipe-flow" class="flex items-stretch gap-1 overflow-x-auto pb-2"></div>
           <div class="mt-6 grid grid-cols-3 gap-3" id="pv-pipe-deadends"></div>
+        </div>
+
+        <!-- Panneau : demandes qui attendent ton action manuelle (visible si toggles actifs) -->
+        <div id="pv-pipe-pending-actions" class="card p-5 mb-5" hidden>
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <div class="hero-kicker mb-1" style="color: hsl(var(--warning));">EN ATTENTE DE TON ACTION</div>
+              <h3 class="text-base font-bold">Demandes coincées sur une étape en mode manuel</h3>
+            </div>
+            <span id="pv-pipe-pending-count" class="text-xs text-text-muted"></span>
+          </div>
+          <div id="pv-pipe-pending-list" class="space-y-2"></div>
         </div>
 
         <div class="card p-5">
@@ -563,6 +578,33 @@ function makePipelineView(config) {
       `;
       await this._loadPipeline();
       this.state.pollHandle = setInterval(() => this._loadPipeline(true), 5000);
+    },
+
+    // ─── Préférences AUTO / MANUEL persistées en localStorage ────────────
+    //  Note : pour l'instant ces toggles sont COSMÉTIQUES côté UI
+    //  (l'étape passe en orange "attend ton action" si manuelle ET non vide),
+    //  ET t'offrent un panneau d'action directe sous le pipeline.
+    //  L'avancement reste automatique côté backend tant que ce n'est pas
+    //  branché aux fonctions Netlify (process-intakes, stripe-webhook).
+    //  Pour activer le vrai blocage automatique, voir OPERATIONS.md.
+    _modesKey() { return `pv-modes-${this.config.apiPrefix}`; },
+    _loadModes() {
+      try {
+        const raw = localStorage.getItem(this._modesKey());
+        return raw ? JSON.parse(raw) : {};
+      } catch { return {}; }
+    },
+    _saveMode(stageKey, mode) {
+      const modes = this._loadModes();
+      modes[stageKey] = mode;
+      try { localStorage.setItem(this._modesKey(), JSON.stringify(modes)); } catch {}
+    },
+    _isManual(stageKey) {
+      const modes = this._loadModes();
+      // Par défaut : final_ready_review est MANUEL (filet humain natif).
+      // Le reste est AUTO sauf si l'utilisateur a basculé.
+      if (modes[stageKey] !== undefined) return modes[stageKey] === 'manual';
+      return stageKey === 'final_ready_review';
     },
 
     async _loadPipeline(silent = false) {
@@ -584,16 +626,22 @@ function makePipelineView(config) {
       const flow = document.getElementById('pv-pipe-flow');
       if (!flow) return;
       const counts = state.counts || {};
-      // Statuts qui nécessitent une intervention humaine
-      const interventionSet = new Set(this.config.interventionStatuses || [
-        'pending_validation', 'paid', 'final_ready_review',
+      // Étapes pour lesquelles un toggle Auto/Manuel a du sens
+      // (avant chaque étape se trouve un automatisme backend qu'on peut
+      // choisir de bloquer pour valider à la main).
+      const toggleable = new Set(this.config.toggleableStages || [
+        'approved',            // bloquer le auto-dispatch (validation brief)
+        'paid',                // bloquer le auto-finalize (relecture perso avant fabrication)
+        'final_ready_review',  // bloquer l'auto-envoi mail final (defaut MANUEL)
       ]);
       const html = [];
       this.config.stages.forEach((st, idx) => {
         const n = counts[st.key] || 0;
         const empty = n === 0;
-        const needsIntervention = !empty && interventionSet.has(st.key);
-        // Couleur : gris (vide) · orange (action requise) · bleu (en cours auto)
+        const isToggleable = toggleable.has(st.key);
+        const isManual = isToggleable && this._isManual(st.key);
+        const needsIntervention = !empty && isManual;
+        // Couleur : gris (vide) · orange (manuel et non vide) · bleu (auto en cours)
         const color = empty ? 'text-muted'
                     : needsIntervention ? 'warning'
                     : 'accent';
@@ -603,11 +651,20 @@ function makePipelineView(config) {
                          : (!empty ? 'is-active' : '');
         const counterClass = empty ? 'text-text-muted opacity-40'
                            : `text-${color}`;
+        const toggleHtml = isToggleable ? `
+          <button class="pv-mode-toggle mt-2 w-full text-[10px] font-bold uppercase tracking-wider px-2 py-1.5 rounded transition-colors"
+                  data-pv-toggle="${this._escape(st.key)}"
+                  data-pv-current="${isManual ? 'manual' : 'auto'}"
+                  style="border: 1px solid hsl(var(--${isManual ? 'warning' : 'accent'}) / 0.4);
+                         background: hsl(var(--${isManual ? 'warning' : 'accent'}) / 0.08);
+                         color: hsl(var(--${isManual ? 'warning' : 'accent'}));"
+                  title="Cliquer pour basculer entre Auto et Manuel sur cette étape">
+            ${isManual ? '✋ Manuel' : '🤖 Auto'}
+          </button>` : '';
         html.push(`
-          <div class="pv-pipe-stage card flex-1 min-w-[160px] p-3 ${stateClass} relative group"
+          <div class="pv-pipe-stage card flex-1 min-w-[170px] p-3 ${stateClass} relative group"
                style="border-color: ${borderColor};${needsIntervention ? ' background: hsl(var(--warning) / 0.06);' : ''}"
-               data-pv-jump="${this._escape(st.key)}"
-               title="Cliquer pour voir les demandes à cette étape">
+               data-pv-stage-key="${this._escape(st.key)}">
             <div class="flex items-baseline justify-between mb-1">
               <div class="text-[9px] font-bold tracking-widest text-text-muted">ÉTAPE ${idx + 1}</div>
               <div class="text-2xl font-bold ${counterClass}">${n}</div>
@@ -616,9 +673,10 @@ function makePipelineView(config) {
             <div class="text-[11px] text-text-muted mt-1 leading-tight">${this._escape(st.sub || '')}</div>
             ${needsIntervention ? `
               <div class="text-[10px] font-bold uppercase tracking-widest mt-2 flex items-center gap-1" style="color: hsl(var(--warning));">
-                <span>● Action requise</span>
+                <span>● Attend ton action</span>
               </div>` : ''}
-            ${!empty ? `
+            ${toggleHtml}
+            ${(!empty && !isToggleable) ? `
               <div class="absolute bottom-2 right-2 text-[10px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity"
                    style="color: hsl(var(--${color}));">
                 Voir →
@@ -632,9 +690,25 @@ function makePipelineView(config) {
       });
       flow.innerHTML = html.join('');
 
-      // Click sur une étape → bascule sur l'onglet Demandes filtré sur ce statut
-      flow.querySelectorAll('[data-pv-jump]').forEach(el => {
-        const status = el.dataset.pvJump;
+      // Bind des toggles Auto/Manuel
+      flow.querySelectorAll('[data-pv-toggle]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const key = btn.dataset.pvToggle;
+          const current = btn.dataset.pvCurrent;
+          const next = current === 'manual' ? 'auto' : 'manual';
+          this._saveMode(key, next);
+          this._loadPipeline(true);   // refresh visuel
+        });
+      });
+
+      // Panneau "demandes en attente d'action" : combine toutes les demandes
+      // sur les étapes actuellement en mode MANUEL.
+      this._renderPendingActions(state);
+
+      // Click sur une étape (hors clic sur le toggle) → bascule sur l'onglet Demandes filtré
+      flow.querySelectorAll('[data-pv-stage-key]').forEach(el => {
+        const status = el.dataset.pvStageKey;
         const n = counts[status] || 0;
         if (n === 0) {
           el.style.cursor = 'default';
@@ -642,6 +716,7 @@ function makePipelineView(config) {
           return;
         }
         el.style.cursor = 'pointer';
+        el.title = 'Cliquer pour voir les demandes à cette étape';
         el.addEventListener('click', () => {
           this.state.statusFilter = status;
           this.state.selectedId = null;
@@ -668,6 +743,128 @@ function makePipelineView(config) {
           </div>
         `;
       }).join('');
+    },
+
+    // Panneau "En attente de ton action" : liste les demandes coincées
+    // sur des étapes actuellement en mode MANUEL, avec actions directes.
+    _renderPendingActions(state) {
+      const panel = document.getElementById('pv-pipe-pending-actions');
+      const list = document.getElementById('pv-pipe-pending-list');
+      const countEl = document.getElementById('pv-pipe-pending-count');
+      if (!panel || !list) return;
+
+      const toggleable = new Set(this.config.toggleableStages || [
+        'approved', 'paid', 'final_ready_review',
+      ]);
+      const manualStages = [...toggleable].filter(k => this._isManual(k));
+      const counts = state.counts || {};
+      const totalPending = manualStages.reduce((sum, k) => sum + (counts[k] || 0), 0);
+
+      if (totalPending === 0) {
+        panel.hidden = true;
+        return;
+      }
+      panel.hidden = false;
+
+      // Filtre dans state.recent les intakes sur étapes manuelles
+      const recent = state.recent || [];
+      const pending = recent.filter(i => manualStages.includes(i.status));
+      countEl.textContent = `${totalPending} demande(s) coincée(s) — ${pending.length} affichée(s)`;
+
+      if (pending.length === 0) {
+        list.innerHTML = `
+          <div class="text-sm text-text-muted py-3 text-center">
+            ${totalPending} demande(s) en attente. Va voir l'onglet Demandes pour la liste complète et agir.
+          </div>
+          <button id="pv-pending-goto-dashboard" class="btn btn-secondary w-full">Aller voir toutes les demandes</button>
+        `;
+        const btn = document.getElementById('pv-pending-goto-dashboard');
+        if (btn) btn.onclick = () => {
+          this.state.statusFilter = manualStages[0];
+          this.switchTab('dashboard');
+        };
+        return;
+      }
+
+      list.innerHTML = pending.map(i => {
+        const fullName = `${i.client_first_name || ''} ${i.client_last_name || ''}`.trim() || '(anonyme)';
+        const statusLabel = this.config.statusLabels[i.status] || i.status;
+        const stageActions = this._stageActionsFor(i);
+        return `
+          <div class="flex items-center justify-between gap-3 py-3 px-3 rounded border border-warning/30 bg-warning/5">
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-bold truncate">${this._escape(fullName)} <span class="text-text-muted font-normal">· ${this._escape(i.company_name || '')}</span></div>
+              <div class="text-[11px] text-text-muted">${this._escape(statusLabel)} · ${this._fmtDate(i.created_at)}</div>
+            </div>
+            <div class="flex gap-2 shrink-0">
+              ${stageActions.map(a => `<button class="btn btn-${a.cls} text-xs" data-pv-pending-act="${a.id}" data-pv-intake="${i.id}">${this._escape(a.label)}</button>`).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Bind les actions directes
+      list.querySelectorAll('[data-pv-pending-act]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const intakeId = btn.dataset.pvIntake;
+          const actId = btn.dataset.pvPendingAct;
+          const intake = pending.find(i => i.id === intakeId);
+          if (!intake) return;
+          await this._runQuickAction(actId, intake);
+        });
+      });
+    },
+
+    // Liste des actions disponibles directement depuis le panneau pending,
+    // selon le statut de l'intake.
+    _stageActionsFor(intake) {
+      const acts = [];
+      if (intake.status === 'pending_validation') {
+        acts.push({ id: 'approve', label: 'Approuver', cls: 'primary' });
+        acts.push({ id: 'reject', label: 'Refuser', cls: 'secondary' });
+      }
+      if (intake.status === 'approved') {
+        acts.push({ id: 'dispatch', label: 'Lancer fabrication', cls: 'primary' });
+      }
+      if (intake.status === 'paid') {
+        acts.push({ id: 'finalize', label: 'Lancer finalisation', cls: 'primary' });
+      }
+      if (intake.status === 'final_ready_review') {
+        acts.push({ id: 'approve_final', label: 'Valider et envoyer', cls: 'primary' });
+      }
+      acts.push({ id: 'detail', label: 'Détail', cls: 'secondary' });
+      return acts;
+    },
+
+    async _runQuickAction(actId, intake) {
+      const fullName = `${intake.client_first_name || ''} ${intake.client_last_name || ''}`.trim();
+      if (actId === 'detail') return this._openIntakeDetail(intake);
+      if (actId === 'reject') {
+        const reason = prompt('Motif du refus (optionnel) :') ?? null;
+        if (reason === null) return;
+        await this._call('reject_intake', { id: intake.id, reason });
+        await this._loadPipeline();
+        return;
+      }
+      const labels = {
+        approve: 'Approuver et lancer',
+        dispatch: 'Lancer la fabrication',
+        finalize: 'Lancer la finalisation',
+        approve_final: 'Valider et envoyer le mail au client',
+      };
+      const methods = {
+        approve: 'approve_intake',
+        dispatch: 'dispatch_now',
+        finalize: 'finalize_now',
+        approve_final: 'approve_final',
+      };
+      if (!confirm(`${labels[actId]} pour :\n\n${fullName} · ${intake.company_name || ''}`)) return;
+      const r = await this._call(methods[actId], { id: intake.id });
+      if (r && r.ok && actId === 'approve') {
+        // Enchaîne approve + dispatch
+        await this._call('dispatch_now', { id: intake.id });
+      }
+      await this._loadPipeline();
     },
 
     _renderPipelineRecent(recent) {
