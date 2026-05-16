@@ -741,14 +741,14 @@ const Mails = {
       <div class="bg-surface rounded-2xl shadow-hero w-full max-w-2xl h-[80vh] overflow-hidden border border-border animate-slide-up flex flex-col">
         <div class="px-6 pt-4 pb-3 flex items-center justify-between border-b border-border bg-surface-elevated">
           <div>
-            <div class="hero-kicker mb-0.5">TEMPLATES MAIL</div>
+            <div class="hero-kicker mb-0.5">MODÈLES MAIL</div>
             <h3 class="text-base font-bold">Tes modèles HTML réutilisables</h3>
           </div>
           <button id="tm-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg transition-colors text-xl leading-none">×</button>
         </div>
         <div id="tm-list" class="flex-1 overflow-y-auto p-4 space-y-2"></div>
         <div class="px-6 py-3 border-t border-border bg-surface-elevated text-[11px] text-text-muted">
-          Pour créer un nouveau template : ouvre un mail dans le composer, écris ton HTML, clique sur "Templates ▾ → Sauvegarder le contenu actuel comme template".
+          Pour créer un nouveau modèle : ouvre un mail dans le composer, écris ton HTML, clique sur "Modèles ▾ → Sauvegarder le contenu actuel comme modèle".
         </div>
       </div>
     `;
@@ -764,7 +764,7 @@ const Mails = {
       if (!tpls.length) {
         listEl.innerHTML = `
           <div class="text-center py-12 text-text-muted text-sm">
-            Aucun template enregistré.
+            Aucun modèle enregistré.
           </div>`;
         return;
       }
@@ -793,7 +793,7 @@ const Mails = {
         btn.onclick = async () => {
           const tid = btn.dataset.tmRemove;
           const tpl = tpls.find(x => x.id === tid);
-          if (!confirm(`Supprimer le template "${tpl && tpl.name}" ?`)) return;
+          if (!confirm(`Supprimer le modèle "${tpl && tpl.name}" ?`)) return;
           const r = await App.api.mail_template_remove({ id: tid });
           if (r && r.ok) reload();
           else alert('Échec : ' + (r && r.error || 'inconnu'));
@@ -918,16 +918,16 @@ const Mails = {
                 <div class="relative">
                   <button id="cmp-tpl-trigger" class="px-2.5 py-1 rounded-lg font-semibold text-text-muted hover:bg-bg flex items-center gap-1">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                    Templates ▾
+                    Modèles ▾
                   </button>
                   <div id="cmp-tpl-menu" class="hidden absolute right-0 top-full mt-1 w-72 rounded-xl border border-border bg-surface shadow-lift z-30 max-h-80 overflow-y-auto">
                     <div id="cmp-tpl-list" class="py-1"></div>
                     <div class="border-t border-border py-1">
                       <button id="cmp-tpl-save" class="w-full px-4 py-2 text-left text-xs hover:bg-bg flex items-center gap-2 text-accent font-semibold">
-                        <span>+</span> Sauvegarder le contenu actuel comme template
+                        <span>+</span> Sauvegarder le contenu actuel comme modèle
                       </button>
                       <button id="cmp-tpl-manage" class="w-full px-4 py-2 text-left text-xs hover:bg-bg flex items-center gap-2 text-text-muted">
-                        <span>⚙</span> Gérer mes templates…
+                        <span>⚙</span> Gérer mes modèles…
                       </button>
                     </div>
                   </div>
@@ -1346,7 +1346,7 @@ const Mails = {
       const r = await App.api.mail_templates_list();
       const tpls = (r && r.ok) ? (r.templates || []) : [];
       if (!tpls.length) {
-        tplList.innerHTML = '<div class="px-4 py-3 text-xs text-text-muted">Aucun template encore. Sauvegarde ton contenu actuel ci-dessous.</div>';
+        tplList.innerHTML = '<div class="px-4 py-3 text-xs text-text-muted">Aucun modèle encore. Sauvegarde ton contenu actuel ci-dessous.</div>';
         return;
       }
       tplList.innerHTML = tpls.map(t => `
@@ -1400,10 +1400,10 @@ const Mails = {
         alert('Le contenu est vide. Écris quelque chose avant de sauvegarder.');
         return;
       }
-      const name = prompt('Nom du template (ex: "Devis envoyé", "Suivi 1 mois") :');
+      const name = prompt('Nom du modèle (ex : "Devis envoyé", "Suivi 1 mois") :');
       if (!name) return;
       const useSubject = subjectInput.value.trim();
-      const wantSubj = useSubject && confirm(`Sauvegarder aussi le sujet "${useSubject}" comme sujet par défaut du template ?`);
+      const wantSubj = useSubject && confirm(`Sauvegarder aussi l'objet "${useSubject}" comme objet par défaut du modèle ?`);
       const r = await App.api.mail_template_save({
         template: { name, body_html: htmlContent, subject_default: wantSubj ? useSubject : '' }
       });
@@ -1411,9 +1411,9 @@ const Mails = {
         tplMenu.classList.add('hidden');
         // Petite confirmation visuelle
         const status = overlay.querySelector('#cmp-status');
-        status.textContent = `✓ Template "${name}" sauvegardé.`;
+        status.textContent = `✓ Modèle "${name}" sauvegardé.`;
         status.className = 'text-xs text-success';
-        setTimeout(() => { if (status.textContent.startsWith('✓ Template')) status.textContent = ''; }, 3000);
+        setTimeout(() => { if (status.textContent.startsWith('✓ Modèle')) status.textContent = ''; }, 3000);
       } else {
         alert('Échec sauvegarde : ' + (r && r.error || 'inconnu'));
       }
