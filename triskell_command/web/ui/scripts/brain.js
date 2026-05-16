@@ -18,45 +18,61 @@ const Brain = {
   async render(container) {
     container.innerHTML = `
       <section class="animate-slide-up">
-        <div class="mb-5 sm:mb-6 flex items-end justify-between flex-wrap gap-3">
+        <!-- HERO compact -->
+        <div class="mb-5 flex items-end justify-between flex-wrap gap-3">
           <div class="min-w-0 flex-1">
-            <div class="hero-kicker mb-2">BRAIN</div>
-            <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Vide ton cerveau ici.</h1>
-            <p class="hero-subtitle">Idées, tâches, infos en vrac. Claude classe et te rappelle au bon moment. Partagé avec Thomas.</p>
+            <div class="hero-kicker mb-1">BRAIN</div>
+            <h1 class="hero-title hero-title--md mb-1">Vide ton cerveau ici.</h1>
+            <p class="hero-subtitle">Décharge tes idées, Claude les classe, te rappelle au bon moment. Partagé avec Thomas.</p>
           </div>
-          <div class="flex gap-2 w-full sm:w-auto">
-            <button id="b-new" class="btn btn-primary flex-1 sm:flex-none justify-center">
+          <div class="flex gap-2">
+            <button id="b-new" class="btn btn-primary justify-center" title="Note avec image / options avancées">
               <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
               Nouvelle note
             </button>
-            <button id="b-refresh" class="btn btn-secondary justify-center">Rafraîchir</button>
+            <button id="b-refresh" class="btn btn-secondary justify-center" title="Rafraîchir">↻</button>
           </div>
         </div>
 
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-5 gap-3">
-          <!-- Filtre status -->
-          <div class="flex gap-2 text-[11px] overflow-x-auto -mx-1 px-1">
-            <button data-bfilter="open"     class="b-filter is-active whitespace-nowrap">À traiter</button>
-            <button data-bfilter="done"     class="b-filter whitespace-nowrap">Fait</button>
-            <button data-bfilter="archived" class="b-filter whitespace-nowrap">Archivé</button>
+        <!-- QUICK-ADD inline (pour vider vite) -->
+        <div class="card p-3 mb-5 b-quickadd">
+          <textarea id="b-quick" rows="1" placeholder="Tape une idée ici et appuie sur Entrée…"
+                    class="w-full px-2 py-1.5 text-sm bg-transparent border-0 focus:outline-none resize-none font-sans leading-relaxed"></textarea>
+          <div class="flex items-center justify-between mt-1 text-[11px] text-text-muted">
+            <span id="b-quick-hint">Entrée = envoyer · Maj+Entrée = saut de ligne</span>
+            <span id="b-quick-status"></span>
           </div>
-          <!-- Filtre auteur + tri -->
+        </div>
+
+        <!-- STATS BAR -->
+        <div id="b-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5"></div>
+
+        <!-- PRIORITÉ + RAPPELS À VENIR (sections dynamiques) -->
+        <div id="b-priority"></div>
+        <div id="b-reminders"></div>
+
+        <!-- TOUTES LES NOTES (filtres + liste) -->
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-3 mt-6">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-text-muted">Toutes les notes</h2>
           <div class="flex flex-wrap gap-2 items-center text-[11px]">
-            <label class="text-text-muted">Auteur :</label>
             <select id="b-author-filter" class="px-2 py-1 rounded-lg bg-bg border border-border">
-              <option value="">Tous</option>
+              <option value="">Tous auteurs</option>
               <option value="jordan">Moi (Jordan)</option>
               <option value="thomas">Thomas</option>
             </select>
-            <label class="text-text-muted ml-2">Tri :</label>
             <select id="b-sort" class="px-2 py-1 rounded-lg bg-bg border border-border">
               <option value="date_desc">Récentes d'abord</option>
               <option value="date_asc">Anciennes d'abord</option>
-              <option value="priority">Par priorité (urgence × importance)</option>
+              <option value="priority">Par priorité</option>
               <option value="cat">Par catégorie (A→Z)</option>
               <option value="tag">Par tag</option>
             </select>
           </div>
+        </div>
+        <div class="flex gap-2 text-[11px] mb-4 overflow-x-auto -mx-1 px-1">
+          <button data-bfilter="open"     class="b-filter is-active whitespace-nowrap">À traiter</button>
+          <button data-bfilter="done"     class="b-filter whitespace-nowrap">Fait</button>
+          <button data-bfilter="archived" class="b-filter whitespace-nowrap">Archivé</button>
         </div>
 
         <div id="b-content"></div>
@@ -76,7 +92,50 @@ const Brain = {
       this.state.sortBy = e.target.value;
       this._load();
     };
+    // Quick-add : Entrée = envoyer, Maj+Entrée = saut de ligne
+    const quick = document.getElementById('b-quick');
+    quick.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        this._quickSubmit();
+      }
+    });
+    // Auto-grow textarea
+    quick.addEventListener('input', () => {
+      quick.style.height = 'auto';
+      quick.style.height = Math.min(quick.scrollHeight, 240) + 'px';
+    });
     await this._load();
+  },
+
+  async _quickSubmit() {
+    const ta = document.getElementById('b-quick');
+    const status = document.getElementById('b-quick-status');
+    const content = (ta.value || '').trim();
+    if (!content) return;
+    ta.disabled = true;
+    status.textContent = 'Claude analyse…';
+    status.className = 'text-text-muted';
+    try {
+      const r = await App.api.brain_add({ content });
+      if (r && r.ok) {
+        ta.value = '';
+        ta.style.height = 'auto';
+        status.textContent = `✓ Ajouté · ${r.note.category || 'classé'}`;
+        status.className = 'text-success';
+        setTimeout(() => { status.textContent = ''; }, 1500);
+        this._load();
+      } else {
+        status.textContent = '✗ ' + ((r && r.error) || 'erreur');
+        status.className = 'text-danger';
+      }
+    } catch (e) {
+      status.textContent = '✗ ' + e;
+      status.className = 'text-danger';
+    } finally {
+      ta.disabled = false;
+      ta.focus();
+    }
   },
 
   _applyAuthorAndSort(notes) {
@@ -124,6 +183,35 @@ const Brain = {
       .b-prio-5 { border-left: 3px solid hsl(var(--danger, 0 84% 60%)); }
       .b-prio-4 { border-left: 3px solid hsl(var(--warning, 38 92% 50%)); }
       .b-prio-3 { border-left: 3px solid hsl(var(--accent)); }
+
+      /* Quick-add inline */
+      .b-quickadd { border: 1px solid hsl(var(--border)); transition: border-color 160ms, box-shadow 160ms; }
+      .b-quickadd:focus-within { border-color: hsl(var(--accent)); box-shadow: 0 0 0 3px hsl(var(--accent) / 0.15); }
+
+      /* Stats bar */
+      .b-stat { padding: 12px 14px; border-radius: 12px; border: 1px solid hsl(var(--border));
+                background: hsl(var(--surface)); }
+      .b-stat-value { font-size: 22px; font-weight: 800; line-height: 1; color: hsl(var(--text)); }
+      .b-stat-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+                      color: hsl(var(--text-muted)); margin-top: 6px; }
+      .b-stat.is-warn .b-stat-value { color: hsl(var(--warning, 38 92% 50%)); }
+      .b-stat.is-warn { background: hsl(var(--warning, 38 92% 50%) / 0.06);
+                        border-color: hsl(var(--warning, 38 92% 50%) / 0.25); }
+
+      /* Rappels à venir */
+      .b-remind-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+                      border-bottom: 1px solid hsl(var(--border)); cursor: pointer; transition: background 120ms; }
+      .b-remind-row:last-child { border-bottom: none; }
+      .b-remind-row:hover { background: hsl(var(--bg)); }
+      .b-remind-date { min-width: 56px; text-align: center; padding: 4px 6px; border-radius: 8px;
+                       background: hsl(var(--accent) / 0.10); }
+      .b-remind-date.is-past { background: hsl(var(--danger, 0 84% 60%) / 0.10); }
+      .b-remind-day { font-size: 11px; font-weight: 700; color: hsl(var(--text)); line-height: 1.1; }
+      .b-remind-time { font-size: 10px; color: hsl(var(--text-muted)); margin-top: 2px; }
+
+      /* Catégorie header */
+      .b-cat-tile { display: flex; align-items: center; gap: 8px; }
+      .b-cat-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     `;
     document.head.appendChild(s);
   },
@@ -145,17 +233,21 @@ const Brain = {
     root.innerHTML = `<div class="card p-6 text-text-muted text-sm">Chargement…</div>`;
     const filter = this.currentFilter || 'open';
     try {
-      // On charge toutes les notes (status courant) puis on applique
-      // les filtres (auteur, tri) côté front pour éviter d'aller-retour.
       const r = await App.api.brain_list({ status: filter, limit: 300 });
       if (!r || !r.ok) {
         root.innerHTML = `<div class="card p-6 text-danger">${(r && r.error) || 'Erreur'}</div>`;
         return;
       }
-      const notes = this._applyAuthorAndSort(r.notes || []);
+      const allNotes = r.notes || [];
+      // Sections de tête : uniquement sur le filtre "open" (à traiter)
+      const showHead = filter === 'open' && !this.state.authorFilter;
+      this._renderStats(allNotes, showHead);
+      this._renderPriorityBlock(showHead ? allNotes : []);
+      this._renderRemindersBlock(showHead ? allNotes : []);
+
+      const notes = this._applyAuthorAndSort(allNotes);
       if (filter === 'open' && !this.state.authorFilter
           && (!this.state.sortBy || this.state.sortBy === 'date_desc' || this.state.sortBy === 'cat')) {
-        // Vue groupée par catégorie (mode par défaut)
         const byCat = {};
         for (const n of notes) {
           const k = n.category || 'Sans catégorie';
@@ -168,12 +260,117 @@ const Brain = {
                 : b.count - a.count);
         this._renderGrouped();
       } else {
-        // Vue plate (filtre auteur actif ou tri custom)
         this._renderFlat(notes);
       }
     } catch (e) {
       root.innerHTML = `<div class="card p-6 text-danger">Erreur : ${e}</div>`;
     }
+  },
+
+  _renderStats(notes, show) {
+    const el = document.getElementById('b-stats');
+    if (!el) return;
+    if (!show) { el.innerHTML = ''; return; }
+    const total = notes.length;
+    const urgentes = notes.filter(n => (n.urgency || 0) >= 4).length;
+    const now = Date.now();
+    const day = 24 * 3600 * 1000;
+    const rappels = notes.filter(n => n.remind_at && !n.reminded_at).length;
+    const aujourdhui = notes.filter(n => {
+      if (!n.remind_at) return false;
+      const t = new Date(n.remind_at).getTime();
+      return t >= now - day && t <= now + day;
+    }).length;
+    const stat = (label, value, accent) => `
+      <div class="b-stat ${accent || ''}">
+        <div class="b-stat-value">${value}</div>
+        <div class="b-stat-label">${label}</div>
+      </div>`;
+    el.innerHTML = stat('À traiter', total) +
+                   stat('Urgentes', urgentes, urgentes > 0 ? 'is-warn' : '') +
+                   stat('Rappels actifs', rappels) +
+                   stat('Sous 24h', aujourdhui, aujourdhui > 0 ? 'is-warn' : '');
+  },
+
+  _renderPriorityBlock(notes) {
+    const el = document.getElementById('b-priority');
+    if (!el) return;
+    const top = notes
+      .filter(n => (n.urgency || 0) * (n.importance || 0) > 0)
+      .sort((a, b) => ((b.urgency || 0) * (b.importance || 0))
+                    - ((a.urgency || 0) * (a.importance || 0)))
+      .slice(0, 3)
+      .filter(n => (n.urgency || 0) >= 3);
+    if (!top.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `
+      <div class="mb-5">
+        <div class="flex items-baseline justify-between mb-2">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-text-muted">🔥 À traiter en priorité</h2>
+          <span class="text-[11px] text-text-muted">${top.length} note${top.length > 1 ? 's' : ''}</span>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          ${top.map(n => this._renderNoteCard(n)).join('')}
+        </div>
+      </div>
+    `;
+    el.querySelectorAll('[data-bnote]').forEach(card => {
+      card.onclick = async () => {
+        const id = card.dataset.bnote;
+        let n = notes.find(x => x.id === id);
+        if (n) this._openDetail(n);
+      };
+    });
+  },
+
+  _renderRemindersBlock(notes) {
+    const el = document.getElementById('b-reminders');
+    if (!el) return;
+    const now = Date.now();
+    const sevenDays = 7 * 24 * 3600 * 1000;
+    const upcoming = notes
+      .filter(n => n.remind_at && !n.reminded_at)
+      .filter(n => {
+        const t = new Date(n.remind_at).getTime();
+        return t >= now - 24 * 3600 * 1000 && t <= now + sevenDays;
+      })
+      .sort((a, b) => new Date(a.remind_at) - new Date(b.remind_at))
+      .slice(0, 5);
+    if (!upcoming.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `
+      <div class="mb-5">
+        <div class="flex items-baseline justify-between mb-2">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-text-muted">⏰ Rappels à venir (7 jours)</h2>
+          <span class="text-[11px] text-text-muted">${upcoming.length}</span>
+        </div>
+        <div class="card overflow-hidden">
+          ${upcoming.map(n => {
+            const t = new Date(n.remind_at);
+            const past = t.getTime() < now;
+            return `
+              <div class="b-remind-row" data-bnote="${this._escape(n.id)}">
+                <div class="b-remind-date ${past ? 'is-past' : ''}">
+                  <div class="b-remind-day">${t.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</div>
+                  <div class="b-remind-time">${t.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm leading-tight truncate">${this._escape(n.summary || n.content || '')}</div>
+                  <div class="text-[11px] text-text-muted mt-0.5">
+                    ${n.urgency ? `🔥 ${n.urgency}/5` : ''} ${n.category ? '· ' + this._escape(n.category) : ''}
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+    el.querySelectorAll('[data-bnote]').forEach(row => {
+      row.onclick = async () => {
+        const id = row.dataset.bnote;
+        let n = notes.find(x => x.id === id);
+        if (n) this._openDetail(n);
+      };
+    });
   },
 
   _renderGrouped() {
@@ -191,7 +388,10 @@ const Brain = {
     root.innerHTML = this.state.groups.map(g => `
       <div class="mb-6">
         <div class="flex items-baseline justify-between mb-3">
-          <div class="b-cat-header">${this._escape(g.category)}</div>
+          <div class="b-cat-tile">
+            <span class="b-cat-dot" style="background:${this._catColor(g.category)}"></span>
+            <span class="b-cat-header">${this._escape(g.category)}</span>
+          </div>
           <div class="text-xs text-text-muted">${g.count} note${g.count > 1 ? 's' : ''}</div>
         </div>
         <div class="space-y-2">
@@ -633,6 +833,15 @@ const Brain = {
     overlay.addEventListener('keydown', e => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendReply(); }
     });
+  },
+
+  // Couleur stable dérivée du nom de la catégorie (hash → teinte HSL)
+  _catColor(name) {
+    const s = String(name || '');
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0xffffffff;
+    const hue = Math.abs(h) % 360;
+    return `hsl(${hue}, 70%, 55%)`;
   },
 
   // ----------------------------------------------------------------------
