@@ -555,7 +555,7 @@ function makePipelineView(config) {
               <span class="font-semibold" style="color: hsl(var(--warning));">attend ton action</span>
             </div>
           </div>
-          <div id="pv-pipe-flow" class="flex items-stretch gap-1 overflow-x-auto pb-2"></div>
+          <div id="pv-pipe-flow" class="flex items-stretch gap-1.5 flex-wrap md:flex-nowrap"></div>
           <div class="mt-6 grid grid-cols-3 gap-3" id="pv-pipe-deadends"></div>
         </div>
 
@@ -686,7 +686,7 @@ function makePipelineView(config) {
             ${isManual ? '✋ Manuel' : '🤖 Auto'}
           </button>` : '';
         html.push(`
-          <div class="pv-pipe-stage card flex-1 min-w-[170px] p-3 ${stateClass} relative group"
+          <div class="pv-pipe-stage card flex-1 basis-0 min-w-0 sm:min-w-[140px] md:min-w-0 p-2.5 ${stateClass} relative group"
                style="border-color: ${borderColor};${needsIntervention ? ' background: hsl(var(--warning) / 0.06);' : ''}"
                data-pv-stage-key="${this._escape(st.key)}">
             <div class="flex items-baseline justify-between mb-1">
@@ -709,7 +709,9 @@ function makePipelineView(config) {
         `);
         if (idx < this.config.stages.length - 1) {
           const flowActive = (counts[this.config.stages[idx + 1].key] || 0) > 0 || !empty;
-          html.push(`<div class="pv-pipe-arrow ${flowActive ? 'is-active' : ''}"></div>`);
+          // Flèches cachées en wrap (mobile) pour éviter l'effet bizarre quand
+          // une étape passe à la ligne. Visibles dès md (≥768px).
+          html.push(`<div class="pv-pipe-arrow hidden md:flex ${flowActive ? 'is-active' : ''}"></div>`);
         }
       });
       flow.innerHTML = html.join('');
