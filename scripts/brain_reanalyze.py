@@ -48,17 +48,20 @@ def main() -> int:
             "category": analysis.get("category") or None,
             "summary":  analysis.get("summary") or None,
             "tags":     analysis.get("tags") or [],
+            "urgency":   analysis.get("urgency"),
+            "importance": analysis.get("importance"),
             "assigned_to": analysis.get("assigned_to"),
         }
         remind = analysis.get("remind_at")
         if remind:
             patch["remind_at"] = remind
+            patch["reminded_at"] = None  # autorise un nouveau rappel
 
         if brain.update_note(nid, patch):
             new = (patch["summary"] or "").strip() or "(vide)"
-            print(f"[{i}/{len(notes)}] {nid[:8]}")
-            print(f"    avant : {old[:100]}")
-            print(f"    après : {new[:100]}")
+            u, imp = analysis.get("urgency"), analysis.get("importance")
+            print(f"[{i}/{len(notes)}] {nid[:8]}  urg={u}  imp={imp}  rappel={remind or '—'}")
+            print(f"    {new[:100]}")
             ok += 1
         else:
             print(f"[{i}/{len(notes)}] {nid[:8]} — update KO")
