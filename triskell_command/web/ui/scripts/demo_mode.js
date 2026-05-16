@@ -430,30 +430,35 @@ const DemoMode = {
     // ============ Prospection en direct (démo) ============
     prospect_generate_mail(payload) {
       const cat = (payload && payload.category) || 'business';
-      const url = (payload && payload.url) || 'exemple.com';
+      const url = (payload && payload.url) || 'https://demo.lagriffe-studio.fr';
       if (cat === 'celebrity') {
         return {
           ok: true,
           target_name: 'Doumbé',
           used_template: 'Approche créateur',
-          subject: 'Quelques mots après votre dernier combat',
+          subject: 'Cédric — un site que j\'ai pensé pour vous',
           body_html: '<p>Bonjour Cédric,</p>'
-            + '<p>Je suis tombé sur votre dernier post Instagram où vous parlez de votre prochain projet — la sincérité de votre approche m\'a marqué.</p>'
-            + '<p>Je dirige <strong>Triskell Studio</strong>, un petit collectif qui aide les créateurs à mieux structurer leur présence en ligne (sites, SEO, vidéo). Pas pour faire votre site à votre place — vous en avez déjà un. Plutôt pour offrir un regard neuf sur des détails techniques qui pourraient amplifier votre audience.</p>'
-            + '<p>Si l\'idée vous parle, on peut prendre 15 min en visio ? Je vous montre ce que je vois, sans engagement.</p>',
+            + '<p>Suite à votre dernier post Instagram sur votre prochain projet, j\'ai imaginé à quoi pourrait ressembler votre univers sur le web. J\'ai pris quelques heures pour <strong>concevoir un site qui colle à votre ligne</strong> — ton brut, focus sur vos combats, calendrier propre.</p>'
+            + '<p><img src="cid:prospect_preview" alt="Aperçu du site" style="max-width:100%;height:auto;display:block;border-radius:8px;border:1px solid #e5e7eb;"></p>'
+            + `<p>Voici à quoi ça ressemble : <a href="${url}"><strong>Découvrir le site</strong></a>. Ouvrez quand vous avez 30 secondes, dites-moi ce que vous en pensez. Si ça vous parle, on bascule sur votre vrai domaine en quelques jours.</p>`,
           source_url: url, category: cat,
+          screenshot_b64: '',
+          screenshot_content_type: '',
         };
       }
       return {
         ok: true,
         target_name: 'Boulangerie Lefèvre',
         used_template: 'Approche commerce local',
-        subject: 'Boulangerie Lefèvre : 3 idées concrètes pour gagner en visibilité',
+        subject: 'Boulangerie Lefèvre — votre nouveau site, prêt à découvrir',
         body_html: '<p>Bonjour Marc,</p>'
-          + '<p>Je suis tombé sur le site de votre boulangerie en cherchant un pâtissier dans le secteur de Plérin — votre carte des spécialités m\'a fait sourire (le kouign-amann breton, vrai bon réflexe).</p>'
-          + '<p>J\'ai jeté un œil rapide à votre fiche Google et à votre site : <strong>il y a 3 choses simples qui pourraient vous amener plus de clients</strong> sans changer votre routine. Je dirige <em>Lagriffe Studio</em>, on bosse beaucoup avec des commerces locaux comme le vôtre.</p>'
-          + '<p>15 min en visio pour vous les montrer ? Si vous voyez l\'intérêt, on regarde la suite. Sinon, vous repartez avec les idées et c\'est tout.</p>',
+          + '<p>J\'ai pris quelques heures pour vous <strong>concevoir un site qui met en valeur votre boulangerie</strong> : votre kouign-amann breton en page d\'accueil, vos horaires bien visibles, un bloc avis Google et la prise de commande en ligne pour les fêtes.</p>'
+          + '<p><img src="cid:prospect_preview" alt="Aperçu du site" style="max-width:100%;height:auto;display:block;border-radius:8px;border:1px solid #e5e7eb;"></p>'
+          + `<p>Voilà à quoi ça ressemble : <a href="${url}"><strong>Voir le site</strong></a>.</p>`
+          + '<p>Si ça vous plaît, en 1 journée on bascule sur votre vrai domaine. Sinon, vous repartez avec les idées et c\'est cadeau.</p>',
         source_url: url, category: cat,
+        screenshot_b64: '',
+        screenshot_content_type: '',
       };
     },
 

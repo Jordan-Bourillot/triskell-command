@@ -1302,7 +1302,9 @@ const Mails = {
     // Pièces jointes + images inline (CID)
     // ----------------------------------------------------------------------
     // Format d'une entrée : { filename, content_b64, content_type, size, inline, cid }
-    const attachments = [];
+    const attachments = Array.isArray(opts.prefilledAttachments)
+      ? opts.prefilledAttachments.map(a => ({ ...a }))
+      : [];
     const MAX_TOTAL_BYTES = 22 * 1024 * 1024; // 22 Mo (la plupart des SMTP plafonnent à 25)
 
     const attListEl   = overlay.querySelector('#cmp-attachments-list');
@@ -2115,8 +2117,8 @@ const Mails = {
             <div class="px-6 pt-5 pb-4 flex items-start justify-between border-b border-border bg-surface-elevated">
               <div>
                 <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">PROSPECTION EN DIRECT</div>
-                <h3 class="text-lg font-bold">Quel type de cible ?</h3>
-                <p class="text-xs text-text-muted mt-1">Claude adaptera le ton, les arguments et le modèle utilisé selon le type de personne ou d'entreprise.</p>
+                <h3 class="text-lg font-bold">À qui présentes-tu ton site ?</h3>
+                <p class="text-xs text-text-muted mt-1">Tu vas envoyer un mail pour leur faire découvrir un site que tu as réalisé pour eux. Le ton du mail s'adapte selon la cible.</p>
               </div>
               <button id="pf-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
             </div>
@@ -2125,13 +2127,13 @@ const Mails = {
                       class="text-left p-5 rounded-2xl border-2 border-border hover:border-accent hover:bg-accent/5 transition-all">
                 <div class="text-3xl mb-2">⭐</div>
                 <div class="text-base font-bold text-text">Célébrités</div>
-                <div class="text-xs text-text-muted mt-1 leading-snug">Artistes, sportifs, créateurs, influenceurs. Ton respectueux et admirateur. Focus sur leur travail et leurs projets.</div>
+                <div class="text-xs text-text-muted mt-1 leading-snug">Artistes, sportifs, créateurs, influenceurs. Ton respectueux, on leur présente une démo créée pour eux.</div>
               </button>
               <button data-cat="business"
                       class="text-left p-5 rounded-2xl border-2 border-border hover:border-accent hover:bg-accent/5 transition-all">
                 <div class="text-3xl mb-2">🏢</div>
                 <div class="text-base font-bold text-text">Autres (entreprises)</div>
-                <div class="text-xs text-text-muted mt-1 leading-snug">Commerces, cabinets, restaurants, artisans. Ton commercial et concret. Focus sur leurs services et leur secteur.</div>
+                <div class="text-xs text-text-muted mt-1 leading-snug">Commerces, cabinets, restaurants, artisans. Ton chaleureux et concret, on leur montre un site prêt à adopter.</div>
               </button>
             </div>
           </div>
@@ -2152,8 +2154,8 @@ const Mails = {
             <div class="px-6 pt-5 pb-4 flex items-start justify-between border-b border-border bg-surface-elevated">
               <div>
                 <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">PROSPECTION ${catLabel.toUpperCase()}</div>
-                <h3 class="text-lg font-bold">${catIcon} URL du site à analyser</h3>
-                <p class="text-xs text-text-muted mt-1">Colle l'adresse du site officiel ou de la page web. Claude va l'analyser et générer un mail personnalisé.</p>
+                <h3 class="text-lg font-bold">${catIcon} URL du site que tu as réalisé</h3>
+                <p class="text-xs text-text-muted mt-1">Colle l'adresse du site que tu as fait pour eux (souvent un sous-domaine de démo). Claude va l'analyser, capturer un aperçu et rédiger le mail de présentation.</p>
               </div>
               <button id="pf-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
             </div>
@@ -2198,9 +2200,30 @@ const Mails = {
             });
             if (r && r.ok) {
               close();
+              const prefilledAttachments = [];
+              let bodyForComposer = r.body_html || '';
+              if (r.screenshot_b64) {
+                prefilledAttachments.push({
+                  filename: `apercu-${(r.target_name || 'site').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) || 'site'}.png`,
+                  content_b64: r.screenshot_b64,
+                  content_type: r.screenshot_content_type || 'image/png',
+                  size: Math.floor((r.screenshot_b64.length || 0) * 0.75),
+                  inline: true,
+                  cid: 'prospect_preview',
+                });
+                // Remplace src="cid:..." par data:... pour que l'aperçu
+                // s'affiche dans l'éditeur. Le composer reconvertit
+                // automatiquement en cid: au moment de l'envoi.
+                const dataUrl = `data:${r.screenshot_content_type || 'image/png'};base64,${r.screenshot_b64}`;
+                bodyForComposer = bodyForComposer.replace(
+                  /<img([^>]*?)src=["']cid:prospect_preview["']([^>]*?)>/gi,
+                  `<img$1data-cid="prospect_preview" src="${dataUrl}"$2>`
+                );
+              }
               this._openComposer({
                 prefilledSubject: r.subject || '',
-                prefilledBodyHtml: r.body_html || '',
+                prefilledBodyHtml: bodyForComposer,
+                prefilledAttachments,
                 title: `Prospection : ${r.target_name || url}`,
               });
             } else {
@@ -2235,7 +2258,7 @@ const Mails = {
                 </svg>
               </div>
               <div class="text-base font-bold text-text mb-1">Claude analyse le site…</div>
-              <div class="text-xs text-text-muted">Récupération du contenu, choix du modèle, personnalisation du mail. Compte 15-30 secondes.</div>
+              <div class="text-xs text-text-muted">Téléchargement du contenu, capture de l'aperçu, choix du modèle, rédaction du mail. Compte 15-40 secondes.</div>
             </div>
           </div>
         `;

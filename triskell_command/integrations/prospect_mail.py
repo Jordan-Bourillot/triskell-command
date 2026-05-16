@@ -1,22 +1,32 @@
 """Génération de mails de prospection en direct.
 
 Workflow :
-1. L'utilisateur colle une URL + choisit une catégorie (celebrity / business)
-2. On télécharge le HTML, on extrait le contenu pertinent
-3. On liste les modèles d'emails existants
-4. On envoie tout à Claude qui choisit le meilleur modèle et l'adapte
-5. On renvoie {subject, body_html, target_name, used_template_name}
+- Jordan a réalisé un site web POUR une célébrité ou une entreprise (par
+  exemple un site de démo / portfolio sur un sous-domaine Triskell).
+- Il veut envoyer un mail à cette célébrité/entreprise pour leur
+  présenter ce site et les inviter à le découvrir.
+- L'utilisateur colle l'URL du site qu'il a réalisé + choisit la catégorie.
+- On télécharge le HTML pour comprendre la cible (qui est-ce, secteur,
+  style du site fait).
+- On capture une image du site via Microlink (best-effort).
+- On liste les modèles d'emails existants.
+- Claude choisit le meilleur modèle, l'adapte, rédige un mail qui PRÉSENTE
+  ce site à la cible.
+- On renvoie {subject, body_html, screenshot_b64?, ...} ; le frontend
+  ouvre le composer pré-rempli avec le mail + l'image en pièce jointe
+  inline (CID) référencée dans le HTML.
 
 Toute la partie IA est synchrone (l'utilisateur attend), donc on garde le
 prompt court et on limite le contexte du site à ~6 000 caractères.
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote_plus
 
 import requests
 from bs4 import BeautifulSoup
@@ -89,55 +99,109 @@ def fetch_and_extract(url: str, timeout: int = 12) -> dict:
     }
 
 
+def grab_screenshot(url: str, timeout: int = 25) -> Optional[dict]:
+    """Capture une image du site via l'API publique Microlink (gratuite,
+    limite raisonnable sans clé). Renvoie {b64, content_type, size} ou
+    None en cas d'échec (best-effort, on continue sans).
+    """
+    try:
+        api = (
+            "https://api.microlink.io/?url=" + quote_plus(url)
+            + "&screenshot=true&meta=false&waitForTimeout=1800"
+            + "&viewport.width=1280&viewport.height=720&fullPage=false"
+        )
+        r = requests.get(api, timeout=timeout)
+        if not r.ok:
+            logger.info("microlink HTTP %s for %s", r.status_code, url)
+            return None
+        data = r.json()
+        if data.get("status") != "success":
+            return None
+        sh_url = (data.get("data") or {}).get("screenshot", {}).get("url")
+        if not sh_url:
+            return None
+        img = requests.get(sh_url, timeout=timeout)
+        if not img.ok:
+            return None
+        b = img.content
+        return {
+            "b64": base64.b64encode(b).decode("ascii"),
+            "content_type": img.headers.get("Content-Type", "image/png"),
+            "size": len(b),
+        }
+    except Exception as exc:
+        logger.info("microlink screenshot failed for %s: %s", url, exc)
+        return None
+
+
 SYSTEM_PROMPT_BASE = """Tu es l'assistant marketing personnel de Jordan Bourillot, fondateur de
 Triskell Studio (Lagriffe Studio = sites web, RankUs Studio = SEO, Studio WoW = vidéo).
 
-Ton job : rédiger un mail de prospection court, sincère, qui montre que Jordan a
-vraiment regardé le site / le travail de la cible avant d'écrire. Pas de copier-coller
-générique, pas de jargon, pas de "j'ai été impressionné par votre travail" creux.
+CONTEXTE — LIS BIEN :
+L'URL que tu reçois est un SITE WEB QUE JORDAN A DÉJÀ CRÉÉ pour la cible
+(célébrité, créateur, entreprise locale, etc.) — sur un sous-domaine Triskell
+ou un domaine de test, pas encore en production officielle. Jordan veut
+envoyer un mail à cette cible pour leur PRÉSENTER ce site qu'il a réalisé
+spécifiquement pour eux, leur donner envie de l'ouvrir, et idéalement
+qu'ils l'adoptent (le rachètent / déploient sur leur vrai domaine).
+
+Ton job : rédiger un mail court, sincère, qui leur fait découvrir CE site
+qu'il a fait pour eux, en mettant l'accent sur le soin apporté et sur ce
+qu'il leur apporte concrètement.
 
 Règles absolues :
-- Tu reçois plusieurs MODÈLES de mails. Tu CHOISIS celui qui colle le mieux
-  à la cible, ET tu l'adaptes (tu ne le sors pas brut). Si aucun modèle ne
-  colle vraiment, tu pars d'une page blanche en gardant le style général.
-- Tu cites 1 ou 2 éléments PRÉCIS du site (un projet, une page, une phrase
-  qui t'a marqué, le nom d'un produit/service). Ça doit prouver que tu as
-  ouvert le site.
-- Ton court : 100-180 mots max corps du mail. Une accroche → un point précis
-  → une proposition simple → une CTA douce.
-- Pas de "Bonjour Madame/Monsieur" (impersonnel). Si tu trouves le prénom
-  dans le site, utilise-le. Sinon "Bonjour" tout court.
-- Ne signe PAS le mail (la signature sera ajoutée automatiquement).
-- Pas d'invention d'éléments : si tu ne sais pas, ne dis rien.
+- Tu reçois plusieurs MODÈLES de mails déjà rédigés par Jordan. Tu CHOISIS
+  celui qui colle le mieux à cette cible et tu l'adaptes (tu ne le sors pas
+  brut). Si aucun ne colle, tu pars d'une page blanche en gardant le style.
+- Le mail DOIT inclure le lien cliquable vers le site (passe par un
+  <a href="URL_DU_SITE">...</a>), avec un texte d'ancre clair ("Découvrir
+  le site", "Voir ce que j'ai imaginé pour vous", etc.). Utilise
+  EXACTEMENT l'URL que je te donne.
+- Une APERÇU IMAGE du site sera attaché au mail. Insère un placeholder
+  `<img src="cid:prospect_preview">` à un endroit pertinent (juste après
+  l'accroche, ou avant la CTA, au choix). Si l'image n'est pas dispo, le
+  frontend retirera la balise sans souci.
+- Cite 1 ou 2 éléments PRÉCIS de la cible (un projet, une page, une phrase,
+  un produit / service). Ça doit prouver que tu as vraiment regardé qui
+  ils sont.
+- Ton court : 110-200 mots max corps du mail. Accroche → ce que tu as fait
+  → preview + lien → ce que ça leur apporte → CTA douce.
+- Pas de "Bonjour Madame/Monsieur". Si tu trouves le prénom dans le site,
+  utilise-le. Sinon "Bonjour" tout court.
+- Ne signe PAS le mail (signature ajoutée automatiquement).
+- Pas d'invention : si tu ne sais pas, ne dis rien.
 
 Tu réponds OBLIGATOIREMENT au format JSON strict avec ces clés :
 {
   "target_name": "Nom de la personne ou de l'entreprise (texte court)",
-  "used_template": "Nom du modèle utilisé (ou 'aucun' si tu pars de zéro)",
+  "used_template": "Nom du modèle utilisé (ou 'aucun')",
   "subject": "Objet du mail (court, sans guillemets autour)",
-  "body_html": "<p>...</p> HTML simple avec <p>, <br>, <strong>, <em>, <a href>."
+  "body_html": "<p>...</p> HTML simple : <p>, <br>, <strong>, <em>, <a href>, <img src=\\"cid:prospect_preview\\">."
 }
 """
 
 CATEGORY_HINTS = {
     "celebrity": (
-        "CATÉGORIE : CÉLÉBRITÉ.\n"
-        "- Ton respectueux et admiratif (sans flagornerie).\n"
-        "- Pas d'arguments commerciaux frontaux. On propose plutôt une\n"
-        "  collaboration, un échange, un cadeau pertinent.\n"
-        "- Mentionne précisément un projet/œuvre/post récent qui t'a marqué.\n"
-        "- Si la cible a déjà un site et une équipe, ne dis pas \"je peux te\n"
-        "  refaire ton site\" — ça serait maladroit. Trouve un angle plus fin."
+        "CATÉGORIE : CÉLÉBRITÉ / CRÉATEUR / FIGURE PUBLIQUE.\n"
+        "- Ton respectueux, posé, jamais flagorneur.\n"
+        "- Insiste sur l'idée que le site a été pensé SPÉCIALEMENT pour eux,\n"
+        "  en réaction à leur univers / leurs créations / leur ligne éditoriale.\n"
+        "- Si tu trouves dans le site des références à leur travail (citations,\n"
+        "  visuels, projets), souligne-le pour montrer la cohérence avec leur\n"
+        "  identité.\n"
+        "- CTA douce type \"Ouvrez quand vous avez 30 secondes, dites-moi ce que\n"
+        "  vous en pensez\". Pas de pression commerciale."
     ),
     "business": (
         "CATÉGORIE : ENTREPRISE / COMMERCE.\n"
-        "- Ton commercial mais chaleureux, comme un voisin qui passe dire bonjour.\n"
-        "- Identifie le secteur (boulangerie, cabinet, restaurant, garage…).\n"
-        "- Mentionne 1 chose concrète vue sur leur site (un produit, un service,\n"
-        "  une mention dans les actualités, un défaut visible).\n"
-        "- Propose un service Triskell pertinent (site + Maps si commerce local,\n"
-        "  SEO si déjà un site, vidéo si activité visuelle).\n"
-        "- CTA douce type \"15 min en visio pour vous montrer ce que je vois\"."
+        "- Ton chaleureux et concret, comme un voisin qui montre une démo.\n"
+        "- Identifie clairement le secteur (boulangerie, cabinet, restaurant…)\n"
+        "  d'après le site que tu as fait pour eux.\n"
+        "- Mentionne ce que le site permet de faire mieux que ce qu'ils ont\n"
+        "  actuellement (ex : prise de RDV en ligne, mise en avant des avis\n"
+        "  Google, fiche Maps optimisée…).\n"
+        "- CTA claire : \"Si ça vous plaît, en 1 jour on bascule sur votre vrai\n"
+        "  domaine. Sinon, vous repartez avec les idées\"."
     ),
 }
 
@@ -192,15 +256,18 @@ def generate(url: str, category: str, templates: list[dict],
         f"{CATEGORY_HINTS.get(category, '')}\n\n"
         f"MODÈLES DISPONIBLES (choisis-en un ou pars de zéro si rien ne colle) :\n"
         f"{tpl_block}\n\n"
-        f"SITE CIBLE À ANALYSER :\n"
+        f"SITE DÉJÀ RÉALISÉ POUR LA CIBLE (à présenter dans le mail) :\n"
         f"URL : {url}\n"
         f"Domaine : {site['domain']}\n"
         f"Titre : {site['title']}\n"
         f"Titre OG : {site['og_title']}\n"
         f"H1 : {site['h1']}\n"
         f"Description : {site['description']}\n"
-        f"Réseaux sociaux : {', '.join(site['social_links'][:5]) or '(non trouvés)'}\n"
+        f"Réseaux sociaux trouvés sur le site : {', '.join(site['social_links'][:5]) or '(aucun)'}\n"
         f"Contenu (extrait) :\n{site['body_text']}\n\n"
+        f"Pour rappel : ce site a été créé par Jordan pour cette cible. Tu rédiges\n"
+        f"un mail qui le leur présente et leur donne envie de cliquer pour le voir.\n"
+        f"Lien à utiliser tel quel dans le mail : {url}\n\n"
         f"Réponds maintenant au format JSON strict, rien d'autre."
     )
 
@@ -240,12 +307,35 @@ def generate(url: str, category: str, templates: list[dict],
         return {"ok": False, "error": "Réponse Claude non parsable en JSON.",
                 "raw": text[:500]}
 
+    body_html = (data.get("body_html") or "").strip()
+
+    # Capture d'écran du site (best-effort). Si OK, on s'attend à ce que
+    # Claude ait déjà inséré <img src="cid:prospect_preview"> dans body_html.
+    # Sinon, on injecte l'image en haut du body. Si on n'a pas réussi à
+    # capturer, on retire l'éventuelle balise placeholder.
+    screenshot = grab_screenshot(url)
+    if screenshot:
+        if "cid:prospect_preview" not in body_html:
+            # Claude a oublié de placer le placeholder : on l'ajoute en haut
+            preview_img = ('<p style="margin:0 0 1em 0"><img src="cid:prospect_preview" '
+                           'alt="Aperçu du site" style="max-width:100%;height:auto;'
+                           'display:block;border-radius:8px;border:1px solid #e5e7eb;"></p>')
+            body_html = preview_img + body_html
+    else:
+        # Pas de screenshot : on retire les balises placeholder vides
+        body_html = re.sub(
+            r'<img[^>]*src=["\']cid:prospect_preview["\'][^>]*>',
+            "", body_html
+        )
+
     return {
         "ok": True,
         "target_name":    (data.get("target_name") or site["title"] or site["domain"])[:200],
         "used_template":  (data.get("used_template") or "aucun")[:120],
         "subject":        (data.get("subject") or "").strip(),
-        "body_html":      (data.get("body_html") or "").strip(),
+        "body_html":      body_html,
         "source_url":     url,
         "category":       category,
+        "screenshot_b64": (screenshot or {}).get("b64") or "",
+        "screenshot_content_type": (screenshot or {}).get("content_type") or "",
     }
