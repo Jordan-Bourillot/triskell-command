@@ -38,6 +38,7 @@ PUBLIC_API_PATHS = {
     "/api/login",
     "/api/me",  # /me peut être appelé sans auth → renvoie {ok:true, connected:false}
     "/api/push/public_key",  # clé VAPID publique (pas un secret)
+    "/api/billing/webhook",  # Stripe doit pouvoir poster sans cookie
 }
 
 # Utilisateurs reconnus (étendre ici si on ajoute du monde)
