@@ -2113,9 +2113,12 @@ const Mails = {
     ov.className = 'fixed inset-0 z-[210] flex items-center justify-center p-4';
     ov.style.background = 'rgba(15,23,42,0.78)';
     ov.style.backdropFilter = 'blur(10px)';
-    let step = 'category'; // 'category' | 'businessKind' | 'url' | 'loading'
+    let step = 'category'; // 'category' | 'celebrityKind' | 'businessKind' | 'url' | 'loading'
     let chosenCategory = null;
-    let chosenSubtype = null; // 'template' | 'personalized' (uniquement si business)
+    // Subtype :
+    //  - business    → 'template' | 'personalized'
+    //  - celebrity   → 'sport' | 'influencer'
+    let chosenSubtype = null;
 
     const render = () => {
       if (step === 'category') {
@@ -2149,14 +2152,47 @@ const Mails = {
         ov.querySelectorAll('[data-cat]').forEach(b => {
           b.onclick = () => {
             chosenCategory = b.dataset.cat;
-            // Pour les entreprises : étape intermédiaire (modèle vs perso)
-            // Pour les célébrités : on saute direct à l'URL (toujours perso)
-            if (chosenCategory === 'business') {
-              step = 'businessKind';
-            } else {
-              chosenSubtype = 'personalized';
-              step = 'url';
-            }
+            // Chaque catégorie a maintenant son étape intermédiaire
+            step = chosenCategory === 'business' ? 'businessKind' : 'celebrityKind';
+            render();
+          };
+        });
+      } else if (step === 'celebrityKind') {
+        ov.innerHTML = `
+          <div class="bg-surface rounded-2xl shadow-hero w-full max-w-lg border border-border animate-slide-up overflow-hidden">
+            <div class="px-6 pt-5 pb-4 flex items-start justify-between border-b border-border bg-surface-elevated">
+              <div>
+                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">PROSPECTION CÉLÉBRITÉ</div>
+                <h3 class="text-lg font-bold">⭐ Quel type de personnalité ?</h3>
+                <p class="text-xs text-text-muted mt-1">Le ton, les angles et le modèle de mail utilisé changent selon le profil.</p>
+              </div>
+              <button id="pf-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
+            </div>
+            <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button data-sub="sport"
+                      class="text-left p-5 rounded-2xl border-2 border-border hover:border-accent hover:bg-accent/5 transition-all">
+                <div class="text-3xl mb-2">🏆</div>
+                <div class="text-base font-bold text-text">Sportif</div>
+                <div class="text-xs text-text-muted mt-1 leading-snug">Boxeur, footballeur, MMA, cycliste, athlète, etc. Ton respectueux et concret — focus carrière, palmarès, prochains événements, sponsors.</div>
+              </button>
+              <button data-sub="influencer"
+                      class="text-left p-5 rounded-2xl border-2 border-border hover:border-accent hover:bg-accent/5 transition-all">
+                <div class="text-3xl mb-2">📱</div>
+                <div class="text-base font-bold text-text">Influenceur / créateur</div>
+                <div class="text-xs text-text-muted mt-1 leading-snug">YouTubeur, TikTokeur, Instagrameur, podcaster, streamer. Ton décontracté, focus sur l'univers de contenu, la communauté, les partenariats.</div>
+              </button>
+            </div>
+            <div class="px-5 pb-4 flex items-center">
+              <button id="pf-back" class="text-xs text-text-muted hover:text-text">← Changer de catégorie</button>
+            </div>
+          </div>
+        `;
+        ov.querySelector('#pf-close').onclick = close;
+        ov.querySelector('#pf-back').onclick = () => { step = 'category'; render(); };
+        ov.querySelectorAll('[data-sub]').forEach(b => {
+          b.onclick = () => {
+            chosenSubtype = b.dataset.sub;
+            step = 'url';
             render();
           };
         });
@@ -2213,6 +2249,14 @@ const Mails = {
           kicker = 'PROSPECTION ENTREPRISE · PERSONNALISÉ';
           urlTitle = '🎯 URL du site personnalisé';
           urlHint = "Colle l'adresse du site que tu as déjà adapté à leurs infos. Le mail dira qu'il est prêt à être déployé sur leur vrai domaine.";
+        } else if (chosenCategory === 'celebrity' && chosenSubtype === 'sport') {
+          kicker = 'PROSPECTION CÉLÉBRITÉ · SPORTIF';
+          urlTitle = '🏆 URL du site que tu as réalisé';
+          urlHint = "Colle l'adresse du site que tu as conçu pour ce sportif. Claude utilisera un ton respectueux et orientera le mail autour de sa carrière et son palmarès.";
+        } else if (chosenCategory === 'celebrity' && chosenSubtype === 'influencer') {
+          kicker = 'PROSPECTION CÉLÉBRITÉ · INFLUENCEUR';
+          urlTitle = '📱 URL du site que tu as réalisé';
+          urlHint = "Colle l'adresse du site que tu as conçu pour ce créateur. Claude adoptera un ton décontracté et parlera de son univers de contenu et sa communauté.";
         }
         ov.innerHTML = `
           <div class="bg-surface rounded-2xl shadow-hero w-full max-w-lg border border-border animate-slide-up overflow-hidden">
@@ -2244,8 +2288,8 @@ const Mails = {
         ov.querySelector('#pf-close').onclick = close;
         ov.querySelector('#pf-cancel').onclick = close;
         ov.querySelector('#pf-back').onclick = () => {
-          // Si business → retour au choix Modèle/Perso. Sinon → choix catégorie.
-          step = (chosenCategory === 'business') ? 'businessKind' : 'category';
+          // Retour au sous-choix de la catégorie courante
+          step = chosenCategory === 'business' ? 'businessKind' : 'celebrityKind';
           render();
         };
         const urlInput = ov.querySelector('#pf-url');

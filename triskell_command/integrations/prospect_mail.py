@@ -191,16 +191,46 @@ Tu réponds OBLIGATOIREMENT au format JSON strict avec ces clés :
 """
 
 CATEGORY_HINTS = {
+    # Conservé pour rétrocompatibilité (sans sous-type célébrité)
     "celebrity": (
-        "CATÉGORIE : CÉLÉBRITÉ / CRÉATEUR / FIGURE PUBLIQUE.\n"
+        "CATÉGORIE : CÉLÉBRITÉ.\n"
         "- Ton respectueux, posé, jamais flagorneur.\n"
-        "- Insiste sur l'idée que le site a été pensé SPÉCIALEMENT pour eux,\n"
-        "  en réaction à leur univers / leurs créations / leur ligne éditoriale.\n"
-        "- Si tu trouves dans le site des références à leur travail (citations,\n"
-        "  visuels, projets), souligne-le pour montrer la cohérence avec leur\n"
-        "  identité.\n"
-        "- CTA douce type \"Ouvrez quand vous avez 30 secondes, dites-moi ce que\n"
-        "  vous en pensez\". Pas de pression commerciale."
+        "- Insiste sur l'idée que le site a été pensé SPÉCIALEMENT pour eux.\n"
+        "- CTA douce type \"Ouvrez quand vous avez 30 secondes\"."
+    ),
+    "celebrity_sport": (
+        "CATÉGORIE : CÉLÉBRITÉ — SPORTIF / SPORTIVE.\n"
+        "Cible : boxeur, footballeur, MMA, cycliste, athlète, basketteur, etc.\n"
+        "- Ton respectueux et concret, comme un fan qui connaît leur carrière.\n"
+        "- Mentionne 1 ou 2 éléments PRÉCIS : un combat / match / record / titre\n"
+        "  / palmarès / prochain événement vu sur le site, dans leurs interviews\n"
+        "  ou leurs réseaux. Ça doit prouver que tu suis leur actu.\n"
+        "- Insiste sur le fait que le site reflète leur identité de compétiteur :\n"
+        "  palmarès mis en avant, calendrier des prochains événements, espace\n"
+        "  sponsors / partenaires, presse, fan-zone.\n"
+        "- Pas de jargon commercial. Pas de \"pack visibilité\" ou \"booster\n"
+        "  votre présence\". Parle plutôt de \"un outil au service de votre\n"
+        "  carrière\".\n"
+        "- CTA douce : \"Ouvrez quand vous avez 30 secondes entre deux séances,\n"
+        "  dites-moi ce que vous en pensez.\""
+    ),
+    "celebrity_influencer": (
+        "CATÉGORIE : CÉLÉBRITÉ — INFLUENCEUR / CRÉATEUR.\n"
+        "Cible : YouTubeur, TikTokeur, Instagrameur, podcaster, streamer Twitch,\n"
+        "créateur de contenu en général.\n"
+        "- Ton décontracté, comme entre créateurs. Vouvoiement OK mais sans\n"
+        "  raideur, ou tutoiement si le ton du site / des posts est clairement\n"
+        "  tu (tutoiement adapté à la plateforme).\n"
+        "- Mentionne 1 ou 2 éléments PRÉCIS : une vidéo récente, une série de\n"
+        "  contenus, un format signature, un partenariat visible, une mention\n"
+        "  d'audience / abonnés vue sur le site.\n"
+        "- Insiste sur le fait que le site reflète leur univers de contenu :\n"
+        "  vitrine des derniers projets, lien vers les plateformes, espace\n"
+        "  partenariats / brand deals, fan-mail / newsletter, shop éventuel.\n"
+        "- Parle de \"univers\", \"communauté\", \"identité visuelle\" plutôt\n"
+        "  que \"prospects\" et \"conversion\".\n"
+        "- CTA douce : \"Ouvrez le entre deux montages, dites-moi ce que vous\n"
+        "  en pensez.\""
     ),
     "business_template": (
         "CATÉGORIE : ENTREPRISE / COMMERCE — SITE MODÈLE GÉNÉRIQUE.\n"
@@ -304,6 +334,8 @@ def generate(url: str, category: str, templates: list[dict],
     hint_key = category
     if category == "business":
         hint_key = f"business_{subtype}" if subtype in ("template", "personalized") else "business_personalized"
+    elif category == "celebrity":
+        hint_key = f"celebrity_{subtype}" if subtype in ("sport", "influencer") else "celebrity"
     category_hint = CATEGORY_HINTS.get(hint_key) or CATEGORY_HINTS.get("celebrity", "")
 
     user_prompt = (

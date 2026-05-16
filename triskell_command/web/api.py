@@ -1197,8 +1197,15 @@ class Api:
             return {"ok": False, "error": "URL manquante."}
         if category not in ("celebrity", "business"):
             category = "business"
-        if subtype not in ("template", "personalized"):
-            subtype = "personalized" if category == "celebrity" else "personalized"
+        # Subtype valide selon catégorie :
+        #   - business    → 'template' | 'personalized'
+        #   - celebrity   → 'sport' | 'influencer'
+        valid_subs = {
+            "business":  {"template", "personalized"},
+            "celebrity": {"sport", "influencer"},
+        }
+        if subtype not in valid_subs.get(category, set()):
+            subtype = "influencer" if category == "celebrity" else "personalized"
         # Récupère les modèles (best-effort)
         templates = []
         try:

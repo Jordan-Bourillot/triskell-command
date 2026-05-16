@@ -489,19 +489,49 @@ const DemoMode = {
           screenshot_b64: '', screenshot_content_type: '',
         };
       }
+      if (cat === 'celebrity' && sub === 'sport') {
+        return {
+          ok: true,
+          target_name: 'Cédric Doumbé',
+          used_template: 'Approche sportif',
+          subject: 'Cédric — un site pensé pour la suite de votre carrière',
+          body_html: '<p>Bonjour Cédric,</p>'
+            + '<p>J\'ai suivi votre dernier combat — la lecture du round 2 était impressionnante de sang-froid. J\'ai pris quelques heures pour <strong>concevoir un site qui reflète votre identité de combattant</strong> : palmarès en page d\'accueil, calendrier des prochains événements, espace partenaires et fan-zone.</p>'
+            + '<p><img src="cid:prospect_preview" alt="Aperçu du site" style="max-width:100%;height:auto;display:block;border-radius:8px;border:1px solid #e5e7eb;"></p>'
+            + `<p><a href="${url}"><strong>Découvrir le site</strong></a></p>`
+            + '<p>Pas un site \"de boxeur générique\" — un outil au service de votre carrière. Ouvrez quand vous avez 30 secondes entre deux séances, dites-moi ce que vous en pensez.</p>',
+          source_url: url, category: cat, subtype: sub,
+          screenshot_b64: '', screenshot_content_type: '',
+        };
+      }
+      if (cat === 'celebrity' && sub === 'influencer') {
+        return {
+          ok: true,
+          target_name: 'Squeezie',
+          used_template: 'Approche créateur de contenu',
+          subject: 'Une vitrine web qui colle à ton univers',
+          body_html: '<p>Salut Lucas,</p>'
+            + '<p>J\'ai regardé ta dernière série Qui est l\'imposteur et le format Stories. J\'ai pris quelques heures pour <strong>imaginer une vitrine web qui colle à ton univers de contenu</strong> : tes derniers projets en page d\'accueil, lien direct vers tes plateformes, espace partenariats / brand deals et un coin newsletter pour ta communauté.</p>'
+            + '<p><img src="cid:prospect_preview" alt="Aperçu du site" style="max-width:100%;height:auto;display:block;border-radius:8px;border:1px solid #e5e7eb;"></p>'
+            + `<p><a href="${url}"><strong>Ouvrir la démo</strong></a></p>`
+            + '<p>Pas un site \"de YouTubeur classique\" — quelque chose qui prolonge ton identité visuelle. Ouvre-le entre deux montages, dis-moi ce que tu en penses.</p>',
+          source_url: url, category: cat, subtype: sub,
+          screenshot_b64: '', screenshot_content_type: '',
+        };
+      }
       if (cat === 'celebrity') {
+        // Fallback générique célébrité (si pas de subtype)
         return {
           ok: true,
           target_name: 'Doumbé',
           used_template: 'Approche créateur',
           subject: 'Cédric — un site que j\'ai pensé pour vous',
           body_html: '<p>Bonjour Cédric,</p>'
-            + '<p>Suite à votre dernier post Instagram sur votre prochain projet, j\'ai imaginé à quoi pourrait ressembler votre univers sur le web. J\'ai pris quelques heures pour <strong>concevoir un site qui colle à votre ligne</strong> — ton brut, focus sur vos combats, calendrier propre.</p>'
+            + '<p>Suite à votre dernier post Instagram, j\'ai imaginé à quoi pourrait ressembler votre univers sur le web. J\'ai pris quelques heures pour <strong>concevoir un site qui colle à votre ligne</strong>.</p>'
             + '<p><img src="cid:prospect_preview" alt="Aperçu du site" style="max-width:100%;height:auto;display:block;border-radius:8px;border:1px solid #e5e7eb;"></p>'
-            + `<p>Voici à quoi ça ressemble : <a href="${url}"><strong>Découvrir le site</strong></a>. Ouvrez quand vous avez 30 secondes, dites-moi ce que vous en pensez. Si ça vous parle, on bascule sur votre vrai domaine en quelques jours.</p>`,
+            + `<p><a href="${url}"><strong>Découvrir le site</strong></a>. Dites-moi ce que vous en pensez.</p>`,
           source_url: url, category: cat,
-          screenshot_b64: '',
-          screenshot_content_type: '',
+          screenshot_b64: '', screenshot_content_type: '',
         };
       }
       return {
