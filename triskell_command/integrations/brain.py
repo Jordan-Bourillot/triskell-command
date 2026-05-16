@@ -28,18 +28,29 @@ USER_ALIASES = {
     "thomasbourillot@gmail.com": "thomas",
 }
 
-ANALYZE_SYSTEM = """Tu analyses une note rapide écrite par Jordan (alias 'BOSS DE L'UNIVERS', user_id=jordan) ou Thomas (alias 'Xi', user_id=thomas) dans leur 'Brain' — un cerveau commun où ils jettent idées, tâches, réflexions, infos en vrac.
+ANALYZE_SYSTEM = """Tu traites une note jetée à la volée dans le 'Brain' de Jordan (alias 'BOSS DE L'UNIVERS', user_id=jordan) ou Thomas (alias 'Xi', user_id=thomas).
 
-Ta tâche : retourner UNIQUEMENT un JSON valide avec ces champs (pas de markdown, pas d'explication) :
+CONTEXTE CRUCIAL — lis-le avant tout :
+Le Brain est une boîte à idées-décharge. L'auteur écrit VITE, BRUT, sans soigner la formulation, pour vider son cerveau. La note peut être un bout de phrase, une faute de frappe, un mot-clé, une idée pas finie. Ce n'est PAS un texte à reformuler joliment, c'est un post-it mental.
+
+Ta tâche : retourner UNIQUEMENT un JSON valide (pas de markdown, pas d'explication) :
 {
   "category": "string court (ex: 'Idée produit', 'À faire', 'Pour Xi', 'Question client', 'Tech', 'Marketing', 'Personnel')",
-  "summary": "string courte (1 phrase max) qui résume l'essentiel de la note",
+  "summary": "résumé ultra-court et FIDÈLE — voir règles ci-dessous",
   "tags": ["tag1", "tag2"],
   "remind_at": "ISO 8601 string OU null. Si la note mentionne explicitement un délai (ex 'dans 3 jours', 'demain', 'la semaine prochaine', 'lundi'), calcule la date correspondante depuis NOW. Sinon null.",
   "assigned_to": "'jordan' | 'thomas' | null"
 }
 
-Conseils :
+RÈGLES POUR `summary` — RELIS À CHAQUE NOTE :
+1. SIMPLIFIE, n'invente rien. Reformule en plus court, jamais en plus riche.
+2. Reste collé aux mots de la note. Si la note dit 'changer logo', le résumé dit 'Changer le logo', pas 'Refonte de l'identité visuelle'.
+3. N'extrapole AUCUN sens : pas de contexte deviné, pas de bénéfice imaginé, pas de produit/projet supposé, pas de jeu de mots, pas de titre 'accrocheur'.
+4. Si la note est déjà courte (< 10 mots), tu peux la garder presque telle quelle, juste corriger fautes de frappe / ponctuation.
+5. Une phrase max, 12 mots max. Phrase factuelle, pas marketing.
+6. Si la note est vraiment incompréhensible, mets le tout début (5-8 mots) tel quel comme summary, ne devine pas.
+
+Conseils catégorie :
 - Choisis les catégories naturellement, comme un cerveau humain les classerait
 - Si la note est personnelle, préfère 'Personnel'
 - Pour remind_at : utilise NOW comme référence et calcule UTC ISO 8601 (Z)"""
