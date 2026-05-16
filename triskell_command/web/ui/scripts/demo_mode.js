@@ -330,48 +330,73 @@ const DemoMode = {
     },
 
     // ============ Phare SEO ============
+    // Format attendu : {ok, sites_count, total_clicks_30d, avg_position_30d, pending_actions}
     phare_overview() {
       return {
         ok: true,
-        kpis: {
-          sites_audites: 47,
-          score_moyen: 84,
-          actions_pending: 12,
-          actions_fixed_mois: 38,
-          impressions_mois: '124 580',
-          clicks_mois: '8 320',
-        },
-        top_sites: [
-          { url: 'triskell-studio.fr', score: 96, trend: '+2' },
-          { url: 'lagriffe-studio.fr', score: 92, trend: '+5' },
-          { url: 'boulangerie-lefevre.fr', score: 89, trend: '+8' },
-          { url: 'cabinet-dupont.fr', score: 87, trend: '+1' },
+        sites_count: 13,
+        total_clicks_30d: 28420,
+        avg_position_30d: 9.4,
+        pending_actions: 6,
+      };
+    },
+    // Format attendu : {ok, sites: [{id, name, domain, clicks_30d, avg_position_30d}]}
+    phare_sites() {
+      return {
+        ok: true,
+        sites: [
+          { id: 's1',  name: 'Triskell Studio',     domain: 'triskell-studio.fr',          clicks_30d: 12480, avg_position_30d: 4.2 },
+          { id: 's2',  name: 'Lagriffe Studio',     domain: 'lagriffe-studio.fr',          clicks_30d: 5240,  avg_position_30d: 6.1 },
+          { id: 's3',  name: 'RankUs Studio',       domain: 'rankus-studio.fr',            clicks_30d: 3890,  avg_position_30d: 8.4 },
+          { id: 's4',  name: 'Studio WoW',          domain: 'studio-wow.fr',               clicks_30d: 2120,  avg_position_30d: 11.2 },
+          { id: 's5',  name: 'Le Druide Antavirus', domain: 'antavirus.fr',                clicks_30d: 1840,  avg_position_30d: 7.8 },
+          { id: 's6',  name: 'Boulangerie Lefèvre', domain: 'boulangerie-lefevre.fr',      clicks_30d: 980,   avg_position_30d: 4.5 },
+          { id: 's7',  name: 'Cabinet Dupont',      domain: 'cabinet-dupont.fr',           clicks_30d: 720,   avg_position_30d: 6.8 },
+          { id: 's8',  name: 'Pharmacie Centrale',  domain: 'pharmacie-centrale.fr',       clicks_30d: 612,   avg_position_30d: 5.2 },
+          { id: 's9',  name: 'Studio Yoga Soleil',  domain: 'yoga-soleil.fr',              clicks_30d: 410,   avg_position_30d: 8.1 },
+          { id: 's10', name: 'Restaurant Le Bistrot',domain:'le-bistrot-vannes.fr',        clicks_30d: 380,   avg_position_30d: 7.4 },
+          { id: 's11', name: 'Atelier Missor',      domain: 'atelier-missor.fr',           clicks_30d: 285,   avg_position_30d: 12.4 },
+          { id: 's12', name: 'Pack Électricien',    domain: 'pack-elec.triskell-studio.fr',clicks_30d: 248,   avg_position_30d: 14.8 },
+          { id: 's13', name: 'Studio PDF',          domain: 'le-studio-pdf.fr',            clicks_30d: 162,   avg_position_30d: 19.2 },
         ],
       };
     },
-    phare_sites() {
-      const sites = [
-        { url: 'triskell-studio.fr', score: 96, impressions: 12480, clicks: 932, position_avg: 8.2 },
-        { url: 'lagriffe-studio.fr', score: 92, impressions: 8240, clicks: 612, position_avg: 9.4 },
-        { url: 'rankus-studio.fr', score: 90, impressions: 6890, clicks: 428, position_avg: 11.1 },
-        { url: 'boulangerie-lefevre.fr', score: 89, impressions: 4820, clicks: 380, position_avg: 4.8 },
-        { url: 'cabinet-dupont.fr', score: 87, impressions: 3240, clicks: 295, position_avg: 6.3 },
-        { url: 'pharmacie-centrale.fr', score: 85, impressions: 5180, clicks: 412, position_avg: 5.1 },
-        { url: 'yoga-soleil.fr', score: 84, impressions: 2920, clicks: 218, position_avg: 7.8 },
-        { url: 'atelier-missor.fr', score: 82, impressions: 1840, clicks: 142, position_avg: 12.4 },
-      ];
-      return { ok: true, sites };
-    },
+    // Format attendu : {ok, actions: [{id, title, kind, created_at, summary}]}
     phare_pending_actions() {
+      const now = Date.now();
       return {
         ok: true,
         actions: [
-          { id: 'a1', site: 'cabinet-dupont.fr', kind: 'meta_description', label: 'Ajouter meta description sur 3 pages', impact: 'haut', estimated_minutes: 8 },
-          { id: 'a2', site: 'boulangerie-lefevre.fr', kind: 'alt_image', label: 'Ajouter alt sur 12 images du menu', impact: 'moyen', estimated_minutes: 15 },
-          { id: 'a3', site: 'yoga-soleil.fr', kind: 'speed', label: 'Compresser 4 images du header (1.2 Mo → 280 Ko)', impact: 'haut', estimated_minutes: 5 },
-          { id: 'a4', site: 'pharmacie-centrale.fr', kind: 'schema', label: 'Ajouter schema LocalBusiness', impact: 'haut', estimated_minutes: 12 },
-          { id: 'a5', site: 'atelier-missor.fr', kind: 'broken_link', label: '2 liens cassés en footer', impact: 'moyen', estimated_minutes: 3 },
+          { id: 'a1', title: 'Ajouter meta description sur 3 pages — cabinet-dupont.fr', kind: 'meta_description', created_at: new Date(now - 3600_000).toISOString(),
+            summary: "L'agent audit a détecté 3 pages sans meta description (impact CTR estimé +14%). PR prête : ajout de descriptions optimisées, 70-155 caractères, mots-clés ciblés." },
+          { id: 'a2', title: 'Compresser 4 images header — yoga-soleil.fr', kind: 'speed', created_at: new Date(now - 7200_000).toISOString(),
+            summary: "Le header pèse 1.2 Mo (4 photos non compressées). Compression sans perte visible → 280 Ko. Gain LCP estimé : -0.8s. PR : conversion WebP + redimensionnement." },
+          { id: 'a3', title: 'Ajouter schema LocalBusiness — pharmacie-centrale.fr', kind: 'schema', created_at: new Date(now - 10800_000).toISOString(),
+            summary: "Pas de structured data LocalBusiness détecté. Ajout JSON-LD avec horaires, coordonnées, geo, type Pharmacy. Visible dans Knowledge Panel Google sous 14 jours." },
+          { id: 'a4', title: 'Réparer 2 liens cassés en footer — atelier-missor.fr', kind: 'broken_link', created_at: new Date(now - 14400_000).toISOString(),
+            summary: "Liens vers /tarifs (404) et vers compte Insta supprimé. PR : retire les liens morts, redirige /tarifs vers /prestations." },
+          { id: 'a5', title: 'Mots-clés long tail — boulangerie-lefevre.fr', kind: 'keywords', created_at: new Date(now - 21600_000).toISOString(),
+            summary: "Opportunité détectée : \"kouign-amann frais Plérin\" (volume 90/mois, KD faible). PR : page dédiée + maillage interne depuis la page d'accueil." },
+          { id: 'a6', title: 'Rafraîchir page \"Services\" — lagriffe-studio.fr', kind: 'refresh', created_at: new Date(now - 28800_000).toISOString(),
+            summary: "Page non touchée depuis 6 mois, position 14 sur \"création site web Bretagne\". PR : refonte du contenu, ajout FAQ, témoignages clients, CTA visible." },
         ],
+      };
+    },
+    // Format attendu pour l'onglet Site : page détaillée d'un site
+    phare_site(payload) {
+      const id = payload && payload.id;
+      return {
+        ok: true,
+        site: {
+          id, name: 'Site démo', domain: 'demo.fr',
+          clicks_30d: 1840, avg_position_30d: 8.3,
+          score: 87, impressions_30d: 24820,
+          top_keywords: [
+            { keyword: 'kouign-amann breton', position: 3, clicks: 142, search_volume: 480 },
+            { keyword: 'boulangerie plérin',  position: 2, clicks: 89,  search_volume: 320 },
+            { keyword: 'pain spéciaux 22',    position: 7, clicks: 41,  search_volume: 190 },
+          ],
+        },
       };
     },
 
