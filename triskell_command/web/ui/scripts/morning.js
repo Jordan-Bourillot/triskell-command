@@ -39,16 +39,29 @@ const Morning = {
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0114-7.4M21 12a9 9 0 01-14 7.4"/><path d="M21 4v5h-5M3 20v-5h5"/></svg>
               Rafraîchir
             </button>
-            <button id="m-ask-claude" class="btn btn-secondary">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2l1.5 4.5L18 8l-4.5 1.5L12 14l-1.5-4.5L6 8l4.5-1.5L12 2z"/></svg>
-              Demander conseil à Claude
-            </button>
             <button id="m-compose-mail" class="btn btn-secondary" title="Composer (Ctrl+Shift+M)">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 20h9"/>
                 <path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/>
               </svg>
               Composer un mail
+            </button>
+            <button id="m-brain" class="btn btn-secondary" title="Brain — note rapide (Ctrl+B)">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+                <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+                <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
+              </svg>
+              Brain
+            </button>
+            <button id="m-allo-claude" class="btn btn-primary"
+                    style="background: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--accent-glow))); border: 0;"
+                    title="Allô Claude — pose une question rapide à Claude">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a8 8 0 0 1-11.7 7.1L4 20.5l1.4-5.3A8 8 0 1 1 21 12z"/>
+                <path d="M12 8.5v3M12 12.5v3M8.5 12h3M12.5 12h3" stroke-width="1.6"/>
+              </svg>
+              Allô Claude
             </button>
           </div>
         </div>
@@ -58,7 +71,10 @@ const Morning = {
     `;
 
     document.getElementById('m-refresh').onclick = () => this.render(container);
-    document.getElementById('m-ask-claude').onclick = () => Claude.open();
+    document.getElementById('m-brain').onclick = () => {
+      if (typeof Brain !== 'undefined' && Brain._openNew) Brain._openNew();
+    };
+    document.getElementById('m-allo-claude').onclick = () => Claude.open();
     document.getElementById('m-compose-mail').onclick = () => {
       // Bascule sur la vue Mails et ouvre directement le composer
       App.show('mails');

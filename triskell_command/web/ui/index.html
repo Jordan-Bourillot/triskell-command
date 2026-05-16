@@ -291,54 +291,7 @@
         </button>
       </div>
 
-      <!-- Bouton "Brain" — ouvre directement la modale nouvelle note (boîte à idées) -->
-      <div class="px-3 pt-1 pb-1">
-        <button id="brain-trigger"
-                title="Vide ton cerveau ici (Brain — boîte à idées)"
-                class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl
-                       border border-border bg-bg
-                       hover:border-accent hover:bg-surface-elevated
-                       transition-all duration-160 group brain-trigger-btn">
-          <div class="w-8 h-8 rounded-lg
-                      bg-gradient-to-br from-accent to-accent-glow
-                      flex items-center justify-center shrink-0
-                      shadow-soft brain-icon-wrap">
-            <!-- Cerveau SVG flottant (Lucide brain) -->
-            <svg class="w-[18px] h-[18px] text-white brain-icon" fill="none" stroke="currentColor"
-                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
-              <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
-              <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
-              <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
-              <path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/>
-              <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/>
-              <path d="M3.477 10.896a4 4 0 0 1 .585-.396"/>
-              <path d="M19.938 10.5a4 4 0 0 1 .585.396"/>
-              <path d="M6 18a4 4 0 0 1-1.967-.516"/>
-              <path d="M19.967 17.484A4 4 0 0 1 18 18"/>
-            </svg>
-          </div>
-          <div class="flex-1 text-left">
-            <div class="text-[13px] font-semibold leading-none mb-0.5">Brain</div>
-            <div class="text-[10.5px] text-text-muted">+ Note rapide</div>
-          </div>
-          <kbd class="text-[9.5px] font-bold text-text-muted bg-surface
-                      px-1.5 py-0.5 rounded border border-border shrink-0">⌃ B</kbd>
-        </button>
-      </div>
-
-      <!-- Animation flottante du cerveau (style local) -->
-      <style>
-        .brain-icon-wrap {
-          animation: brainFloat 3.4s ease-in-out infinite;
-        }
-        .brain-trigger-btn:hover .brain-icon-wrap {
-          animation-duration: 1.4s;
-        }
-        @keyframes brainFloat {
-          0%, 100% { transform: translateY(0) rotate(-2deg); }
-          50%      { transform: translateY(-3px) rotate(2deg); }
-        }
-      </style>
+      <!-- Brain et Allô Claude déplacés dans le header de la Matinale. -->
 
       <!-- Sections de navigation -->
       <nav class="flex-1 overflow-y-auto px-3 pt-3 pb-4 space-y-6">
@@ -416,23 +369,10 @@
 
       <!-- Footer SYSTÈME (compact) -->
       <div class="px-2 py-2 border-t border-border space-y-1">
-        <!-- Bouton "Allô Claude" — accessible depuis le menu (en plus du FAB
-             flottant pour desktop). Sur mobile c'est le seul accès. -->
-        <button id="claude-menu-trigger"
-                class="w-full flex items-center gap-2 px-3 py-2 rounded-xl
-                       bg-gradient-to-br from-accent to-accent-glow
-                       text-white text-sm font-semibold
-                       shadow-soft hover:shadow-lift active:scale-95
-                       transition-all duration-160">
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12a8 8 0 0 1-11.7 7.1L4 20.5l1.4-5.3A8 8 0 1 1 21 12z" fill="currentColor" fill-opacity="0.18"/>
-            <path d="M21 12a8 8 0 0 1-11.7 7.1L4 20.5l1.4-5.3A8 8 0 1 1 21 12z"/>
-            <path d="M12 8.5v3M12 12.5v3M8.5 12h3M12.5 12h3" stroke-width="1.6"/>
-          </svg>
-          Allô Claude
-          <span id="claude-menu-dot" class="ml-auto w-2 h-2 rounded-full bg-danger hidden"></span>
-        </button>
+        <!-- Allô Claude déplacé dans le header de la Matinale. -->
+        <!-- Pastille de notif Claude conservée comme élément masqué pour
+             ne pas casser le code qui la met à jour. -->
+        <span id="claude-menu-dot" class="hidden"></span>
         <!-- Badge utilisateur (avatar + prénom + engrenage au hover) -->
         <div id="user-badge-slot"></div>
         <!-- Tuto · Réglages · Bretagne · v en une seule ligne discrète -->
