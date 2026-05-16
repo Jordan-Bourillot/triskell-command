@@ -1055,6 +1055,24 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def brain_edit(self, payload: dict) -> dict:
+        p = payload or {}
+        nid = (p.get("id") or "").strip()
+        content = (p.get("content") or "").strip()
+        if not nid:
+            return {"ok": False, "error": "id manquant"}
+        if not content:
+            return {"ok": False, "error": "Contenu vide."}
+        try:
+            from ..integrations import brain
+            note = brain.edit_content(nid, content, client=self._supabase(),
+                                       ai_keys=self._brain_ai_keys())
+            if note is None:
+                return {"ok": False, "error": "Édition échouée"}
+            return {"ok": True, "note": note}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def brain_reply(self, payload: dict) -> dict:
         p = payload or {}
         nid = (p.get("id") or "").strip()

@@ -197,6 +197,42 @@ def update_note(note_id: str, patch: dict, client=None) -> bool:
         return False
 
 
+def edit_content(note_id: str, new_content: str, *, client=None,
+                 ai_keys: Optional[dict] = None) -> Optional[dict]:
+    """Met à jour le contenu d'une note + ré-analyse (catégorie, résumé, tags, rappel)."""
+    sb = _sb(client)
+    if sb is None or not note_id:
+        return None
+    new_content = (new_content or "").strip()
+    if not new_content:
+        return None
+    note = get_note(note_id, client=client)
+    if note is None:
+        return None
+    # Re-analyse avec contexte complet (contenu + réponses) si réponses présentes
+    replies = note.get("replies") or []
+    if replies:
+        full = f"Note originale ({note.get('author')}) : {new_content}\n\n"
+        for r in replies:
+            full += f"Réponse ({r.get('author')}) : {r.get('content')}\n\n"
+        analysis = analyze_note(full, ai_keys=ai_keys) or {}
+    else:
+        analysis = analyze_note(new_content, ai_keys=ai_keys) or {}
+    patch = {
+        "content":  new_content,
+        "category": analysis.get("category") or note.get("category"),
+        "summary":  analysis.get("summary") or None,
+        "tags":     analysis.get("tags") or note.get("tags") or [],
+        "assigned_to": analysis.get("assigned_to") if analysis else note.get("assigned_to"),
+    }
+    new_remind = analysis.get("remind_at")
+    if new_remind and new_remind != note.get("remind_at"):
+        patch["remind_at"] = new_remind
+        patch["reminded_at"] = None
+    update_note(note_id, patch, client=client)
+    return get_note(note_id, client=client)
+
+
 def delete_note(note_id: str, client=None) -> bool:
     sb = _sb(client)
     if sb is None or not note_id: return False

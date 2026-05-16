@@ -333,8 +333,21 @@ const Brain = {
         </div>
 
         <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-5 space-y-4">
-          <!-- Note originale -->
-          <div class="text-sm whitespace-pre-wrap leading-relaxed">${this._escape(n.content)}</div>
+          <!-- Note originale (avec édition inline) -->
+          <div id="bd-note-block">
+            <div id="bd-note-view" class="text-sm whitespace-pre-wrap leading-relaxed">${this._escape(n.content)}</div>
+            <button id="bd-edit" class="text-xs text-text-muted hover:text-accent mt-2">✎ Modifier</button>
+            <div id="bd-edit-zone" class="hidden">
+              <textarea id="bd-edit-content" rows="5"
+                        class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent resize-y">${this._escape(n.content)}</textarea>
+              <div class="flex items-center gap-2 mt-2">
+                <button id="bd-edit-save" class="btn btn-primary text-xs">Enregistrer</button>
+                <button id="bd-edit-cancel" class="btn btn-secondary text-xs">Annuler</button>
+                <span id="bd-edit-status" class="text-xs text-text-muted"></span>
+              </div>
+              <div class="text-[11px] text-text-muted mt-1">Claude relance l'analyse après sauvegarde.</div>
+            </div>
+          </div>
 
           ${(n.tags || []).length || n.remind_at ? `
             <div class="flex items-center gap-2 text-[11px] text-text-muted flex-wrap">
@@ -395,6 +408,40 @@ const Brain = {
       const r = await App.api.brain_delete({ id: n.id });
       if (r && r.ok) { close(); this._load(); }
       else alert('Échec : ' + (r && r.error || 'inconnu'));
+    };
+
+    // ---- Édition du contenu ----
+    const editBtn    = overlay.querySelector('#bd-edit');
+    const editZone   = overlay.querySelector('#bd-edit-zone');
+    const noteView   = overlay.querySelector('#bd-note-view');
+    const editArea   = overlay.querySelector('#bd-edit-content');
+    const editSave   = overlay.querySelector('#bd-edit-save');
+    const editCancel = overlay.querySelector('#bd-edit-cancel');
+    const editStatus = overlay.querySelector('#bd-edit-status');
+    const showEdit = (on) => {
+      editZone.classList.toggle('hidden', !on);
+      noteView.classList.toggle('hidden', on);
+      editBtn.classList.toggle('hidden', on);
+      if (on) { editArea.value = n.content || ''; editArea.focus(); }
+    };
+    editBtn.onclick = () => showEdit(true);
+    editCancel.onclick = () => showEdit(false);
+    editSave.onclick = async () => {
+      const content = editArea.value.trim();
+      if (!content) { editStatus.textContent = '✗ Vide.'; editStatus.className = 'text-xs text-danger'; return; }
+      if (content === (n.content || '').trim()) { showEdit(false); return; }
+      editSave.disabled = true;
+      editStatus.textContent = 'Claude ré-analyse…'; editStatus.className = 'text-xs text-text-muted';
+      const r = await App.api.brain_edit({ id: n.id, content });
+      if (r && r.ok) {
+        editStatus.textContent = '✓ Enregistré';
+        editStatus.className = 'text-xs text-success';
+        setTimeout(() => { close(); this._load(); }, 600);
+      } else {
+        editStatus.textContent = '✗ ' + ((r && r.error) || 'erreur');
+        editStatus.className = 'text-xs text-danger';
+        editSave.disabled = false;
+      }
     };
 
     const replySend = overlay.querySelector('#bd-reply-send');
