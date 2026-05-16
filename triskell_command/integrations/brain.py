@@ -21,6 +21,7 @@ from uuid import uuid4
 logger = logging.getLogger(__name__)
 
 TABLE = "command_voice_brain"
+BUCKET = "brain-attachments"
 
 # Mêmes utilisateurs que command-voice (alias mobile)
 USER_ALIASES = {
@@ -157,14 +158,22 @@ def get_note(note_id: str, client=None) -> Optional[dict]:
 
 
 def add_note(content: str, *, author: str = "jordan", client=None,
-             ai_keys: Optional[dict] = None) -> Optional[dict]:
-    """Ajoute une note + analyse IA (catégorie, tags, remind_at)."""
+             ai_keys: Optional[dict] = None,
+             attachments: Optional[list[str]] = None,
+             analyze_images: bool = False) -> Optional[dict]:
+    """Ajoute une note + analyse IA (catégorie, tags, remind_at).
+
+    Si `attachments` est fourni : les URLs sont stockées avec la note.
+    Si `analyze_images=True` : Claude regarde aussi les images pour résumer."""
     sb = _sb(client)
     if sb is None: return None
     content = (content or "").strip()
-    if not content: return None
+    atts = [a for a in (attachments or []) if a]
+    if not content and not atts: return None
     # Analyse IA (best-effort — si ça échoue, on insère sans métadonnées)
-    analysis = analyze_note(content, ai_keys=ai_keys) or {}
+    img_for_analysis = atts if analyze_images else None
+    analysis = analyze_note(content or "(image seule)", ai_keys=ai_keys,
+                             image_urls=img_for_analysis) or {}
     row = {
         "author": author,
         "content": content,
@@ -175,6 +184,7 @@ def add_note(content: str, *, author: str = "jordan", client=None,
         "assigned_to": analysis.get("assigned_to"),
         "replies": [],
         "status": "open",
+        "attachments": atts,
     }
     try:
         ins = sb.table(TABLE).insert(row).execute()
@@ -198,28 +208,42 @@ def update_note(note_id: str, patch: dict, client=None) -> bool:
 
 
 def edit_content(note_id: str, new_content: str, *, client=None,
-                 ai_keys: Optional[dict] = None) -> Optional[dict]:
-    """Met à jour le contenu d'une note + ré-analyse (catégorie, résumé, tags, rappel)."""
+                 ai_keys: Optional[dict] = None,
+                 attachments: Optional[list[str]] = None,
+                 analyze_images: bool = False) -> Optional[dict]:
+    """Met à jour le contenu (+ éventuellement attachments) + ré-analyse.
+
+    Si `attachments` est None : on garde celles déjà en base.
+    Si `attachments` est une liste : on remplace par cette liste (peut être vide pour tout enlever).
+    Si `analyze_images=True` : Claude regarde les images (vision) pour résumer."""
     sb = _sb(client)
     if sb is None or not note_id:
         return None
     new_content = (new_content or "").strip()
-    if not new_content:
-        return None
     note = get_note(note_id, client=client)
     if note is None:
         return None
+    # attachments : on garde l'existant si non précisé
+    if attachments is None:
+        atts = note.get("attachments") or []
+    else:
+        atts = [a for a in attachments if a]
+    if not new_content and not atts:
+        return None
+    img_for_analysis = atts if analyze_images else None
     # Re-analyse avec contexte complet (contenu + réponses) si réponses présentes
     replies = note.get("replies") or []
     if replies:
-        full = f"Note originale ({note.get('author')}) : {new_content}\n\n"
+        full = f"Note originale ({note.get('author')}) : {new_content or '(image seule)'}\n\n"
         for r in replies:
             full += f"Réponse ({r.get('author')}) : {r.get('content')}\n\n"
-        analysis = analyze_note(full, ai_keys=ai_keys) or {}
+        analysis = analyze_note(full, ai_keys=ai_keys, image_urls=img_for_analysis) or {}
     else:
-        analysis = analyze_note(new_content, ai_keys=ai_keys) or {}
+        analysis = analyze_note(new_content or "(image seule)", ai_keys=ai_keys,
+                                 image_urls=img_for_analysis) or {}
     patch = {
         "content":  new_content,
+        "attachments": atts,
         "category": analysis.get("category") or note.get("category"),
         "summary":  analysis.get("summary") or None,
         "tags":     analysis.get("tags") or note.get("tags") or [],
@@ -274,10 +298,58 @@ def add_reply(note_id: str, reply_content: str, *, author: str = "jordan",
 
 
 # ---------------------------------------------------------------------------
+# Pièces jointes (Supabase Storage)
+# ---------------------------------------------------------------------------
+import base64 as _b64, mimetypes as _mt
+from urllib.request import urlopen as _urlopen
+
+
+def upload_attachment(file_bytes: bytes, filename: str, *,
+                       content_type: Optional[str] = None, client=None) -> Optional[str]:
+    """Upload un fichier dans le bucket Storage et renvoie l'URL publique."""
+    sb = _sb(client)
+    if sb is None or not file_bytes:
+        return None
+    ct = content_type or _mt.guess_type(filename)[0] or "application/octet-stream"
+    ext = (Path(filename).suffix or "").lower() or ".bin"
+    # chemin : YYYY/MM/<uuid>.<ext>
+    now = datetime.now(timezone.utc)
+    key = f"{now.year:04d}/{now.month:02d}/{uuid4().hex}{ext}"
+    try:
+        sb.storage.from_(BUCKET).upload(
+            path=key,
+            file=file_bytes,
+            file_options={"content-type": ct, "upsert": "false"},
+        )
+        return sb.storage.from_(BUCKET).get_public_url(key)
+    except Exception as exc:
+        logger.warning("brain.upload_attachment: %s", exc)
+        return None
+
+
+def _fetch_image_as_base64(url: str) -> Optional[tuple[str, str]]:
+    """Récupère une image depuis son URL publique → (media_type, base64). None si échec."""
+    try:
+        with _urlopen(url, timeout=10) as r:
+            data = r.read()
+            mt = r.headers.get_content_type() or "image/jpeg"
+        if not mt.startswith("image/"):
+            return None
+        return mt, _b64.b64encode(data).decode("ascii")
+    except Exception as exc:
+        logger.warning("brain._fetch_image_as_base64 %s: %s", url, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Analyse IA (Claude)
 # ---------------------------------------------------------------------------
-def analyze_note(content: str, *, ai_keys: Optional[dict] = None) -> Optional[dict]:
-    """Appelle Claude pour catégoriser + résumer + extraire tags + détecter rappel."""
+def analyze_note(content: str, *, ai_keys: Optional[dict] = None,
+                  image_urls: Optional[list[str]] = None) -> Optional[dict]:
+    """Appelle Claude pour catégoriser + résumer + extraire tags + détecter rappel.
+
+    Si `image_urls` est fourni, Claude regarde aussi les images (vision)
+    et peut s'appuyer sur leur contenu pour résumer."""
     api_key = (ai_keys or {}).get("anthropic", "") if ai_keys else ""
     if not api_key:
         # Fallback : lit settings.json local
@@ -297,6 +369,17 @@ def analyze_note(content: str, *, ai_keys: Optional[dict] = None) -> Optional[di
     try:
         client = Anthropic(api_key=api_key)
         now_iso = datetime.now(timezone.utc).isoformat()
+        # Construit le message user — texte + images si fournies
+        user_blocks: list = []
+        for url in (image_urls or []):
+            img = _fetch_image_as_base64(url)
+            if img is None: continue
+            mt, b64 = img
+            user_blocks.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": mt, "data": b64},
+            })
+        user_blocks.append({"type": "text", "text": content or "(note sans texte, voir images)"})
         resp = client.messages.create(
             model="claude-sonnet-4-5",
             max_tokens=400,
@@ -305,7 +388,7 @@ def analyze_note(content: str, *, ai_keys: Optional[dict] = None) -> Optional[di
                  "cache_control": {"type": "ephemeral"}},
                 {"type": "text", "text": f"NOW = {now_iso}"},
             ],
-            messages=[{"role": "user", "content": content}],
+            messages=[{"role": "user", "content": user_blocks}],
         )
         text = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
         text = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()

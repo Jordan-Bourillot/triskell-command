@@ -1012,18 +1012,47 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     def brain_add(self, payload: dict) -> dict:
-        content = ((payload or {}).get("content") or "").strip()
-        if not content:
-            return {"ok": False, "error": "Contenu vide."}
+        p = payload or {}
+        content = (p.get("content") or "").strip()
+        attachments = [a for a in (p.get("attachments") or []) if a]
+        analyze_images = bool(p.get("analyze_images"))
+        if not content and not attachments:
+            return {"ok": False, "error": "Note vide (ni texte ni image)."}
         try:
             from ..integrations import brain
             client = self._supabase()
             author = brain._user_alias(client)
             note = brain.add_note(content, author=author, client=client,
-                                   ai_keys=self._brain_ai_keys())
+                                   ai_keys=self._brain_ai_keys(),
+                                   attachments=attachments,
+                                   analyze_images=analyze_images)
             if note is None:
                 return {"ok": False, "error": "Insertion échouée"}
             return {"ok": True, "note": note}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def brain_upload(self, payload: dict) -> dict:
+        """Upload d'un fichier (base64) → URL publique dans le bucket."""
+        p = payload or {}
+        data_b64 = (p.get("data") or "").strip()
+        filename = (p.get("filename") or "upload.bin").strip()
+        content_type = (p.get("content_type") or "").strip() or None
+        if not data_b64:
+            return {"ok": False, "error": "Fichier manquant"}
+        try:
+            import base64
+            file_bytes = base64.b64decode(data_b64)
+            # Garde-fou taille (10 Mo max)
+            if len(file_bytes) > 10 * 1024 * 1024:
+                return {"ok": False, "error": "Fichier > 10 Mo"}
+            from ..integrations import brain
+            url = brain.upload_attachment(file_bytes, filename,
+                                           content_type=content_type,
+                                           client=self._supabase())
+            if not url:
+                return {"ok": False, "error": "Upload échoué"}
+            return {"ok": True, "url": url}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -1059,14 +1088,23 @@ class Api:
         p = payload or {}
         nid = (p.get("id") or "").strip()
         content = (p.get("content") or "").strip()
+        analyze_images = bool(p.get("analyze_images"))
+        # attachments : si absent du payload → garde l'existant ; si présent (même vide) → remplace
+        attachments = p.get("attachments")
+        if attachments is not None:
+            attachments = [a for a in attachments if a]
         if not nid:
             return {"ok": False, "error": "id manquant"}
-        if not content:
-            return {"ok": False, "error": "Contenu vide."}
+        if not content and not (attachments or []):
+            # autorisé si la note garde ses attachments existants
+            if attachments is not None:
+                return {"ok": False, "error": "Note vide (ni texte ni image)."}
         try:
             from ..integrations import brain
             note = brain.edit_content(nid, content, client=self._supabase(),
-                                       ai_keys=self._brain_ai_keys())
+                                       ai_keys=self._brain_ai_keys(),
+                                       attachments=attachments,
+                                       analyze_images=analyze_images)
             if note is None:
                 return {"ok": False, "error": "Édition échouée"}
             return {"ok": True, "note": note}

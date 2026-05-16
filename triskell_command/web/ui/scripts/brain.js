@@ -208,11 +208,18 @@ const Brain = {
     const remind = n.remind_at ? this._fmtDate(n.remind_at) : '';
     const replyCount = (n.replies || []).length;
     const summaryOrContent = n.summary || (n.content || '').slice(0, 200);
+    const atts = (n.attachments || []).slice(0, 4);
+    const extra = (n.attachments || []).length - atts.length;
     return `
       <div class="card b-note p-4" data-bnote="${this._escape(n.id)}">
         <div class="flex items-start justify-between gap-3 mb-2">
           <div class="flex-1 min-w-0">
             <div class="text-sm leading-relaxed text-text whitespace-pre-wrap">${this._escape(summaryOrContent)}</div>
+            ${atts.length ? `
+              <div class="flex gap-1.5 mt-2 flex-wrap">
+                ${atts.map(u => `<img src="${this._escape(u)}" alt="" class="w-14 h-14 object-cover rounded-md border border-border" loading="lazy">`).join('')}
+                ${extra > 0 ? `<div class="w-14 h-14 rounded-md border border-border flex items-center justify-center text-xs text-text-muted bg-bg">+${extra}</div>` : ''}
+              </div>` : ''}
           </div>
           <span class="b-author ${author} shrink-0">${this._escape(author)}</span>
         </div>
@@ -220,11 +227,126 @@ const Brain = {
           ${tags.map(t => `<span class="b-tag">${this._escape(t)}</span>`).join('')}
           ${remind ? `<span>⏰ ${remind}</span>` : ''}
           ${replyCount > 0 ? `<span>💬 ${replyCount}</span>` : ''}
+          ${(n.attachments || []).length ? `<span>📎 ${(n.attachments || []).length}</span>` : ''}
           ${n.assigned_to ? `<span>→ ${this._escape(n.assigned_to)}</span>` : ''}
           <span class="ml-auto">${this._fmtDate(n.created_at)}</span>
         </div>
       </div>
     `;
+  },
+
+  // ----------------------------------------------------------------------
+  // Composer pièces jointes (réutilisé dans nouvelle note + édition)
+  // ----------------------------------------------------------------------
+  async _uploadFile(file) {
+    if (!file) return null;
+    if (!file.type || !file.type.startsWith('image/')) {
+      alert("Seules les images sont acceptées pour le moment.");
+      return null;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert("Image trop lourde (max 10 Mo).");
+      return null;
+    }
+    const data = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(',')[1] || '');
+      r.onerror = () => rej(r.error);
+      r.readAsDataURL(file);
+    });
+    const r = await App.api.brain_upload({
+      data, filename: file.name || `paste-${Date.now()}.png`,
+      content_type: file.type,
+    });
+    if (!r || !r.ok) {
+      alert("Upload échoué : " + ((r && r.error) || 'inconnu'));
+      return null;
+    }
+    return r.url;
+  },
+
+  _attachmentsComposerHTML(idPrefix, opts) {
+    const o = opts || {};
+    return `
+      <div class="mt-3" id="${idPrefix}-att">
+        <div class="flex items-center gap-2 flex-wrap">
+          <label class="btn btn-secondary text-xs cursor-pointer">
+            📎 Ajouter une image
+            <input type="file" accept="image/*" multiple id="${idPrefix}-file" class="hidden">
+          </label>
+          <span class="text-[11px] text-text-muted">Ou colle (Ctrl+V) / glisse dans la zone.</span>
+        </div>
+        <div id="${idPrefix}-previews" class="flex gap-2 mt-2 flex-wrap"></div>
+        <label class="flex items-center gap-2 mt-2 text-xs text-text-muted cursor-pointer">
+          <input type="checkbox" id="${idPrefix}-vision" class="w-3.5 h-3.5">
+          Faire analyser les images par Claude (vision)
+        </label>
+        <div id="${idPrefix}-upload-status" class="text-[11px] text-text-muted mt-1"></div>
+      </div>
+    `;
+  },
+
+  _bindAttachmentsComposer(overlay, idPrefix, dropZone, initialUrls) {
+    const state = { urls: [...(initialUrls || [])] };
+    const previewsEl = overlay.querySelector(`#${idPrefix}-previews`);
+    const statusEl   = overlay.querySelector(`#${idPrefix}-upload-status`);
+    const fileInput  = overlay.querySelector(`#${idPrefix}-file`);
+    const visionCb   = overlay.querySelector(`#${idPrefix}-vision`);
+
+    const renderPreviews = () => {
+      previewsEl.innerHTML = state.urls.map((u, i) => `
+        <div class="relative group">
+          <img src="${this._escape(u)}" alt="" class="w-16 h-16 object-cover rounded-md border border-border">
+          <button type="button" data-rm="${i}" title="Retirer"
+                  class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-danger text-white text-[11px] leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition">×</button>
+        </div>
+      `).join('');
+      previewsEl.querySelectorAll('[data-rm]').forEach(b => {
+        b.onclick = () => {
+          state.urls.splice(parseInt(b.dataset.rm, 10), 1);
+          renderPreviews();
+        };
+      });
+    };
+
+    const handleFiles = async (files) => {
+      const arr = Array.from(files || []);
+      for (const f of arr) {
+        statusEl.textContent = `Envoi de ${f.name}…`;
+        const url = await this._uploadFile(f);
+        if (url) { state.urls.push(url); renderPreviews(); }
+      }
+      statusEl.textContent = state.urls.length
+        ? `${state.urls.length} image${state.urls.length > 1 ? 's' : ''} prête${state.urls.length > 1 ? 's' : ''}.`
+        : '';
+    };
+
+    fileInput.onchange = (e) => handleFiles(e.target.files);
+
+    // Paste sur la dropZone (ou le textarea passé en argument)
+    if (dropZone) {
+      dropZone.addEventListener('paste', (e) => {
+        const items = (e.clipboardData && e.clipboardData.items) || [];
+        const imgs = Array.from(items).filter(i => i.type && i.type.startsWith('image/'))
+                                       .map(i => i.getAsFile()).filter(Boolean);
+        if (imgs.length) { e.preventDefault(); handleFiles(imgs); }
+      });
+      // Drag & drop sur la dropZone
+      dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('ring-2', 'ring-accent/40'); });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('ring-2', 'ring-accent/40'));
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('ring-2', 'ring-accent/40');
+        const files = (e.dataTransfer && e.dataTransfer.files) || [];
+        if (files.length) handleFiles(files);
+      });
+    }
+
+    renderPreviews();
+    return {
+      getUrls: () => state.urls.slice(),
+      getAnalyzeImages: () => !!(visionCb && visionCb.checked),
+    };
   },
 
   _bindCards() {
@@ -261,7 +383,8 @@ const Brain = {
         <div class="px-6 py-5">
           <textarea id="bn-content" rows="6" autofocus
                     placeholder="Ex: Demander à Thomas si on garde Calendly. Lui répondre lundi.&#10;Ex: Idée produit : extension Chrome qui résume les vidéos YouTube."
-                    class="w-full px-3 py-3 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed resize-y"></textarea>
+                    class="w-full px-3 py-3 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed resize-y transition"></textarea>
+          ${this._attachmentsComposerHTML('bn')}
           <div id="bn-status" class="mt-2 text-xs text-text-muted">⌘+Entrée pour envoyer</div>
         </div>
         <div class="px-6 py-3 border-t border-border bg-surface-elevated flex justify-end gap-2">
@@ -279,17 +402,24 @@ const Brain = {
     };
     document.addEventListener('keydown', escListener);
 
+    const textarea = overlay.querySelector('#bn-content');
+    const composer = this._bindAttachmentsComposer(overlay, 'bn', textarea, []);
+
     const save = async () => {
       const content = overlay.querySelector('#bn-content').value.trim();
       const status = overlay.querySelector('#bn-status');
-      if (!content) {
-        status.textContent = '✗ Vide.'; status.className = 'mt-2 text-xs text-danger'; return;
+      const attachments = composer.getUrls();
+      if (!content && !attachments.length) {
+        status.textContent = '✗ Vide (texte ou image).'; status.className = 'mt-2 text-xs text-danger'; return;
       }
       const btn = overlay.querySelector('#bn-save');
       btn.disabled = true;
       status.textContent = 'Claude analyse…'; status.className = 'mt-2 text-xs text-text-muted';
       try {
-        const r = await App.api.brain_add({ content });
+        const r = await App.api.brain_add({
+          content, attachments,
+          analyze_images: composer.getAnalyzeImages(),
+        });
         if (r && r.ok) {
           status.textContent = `✓ Ajouté · catégorie : ${r.note.category || 'auto'}`;
           status.className = 'mt-2 text-xs text-success';
@@ -336,10 +466,18 @@ const Brain = {
           <!-- Note originale (avec édition inline) -->
           <div id="bd-note-block">
             <div id="bd-note-view" class="text-sm whitespace-pre-wrap leading-relaxed">${this._escape(n.content)}</div>
+            ${(n.attachments || []).length ? `
+              <div id="bd-attachments-view" class="grid grid-cols-2 gap-2 mt-3">
+                ${(n.attachments || []).map(u => `
+                  <img src="${this._escape(u)}" alt="" data-lightbox="${this._escape(u)}"
+                       class="w-full h-32 object-cover rounded-lg border border-border cursor-zoom-in hover:opacity-90 transition" loading="lazy">
+                `).join('')}
+              </div>` : ''}
             <button id="bd-edit" class="text-xs text-text-muted hover:text-accent mt-2">✎ Modifier</button>
             <div id="bd-edit-zone" class="hidden">
               <textarea id="bd-edit-content" rows="5"
-                        class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent resize-y">${this._escape(n.content)}</textarea>
+                        class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent resize-y transition">${this._escape(n.content)}</textarea>
+              ${this._attachmentsComposerHTML('bd')}
               <div class="flex items-center gap-2 mt-2">
                 <button id="bd-edit-save" class="btn btn-primary text-xs">Enregistrer</button>
                 <button id="bd-edit-cancel" class="btn btn-secondary text-xs">Annuler</button>
@@ -410,17 +548,25 @@ const Brain = {
       else alert('Échec : ' + (r && r.error || 'inconnu'));
     };
 
+    // ---- Lightbox plein écran sur les images attachées (vue lecture) ----
+    overlay.querySelectorAll('[data-lightbox]').forEach(img => {
+      img.onclick = (e) => { e.stopPropagation(); this._openLightbox(img.dataset.lightbox); };
+    });
+
     // ---- Édition du contenu ----
     const editBtn    = overlay.querySelector('#bd-edit');
     const editZone   = overlay.querySelector('#bd-edit-zone');
     const noteView   = overlay.querySelector('#bd-note-view');
+    const attView    = overlay.querySelector('#bd-attachments-view');
     const editArea   = overlay.querySelector('#bd-edit-content');
     const editSave   = overlay.querySelector('#bd-edit-save');
     const editCancel = overlay.querySelector('#bd-edit-cancel');
     const editStatus = overlay.querySelector('#bd-edit-status');
+    const editComposer = this._bindAttachmentsComposer(overlay, 'bd', editArea, n.attachments || []);
     const showEdit = (on) => {
       editZone.classList.toggle('hidden', !on);
       noteView.classList.toggle('hidden', on);
+      if (attView) attView.classList.toggle('hidden', on);
       editBtn.classList.toggle('hidden', on);
       if (on) { editArea.value = n.content || ''; editArea.focus(); }
     };
@@ -428,11 +574,19 @@ const Brain = {
     editCancel.onclick = () => showEdit(false);
     editSave.onclick = async () => {
       const content = editArea.value.trim();
-      if (!content) { editStatus.textContent = '✗ Vide.'; editStatus.className = 'text-xs text-danger'; return; }
-      if (content === (n.content || '').trim()) { showEdit(false); return; }
+      const attachments = editComposer.getUrls();
+      if (!content && !attachments.length) {
+        editStatus.textContent = '✗ Vide (texte ou image).'; editStatus.className = 'text-xs text-danger'; return;
+      }
+      const unchanged = content === (n.content || '').trim()
+                     && JSON.stringify(attachments) === JSON.stringify(n.attachments || []);
+      if (unchanged) { showEdit(false); return; }
       editSave.disabled = true;
       editStatus.textContent = 'Claude ré-analyse…'; editStatus.className = 'text-xs text-text-muted';
-      const r = await App.api.brain_edit({ id: n.id, content });
+      const r = await App.api.brain_edit({
+        id: n.id, content, attachments,
+        analyze_images: editComposer.getAnalyzeImages(),
+      });
       if (r && r.ok) {
         editStatus.textContent = '✓ Enregistré';
         editStatus.className = 'text-xs text-success';
@@ -459,6 +613,21 @@ const Brain = {
     overlay.addEventListener('keydown', e => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendReply(); }
     });
+  },
+
+  // ----------------------------------------------------------------------
+  // Lightbox image plein écran
+  // ----------------------------------------------------------------------
+  _openLightbox(url) {
+    const lb = document.createElement('div');
+    lb.className = 'fixed inset-0 z-[300] flex items-center justify-center p-4 cursor-zoom-out';
+    lb.style.background = 'rgba(0,0,0,0.92)';
+    lb.innerHTML = `<img src="${this._escape(url)}" alt="" class="max-w-full max-h-full object-contain rounded-lg shadow-hero">`;
+    const close = () => { lb.remove(); document.removeEventListener('keydown', esc); };
+    const esc = (e) => { if (e.key === 'Escape') close(); };
+    lb.onclick = close;
+    document.addEventListener('keydown', esc);
+    document.body.appendChild(lb);
   },
 
   // helpers
