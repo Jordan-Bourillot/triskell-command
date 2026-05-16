@@ -48,9 +48,16 @@ def parse_event(payload: bytes, sig_header: str) -> dict[str, Any]:
 # Dispatch principal
 # ---------------------------------------------------------------------------
 def handle_event(event: dict[str, Any]) -> dict[str, Any]:
-    """Traite l'event Stripe et met à jour la table saas_subscriptions.
+    """Traite l'event Stripe.
 
-    Renvoie un dict {ok, processed, type, workspace_id?} pour le log/réponse.
+    Route entre :
+    - SaaS workspaces (cette table : `saas_subscriptions`)
+    - Clients finaux (table : `client_subscriptions`)
+
+    Le routage se fait par metadata :
+    - metadata.workspace_id → SaaS
+    - metadata.client_subscription_id → Client final
+    Les deux peuvent coexister dans un même flux Stripe sans interférence.
     """
     et = event.get("type", "")
     obj = (event.get("data") or {}).get("object") or {}
@@ -58,20 +65,40 @@ def handle_event(event: dict[str, Any]) -> dict[str, Any]:
     # 1. Persiste l'event brut dans stripe_events (audit + anti-replay)
     _log_event(event)
 
-    # 2. Dispatch par type
-    handler = _HANDLERS.get(et)
-    if handler is None:
-        logger.info("Stripe event '%s' reçu (pas géré, ignoré).", et)
-        return {"ok": True, "processed": False, "type": et}
-
+    # 2. Tentative branche CLIENTS finaux (filtre par metadata interne)
+    clients_result: dict[str, Any] = {"processed": False}
     try:
-        result = handler(obj)
-        _mark_processed(event.get("id"))
-        return {"ok": True, "processed": True, "type": et, **result}
+        from ..billing_clients import webhook as clients_webhook
+        clients_result = clients_webhook.maybe_handle_event(event) or {}
     except Exception as exc:
-        logger.exception("Handler %s a échoué", et)
-        _mark_error(event.get("id"), str(exc))
-        return {"ok": False, "processed": False, "type": et, "error": str(exc)}
+        logger.exception("billing_clients dispatch a planté")
+        clients_result = {"processed": False, "error": f"clients: {exc}"}
+
+    # 3. Branche SaaS workspaces (gestion par défaut historique)
+    handler = _HANDLERS.get(et)
+    saas_processed = False
+    saas_payload: dict[str, Any] = {}
+    if handler is not None:
+        try:
+            saas_payload = handler(obj) or {}
+            saas_processed = True
+        except Exception as exc:
+            logger.exception("Handler SaaS %s a échoué", et)
+            _mark_error(event.get("id"), str(exc))
+            return {"ok": False, "processed": False, "type": et,
+                    "error": str(exc),
+                    "clients_result": clients_result}
+
+    # 4. Si aucun des deux n'a traité, on log et on renvoie no-op
+    if not saas_processed and not clients_result.get("processed"):
+        logger.info("Stripe event '%s' reçu (aucune branche n'a matché).", et)
+        return {"ok": True, "processed": False, "type": et,
+                "clients_result": clients_result}
+
+    _mark_processed(event.get("id"))
+    return {"ok": True, "processed": True, "type": et,
+            "saas": saas_payload,
+            "clients_result": clients_result}
 
 
 # ---------------------------------------------------------------------------
