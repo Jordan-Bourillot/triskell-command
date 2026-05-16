@@ -1,0 +1,22 @@
+name: Deploy prod (Coolify)
+
+# Auto-déclenche un redéploiement Coolify à chaque push sur main.
+# Remplace l'ancien webhook GitHub→Coolify qui ne fonctionnait pas.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # bouton "Run workflow" manuel possible aussi
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Coolify deploy webhook
+        run: |
+          curl -fsSL -X GET \
+            "http://91.99.227.241:8000/api/v1/deploy?uuid=f2l1b3v08gcoftnf631djuxn&force=false" \
+            ${COOLIFY_TOKEN:+-H "Authorization: Bearer $COOLIFY_TOKEN"} \
+            && echo "Deploy déclenché ✓"
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
