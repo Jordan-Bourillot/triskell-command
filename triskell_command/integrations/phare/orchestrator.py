@@ -360,11 +360,24 @@ def run_analyst(site_id: str, *, app_state=None) -> dict:
         out = {}
 
     if out:
+        # next_week_recommendation peut être str (ancien format) OU dict
+        # (nouveau format boosté : {action, owner_agent, expected_impact})
+        reco = out.get("next_week_recommendation") or ""
+        if isinstance(reco, dict):
+            action = reco.get("action") or ""
+            owner = reco.get("owner_agent") or ""
+            impact = reco.get("expected_impact") or ""
+            reco_str = action
+            if owner:
+                reco_str += f" (agent : {owner})"
+            if impact:
+                reco_str += f" — impact attendu : {impact}"
+        else:
+            reco_str = str(reco)
         repo.insert_action({
             "site_id": site_id, "agent": "analyste", "kind": "recommandation",
             "title": f"Bulletin {date.today().isoformat()} — {out.get('trend', '')}",
-            "detail_md": (out.get("trend_summary_md") or "") +
-                         f"\n\nReco : {out.get('next_week_recommendation', '')}",
+            "detail_md": (out.get("trend_summary_md") or "") + f"\n\nReco : {reco_str}",
             "status": "draft", "impact": 2, "effort": 1,
         })
 

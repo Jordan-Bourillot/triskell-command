@@ -448,10 +448,20 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    def phare_sites(self) -> dict:
+    def phare_sites(self, payload: dict | None = None) -> dict:
+        """Liste les sites Phare. Payload optionnel :
+        - `external_only` (bool) : ne renvoie que les sites clients externes
+        - `internal_only` (bool) : ne renvoie que les sites internes Triskell
+        - `include_inactive` (bool) : inclut les sites désactivés
+        """
+        p = payload or {}
         try:
             from ..integrations.phare import repo
-            sites = repo.list_sites(active_only=True)
+            sites = repo.list_sites(active_only=not bool(p.get("include_inactive")))
+            if p.get("external_only"):
+                sites = [s for s in sites if s.get("is_external_client")]
+            elif p.get("internal_only"):
+                sites = [s for s in sites if not s.get("is_external_client")]
             return {"ok": True, "sites": sites}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -501,6 +511,204 @@ class Api:
         try:
             from ..integrations.phare import orchestrator
             return orchestrator.merge_action(aid, force=force)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def phare_site_upsert(self, payload: dict) -> dict:
+        """Crée ou met à jour un site dans Le Phare.
+
+        Champs acceptés : id (optionnel pour edit), name, domain, repo_github,
+        repo_branch_main, netlify_site_id, stack, priority, key_paths,
+        notes, is_external_client, is_active.
+        """
+        p = payload or {}
+        name = (p.get("name") or "").strip()
+        domain = (p.get("domain") or "").strip().lower()
+        if not name or not domain:
+            return {"ok": False, "error": "Le nom et le domaine sont obligatoires."}
+        try:
+            from ..integrations.phare import repo
+            site = {
+                "name": name,
+                "domain": domain,
+                "repo_github": (p.get("repo_github") or "").strip() or None,
+                "repo_branch_main": (p.get("repo_branch_main") or "main").strip(),
+                "netlify_site_id": (p.get("netlify_site_id") or "").strip() or None,
+                "stack": (p.get("stack") or "html").strip(),
+                "priority": int(p.get("priority") or 50),
+                "key_paths": p.get("key_paths") or ["/"],
+                "notes": (p.get("notes") or "").strip(),
+                "is_external_client": bool(p.get("is_external_client", False)),
+                "is_active": bool(p.get("is_active", True)),
+            }
+            if p.get("id"):
+                site["id"] = p["id"]
+            row = repo.upsert_site(site)
+            if not row:
+                return {"ok": False, "error": "Impossible d'enregistrer le site (Supabase non joignable)."}
+            return {"ok": True, "site": row}
+        except Exception as exc:
+            logger.warning("phare_site_upsert: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def phare_site_deactivate(self, payload: dict) -> dict:
+        sid = (payload or {}).get("id") or ""
+        if not sid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.phare import repo
+            ok = repo.deactivate_site(sid)
+            return {"ok": ok}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def phare_site_activate(self, payload: dict) -> dict:
+        """Réactive un site précédemment désactivé."""
+        sid = (payload or {}).get("id") or ""
+        if not sid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.phare import repo
+            row = repo.upsert_site({"id": sid, "is_active": True})
+            return {"ok": True, "site": row}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def phare_agents_status(self) -> dict:
+        """Renvoie le statut des 8 agents (nom, modèle, cadence, dernier passage).
+
+        Lit `phare_actions` pour deviner le dernier run de chaque agent.
+        Tolère l'absence de Supabase : renvoie le catalogue figé sans last_run.
+        """
+        catalog = [
+            {"name": "auditeur", "label": "L'Auditeur Technique", "emoji": "🔍",
+             "tagline": "Détecte tout ce qui freine.",
+             "description": "Passe chaque site au peigne fin : pages lentes, balises manquantes, liens cassés, problèmes Core Web Vitals. Note de santé sur 100.",
+             "missions": ["Analyser le crawl + Lighthouse + PageSpeed",
+                          "Identifier les 5 problèmes critiques",
+                          "Lister les quick wins (effort < 30 min)"],
+             "cadence": "Lundi 6h-22h, 1 site par heure",
+             "model": "claude-sonnet-4-6", "model_short": "Sonnet 4.6"},
+            {"name": "veilleur", "label": "Le Veilleur Mots-Clés", "emoji": "🎯",
+             "tagline": "Trouve les mots-clés qui payent.",
+             "description": "Analyse tes positions GSC + les SERP concurrents pour repérer les mots-clés à fort potentiel. Construit le cocon sémantique.",
+             "missions": ["10 mots-clés prioritaires (volume FR > 50)",
+                          "20 long-traîne en cluster",
+                          "Cocon sémantique (thème pivot + sous-thèmes)"],
+             "cadence": "Lundi & jeudi 7h",
+             "model": "claude-sonnet-4-6", "model_short": "Sonnet 4.6"},
+            {"name": "redacteur", "label": "Le Rédacteur", "emoji": "✍️",
+             "tagline": "Écrit comme un humain. Mieux.",
+             "description": "Produit des articles SEO complets (1000-1500 mots) à partir des briefs du Veilleur. Voix Triskell, anti-slop activé.",
+             "missions": ["Brief + article complet à partir d'un mot-clé",
+                          "Structure H1/H2/H3 propre",
+                          "Suggestions de maillage interne"],
+             "cadence": "À la demande (déclenché par le Chef d'Orchestre)",
+             "model": "claude-sonnet-4-6", "model_short": "Sonnet 4.6"},
+            {"name": "optimiseur_onpage", "label": "L'Optimiseur On-Page", "emoji": "⚡",
+             "tagline": "Affûte chaque page au scalpel.",
+             "description": "Réécrit titres, meta descriptions, Hn, alts et JSON-LD pour booster le SEO sans toucher au contenu. Ouvre une PR auto.",
+             "missions": ["Patches HTML balisés (title/meta/Hn/alt/JSON-LD)",
+                          "Score avant/après estimé",
+                          "PR GitHub + preview Netlify"],
+             "cadence": "Mar/Mer/Ven 10h, 1 site par cycle",
+             "model": "claude-sonnet-4-6", "model_short": "Sonnet 4.6"},
+            {"name": "tisseur", "label": "Le Tisseur", "emoji": "🕸️",
+             "tagline": "Relie tous tes sites en cocon.",
+             "description": "Maillage interne intra-site + inter-sites Triskell. Détecte les pages orphelines, propose les liens manquants.",
+             "missions": ["Liens internes manquants",
+                          "Liens inter-sites Triskell (cocon global)",
+                          "Pages orphelines à reconnecter"],
+             "cadence": "Lundi 9h",
+             "model": "claude-sonnet-4-6", "model_short": "Sonnet 4.6"},
+            {"name": "chasseur_backlinks", "label": "Le Chasseur Backlinks", "emoji": "🪝",
+             "tagline": "Va chercher les liens externes.",
+             "description": "Analyse le gap concurrentiel, repère les mentions non-liées, identifie les opportunités HARO. Score d'impact 0-100.",
+             "missions": ["Top 10 opportunités d'acquisition",
+                          "5 HARO/expert quotes envisageables",
+                          "5 mentions non-liées à transformer"],
+             "cadence": "Mercredi 9h",
+             "model": "claude-sonnet-4-6", "model_short": "Sonnet 4.6"},
+            {"name": "analyste", "label": "L'Analyste", "emoji": "📊",
+             "tagline": "Te dit la vérité chaque matin.",
+             "description": "Lit tes métriques GSC sur 30 jours, repère les pages qui montent / descendent, chiffre le ROI des actions Phare.",
+             "missions": ["Bulletin quotidien 8h (top 3 sites)",
+                          "Pages qui décollent / décrochent",
+                          "Recommandation pour la semaine"],
+             "cadence": "Tous les jours 8h",
+             "model": "claude-sonnet-4-6", "model_short": "Sonnet 4.6"},
+            {"name": "chef_orchestre", "label": "Le Chef d'Orchestre", "emoji": "👑",
+             "tagline": "Le cerveau stratégique. Opus.",
+             "description": "Une fois par mois, le modèle le plus puissant prend tout l'écosystème en main et trace le plan du mois pour les 7 autres.",
+             "missions": ["3 sites prioritaires du mois",
+                          "1 chantier transverse",
+                          "Briefs cadrés pour chaque agent",
+                          "Critères de succès chiffrés"],
+             "cadence": "1er du mois 9h",
+             "model": "claude-opus-4-7", "model_short": "Opus 4.7"},
+        ]
+        # Tente d'enrichir avec le dernier run réel par agent
+        try:
+            from ..integrations.phare import repo
+            for a in catalog:
+                try:
+                    last = repo.last_action_by_agent(a["name"])
+                    if last:
+                        a["last_run_at"] = last.get("created_at")
+                        a["status"] = "ok"
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return {"ok": True, "agents": catalog}
+
+    def phare_run_agent(self, payload: dict) -> dict:
+        """Lance la mission par défaut d'un agent en arrière-plan.
+
+        Mappe le nom de l'agent vers une fonction orchestrator. Si l'agent
+        nécessite un site précis et qu'aucun n'est fourni, prend le 1er
+        actif par priorité.
+        """
+        agent = (payload or {}).get("agent") or ""
+        site_id = (payload or {}).get("site_id") or ""
+        if not agent:
+            return {"ok": False, "error": "agent manquant"}
+        try:
+            from ..integrations.phare import orchestrator, repo
+            # Choisit un site cible si non fourni
+            if not site_id and agent != "chef_orchestre":
+                sites = repo.list_sites(active_only=True) or []
+                if not sites:
+                    return {"ok": False, "error": "Aucun site actif à traiter."}
+                site_id = sites[0]["id"]
+
+            def _run():
+                try:
+                    if agent == "auditeur":
+                        orchestrator.run_audit(site_id, app_state=self._app_state)
+                    elif agent == "veilleur":
+                        orchestrator.run_keywords(site_id, app_state=self._app_state)
+                    elif agent == "optimiseur_onpage":
+                        orchestrator.run_onpage_optim(site_id, app_state=self._app_state)
+                    elif agent == "tisseur":
+                        orchestrator.run_tisseur(site_id, app_state=self._app_state)
+                    elif agent == "chasseur_backlinks":
+                        orchestrator.run_backlinks(site_id, app_state=self._app_state)
+                    elif agent == "analyste":
+                        orchestrator.run_analyst(site_id, app_state=self._app_state)
+                    elif agent == "chef_orchestre":
+                        orchestrator.run_strategy(app_state=self._app_state)
+                    elif agent == "redacteur":
+                        # Rédacteur a besoin d'un mot-clé cible ; on lance un cycle veilleur d'abord
+                        orchestrator.run_keywords(site_id, app_state=self._app_state)
+                    else:
+                        logger.warning("phare_run_agent: agent inconnu %s", agent)
+                except Exception as exc:
+                    logger.warning("phare_run_agent[%s]: %s", agent, exc)
+
+            threading.Thread(target=_run, daemon=True,
+                              name=f"PhareAgent-{agent}").start()
+            return {"ok": True, "started": True, "agent": agent, "site_id": site_id}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

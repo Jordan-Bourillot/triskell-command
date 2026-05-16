@@ -347,6 +347,21 @@ def pending_actions_count() -> int:
         return 0
 
 
+def last_action_by_agent(agent_name: str) -> Optional[dict]:
+    """Renvoie la dernière action enregistrée pour un agent donné, ou None."""
+    sb = _sb()
+    if sb is None:
+        return None
+    try:
+        rows = (sb.table("phare_actions").select("*")
+                .eq("agent", agent_name)
+                .order("created_at", desc=True).limit(1).execute().data)
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("phare.last_action_by_agent: %s", exc)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # phare_metrics
 # ---------------------------------------------------------------------------
