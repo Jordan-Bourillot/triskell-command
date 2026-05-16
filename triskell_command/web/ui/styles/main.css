@@ -318,6 +318,317 @@ html, body {
 }
 
 /* ============================
+ * COCKPIT — poste de contrôle
+ * Inspiration : cabine d'avion, salle de marché, war room.
+ * Hiérarchie visuelle dure, chiffres énormes, voyants live.
+ * ============================ */
+.cockpit-shell {
+  font-family: 'Inter', -apple-system, system-ui, sans-serif;
+}
+
+/* Bandeau STATUT en haut — type tableau de bord avionique */
+.cockpit-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: hsl(var(--text-secondary));
+}
+.cockpit-status-bar .cockpit-led {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10.5px;
+}
+.cockpit-status-bar .cockpit-led::before {
+  content: '';
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: hsl(var(--success));
+  box-shadow: 0 0 8px hsl(var(--success) / 0.7);
+  animation: cockpit-pulse 1.6s ease-in-out infinite;
+}
+.cockpit-status-bar .cockpit-led.alert::before {
+  background: hsl(var(--danger));
+  box-shadow: 0 0 8px hsl(var(--danger) / 0.7);
+}
+.cockpit-status-bar .cockpit-led.warn::before {
+  background: hsl(var(--warning));
+  box-shadow: 0 0 8px hsl(var(--warning) / 0.7);
+}
+.cockpit-status-bar .cockpit-sep {
+  width: 1px; height: 18px;
+  background: hsl(var(--border-strong));
+  opacity: 0.5;
+}
+.cockpit-status-bar .cockpit-time {
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--text));
+  font-weight: 700;
+}
+.cockpit-status-bar .cockpit-date {
+  text-transform: uppercase;
+  font-size: 11px;
+}
+@keyframes cockpit-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.85); }
+}
+
+/* HERO — appel à l'action principal */
+.cockpit-hero {
+  position: relative;
+  margin-top: 16px;
+  padding: 28px 32px;
+  background: linear-gradient(135deg,
+    hsl(var(--surface)) 0%,
+    hsl(var(--surface-elevated)) 100%);
+  border: 1px solid hsl(var(--border));
+  border-radius: 20px;
+  overflow: hidden;
+}
+.cockpit-hero::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at top right,
+    hsl(var(--accent) / 0.12), transparent 55%);
+  pointer-events: none;
+}
+.cockpit-hero[data-state="success"]::before {
+  background: radial-gradient(circle at top right,
+    hsl(var(--success) / 0.18), transparent 55%);
+}
+.cockpit-hero[data-state="danger"]::before {
+  background: radial-gradient(circle at top right,
+    hsl(var(--danger) / 0.18), transparent 55%);
+}
+.cockpit-hero-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: hsl(var(--accent));
+  margin-bottom: 10px;
+}
+.cockpit-hero-kicker::before {
+  content: '▸';
+  font-size: 14px;
+}
+.cockpit-hero-title {
+  font-family: 'Cinzel', serif;
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: hsl(var(--text));
+  margin-bottom: 10px;
+}
+.cockpit-hero-body {
+  font-size: 15px;
+  line-height: 1.55;
+  color: hsl(var(--text-secondary));
+  max-width: 56ch;
+  margin-bottom: 18px;
+}
+
+/* Grille KPIs principaux */
+.cockpit-grid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.cockpit-kpi {
+  position: relative;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: 16px;
+  padding: 18px 20px 16px;
+  overflow: hidden;
+  transition: all 200ms ease;
+}
+.cockpit-kpi:hover {
+  border-color: hsl(var(--accent) / 0.6);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px hsl(var(--accent) / 0.08);
+}
+.cockpit-kpi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.cockpit-kpi-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: hsl(var(--text-muted));
+}
+.cockpit-kpi-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: hsl(var(--surface-elevated));
+  color: hsl(var(--text-muted));
+  border: 1px solid hsl(var(--border));
+}
+.cockpit-kpi-tag.live {
+  background: hsl(var(--success) / 0.15);
+  color: hsl(var(--success));
+  border-color: hsl(var(--success) / 0.4);
+}
+.cockpit-kpi-value {
+  font-size: 52px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: hsl(var(--text));
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 8px;
+}
+.cockpit-kpi.tone-success .cockpit-kpi-value { color: hsl(var(--success)); }
+.cockpit-kpi.tone-warning .cockpit-kpi-value { color: hsl(var(--warning)); }
+.cockpit-kpi.tone-danger  .cockpit-kpi-value { color: hsl(var(--danger)); }
+.cockpit-kpi.tone-accent  .cockpit-kpi-value { color: hsl(var(--accent)); }
+.cockpit-kpi-delta {
+  font-size: 12px;
+  color: hsl(var(--text-muted));
+  line-height: 1.4;
+}
+.cockpit-kpi-delta strong { color: hsl(var(--text)); font-weight: 600; }
+
+/* Sparkline 7 jours */
+.cockpit-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 28px;
+  margin-top: 8px;
+}
+.cockpit-spark-bar {
+  flex: 1;
+  background: hsl(var(--accent) / 0.5);
+  border-radius: 2px;
+  min-height: 2px;
+  transition: all 200ms ease;
+}
+.cockpit-spark-bar.today {
+  background: hsl(var(--accent));
+  box-shadow: 0 0 8px hsl(var(--accent) / 0.4);
+}
+
+/* Bloc Alerte (à corriger) — façon panneau d'avertissement */
+.cockpit-alert {
+  margin-top: 18px;
+  padding: 18px 22px;
+  background: hsl(var(--danger) / 0.07);
+  border: 1px solid hsl(var(--danger) / 0.35);
+  border-left: 4px solid hsl(var(--danger));
+  border-radius: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.cockpit-alert-icon {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  background: hsl(var(--danger) / 0.15);
+  color: hsl(var(--danger));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-weight: 700;
+}
+
+/* Bloc LinkedIn — type "ordres à exécuter" */
+.cockpit-orders {
+  margin-top: 22px;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: 18px;
+  overflow: hidden;
+}
+.cockpit-orders-head {
+  padding: 14px 20px;
+  background: hsl(var(--surface-elevated));
+  border-bottom: 1px solid hsl(var(--border));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cockpit-orders-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: hsl(var(--text));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cockpit-orders-count {
+  background: hsl(var(--accent));
+  color: white;
+  font-size: 10.5px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.06em;
+}
+.cockpit-orders-body { padding: 16px 20px; }
+
+/* Boutons d'action rapide en barre */
+.cockpit-quickbar {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cockpit-quickbar .btn {
+  font-size: 12.5px;
+  padding: 9px 13px;
+}
+
+/* Responsive cockpit */
+@media (max-width: 1024px) {
+  .cockpit-grid { grid-template-columns: repeat(2, 1fr); }
+  .cockpit-kpi-value { font-size: 42px; }
+}
+@media (max-width: 640px) {
+  .cockpit-hero { padding: 22px; }
+  .cockpit-hero-title { font-size: 24px; }
+  .cockpit-hero-body { font-size: 14px; }
+  .cockpit-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .cockpit-kpi { padding: 14px 14px 12px; border-radius: 12px; }
+  .cockpit-kpi-value { font-size: 32px; }
+  .cockpit-kpi-label { font-size: 9.5px; }
+  .cockpit-status-bar { font-size: 11px; padding: 10px 12px; gap: 12px; }
+  .cockpit-status-bar .cockpit-sep { display: none; }
+}
+
+/* ============================
  * Couronne BOSS DE L'UNIVERS — accrochée à la dernière lettre du prénom
  * dans la Matinale (ex : "Bonjour JordaN.")
  * ============================ */

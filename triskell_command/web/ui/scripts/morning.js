@@ -1,104 +1,109 @@
-/* Vue Matinale — Apple-clear.
+/* Vue Cockpit (anciennement "Matinale") — poste de contrôle Triskell.
  *
- * Hero hello + date, UNE priorité du jour mise en avant, 3 KPIs hier,
- * 2 KPIs aujourd'hui, et un bloc "À corriger" qui apparaît seulement
- * s'il y a vraiment quelque chose.
+ * Hiérarchie :
+ *   1. Bandeau de statut (date, heure live, voyants système)
+ *   2. Quickbar (Composer, Brain, Allô Claude, Concentration)
+ *   3. HERO — la mission du jour (priorité unique mise en avant)
+ *   4. Grille KPIs (4 chiffres clés énormes + sparkline 7 jours)
+ *   5. Bloc relances LinkedIn (si il y a des actions à faire)
+ *   6. Bloc alertes (si quelque chose à corriger)
+ *
+ * Ambiance : war room / cockpit avionique. Tout doit être lisible
+ * à 2 mètres et envoyer le signal "on est en chasse".
  */
 
 const Morning = {
+  _clockTimer: null,
+
   async render(container) {
-    // 1. Render shell instantané (hero) pour ne pas attendre l'API
+    // 1. Shell instantané (avant API)
     const greeting = App.greeting();
     const dateStr = App.formatDateFr();
-    // Lit le prénom depuis App.currentUser (rempli au boot par Onboarding)
-    // ou via API en fallback ; vide = on n'affiche pas de prénom
     let userName = (App.currentUser && App.currentUser.first_name) || '';
     if (!userName && App.api) {
       try { userName = await App.api.get_user_name(); } catch (e) {}
     }
+
     // Couronne accrochée à la dernière lettre du prénom (BOSS DE L'UNIVERS)
     const nameWithCrown = userName
       ? `${userName.slice(0, -1)}<span class="boss-letter">${userName.slice(-1)}<svg class="boss-crown" viewBox="0 0 32 22" aria-hidden="true"><defs><linearGradient id="bossCrownGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fde68a"/><stop offset="50%" stop-color="#facc15"/><stop offset="100%" stop-color="#b45309"/></linearGradient></defs><path fill="url(#bossCrownGrad)" stroke="#8a5a00" stroke-width="0.8" stroke-linejoin="round" d="M3 19 L5 7 L11 12 L16 4 L21 12 L27 7 L29 19 Z"/><circle cx="5" cy="6" r="1.6" fill="#dc2626" stroke="#7c2d12" stroke-width="0.5"/><circle cx="16" cy="3" r="1.8" fill="#7c3aed" stroke="#4c1d95" stroke-width="0.5"/><circle cx="27" cy="6" r="1.6" fill="#0ea5e9" stroke="#075985" stroke-width="0.5"/><rect x="3" y="18.5" width="26" height="2" fill="url(#bossCrownGrad)" stroke="#8a5a00" stroke-width="0.5"/></svg></span>`
       : '';
-    const greetingFull = userName ? `${greeting} ${nameWithCrown}.` : `${greeting}.`;
 
     container.innerHTML = `
-      <section class="animate-slide-up max-w-[1100px]">
-        <!-- Hero -->
-        <div class="mb-6 sm:mb-12">
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-              <div class="hero-kicker mb-2">${dateStr.toUpperCase()}</div>
-              <h1 class="hero-title mb-2 sm:mb-3">${greetingFull}</h1>
-              <p class="hero-subtitle">Voilà ce qui t'attend aujourd'hui.</p>
-            </div>
-            ${Help.button('morning')}
-          </div>
-          <div class="flex flex-wrap gap-2 sm:gap-3 mt-5 sm:mt-6">
-            <button id="m-refresh" class="btn btn-secondary">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0114-7.4M21 12a9 9 0 01-14 7.4"/><path d="M21 4v5h-5M3 20v-5h5"/></svg>
-              Rafraîchir
-            </button>
-            <button id="m-compose-mail" class="btn btn-secondary" title="Composer (Ctrl+Shift+M)">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 20h9"/>
-                <path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/>
-              </svg>
-              Composer un mail
-            </button>
-            <button id="m-brain" class="btn btn-secondary" title="Brain — note rapide (Ctrl+B)">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
-                <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
-                <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
-              </svg>
-              Brain
-            </button>
-            <button id="m-allo-claude" class="btn btn-primary"
-                    style="background: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--accent-glow))); border: 0;"
-                    title="Allô Claude — pose une question rapide à Claude">
-              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 12a8 8 0 0 1-11.7 7.1L4 20.5l1.4-5.3A8 8 0 1 1 21 12z"/>
-                <path d="M12 8.5v3M12 12.5v3M8.5 12h3M12.5 12h3" stroke-width="1.6"/>
-              </svg>
-              Allô Claude
-            </button>
-            <button id="m-focus" class="btn btn-secondary" title="Mode Concentration — masque notifs et KPIs pour bosser sans être interrompu">
-              <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"/>
-                <circle cx="12" cy="12" r="6"/>
-                <circle cx="12" cy="12" r="2"/>
-              </svg>
-              Concentration
-            </button>
-          </div>
+      <section class="cockpit-shell animate-slide-up max-w-[1280px]">
+
+        <!-- Bandeau STATUT — voyants live -->
+        <div class="cockpit-status-bar" id="m-statusbar">
+          <span class="cockpit-led" id="m-led-system">SYSTÈME</span>
+          <span class="cockpit-sep"></span>
+          <span class="cockpit-date">${dateStr}</span>
+          <span class="cockpit-sep"></span>
+          <span class="cockpit-time" id="m-clock">--:--:--</span>
+          <span style="flex:1"></span>
+          ${Help.button('morning')}
         </div>
 
-        <div id="m-content" class="space-y-6 sm:space-y-12"></div>
+        <!-- Salutation discrète + quickbar -->
+        <div class="mt-5 flex items-end justify-between gap-3 flex-wrap">
+          <h1 class="hero-title">${userName ? `${greeting} ${nameWithCrown}.` : `${greeting}.`}</h1>
+        </div>
+        <div class="cockpit-quickbar">
+          <button id="m-refresh" class="btn btn-secondary" title="Rafraîchir les chiffres">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0114-7.4M21 12a9 9 0 01-14 7.4"/><path d="M21 4v5h-5M3 20v-5h5"/></svg>
+            Rafraîchir
+          </button>
+          <button id="m-compose-mail" class="btn btn-secondary" title="Composer (Ctrl+Shift+M)">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/>
+            </svg>
+            Composer
+          </button>
+          <button id="m-brain" class="btn btn-secondary" title="Brain — note rapide (Ctrl+B)">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+              <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+              <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
+            </svg>
+            Brain
+          </button>
+          <button id="m-allo-claude" class="btn btn-primary"
+                  style="background: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--accent-glow))); border: 0;"
+                  title="Allô Claude">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a8 8 0 0 1-11.7 7.1L4 20.5l1.4-5.3A8 8 0 1 1 21 12z"/>
+              <path d="M12 8.5v3M12 12.5v3M8.5 12h3M12.5 12h3" stroke-width="1.6"/>
+            </svg>
+            Allô Claude
+          </button>
+          <button id="m-focus" class="btn btn-secondary" title="Mode Concentration">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+            </svg>
+            Concentration
+          </button>
+        </div>
+
+        <div id="m-content" class="mt-6"></div>
       </section>
     `;
 
+    // Bindings boutons quickbar
     document.getElementById('m-refresh').onclick = () => this.render(container);
     document.getElementById('m-brain').onclick = () => {
       if (typeof Brain !== 'undefined' && Brain._openNew) Brain._openNew();
     };
     document.getElementById('m-allo-claude').onclick = () => Claude.open();
-    document.getElementById('m-compose-mail').onclick = () => {
-      this._openComposeChoice();
-    };
+    document.getElementById('m-compose-mail').onclick = () => this._openComposeChoice();
     const focusBtn = document.getElementById('m-focus');
     if (focusBtn) {
       focusBtn.onclick = () => {
         if (typeof FocusMode === 'undefined') return;
-        if (FocusMode.isOn()) {
-          FocusMode.showOverlay();
-        } else {
-          FocusMode.openStartDialog();
-        }
+        if (FocusMode.isOn()) FocusMode.showOverlay();
+        else FocusMode.openStartDialog();
       };
     }
 
-    // Pastilles "NEW" sur les nouveautés du Cockpit
+    // Pastilles "NEW"
     if (window.NewBadge) {
       const brainBtn = document.getElementById('m-brain');
       const alloBtn  = document.getElementById('m-allo-claude');
@@ -109,7 +114,10 @@ const Morning = {
       if (focusBtn)   window.NewBadge.attach(focusBtn,   'cockpit-focus-v1');
     }
 
-    // 2. Charge le digest et hydrate
+    // Démarre l'horloge live
+    this._startClock();
+
+    // 2. Charge le digest
     const slot = document.getElementById('m-content');
     if (!App.api) {
       slot.innerHTML = this._previewPlaceholder();
@@ -119,30 +127,217 @@ const Morning = {
     try { digest = await App.api.get_morning_digest(); } catch (e) {}
 
     if (!digest || !digest.ok) {
+      this._setSystemLed('alert', 'BASE PARTAGÉE HORS LIGNE');
       slot.innerHTML = `
-        <div class="card p-10 text-center">
-          <div class="text-3xl mb-3">🔌</div>
-          <h2 class="text-xl font-semibold mb-2">Connexion à la base partagée requise</h2>
-          <p class="text-text-secondary mb-6 max-w-lg mx-auto">
-            Connecte-toi à la base partagée Triskell depuis les Réglages
-            pour que cette page se remplisse en temps réel.
-          </p>
-          <button class="btn btn-primary" onclick="App.show('config')">Aller dans Réglages</button>
+        <div class="cockpit-alert">
+          <div class="cockpit-alert-icon">!</div>
+          <div class="flex-1">
+            <h3 class="text-base font-bold mb-1">Connexion à la base partagée requise</h3>
+            <p class="text-sm text-text-secondary mb-4">
+              Connecte-toi à la base partagée Triskell depuis les Réglages pour
+              que ce poste de contrôle se remplisse en temps réel.
+            </p>
+            <button class="btn btn-primary" onclick="App.show('config')">Aller dans Réglages →</button>
+          </div>
         </div>
       `;
       return;
     }
 
-    slot.innerHTML = this._renderPriority(digest)
-                   + this._renderYesterday(digest)
-                   + this._renderToday(digest)
-                   + this._renderIssues(digest)
+    // Met à jour le voyant système selon l'état
+    const alerts = (digest.alerts && (digest.alerts.convoy_failed_today + digest.alerts.convoy_failed_yesterday)) || 0;
+    if (alerts > 0) {
+      this._setSystemLed('alert', `SYSTÈME · ${alerts} ALERTE${alerts > 1 ? 'S' : ''}`);
+    } else {
+      this._setSystemLed('ok', 'SYSTÈME · OPÉRATIONNEL');
+    }
+
+    slot.innerHTML = this._renderHero(digest)
+                   + this._renderKpiGrid(digest)
+                   + this._renderAlert(digest)
                    + `<div id="m-linkedin-slot"></div>`;
 
-    // Bloc LinkedIn (chargé en différé pour ne pas bloquer la Matinale)
     this._loadLinkedinActions();
   },
 
+  // -------- Horloge live (mise à jour seconde par seconde) --------
+  _startClock() {
+    const tick = () => {
+      const el = document.getElementById('m-clock');
+      if (!el) {
+        if (this._clockTimer) clearInterval(this._clockTimer);
+        return;
+      }
+      const d = new Date();
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      const ss = String(d.getSeconds()).padStart(2, '0');
+      el.textContent = `${hh}:${mm}:${ss}`;
+    };
+    tick();
+    if (this._clockTimer) clearInterval(this._clockTimer);
+    this._clockTimer = setInterval(tick, 1000);
+  },
+
+  _setSystemLed(state, label) {
+    const el = document.getElementById('m-led-system');
+    if (!el) return;
+    el.classList.remove('alert', 'warn');
+    if (state === 'alert') el.classList.add('alert');
+    else if (state === 'warn') el.classList.add('warn');
+    el.textContent = label;
+  },
+
+  // -------- HERO : la mission du jour --------
+  _renderHero(d) {
+    const q = d.queue || {};
+    const nInt = q.replies_unhandled_interested || 0;
+    const nTotal = q.replies_unhandled_total || 0;
+    const nDraftsP = q.drafts_prospect_pending || 0;
+    const nDraftsC = q.drafts_convoy_pending || 0;
+    const nDrafts = nDraftsP + nDraftsC;
+
+    let kicker, title, body, cta, target, state;
+    if (nInt > 0) {
+      kicker = 'EN CHASSE — PRIORITÉ MAXIMALE';
+      title  = nInt === 1
+        ? '1 prospect intéressé à recontacter'
+        : `${nInt} prospects intéressés à recontacter`;
+      body   = "Ils ont mordu. C'est ta meilleure piste pour transformer aujourd'hui — ne les laisse pas refroidir.";
+      cta    = 'Voir leurs réponses →';
+      target = 'replies';
+      state  = 'success';
+    } else if (nDrafts > 0) {
+      kicker = 'À LANCER EN PREMIER';
+      title  = nDrafts === 1
+        ? '1 brouillon à valider'
+        : `${nDrafts} brouillons à valider`;
+      body   = "Des mails préparés par l'app attendent ton OK. Tu peux les approuver en lot.";
+      cta    = 'Valider les brouillons →';
+      target = 'drafts';
+      state  = 'accent';
+    } else if (nTotal > 0) {
+      kicker = 'À TRIER';
+      title  = nTotal === 1
+        ? '1 réponse à examiner'
+        : `${nTotal} réponses à examiner`;
+      body   = "Pas maintenant, refus, désinscriptions — un coup d'œil rapide suffit pour les classer.";
+      cta    = 'Voir les réponses →';
+      target = 'replies';
+      state  = 'warn';
+    } else {
+      kicker = 'TOUT EST À JOUR';
+      title  = "Le terrain est dégagé.";
+      body   = "Aucune réponse à traiter, aucun brouillon en attente. Lance une nouvelle vague — c'est le bon moment.";
+      cta    = "Lancer l'auto-pilote →";
+      target = 'autopilot';
+      state  = 'accent';
+    }
+
+    return `
+      <div class="cockpit-hero" data-state="${state}">
+        <div class="cockpit-hero-kicker">${kicker}</div>
+        <h2 class="cockpit-hero-title">${title}</h2>
+        <p class="cockpit-hero-body">${body}</p>
+        <button class="btn btn-primary" onclick="App.show('${target}')">${cta}</button>
+      </div>
+    `;
+  },
+
+  // -------- Grille 4 KPIs principaux --------
+  _renderKpiGrid(d) {
+    const sentT = d.sent.today;
+    const sentY = d.sent.yesterday;
+    const sentW = d.sent.last_7d;
+    const daily = d.sent.daily_last_7d || [];
+    const repT  = d.replies.today_total;
+    const repY  = d.replies.yesterday_total;
+    const q = d.queue || {};
+    const nInt = q.replies_unhandled_interested || 0;
+    const nDrafts = (q.drafts_prospect_pending || 0) + (q.drafts_convoy_pending || 0);
+
+    return `
+      <div class="cockpit-grid">
+        ${this._kpi({
+          label: 'Envoyés aujourd\'hui',
+          value: sentT,
+          tag: sentT > 0 ? 'LIVE' : null,
+          delta: `<strong>${sentY}</strong> hier · <strong>${sentW}</strong> sur 7 jours`,
+          spark: daily,
+        })}
+        ${this._kpi({
+          label: 'Réponses aujourd\'hui',
+          value: repT,
+          tag: repT > 0 ? 'LIVE' : null,
+          delta: `<strong>${repY}</strong> hier · taux ${sentY ? Math.round(100*repY/sentY) : 0} %`,
+          tone: repT > 0 ? 'success' : '',
+        })}
+        ${this._kpi({
+          label: 'Intéressés en file',
+          value: nInt,
+          delta: nInt === 0 ? 'rien à relancer là tout de suite' : 'à recontacter — chaud',
+          tone: nInt > 0 ? 'success' : '',
+        })}
+        ${this._kpi({
+          label: 'Brouillons à valider',
+          value: nDrafts,
+          delta: nDrafts === 0 ? 'inbox vide' : 'prêts à approuver',
+          tone: nDrafts > 0 ? 'accent' : '',
+        })}
+      </div>
+    `;
+  },
+
+  _kpi({ label, value, tag, delta, tone, spark }) {
+    const toneCls = tone ? `tone-${tone}` : '';
+    const tagHtml = tag ? `<span class="cockpit-kpi-tag live">${tag}</span>` : '';
+    const sparkHtml = (spark && spark.length) ? this._sparkline(spark) : '';
+    return `
+      <div class="cockpit-kpi ${toneCls}">
+        <div class="cockpit-kpi-head">
+          <span class="cockpit-kpi-label">${label}</span>
+          ${tagHtml}
+        </div>
+        <div class="cockpit-kpi-value">${value}</div>
+        ${delta ? `<div class="cockpit-kpi-delta">${delta}</div>` : ''}
+        ${sparkHtml}
+      </div>
+    `;
+  },
+
+  _sparkline(values) {
+    const max = Math.max(1, ...values);
+    const bars = values.map((v, i) => {
+      const h = Math.max(2, Math.round((v / max) * 28));
+      const today = (i === values.length - 1) ? 'today' : '';
+      return `<div class="cockpit-spark-bar ${today}" style="height:${h}px;" title="${v}"></div>`;
+    }).join('');
+    return `<div class="cockpit-spark">${bars}</div>`;
+  },
+
+  // -------- Bloc Alerte (conditionnel) --------
+  _renderAlert(d) {
+    const a = d.alerts || {};
+    const fY = a.convoy_failed_yesterday || 0;
+    const fT = a.convoy_failed_today || 0;
+    const total = fY + fT;
+    if (total === 0) return '';
+    return `
+      <div class="cockpit-alert">
+        <div class="cockpit-alert-icon">!</div>
+        <div class="flex-1">
+          <h3 class="text-base font-bold mb-1">${total === 1 ? '1 mail non parti' : `${total} mails non partis`}</h3>
+          <p class="text-sm text-text-secondary mb-3">
+            Un problème de configuration mail ou de destinataire bloque la diffusion.
+            Ouvre l'écran d'import pour voir le détail.
+          </p>
+          <button class="btn btn-secondary" onclick="App.show('convoy')">Voir le détail →</button>
+        </div>
+      </div>
+    `;
+  },
+
+  // -------- Bloc LinkedIn (chargé en différé) --------
   async _loadLinkedinActions() {
     if (!App.api) return;
     let actions = [];
@@ -154,20 +349,24 @@ const Morning = {
     if (!slot) return;
     if (actions.length === 0) { slot.innerHTML = ''; return; }
     slot.innerHTML = `
-      <div>
-        <div class="section-label">LinkedIn — relances à faire (${actions.length})</div>
-        <div class="card p-5">
-          <div class="flex items-start justify-between gap-4 mb-4">
-            <p class="text-sm text-text-muted">
-              Ces prospects n'ont pas répondu à ton mail. L'IA a préparé un message
-              LinkedIn court — 3 clics et c'est envoyé. Si tu as Phantombuster
-              configuré, tu peux tout envoyer d'un coup.
-            </p>
-            <button id="m-li-dispatch-all"
-                    class="text-xs px-3 py-1.5 rounded-lg bg-accent text-white hover:bg-accent-hover whitespace-nowrap">
-              ⚡ Tout envoyer via Phantombuster
-            </button>
+      <div class="cockpit-orders">
+        <div class="cockpit-orders-head">
+          <div class="cockpit-orders-title">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5"/><line x1="8" y1="11" x2="8" y2="16"/><circle cx="8" cy="8" r="0.5"/><path d="M12 16v-3a3 3 0 016 0v3"/></svg>
+            Ordres LinkedIn
+            <span class="cockpit-orders-count">${actions.length}</span>
           </div>
+          <button id="m-li-dispatch-all"
+                  class="btn btn-primary"
+                  style="font-size:12px;padding:7px 12px;">
+            ⚡ Tout envoyer via Phantombuster
+          </button>
+        </div>
+        <div class="cockpit-orders-body">
+          <p class="text-sm text-text-muted mb-4">
+            Ces prospects n'ont pas répondu à ton mail. L'IA a préparé un message
+            LinkedIn court — 3 clics et c'est envoyé.
+          </p>
           <div class="space-y-3" id="m-linkedin-list">
             ${actions.slice(0, 8).map(a => this._linkedinCard(a)).join('')}
           </div>
@@ -272,21 +471,7 @@ const Morning = {
     });
   },
 
-  _escHtml(s) {
-    return String(s == null ? '' : s).replace(/[&<>]/g, c => ({
-      '&':'&amp;','<':'&lt;','>':'&gt;'
-    }[c]));
-  },
-  _escAttr(s) {
-    return String(s == null ? '' : s).replace(/["'&<>]/g, c => ({
-      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-    }[c]));
-  },
-
-  // -------- Bloc 1 : priorité du jour (UNE seule) --------
-  /** Mini-modale "Que veux-tu écrire ?" qui propose les 2 modes :
-   *  - Nouveau mail (composer vide classique)
-   *  - Prospection en direct (workflow Claude analyse + génère) */
+  // -------- Compose choice modale (gardée intacte) --------
   _openComposeChoice() {
     const ov = document.createElement('div');
     ov.className = 'fixed inset-0 z-[210] flex items-center justify-center p-4';
@@ -325,7 +510,6 @@ const Morning = {
       </div>
     `;
     document.body.appendChild(ov);
-
     const close = () => {
       document.removeEventListener('keydown', escListener);
       ov.remove();
@@ -337,166 +521,30 @@ const Morning = {
 
     const goMails = (cb) => {
       close();
-      // Si on est déjà sur la vue Mails, on évite le re-render
-      if (App.currentView === 'mails') {
-        cb();
-      } else {
-        App.show('mails');
-        setTimeout(cb, 200);
-      }
+      if (App.currentView === 'mails') cb();
+      else { App.show('mails'); setTimeout(cb, 200); }
     };
-
-    ov.querySelector('[data-cc="new"]').onclick = () => {
-      goMails(() => Mails._openComposer({}));
-    };
-    ov.querySelector('[data-cc="prospect"]').onclick = () => {
-      goMails(() => Mails._openProspectFlow());
-    };
+    ov.querySelector('[data-cc="new"]').onclick = () => goMails(() => Mails._openComposer({}));
+    ov.querySelector('[data-cc="prospect"]').onclick = () => goMails(() => Mails._openProspectFlow());
   },
 
-  _renderPriority(d) {
-    const q = d.queue || {};
-    const nInt = q.replies_unhandled_interested || 0;
-    const nTotal = q.replies_unhandled_total || 0;
-    const nDraftsP = q.drafts_prospect_pending || 0;
-    const nDraftsC = q.drafts_convoy_pending || 0;
-    const nDrafts = nDraftsP + nDraftsC;
-
-    let kicker, title, body, cta, target, accent;
-    if (nInt > 0) {
-      kicker = 'PRIORITÉ DU JOUR';
-      title  = nInt === 1
-        ? '1 prospect intéressé·e à recontacter'
-        : `${nInt} prospects intéressés à recontacter`;
-      body   = "Ils ont répondu positivement à un de tes mails. C'est ta meilleure piste pour transformer aujourd'hui.";
-      cta    = 'Voir leurs réponses';
-      target = 'replies';
-      accent = 'success';
-    } else if (nDrafts > 0) {
-      kicker = 'À FAIRE EN PREMIER';
-      title  = nDrafts === 1
-        ? '1 brouillon à valider'
-        : `${nDrafts} brouillons à valider`;
-      body   = "Des mails préparés par l'app attendent ton OK. Tu peux les approuver en lot.";
-      cta    = 'Valider les brouillons';
-      target = 'drafts';
-      accent = 'accent';
-    } else if (nTotal > 0) {
-      kicker = 'À TRIER';
-      title  = nTotal === 1
-        ? '1 réponse à examiner'
-        : `${nTotal} réponses à examiner`;
-      body   = "Pas maintenant, refus, désinscriptions — un coup d'œil rapide suffit pour les classer.";
-      cta    = 'Voir les réponses';
-      target = 'replies';
-      accent = 'warning';
-    } else {
-      kicker = 'TOUT EST À JOUR';
-      title  = "Rien ne t'attend ce matin.";
-      body   = "Aucune réponse à traiter, aucun brouillon en attente. Bon moment pour lancer une nouvelle vague de prospection ou prendre un café.";
-      cta    = "Lancer l'auto-pilote";
-      target = 'autopilot';
-      accent = 'accent';
-    }
-
-    return `
-      <div class="card-hero p-5 sm:p-8 md:p-12 mb-6 sm:mb-8" data-accent="${accent}">
-        <div class="hero-kicker text-${accent === 'accent' ? 'accent' : accent} mb-2 sm:mb-3">${kicker}</div>
-        <h2 class="font-display text-xl sm:text-2xl md:text-3xl font-bold mb-2 sm:mb-3 leading-tight">${title}</h2>
-        <p class="text-text-secondary text-sm sm:text-base mb-4 sm:mb-6 max-w-2xl">${body}</p>
-        <button class="btn btn-primary w-full sm:w-auto justify-center" onclick="App.show('${target}')">${cta} →</button>
-      </div>
-    `;
+  // -------- Helpers --------
+  _escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>]/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;'
+    }[c]));
   },
-
-  // -------- Bloc 2 : Hier en chiffres (3 KPIs) --------
-  _renderYesterday(d) {
-    const sentY = d.sent.yesterday;
-    const repY  = d.replies.yesterday_total;
-    const breakdown = d.replies.yesterday_breakdown || {};
-    const intY = breakdown.interested || 0;
-    const last7 = d.sent.last_7d;
-
-    return `
-      <div>
-        <div class="section-label">Hier en chiffres</div>
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-5">
-          ${this._stat({label: 'Mails envoyés', value: sentY, delta: `${last7} sur les 7 derniers jours`})}
-          ${this._stat({
-            label: 'Réponses reçues',
-            value: repY,
-            delta: repY === 0 ? '—' : `${Math.round(100*repY/Math.max(sentY,1))} % des envoyés`,
-          })}
-          ${this._stat({
-            label: 'Prospects intéressés',
-            value: intY,
-            delta: intY === 0 ? '—' : 'à recontacter',
-            accent: intY > 0 ? 'success' : '',
-          })}
-        </div>
-      </div>
-    `;
-  },
-
-  // -------- Bloc 3 : Aujourd'hui (2 KPIs) --------
-  _renderToday(d) {
-    const sentT = d.sent.today;
-    const repT  = d.replies.today_total;
-    return `
-      <div>
-        <div class="section-label">Aujourd'hui</div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5">
-          ${this._stat({label: 'Envoyés depuis 00:00', value: sentT, delta: sentT === 0 ? '—' : "L'auto-pilote tourne"})}
-          ${this._stat({label: 'Réponses depuis 00:00', value: repT, delta: repT === 0 ? '—' : 'À examiner', accent: repT > 0 ? 'success' : ''})}
-        </div>
-      </div>
-    `;
-  },
-
-  // -------- Bloc 4 : À corriger (conditionnel) --------
-  _renderIssues(d) {
-    const a = d.alerts || {};
-    const fY = a.convoy_failed_yesterday || 0;
-    const fT = a.convoy_failed_today || 0;
-    const total = fY + fT;
-    if (total === 0) return '';
-    return `
-      <div>
-        <div class="section-label" style="--filet-color: hsl(var(--danger));">À corriger</div>
-        <div class="card p-6 border-l-4 border-l-danger">
-          <div class="flex items-start gap-4">
-            <div class="w-2 h-2 rounded-full bg-danger mt-2"></div>
-            <div class="flex-1">
-              <h3 class="font-semibold text-base mb-1">${total === 1 ? '1 mail non parti' : `${total} mails non partis`}</h3>
-              <p class="text-text-secondary text-sm mb-4">
-                Un problème de configuration mail ou de destinataire. Ouvre l'écran d'import pour voir le détail.
-              </p>
-              <button class="btn btn-secondary" onclick="App.show('convoy')">Voir le détail</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  },
-
-  // -------- Helper stat card --------
-  _stat({label, value, delta, accent}) {
-    const cls = accent ? `accent-${accent}` : '';
-    return `
-      <div class="stat-card ${cls}">
-        <div class="label">${label}</div>
-        <div class="value">${value}</div>
-        ${delta ? `<div class="delta">${delta}</div>` : ''}
-      </div>
-    `;
+  _escAttr(s) {
+    return String(s == null ? '' : s).replace(/["'&<>]/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
   },
 
   // -------- Mode preview (sans API Python) --------
   _previewPlaceholder() {
-    // Donne un rendu visuel même sans pywebview connecté
     const fakeDigest = {
       ok: true,
-      sent: { yesterday: 47, today: 8, last_7d: 312 },
+      sent: { yesterday: 47, today: 8, last_7d: 312, daily_last_7d: [42,38,55,47,61,42,8] },
       replies: {
         yesterday_total: 6,
         yesterday_breakdown: { interested: 2, not_now: 1, no: 2, unsubscribe: 1 },
@@ -506,9 +554,8 @@ const Morning = {
                 drafts_prospect_pending: 3, drafts_convoy_pending: 0 },
       alerts: { convoy_failed_yesterday: 0, convoy_failed_today: 0 },
     };
-    return this._renderPriority(fakeDigest)
-         + this._renderYesterday(fakeDigest)
-         + this._renderToday(fakeDigest)
-         + this._renderIssues(fakeDigest);
+    return this._renderHero(fakeDigest)
+         + this._renderKpiGrid(fakeDigest)
+         + this._renderAlert(fakeDigest);
   },
 };
