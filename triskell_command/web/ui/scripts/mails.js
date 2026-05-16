@@ -342,7 +342,7 @@ const Mails = {
               </div>
 
               <div>
-                <label class="block text-[11px] font-medium text-text-secondary mb-1">Sujet</label>
+                <label class="block text-[11px] font-medium text-text-secondary mb-1">Objet</label>
                 <input id="md-cmp-subject" type="text" value="${this._escape(replySubject)}"
                        class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
               </div>
@@ -773,7 +773,7 @@ const Mails = {
           <div class="flex items-start justify-between gap-3 mb-2">
             <div class="flex-1 min-w-0">
               <div class="text-sm font-bold text-text truncate">${this._escape(t.name)}</div>
-              ${t.subject_default ? `<div class="text-[11px] text-text-muted truncate">Sujet par défaut : ${this._escape(t.subject_default)}</div>` : ''}
+              ${t.subject_default ? `<div class="text-[11px] text-text-muted truncate">Objet par défaut : ${this._escape(t.subject_default)}</div>` : ''}
             </div>
             <div class="flex gap-1 shrink-0">
               <button data-tm-rename="${this._escape(t.id)}" class="text-[11px] px-2 py-1 rounded hover:bg-bg text-text-muted hover:text-accent">Renommer</button>
@@ -892,8 +892,8 @@ const Mails = {
 
           <!-- Sujet -->
           <div>
-            <label class="block text-[11px] font-medium text-text-secondary mb-1">Sujet</label>
-            <input id="cmp-subject" type="text" value="${this._escape(opts.prefilledSubject || '')}" placeholder="Sujet du mail"
+            <label class="block text-[11px] font-medium text-text-secondary mb-1">Objet</label>
+            <input id="cmp-subject" type="text" value="${this._escape(opts.prefilledSubject || '')}" placeholder="Objet du mail"
                    class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
           </div>
 
@@ -1017,6 +1017,21 @@ const Mails = {
         #cmp-body-html:empty:before {
           content: 'Tape ton message ici…';
           color: hsl(var(--text-muted));
+        }
+        /* Images insérées : highlight au survol, indicateur si déjà liée */
+        #cmp-body-html img {
+          cursor: pointer;
+          transition: outline 120ms, box-shadow 120ms;
+        }
+        #cmp-body-html img:hover {
+          outline: 2px solid hsl(var(--accent));
+          outline-offset: 2px;
+        }
+        #cmp-body-html a > img {
+          box-shadow: 0 0 0 2px hsl(var(--accent) / 0.5);
+        }
+        #cmp-body-html a > img::after {
+          content: '🔗';
         }
       `;
       document.head.appendChild(s);
@@ -1490,6 +1505,17 @@ const Mails = {
       });
     }
 
+    // Clic sur une image insérée dans le corps → modale pour la rendre
+    // cliquable (ajouter / modifier / retirer une URL de destination).
+    htmlArea.addEventListener('click', (e) => {
+      const img = e.target.closest('img');
+      if (img && htmlArea.contains(img)) {
+        e.preventDefault();
+        e.stopPropagation();
+        this._openImageLinkDialog(img);
+      }
+    });
+
     // Par défaut, on ouvre directement le mode HTML enrichi (plus pratique
     // pour insérer images / mise en forme). L'utilisateur peut basculer en
     // mode "Texte" via le toggle s'il préfère.
@@ -1579,6 +1605,115 @@ const Mails = {
         sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>Envoyer';
       }
     };
+  },
+
+  /** Ouvre une modale pour rendre une image cliquable (lien URL).
+   *  Si elle est déjà entourée d'un <a>, pré-remplit l'URL existante. */
+  _openImageLinkDialog(img) {
+    const existingLink = img.parentElement && img.parentElement.tagName === 'A'
+      ? img.parentElement : null;
+    const currentUrl = existingLink ? existingLink.getAttribute('href') || '' : '';
+
+    const ov = document.createElement('div');
+    ov.className = 'fixed inset-0 z-[230] flex items-center justify-center p-4';
+    ov.style.background = 'rgba(15,23,42,0.75)';
+    ov.style.backdropFilter = 'blur(8px)';
+    ov.innerHTML = `
+      <div class="bg-surface rounded-2xl shadow-hero w-full max-w-md border border-border animate-slide-up flex flex-col overflow-hidden">
+        <div class="px-5 pt-4 pb-3 border-b border-border bg-surface-elevated">
+          <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">IMAGE</div>
+          <h3 class="text-base font-bold">${existingLink ? 'Modifier le lien' : 'Rendre l\'image cliquable'}</h3>
+          <p class="text-xs text-text-muted mt-1">Quand le destinataire cliquera sur l'image, il sera redirigé vers l'URL ci-dessous.</p>
+        </div>
+        <div class="p-5 space-y-3">
+          <div>
+            <label class="block text-[11px] font-medium text-text-secondary mb-1 uppercase tracking-wider">URL de destination</label>
+            <input id="img-link-url" type="url" value="${this._escape(currentUrl)}"
+                   placeholder="https://triskell-studio.fr"
+                   class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
+            <div class="text-[10px] text-text-muted mt-1">Laisse vide et clique "Enregistrer" pour retirer le lien.</div>
+          </div>
+        </div>
+        <div class="px-5 py-4 border-t border-border bg-surface-elevated flex items-center justify-between gap-2">
+          ${existingLink
+            ? '<button id="img-link-remove" type="button" class="text-xs text-danger hover:underline">Retirer le lien</button>'
+            : '<div></div>'}
+          <div class="flex items-center gap-2">
+            <button id="img-link-cancel" type="button" class="btn btn-secondary">Annuler</button>
+            <button id="img-link-save" type="button" class="btn btn-primary">Enregistrer</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(ov);
+
+    const close = () => {
+      document.removeEventListener('keydown', escListener);
+      ov.remove();
+    };
+    const escListener = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', escListener);
+
+    ov.querySelector('#img-link-cancel').onclick = close;
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+
+    const urlInput = ov.querySelector('#img-link-url');
+    setTimeout(() => { urlInput.focus(); urlInput.select(); }, 50);
+    urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        ov.querySelector('#img-link-save').click();
+      }
+    });
+
+    const wrapImageInLink = (url) => {
+      const a = document.createElement('a');
+      a.setAttribute('href', url);
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener noreferrer');
+      img.parentNode.insertBefore(a, img);
+      a.appendChild(img);
+    };
+    const unwrapImageFromLink = () => {
+      if (!existingLink) return;
+      existingLink.parentNode.insertBefore(img, existingLink);
+      existingLink.remove();
+    };
+
+    ov.querySelector('#img-link-save').onclick = () => {
+      let url = urlInput.value.trim();
+      if (!url) {
+        // URL vide → retire le lien si présent
+        unwrapImageFromLink();
+        img.style.cursor = '';
+        img.removeAttribute('title');
+        close();
+        return;
+      }
+      // Auto-ajout https:// si l'utilisateur n'a pas mis de protocole
+      if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) {
+        url = 'https://' + url;
+      }
+      if (existingLink) {
+        existingLink.setAttribute('href', url);
+        existingLink.setAttribute('target', '_blank');
+        existingLink.setAttribute('rel', 'noopener noreferrer');
+      } else {
+        wrapImageInLink(url);
+      }
+      img.title = `Lien vers ${url}`;
+      close();
+    };
+
+    const removeBtn = ov.querySelector('#img-link-remove');
+    if (removeBtn) {
+      removeBtn.onclick = () => {
+        unwrapImageFromLink();
+        img.style.cursor = '';
+        img.removeAttribute('title');
+        close();
+      };
+    }
   },
 
   _noBackend() {
