@@ -38,15 +38,15 @@ create table if not exists public.workspaces (
   max_users           int  default 1,
   max_campaigns_month int  default 50,
   max_emails_day      int  default 200,
-  -- Owner = créateur initial du workspace (référence users.id existant)
-  owner_user_id uuid references public.users(id) on delete set null,
+  -- Owner = créateur initial du workspace (référence users.user_id existant)
+  owner_user_id uuid references public.users(user_id) on delete set null,
   -- Statut : trialing | active | past_due | canceled
   status      text not null default 'trialing'
 );
 
 create table if not exists public.workspace_members (
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
-  user_id      uuid not null references public.users(id) on delete cascade,
+  user_id      uuid not null references public.users(user_id) on delete cascade,
   role         text not null default 'member',       -- owner | admin | member
   joined_at    timestamptz not null default now(),
   primary key (workspace_id, user_id)
@@ -89,12 +89,15 @@ insert into public.workspaces (slug, name, plan, status)
 values ('triskell-studio', 'Triskell Studio (interne)', 'essential+pro+phare', 'active')
 on conflict (slug) do nothing;
 
--- Rattache Jordan + Thomas à ce workspace (les ids existent dans 03_seed.sql)
+-- Rattache Jordan + Thomas à ce workspace (les ids existent dans 03_seed.sql).
+-- Note : public.users a une colonne `user_id` (pas `id`), pas de colonne email.
+-- L'email vit dans auth.users — on fait la jointure pour distinguer owner/admin.
 insert into public.workspace_members (workspace_id, user_id, role)
-select w.id, u.id,
-       case when u.email like 'jordan%' then 'owner' else 'admin' end
+select w.id, u.user_id,
+       case when au.email ilike 'jordan%' then 'owner' else 'admin' end
   from public.workspaces w
  cross join public.users u
+  join auth.users au on au.id = u.user_id
  where w.slug = 'triskell-studio'
 on conflict do nothing;
 
@@ -133,6 +136,12 @@ begin
   end if;
 
   foreach v_t in array v_tables loop
+    -- Skip si la table n'existe pas (selon ce qui a été migré jusqu'ici)
+    if to_regclass('public.' || v_t) is null then
+      raise notice 'Table public.% absente, skip.', v_t;
+      continue;
+    end if;
+
     -- 4a. add column (sans NOT NULL au début, pour pouvoir backfill)
     execute format('
       alter table public.%I
@@ -160,23 +169,31 @@ end $$;
 -- shared_settings était une table globale clé/valeur partagée par
 -- TOUS les users. En multi-tenant, chaque workspace doit avoir ses
 -- propres réglages (SMTP, catalogue d'offres, etc.).
-alter table public.shared_settings
-  add column if not exists workspace_id uuid
-    references public.workspaces(id) on delete cascade;
+do $$
+begin
+  if to_regclass('public.shared_settings') is null then
+    raise notice 'Table public.shared_settings absente, skip section 5.';
+    return;
+  end if;
 
-update public.shared_settings
-   set workspace_id = (select id from public.workspaces where slug = 'triskell-studio')
- where workspace_id is null;
+  alter table public.shared_settings
+    add column if not exists workspace_id uuid
+      references public.workspaces(id) on delete cascade;
 
-alter table public.shared_settings alter column workspace_id set not null;
+  update public.shared_settings
+     set workspace_id = (select id from public.workspaces where slug = 'triskell-studio')
+   where workspace_id is null;
 
--- L'unicité de la clé doit maintenant être PAR workspace
-alter table public.shared_settings
-  drop constraint if exists shared_settings_pkey;
-alter table public.shared_settings
-  drop constraint if exists shared_settings_key_key;
-alter table public.shared_settings
-  add primary key (workspace_id, key);
+  alter table public.shared_settings alter column workspace_id set not null;
+
+  -- L'unicité de la clé doit maintenant être PAR workspace
+  alter table public.shared_settings
+    drop constraint if exists shared_settings_pkey;
+  alter table public.shared_settings
+    drop constraint if exists shared_settings_key_key;
+  alter table public.shared_settings
+    add primary key (workspace_id, key);
+end $$;
 
 
 -- ─────────────────────────────────────────────────────────────
@@ -247,6 +264,10 @@ declare
   ];
 begin
   foreach v_t in array v_tables loop
+    if to_regclass('public.' || v_t) is null then
+      raise notice 'Table public.% absente, skip RLS.', v_t;
+      continue;
+    end if;
     perform public._install_workspace_rls(v_t);
   end loop;
 end $$;
