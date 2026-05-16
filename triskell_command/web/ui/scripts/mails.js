@@ -986,6 +986,8 @@ const Mails = {
                 <!-- Toggle Texte/HTML -->
                 <button id="cmp-mode-text" class="px-2.5 py-1 rounded-lg font-semibold transition-colors bg-accent/15 text-accent">Texte</button>
                 <button id="cmp-mode-html" class="px-2.5 py-1 rounded-lg font-semibold transition-colors text-text-muted hover:bg-bg">HTML enrichi</button>
+                <!-- Bouton Aperçu (visible uniquement en mode HTML enrichi via JS) -->
+                <button id="cmp-preview-top" type="button" class="hidden px-2.5 py-1 rounded-lg font-semibold transition-colors text-text-muted hover:bg-bg" title="Aperçu (rendu réel du mail)">👁 Aperçu</button>
               </div>
             </div>
 
@@ -1013,7 +1015,6 @@ const Mails = {
               <button data-cmd="formatBlock-blockquote" title="Citation" class="cmp-tb-btn">"</button>
               <div class="w-px h-5 bg-border mx-1"></div>
               <button data-cmd="paste-html" title="Coller du HTML brut" class="cmp-tb-btn font-mono">&lt;/&gt;</button>
-              <button data-cmd="preview" title="Aperçu (rendu réel du mail)" class="cmp-tb-btn">👁 Aperçu</button>
               <button data-cmd="removeFormat" title="Effacer la mise en forme" class="cmp-tb-btn text-text-muted">×</button>
             </div>
 
@@ -1312,6 +1313,7 @@ const Mails = {
     const htmlArea = overlay.querySelector('#cmp-body-html');
     const toolbar = overlay.querySelector('#cmp-toolbar');
 
+    const previewTopBtn = overlay.querySelector('#cmp-preview-top');
     const setMode = (m) => {
       mode = m;
       if (m === 'text') {
@@ -1320,6 +1322,7 @@ const Mails = {
         textArea.classList.remove('hidden');
         htmlArea.classList.add('hidden');
         toolbar.classList.add('hidden');
+        if (previewTopBtn) previewTopBtn.classList.add('hidden');
         // Si on revient en texte depuis HTML : convertit le HTML en texte basique
         if (htmlArea.innerHTML && !textArea.value) {
           textArea.value = htmlArea.innerText;
@@ -1330,6 +1333,7 @@ const Mails = {
         textArea.classList.add('hidden');
         htmlArea.classList.remove('hidden');
         toolbar.classList.remove('hidden');
+        if (previewTopBtn) previewTopBtn.classList.remove('hidden');
         // Si on passe en HTML avec du texte déjà : convertit en paragraphes
         if (textArea.value && !htmlArea.innerHTML) {
           htmlArea.innerHTML = textArea.value
@@ -1579,6 +1583,18 @@ const Mails = {
     htmlArea.addEventListener('mouseup', saveSelection);
     htmlArea.addEventListener('keyup', saveSelection);
 
+    // Bouton Aperçu déplacé en haut (à côté de "Texte / HTML enrichi")
+    if (previewTopBtn) {
+      previewTopBtn.onclick = (e) => {
+        e.preventDefault();
+        const subj = (overlay.querySelector('#cmp-subject').value || '').trim();
+        const fromSel = overlay.querySelector('#cmp-from');
+        const fromLabel = fromSel.options[fromSel.selectedIndex]?.text || '';
+        const to = chipsTo.getValues().join(', ');
+        this._openHtmlPreview(htmlArea.innerHTML, { subject: subj, from: fromLabel, to });
+      };
+    }
+
     // Inputs couleur natifs : appliquent foreColor / hiliteColor sur la sélection sauvée
     const textColorInput = overlay.querySelector('#cmp-text-color-input');
     const bgColorInput   = overlay.querySelector('#cmp-bg-color-input');
@@ -1593,6 +1609,13 @@ const Mails = {
       restoreSelection();
       document.execCommand('hiliteColor', false, e.target.value);
       bgColorBar.style.background = e.target.value;
+    });
+
+    // Empêche les boutons de voler le focus à la zone de saisie
+    // (sinon la sélection / position du curseur est perdue et formatBlock,
+    //  insertUnorderedList, etc. ne s'appliquent plus correctement).
+    toolbar.querySelectorAll('[data-cmd]').forEach(btn => {
+      btn.addEventListener('mousedown', (e) => e.preventDefault());
     });
 
     // Boutons toolbar HTML
