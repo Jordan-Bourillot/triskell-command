@@ -34,7 +34,15 @@ STRATEGY_MODEL = "claude-opus-4-7"
 # Couche LLM — réutilise call_anthropic de triskell_core.ai.providers
 # ---------------------------------------------------------------------------
 def _resolve_api_key(app_state) -> str:
-    """Récupère la clé Anthropic depuis l'app_state (pattern claude_advisor)."""
+    """Récupère la clé Anthropic depuis l'app_state (pattern claude_advisor).
+
+    L'env var ANTHROPIC_API_KEY a priorité (utilisée par Coolify, GitHub
+    Actions, Docker prod). Sinon, lit la config app_state locale.
+    """
+    import os
+    env_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if env_key:
+        return env_key
     if app_state is None:
         return ""
     try:
