@@ -134,7 +134,7 @@ const Phare = {
     // un seul accent coloré (la lampe). Halo généreux mais cadré dans le viewBox.
     // S'adapte aux 3 thèmes via hsl(var(--text)) / var(--accent-glow).
     return `
-      <svg class="phare-svg" viewBox="0 0 280 520" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <svg class="phare-svg" viewBox="-60 -20 400 560" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <defs>
           <!-- Halo de lumière diffus, doux, généreux -->
           <radialGradient id="phareHalo" cx="50%" cy="50%" r="50%">
