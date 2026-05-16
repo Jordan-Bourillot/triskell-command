@@ -6,7 +6,7 @@
  *   - 'clients'  → sites clients externes
  *   - 'agents'   → les 8 agents SEO avec statut et "Lancer maintenant"
  *   - 'site'     → focus 1 site (audit, mots-clés, actions)
- *   - 'prs'      → bac à PRs en attente
+ *   - 'prs'      → modifications en attente de validation (clé interne, label "À valider" en UI)
  *   - 'reports'  → bulletins de l'Analyste
  *
  * Navigation : toujours via boutons clairs, jamais d'onglet caché.
@@ -95,10 +95,10 @@ const Phare = {
             <div class="phare-card-arrow">→</div>
           </button>
 
-          <!-- Liens secondaires (PRs, Bulletins) — discrets sous les 3 grosses cartes -->
+          <!-- Liens secondaires (À valider, Bulletins) — discrets sous les 3 grosses cartes -->
           <div class="phare-secondary">
             <button class="phare-link" data-go="prs">
-              <span>Bac à PRs</span>
+              <span>À valider</span>
               <span class="phare-link-meta" id="ph-prs-count">—</span>
             </button>
             <button class="phare-link" data-go="reports">
@@ -113,7 +113,7 @@ const Phare = {
     container.querySelectorAll('[data-go]').forEach(btn => {
       btn.onclick = () => this._go(btn.dataset.go);
     });
-    // Compteur PRs en attente (chargement non-bloquant)
+    // Compteur des modifs en attente de validation (chargement non-bloquant)
     this._loadPendingCount();
   },
 
@@ -124,51 +124,75 @@ const Phare = {
       const el = document.getElementById('ph-prs-count');
       if (!el) return;
       const n = (data && data.ok) ? (data.actions || []).length : 0;
-      el.textContent = n === 0 ? 'aucune en attente' : `${n} à valider`;
+      el.textContent = n === 0 ? 'rien à valider' : (n === 1 ? '1 modif en attente' : `${n} modifs en attente`);
       if (n > 0) el.style.color = 'hsl(var(--warning))';
     } catch (e) { /* silencieux */ }
   },
 
   _lighthouseSvg() {
-    // Phare stylisé, breton, monolithique. Couleur prend hsl(var(--text)) pour s'adapter aux 3 thèmes.
+    // Phare en style éditorial épuré : silhouette fine, line art doux,
+    // un seul accent coloré (la lampe). Halo généreux mais cadré dans le viewBox.
+    // S'adapte aux 3 thèmes via hsl(var(--text)) / var(--accent-glow).
     return `
-      <svg class="phare-svg" viewBox="0 0 200 360" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <!-- Halo lumineux derrière la lanterne -->
+      <svg class="phare-svg" viewBox="0 0 280 520" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <defs>
-          <radialGradient id="phareGlow" cx="50%" cy="22%" r="60%">
-            <stop offset="0%" stop-color="hsl(var(--accent-glow) / 0.55)"/>
-            <stop offset="40%" stop-color="hsl(var(--accent) / 0.18)"/>
+          <!-- Halo de lumière diffus, doux, généreux -->
+          <radialGradient id="phareHalo" cx="50%" cy="50%" r="50%">
+            <stop offset="0%"  stop-color="hsl(var(--accent-glow) / 0.40)"/>
+            <stop offset="45%" stop-color="hsl(var(--accent) / 0.10)"/>
             <stop offset="100%" stop-color="hsl(var(--accent) / 0)"/>
           </radialGradient>
-          <linearGradient id="phareBody" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stop-color="hsl(var(--text) / 0.95)"/>
-            <stop offset="50%" stop-color="hsl(var(--text) / 1)"/>
-            <stop offset="100%" stop-color="hsl(var(--text) / 0.78)"/>
-          </linearGradient>
+          <!-- Lampe : noyau chaud qui irradie -->
+          <radialGradient id="phareLamp" cx="50%" cy="50%" r="50%">
+            <stop offset="0%"  stop-color="hsl(var(--warning))"/>
+            <stop offset="60%" stop-color="hsl(var(--warning) / 0.55)"/>
+            <stop offset="100%" stop-color="hsl(var(--warning) / 0)"/>
+          </radialGradient>
         </defs>
-        <!-- Halo -->
-        <circle cx="100" cy="80" r="110" fill="url(#phareGlow)"/>
-        <!-- Roches à la base -->
-        <path d="M10 340 Q40 320 70 332 Q100 318 130 332 Q160 320 190 340 L190 360 L10 360 Z"
-              fill="hsl(var(--text) / 0.18)"/>
-        <!-- Corps du phare -->
-        <path d="M75 340 L70 130 L130 130 L125 340 Z" fill="url(#phareBody)"/>
-        <!-- Bandes rouges (le phare breton classique) -->
-        <rect x="71" y="170" width="58" height="22" fill="hsl(var(--danger) / 0.88)"/>
-        <rect x="73" y="230" width="54" height="22" fill="hsl(var(--danger) / 0.88)"/>
-        <rect x="74" y="290" width="52" height="22" fill="hsl(var(--danger) / 0.88)"/>
-        <!-- Plateforme -->
-        <rect x="65" y="120" width="70" height="12" rx="2" fill="hsl(var(--text) / 0.9)"/>
-        <!-- Lanterne (cage de verre) -->
-        <rect x="78" y="78" width="44" height="42" rx="3" fill="hsl(var(--accent) / 0.22)" stroke="hsl(var(--text) / 0.85)" stroke-width="2"/>
-        <!-- Lumière centrale -->
-        <circle cx="100" cy="99" r="9" fill="hsl(var(--warning))"/>
-        <circle cx="100" cy="99" r="14" fill="hsl(var(--warning) / 0.35)"/>
-        <!-- Toit -->
-        <path d="M70 78 L100 50 L130 78 Z" fill="hsl(var(--text) / 0.92)"/>
-        <!-- Antenne -->
-        <line x1="100" y1="50" x2="100" y2="32" stroke="hsl(var(--text) / 0.85)" stroke-width="2.4"/>
-        <circle cx="100" cy="30" r="3" fill="hsl(var(--text) / 0.85)"/>
+
+        <!-- Halo large, centré sur la lampe à y=200, contenu dans le viewBox -->
+        <circle cx="140" cy="200" r="180" fill="url(#phareHalo)"/>
+
+        <!-- Petite ligne d'horizon (suggestion de mer, très subtile) -->
+        <line x1="20" y1="478" x2="260" y2="478"
+              stroke="hsl(var(--text) / 0.10)" stroke-width="1"/>
+
+        <!-- Socle minimaliste : trapèze fin -->
+        <path d="M108 478 L172 478 L162 462 L118 462 Z"
+              fill="hsl(var(--text) / 0.85)"/>
+
+        <!-- Corps du phare : silhouette élancée (trapèze fin) -->
+        <path d="M124 462 L116 250 L164 250 L156 462 Z"
+              fill="hsl(var(--text) / 0.92)"/>
+
+        <!-- Une seule bande accent, fine et désaturée (suggère le breton sans crier) -->
+        <rect x="118" y="356" width="44" height="14"
+              fill="hsl(var(--danger) / 0.72)"/>
+
+        <!-- Plateforme : ligne fine -->
+        <rect x="110" y="244" width="60" height="6" rx="1"
+              fill="hsl(var(--text) / 0.88)"/>
+
+        <!-- Lanterne : carré épuré, juste un trait + la lampe à l'intérieur -->
+        <rect x="120" y="194" width="40" height="50" rx="2"
+              fill="hsl(var(--bg))"
+              stroke="hsl(var(--text) / 0.88)" stroke-width="1.8"/>
+
+        <!-- Halo de la lampe (douceur) -->
+        <circle cx="140" cy="216" r="26" fill="url(#phareLamp)" opacity="0.9"/>
+        <!-- Noyau de la lampe -->
+        <circle cx="140" cy="216" r="7"
+                fill="hsl(var(--warning))"/>
+
+        <!-- Toit : triangle minimaliste -->
+        <path d="M112 194 L140 168 L168 194 Z"
+              fill="hsl(var(--text) / 0.92)"/>
+
+        <!-- Antenne ultra fine, terminée par un point -->
+        <line x1="140" y1="168" x2="140" y2="146"
+              stroke="hsl(var(--text) / 0.78)" stroke-width="1.4"
+              stroke-linecap="round"/>
+        <circle cx="140" cy="144" r="2.2" fill="hsl(var(--text) / 0.78)"/>
       </svg>
     `;
   },
@@ -592,8 +616,8 @@ const Phare = {
         model: 'claude-sonnet-4-6', model_short: 'Sonnet 4.6', status: 'ok' },
       { name: 'optimiseur_onpage', label: "L'Optimiseur On-Page", emoji: '⚡',
         tagline: 'Affûte chaque page au scalpel.',
-        description: "Réécrit titres, meta descriptions, Hn, alts et JSON-LD pour booster le SEO sans toucher au contenu. Ouvre une PR auto.",
-        missions: ["Patches HTML balisés (title/meta/Hn/alt/JSON-LD)", "Score avant/après estimé", "PR GitHub + preview Netlify"],
+        description: "Réécrit titres, meta descriptions, Hn, alts et JSON-LD pour booster le SEO sans toucher au contenu. Soumet la modification en validation.",
+        missions: ["Réécriture des balises (titre, méta, Hn, alt, JSON-LD)", "Score avant/après estimé", "Modif soumise + aperçu Netlify"],
         cadence: 'Mar/Mer/Ven 10h, 1 site par cycle',
         model: 'claude-sonnet-4-6', model_short: 'Sonnet 4.6', status: 'ok' },
       { name: 'tisseur', label: 'Le Tisseur', emoji: '🕸️',
@@ -691,7 +715,17 @@ const Phare = {
         ${acts.length === 0
           ? `<div class="text-center py-10 text-text-muted text-sm">Aucune action en cours.</div>`
           : `<div class="divide-y divide-border">
-              ${acts.slice(0, 10).map(a => `
+              ${acts.slice(0, 10).map(a => {
+                const statusLabels = {
+                  pending_review: 'à valider',
+                  merged: 'publié',
+                  rejected: 'refusé',
+                  draft: 'brouillon',
+                  preview: 'aperçu prêt',
+                  expired: 'expiré',
+                };
+                const statusLabel = statusLabels[a.status] || a.status || 'inconnu';
+                return `
                 <div class="px-5 py-3 flex items-center justify-between text-sm">
                   <div class="flex-1">
                     <div class="font-semibold">${this._esc(a.title || a.kind || '—')}</div>
@@ -702,10 +736,10 @@ const Phare = {
                               ${a.status === 'merged' ? 'bg-success/15 text-success' : ''}
                               ${a.status === 'rejected' ? 'bg-danger/15 text-danger' : ''}
                               ${!['pending_review','merged','rejected'].includes(a.status) ? 'bg-bg text-text-muted' : ''}">
-                    ${this._esc(a.status || 'inconnu')}
+                    ${this._esc(statusLabel)}
                   </span>
                 </div>
-              `).join('')}
+              `;}).join('')}
             </div>`}
       </div>
     `;
@@ -721,12 +755,12 @@ const Phare = {
   },
 
   // ════════════════════════════════════════════════════════════════════
-  //  VUE — Bac à PRs
+  //  VUE — Modifs à valider
   // ════════════════════════════════════════════════════════════════════
   async _renderPRs(container) {
     container.innerHTML = `
       <section class="animate-slide-up">
-        ${this._backHeader('AGENCE — VALIDATION', 'Bac à PRs.', "Les modifications proposées par les agents qui attendent ton feu vert.")}
+        ${this._backHeader('AGENCE — VALIDATION', 'À valider.', "Les modifications proposées par les agents qui attendent ton feu vert.")}
         <div id="ph-prs-body"><div class="text-center py-12 text-text-muted">Chargement…</div></div>
       </section>
     `;
@@ -750,7 +784,7 @@ const Phare = {
       slot.innerHTML = `
         <div class="card p-6 sm:p-12 text-center">
           <div class="text-4xl mb-3">✓</div>
-          <h2 class="text-xl font-semibold mb-2">Aucune PR en attente</h2>
+          <h2 class="text-xl font-semibold mb-2">Rien à valider</h2>
           <p class="text-text-secondary max-w-lg mx-auto">Tout est mergé ou en cours d'analyse. Les agents continuent leur ronde.</p>
         </div>`;
       return;
@@ -768,8 +802,8 @@ const Phare = {
             </header>
             ${a.summary ? `<p class="text-sm text-text-secondary mb-4">${this._esc(a.summary)}</p>` : ''}
             <footer class="flex justify-end gap-2 pt-3 border-t border-border">
-              <button class="btn btn-secondary" data-merge="${this._esc(a.id)}" data-force="false">Merger</button>
-              <button class="btn btn-primary" data-merge="${this._esc(a.id)}" data-force="true">Forcer le merge</button>
+              <button class="btn btn-secondary" data-merge="${this._esc(a.id)}" data-force="false">Valider et publier</button>
+              <button class="btn btn-primary" data-merge="${this._esc(a.id)}" data-force="true">Publier quand même</button>
             </footer>
           </article>
         `).join('')}
