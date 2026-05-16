@@ -75,17 +75,26 @@ def _client():
 
 def _resolve_ai(app_state) -> dict:
     """Renvoie {provider, model, api_key} pour appeler Claude.
-    Préfère Anthropic dans la config locale ; ne tente pas Supabase."""
+    Cherche dans l'ordre : env vars (ANTHROPIC_API_KEY), Supabase, local."""
     out = {"provider": "", "model": "", "api_key": ""}
+    # Récupère les clés via shared_secrets qui gère env > Supabase > local
+    try:
+        from . import shared_secrets
+        keys = shared_secrets.get_ai_keys(client=_client(), app_state=app_state)
+    except Exception:
+        keys = {}
+    # Fallback : config locale brute (au cas où shared_secrets pète)
+    if not keys:
+        ai = app_state.get("ai", default={}) or {}
+        keys = ai.get("api_keys") or {}
+
     ai = app_state.get("ai", default={}) or {}
-    keys = ai.get("api_keys") or {}
     # On force Anthropic pour le conseiller (modèle plus apte à raisonner)
     anth = keys.get("anthropic") or ""
     if anth:
         out["provider"] = "anthropic"
         out["api_key"] = anth
         out["model"] = ai.get("selected_model") or "claude-sonnet-4-5"
-        # Si selected_model n'est pas un Anthropic, on tombe sur le défaut
         if not str(out["model"]).startswith("claude"):
             out["model"] = "claude-sonnet-4-5"
         return out
@@ -163,12 +172,37 @@ def gather_context(app_state) -> dict[str, Any]:
         logger.debug("clients: %s", exc)
 
     # État configuration mini
-    out = app_state.get("outreach", default={}) or {}
+    # IMPORTANT : on lit la config SMTP/IMAP depuis Supabase shared_settings
+    # en priorité (config partagée Jordan/Thomas), pas le settings.json local.
+    # Sur le serveur Docker, le fichier local est souvent vide alors que la
+    # vraie config est en BDD. Sinon Claude croit que tout est cassé et
+    # affole l'utilisateur ("Ton SMTP est mort").
+    smtp_ok = False
+    imap_ok = False
+    try:
+        from . import shared_secrets
+        client = _client()
+        cfg = shared_secrets.get_smtp_config(client=client, app_state=app_state) or {}
+        smtp_ok = bool(cfg.get("smtp_host") and cfg.get("smtp_user") and cfg.get("smtp_password"))
+        imap_ok = bool(cfg.get("imap_host") and cfg.get("imap_user") and cfg.get("imap_password"))
+        # Si on a au moins un compte mail dans Supabase (multi-comptes), c'est bon
+        if not smtp_ok:
+            accounts = shared_secrets.get_all_mail_accounts(client=client, app_state=app_state) or []
+            for acc in accounts:
+                if acc.get("smtp_host") and acc.get("from_email"):
+                    smtp_ok = True
+                    break
+    except Exception as exc:
+        logger.debug("config_status from shared_secrets: %s", exc)
+        # Fallback : ancien comportement (lecture locale)
+        out = app_state.get("outreach", default={}) or {}
+        smtp_ok = bool(out.get("smtp_host") and out.get("smtp_user")
+                         and out.get("smtp_password"))
+        imap_ok = bool(out.get("imap_host") and out.get("imap_user")
+                         and out.get("imap_password"))
     ctx["config_status"] = {
-        "smtp_ok": bool(out.get("smtp_host") and out.get("smtp_user")
-                         and out.get("smtp_password")),
-        "imap_ok": bool(out.get("imap_host") and out.get("imap_user")
-                         and out.get("imap_password")),
+        "smtp_ok": smtp_ok,
+        "imap_ok": imap_ok,
         "ai_configured": bool(_resolve_ai(app_state).get("api_key")),
     }
 
