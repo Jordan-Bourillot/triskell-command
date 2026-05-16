@@ -39,7 +39,9 @@ Ta tâche : retourner UNIQUEMENT un JSON valide (pas de markdown, pas d'explicat
   "category": "string court (ex: 'Idée produit', 'À faire', 'Pour Xi', 'Question client', 'Tech', 'Marketing', 'Personnel')",
   "summary": "résumé ultra-court et FIDÈLE — voir règles ci-dessous",
   "tags": ["tag1", "tag2"],
-  "remind_at": "ISO 8601 string OU null. Si la note mentionne explicitement un délai (ex 'dans 3 jours', 'demain', 'la semaine prochaine', 'lundi'), calcule la date correspondante depuis NOW. Sinon null.",
+  "urgency": 1-5,
+  "importance": 1-5,
+  "remind_at": "ISO 8601 UTC string OU null. Voir règles ci-dessous.",
   "assigned_to": "'jordan' | 'thomas' | null"
 }
 
@@ -51,10 +53,28 @@ RÈGLES POUR `summary` — RELIS À CHAQUE NOTE :
 5. Une phrase max, 12 mots max. Phrase factuelle, pas marketing.
 6. Si la note est vraiment incompréhensible, mets le tout début (5-8 mots) tel quel comme summary, ne devine pas.
 
-Conseils catégorie :
+RÈGLES POUR `urgency` (à quel point ça doit être traité vite) :
+- 5 = à faire MAINTENANT / aujourd'hui (urgence client, deadline imminente, problème prod, RDV demain)
+- 4 = cette semaine (engagement pris, attendu sous quelques jours)
+- 3 = ce mois-ci (à planifier, sans deadline forte)
+- 2 = quand il y aura du temps (idée à explorer, amélioration)
+- 1 = aucun délai (réflexion, vision long terme, idée pure)
+
+RÈGLES POUR `importance` (à quel point l'impact est grand) :
+- 5 = critique pour le business / la vie (chiffre d'affaires, santé, légal, client clé)
+- 4 = fort impact (nouveau produit, refonte majeure, relation pro importante)
+- 3 = impact normal (amélioration utile, sujet de fond)
+- 2 = mineur (petit confort, détail)
+- 1 = marginal (curiosité, fun, peu de valeur)
+
+RÈGLES POUR `remind_at` (ordre de priorité) :
+1. Si la note mentionne un délai EXPLICITE ('demain', 'dans 3 jours', 'lundi', 'la semaine prochaine') → calcule la date correspondante en UTC ISO 8601 (Z).
+2. Sinon → laisse null. Le système calculera automatiquement le rappel à partir de l'urgence.
+
+Catégorie :
 - Choisis les catégories naturellement, comme un cerveau humain les classerait
 - Si la note est personnelle, préfère 'Personnel'
-- Pour remind_at : utilise NOW comme référence et calcule UTC ISO 8601 (Z)"""
+- Pour remind_at calculé : utilise NOW comme référence (UTC ISO 8601 Z)"""
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +200,8 @@ def add_note(content: str, *, author: str = "jordan", client=None,
         "category": analysis.get("category") or None,
         "summary":  analysis.get("summary") or None,
         "tags":     analysis.get("tags") or [],
+        "urgency":   analysis.get("urgency"),
+        "importance": analysis.get("importance"),
         "remind_at": analysis.get("remind_at"),
         "assigned_to": analysis.get("assigned_to"),
         "replies": [],
@@ -247,6 +269,8 @@ def edit_content(note_id: str, new_content: str, *, client=None,
         "category": analysis.get("category") or note.get("category"),
         "summary":  analysis.get("summary") or None,
         "tags":     analysis.get("tags") or note.get("tags") or [],
+        "urgency":   analysis.get("urgency") if analysis else note.get("urgency"),
+        "importance": analysis.get("importance") if analysis else note.get("importance"),
         "assigned_to": analysis.get("assigned_to") if analysis else note.get("assigned_to"),
     }
     new_remind = analysis.get("remind_at")
@@ -289,6 +313,8 @@ def add_reply(note_id: str, reply_content: str, *, author: str = "jordan",
         "category": analysis.get("category") or note.get("category"),
         "summary":  analysis.get("summary") or note.get("summary"),
         "tags":     analysis.get("tags") or note.get("tags"),
+        "urgency":   analysis.get("urgency") if analysis else note.get("urgency"),
+        "importance": analysis.get("importance") if analysis else note.get("importance"),
     }
     if analysis.get("remind_at") and analysis.get("remind_at") != note.get("remind_at"):
         patch["remind_at"] = analysis["remind_at"]
@@ -339,6 +365,98 @@ def _fetch_image_as_base64(url: str) -> Optional[tuple[str, str]]:
     except Exception as exc:
         logger.warning("brain._fetch_image_as_base64 %s: %s", url, exc)
         return None
+
+
+def process_reminders(client=None, *, dry_run: bool = False) -> dict:
+    """Parcourt les notes 'open' dont remind_at est échu (et reminded_at null)
+    et envoie une notification push à l'auteur (et l'assigned_to si présent).
+
+    Renvoie {"checked": n, "sent": k, "errors": [...]}.
+    Si dry_run=True : ne fait que lister sans pousser ni marquer.
+    """
+    sb = _sb(client)
+    if sb is None:
+        return {"checked": 0, "sent": 0, "errors": ["no_supabase"]}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        rows = (sb.table(TABLE).select("*")
+                  .eq("status", "open")
+                  .is_("reminded_at", "null")
+                  .lte("remind_at", now_iso)
+                  .limit(50)
+                  .execute().data) or []
+    except Exception as exc:
+        return {"checked": 0, "sent": 0, "errors": [f"list: {exc}"]}
+
+    sent = 0
+    errors: list[str] = []
+    # Import push lazy (pas dispo dans tous les environnements)
+    try:
+        from ..web import push as _push
+    except Exception as exc:
+        return {"checked": len(rows), "sent": 0, "errors": [f"push_import: {exc}"]}
+
+    for n in rows:
+        nid = n.get("id")
+        title = "🧠 Rappel Brain"
+        u = n.get("urgency")
+        if u == 5: title = "🔥 Urgent — Brain"
+        elif u == 4: title = "⚡ Bientôt — Brain"
+        body = (n.get("summary") or n.get("content") or "")[:200]
+        # Cible : assigned_to si défini, sinon auteur, sinon tout le monde
+        targets = []
+        if n.get("assigned_to"):
+            targets.append(n["assigned_to"])
+        elif n.get("author"):
+            targets.append(n["author"])
+        else:
+            targets.append(None)
+        if dry_run:
+            sent += 1
+            continue
+        try:
+            for t in targets:
+                _push.send_push(title, body,
+                                user_id=t, tag=f"brain-{nid}",
+                                tag_group="brain", priority=("urgent" if u == 5 else "normal"),
+                                url="/?view=brain",
+                                extra_data={"note_id": nid})
+            sb.table(TABLE).update({"reminded_at": now_iso}).eq("id", nid).execute()
+            sent += 1
+        except Exception as exc:
+            errors.append(f"{nid}: {exc}")
+
+    return {"checked": len(rows), "sent": sent, "errors": errors}
+
+
+def _compute_remind_from_urgency(urgency: int) -> Optional[str]:
+    """Calcule un remind_at par défaut depuis l'urgence (1-5).
+    Renvoie une string ISO 8601 UTC (Z) ou None pour urgency <= 2.
+
+    Règles (heure locale Europe/Paris) :
+      - 5 → dans 2 heures
+      - 4 → demain 9h00
+      - 3 → dans 3 jours, 9h00
+      - 1-2 → pas de rappel auto
+    """
+    from datetime import timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Europe/Paris")
+    except Exception:
+        tz = timezone.utc
+    now = datetime.now(tz)
+    if urgency == 5:
+        when = now + timedelta(hours=2)
+    elif urgency == 4:
+        nine = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        when = nine + timedelta(days=1) if now >= nine else nine
+    elif urgency == 3:
+        nine = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=3)
+        when = nine
+    else:
+        return None
+    return when.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 # ---------------------------------------------------------------------------
@@ -399,10 +517,24 @@ def analyze_note(content: str, *, ai_keys: Optional[dict] = None,
         remind = parsed.get("remind_at")
         if not (isinstance(remind, str) and len(remind) >= 10 and remind[:4].isdigit()):
             remind = None
+        # Urgence / Importance (clamp 1-5)
+        def _clamp(v):
+            try:
+                n = int(v)
+                return max(1, min(5, n))
+            except (TypeError, ValueError):
+                return None
+        urgency = _clamp(parsed.get("urgency"))
+        importance = _clamp(parsed.get("importance"))
+        # Si remind_at non explicite, déduit depuis urgency
+        if remind is None and urgency is not None and urgency >= 3:
+            remind = _compute_remind_from_urgency(urgency)
         return {
             "category": str(parsed.get("category") or "Sans catégorie")[:60],
             "summary":  str(parsed.get("summary") or "")[:200],
             "tags":     [str(t) for t in (parsed.get("tags") or [])][:3],
+            "urgency":  urgency,
+            "importance": importance,
             "remind_at": remind,
             "assigned_to": assigned,
         }

@@ -1062,15 +1062,35 @@ class Api:
         if not nid:
             return {"ok": False, "error": "id manquant"}
         patch = {}
-        if "status" in p:   patch["status"] = p["status"]
-        if "category" in p: patch["category"] = p["category"]
-        if "remind_at" in p: patch["remind_at"] = p["remind_at"]
+        if "status" in p:     patch["status"] = p["status"]
+        if "category" in p:   patch["category"] = p["category"]
+        if "remind_at" in p:
+            patch["remind_at"] = p["remind_at"]
+            patch["reminded_at"] = None
+        if "urgency" in p:
+            try: patch["urgency"] = max(1, min(5, int(p["urgency"]))) if p["urgency"] is not None else None
+            except Exception: pass
+        if "importance" in p:
+            try: patch["importance"] = max(1, min(5, int(p["importance"]))) if p["importance"] is not None else None
+            except Exception: pass
         if not patch:
             return {"ok": False, "error": "Rien à mettre à jour"}
         try:
             from ..integrations import brain
             ok = brain.update_note(nid, patch, client=self._supabase())
             return {"ok": bool(ok)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def brain_process_reminders(self, payload: dict | None = None) -> dict:
+        """Envoie les rappels push pour les notes dont remind_at est échu.
+        À appeler périodiquement (cron / scheduled function)."""
+        p = payload or {}
+        dry = bool(p.get("dry_run"))
+        try:
+            from ..integrations import brain
+            res = brain.process_reminders(client=self._supabase(), dry_run=dry)
+            return {"ok": True, **res}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

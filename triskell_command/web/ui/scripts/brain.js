@@ -52,6 +52,7 @@ const Brain = {
             <select id="b-sort" class="px-2 py-1 rounded-lg bg-bg border border-border">
               <option value="date_desc">Récentes d'abord</option>
               <option value="date_asc">Anciennes d'abord</option>
+              <option value="priority">Par priorité (urgence × importance)</option>
               <option value="cat">Par catégorie (A→Z)</option>
               <option value="tag">Par tag</option>
             </select>
@@ -84,9 +85,11 @@ const Brain = {
       out = out.filter(n => (n.author || '').toLowerCase() === this.state.authorFilter);
     }
     const sort = this.state.sortBy || 'date_desc';
+    const prio = (n) => (n.urgency || 0) * (n.importance || 0);
     if (sort === 'date_asc')  out.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
     else if (sort === 'cat')  out.sort((a, b) => (a.category || 'zzz').localeCompare(b.category || 'zzz'));
     else if (sort === 'tag')  out.sort((a, b) => ((a.tags || [])[0] || 'zzz').localeCompare((b.tags || [])[0] || 'zzz'));
+    else if (sort === 'priority') out.sort((a, b) => prio(b) - prio(a) || (b.created_at || '').localeCompare(a.created_at || ''));
     else                       out.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
     return out;
   },
@@ -114,6 +117,13 @@ const Brain = {
                   border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
       .b-author.jordan { background: hsl(var(--accent) / 0.15); color: hsl(var(--accent)); }
       .b-author.thomas { background: hsl(var(--success) / 0.15); color: hsl(var(--success)); }
+      .b-prio-pill { display: inline-flex; align-items: center; gap: 2px;
+                     padding: 1px 5px; border-radius: 4px;
+                     background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
+                     color: hsl(var(--text-muted)); font-weight: 600; }
+      .b-prio-5 { border-left: 3px solid hsl(var(--danger, 0 84% 60%)); }
+      .b-prio-4 { border-left: 3px solid hsl(var(--warning, 38 92% 50%)); }
+      .b-prio-3 { border-left: 3px solid hsl(var(--accent)); }
     `;
     document.head.appendChild(s);
   },
@@ -210,8 +220,10 @@ const Brain = {
     const summaryOrContent = n.summary || (n.content || '').slice(0, 200);
     const atts = (n.attachments || []).slice(0, 4);
     const extra = (n.attachments || []).length - atts.length;
+    const u = n.urgency, imp = n.importance;
+    const prioClass = u >= 5 ? 'b-prio-5' : u === 4 ? 'b-prio-4' : u === 3 ? 'b-prio-3' : '';
     return `
-      <div class="card b-note p-4" data-bnote="${this._escape(n.id)}">
+      <div class="card b-note p-4 ${prioClass}" data-bnote="${this._escape(n.id)}">
         <div class="flex items-start justify-between gap-3 mb-2">
           <div class="flex-1 min-w-0">
             <div class="text-sm leading-relaxed text-text whitespace-pre-wrap">${this._escape(summaryOrContent)}</div>
@@ -221,7 +233,13 @@ const Brain = {
                 ${extra > 0 ? `<div class="w-14 h-14 rounded-md border border-border flex items-center justify-center text-xs text-text-muted bg-bg">+${extra}</div>` : ''}
               </div>` : ''}
           </div>
-          <span class="b-author ${author} shrink-0">${this._escape(author)}</span>
+          <div class="flex flex-col items-end gap-1 shrink-0">
+            <span class="b-author ${author}">${this._escape(author)}</span>
+            ${(u || imp) ? `<div class="flex gap-1 text-[10px]">
+              ${u   ? `<span class="b-prio-pill" title="Urgence ${u}/5">🔥 ${u}</span>` : ''}
+              ${imp ? `<span class="b-prio-pill" title="Importance ${imp}/5">⭐ ${imp}</span>` : ''}
+            </div>` : ''}
+          </div>
         </div>
         <div class="flex items-center gap-2 text-[11px] text-text-muted flex-wrap">
           ${tags.map(t => `<span class="b-tag">${this._escape(t)}</span>`).join('')}
@@ -487,8 +505,10 @@ const Brain = {
             </div>
           </div>
 
-          ${(n.tags || []).length || n.remind_at ? `
+          ${(n.tags || []).length || n.remind_at || n.urgency || n.importance ? `
             <div class="flex items-center gap-2 text-[11px] text-text-muted flex-wrap">
+              ${n.urgency    ? `<span class="b-prio-pill">🔥 ${n.urgency}/5 urgence</span>` : ''}
+              ${n.importance ? `<span class="b-prio-pill">⭐ ${n.importance}/5 importance</span>` : ''}
               ${(n.tags || []).map(t => `<span class="b-tag">${this._escape(t)}</span>`).join('')}
               ${n.remind_at ? `<span>⏰ Rappel : ${this._fmtDate(n.remind_at)}</span>` : ''}
               ${n.assigned_to ? `<span>→ ${this._escape(n.assigned_to)}</span>` : ''}

@@ -99,6 +99,10 @@ def create_app() -> FastAPI:
     # Empêche l'expiration de l'access_token (durée typique : 1h).
     _start_supabase_refresh_thread()
 
+    # Thread des rappels Brain : check toutes les 5 min si des notes ont
+    # un remind_at échu et envoie une push notification.
+    _start_brain_reminders_thread()
+
     # Démarre les workers backend (pollers IMAP, autopilot, drip, etc.)
     # SANS attendre que le front se connecte. Comme ça, le serveur fait son
     # boulot même si personne n'a la page ouverte.
@@ -335,6 +339,92 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Pas de photo")
         return FileResponse(str(p))
 
+    # ---------------- Facturation SaaS (Stripe) ----------------
+    # Routes minimales pour brancher l'abonnement. Aucune ne nécessite
+    # le SDK Stripe d'être installé tant qu'on ne les appelle pas — elles
+    # le chargent en lazy via billing_saas.checkout._stripe().
+
+    @app.post("/api/billing/create_checkout")
+    async def billing_create_checkout(request: Request) -> JSONResponse:
+        """Crée une Stripe Checkout Session.
+
+        Body attendu : {"modules": ["essential", "phare"], "email": "..."}
+        Renvoie {"ok": true, "url": "https://checkout.stripe.com/..."}.
+        """
+        user_id = getattr(request.state, "user_id", None)
+        if not user_id:
+            return JSONResponse(status_code=401,
+                                content={"ok": False, "error": "auth_required"})
+        try:
+            payload = (await request.json()) or {}
+        except Exception:
+            payload = {}
+        modules = payload.get("modules") or ["essential"]
+        email   = (payload.get("email") or "").strip()
+        # En attendant le multi-tenant réel (migration 20), on utilise
+        # l'user_id comme workspace_id temporaire (1 user = 1 workspace).
+        workspace_id = user_id
+        try:
+            from ..integrations.billing_saas import checkout
+            url = checkout.create_session(
+                workspace_id=workspace_id,
+                workspace_email=email,
+                modules=modules,
+            )
+            return JSONResponse(content={"ok": True, "url": url})
+        except Exception as exc:
+            logger.exception("billing.create_checkout a échoué")
+            return JSONResponse(status_code=500,
+                                content={"ok": False, "error": str(exc)})
+
+    @app.post("/api/billing/portal")
+    async def billing_portal(request: Request) -> JSONResponse:
+        """Renvoie l'URL Stripe Customer Portal pour gérer son abonnement."""
+        user_id = getattr(request.state, "user_id", None)
+        if not user_id:
+            return JSONResponse(status_code=401,
+                                content={"ok": False, "error": "auth_required"})
+        try:
+            payload = (await request.json()) or {}
+        except Exception:
+            payload = {}
+        customer_id = (payload.get("stripe_customer_id") or "").strip()
+        if not customer_id:
+            return JSONResponse(status_code=400,
+                                content={"ok": False,
+                                         "error": "stripe_customer_id requis"})
+        try:
+            from ..integrations.billing_saas import portal
+            url = portal.create_session(customer_id)
+            return JSONResponse(content={"ok": True, "url": url})
+        except Exception as exc:
+            logger.exception("billing.portal a échoué")
+            return JSONResponse(status_code=500,
+                                content={"ok": False, "error": str(exc)})
+
+    @app.post("/api/billing/webhook")
+    async def billing_webhook(request: Request) -> JSONResponse:
+        """Reçoit les évènements Stripe (signature vérifiée).
+
+        Cette route DOIT être dans PUBLIC_API_PATHS (côté tcauth) sinon
+        Stripe se prend un 401. À ajouter manuellement quand on active
+        vraiment la facturation.
+        """
+        sig = request.headers.get("stripe-signature", "")
+        payload_bytes = await request.body()
+        try:
+            from ..integrations.billing_saas import webhook
+            event = webhook.parse_event(payload_bytes, sig)
+            result = webhook.handle_event(event)
+            return JSONResponse(content=result)
+        except ValueError as exc:
+            return JSONResponse(status_code=400,
+                                content={"ok": False, "error": str(exc)})
+        except Exception as exc:
+            logger.exception("billing.webhook a échoué")
+            return JSONResponse(status_code=500,
+                                content={"ok": False, "error": str(exc)})
+
     # ---------------- Static files (UI) ----------------
 
     if UI_DIR.exists():
@@ -401,6 +491,28 @@ def _start_supabase_refresh_thread(interval_sec: int = 1800) -> None:
     t = threading.Thread(target=loop, name="supabase-refresh", daemon=True)
     t.start()
     logger.info("Thread auto-refresh Supabase démarré (toutes les %d s).", interval_sec)
+
+
+def _start_brain_reminders_thread(interval_sec: int = 300) -> None:
+    """Démarre un thread daemon qui parcourt les rappels Brain échus
+    et pousse une notification push, toutes les 5 min par défaut."""
+    def loop():
+        # Petit délai initial pour laisser le serveur finir son boot
+        time.sleep(60)
+        while True:
+            try:
+                from ..integrations import brain
+                res = brain.process_reminders()
+                if res.get("sent"):
+                    logger.info("Brain reminders : %d envoyés (sur %d échus)",
+                                res.get("sent", 0), res.get("checked", 0))
+            except Exception as exc:
+                logger.debug("brain reminders thread: %s", exc)
+            time.sleep(interval_sec)
+
+    t = threading.Thread(target=loop, name="brain-reminders", daemon=True)
+    t.start()
+    logger.info("Thread rappels Brain démarré (toutes les %d s).", interval_sec)
 
 
 def _register_route(app: FastAPI, name: str, method) -> None:
