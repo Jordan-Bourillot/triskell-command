@@ -17,9 +17,11 @@ Génération des hash : `python scripts/hash_password.py`
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import secrets
+from pathlib import Path
 from typing import Optional
 
 import bcrypt
@@ -117,6 +119,63 @@ def read_session_cookie(value: Optional[str]) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Display names personnalisés (modifiables via la modale "Mon profil")
+# ---------------------------------------------------------------------------
+# Stockage : ~/.triskell-command/user_display_names.json
+# Forme   : {"jordan": "Jordan Bourillot", "thomas": "Thomas X"}
+# Fallback: si pas d'entrée pour user_id, on retourne KNOWN_USERS[user_id]["display_name"]
+#           (le nom par défaut hardcodé).
+
+def _display_names_file() -> Path:
+    base = Path.home() / ".triskell-command"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        logger.debug("Création %s impossible : %s", base, exc)
+    return base / "user_display_names.json"
+
+
+def _load_custom_names() -> dict:
+    path = _display_names_file()
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        logger.warning("Lecture %s impossible : %s", path, exc)
+        return {}
+
+
+def _save_custom_names(names: dict) -> bool:
+    path = _display_names_file()
+    try:
+        path.write_text(json.dumps(names, ensure_ascii=False, indent=2),
+                        encoding="utf-8")
+        return True
+    except Exception as exc:
+        logger.warning("Écriture %s impossible : %s", path, exc)
+        return False
+
+
 def get_display_name(user_id: str) -> str:
+    """Renvoie le nom à afficher pour un utilisateur. Personnalisé si défini,
+    sinon nom par défaut hardcodé dans KNOWN_USERS."""
+    custom = _load_custom_names()
+    val = (custom.get(user_id) or "").strip()
+    if val:
+        return val
     user = KNOWN_USERS.get(user_id)
     return user["display_name"] if user else user_id
+
+
+def set_display_name(user_id: str, name: str) -> bool:
+    """Enregistre le nom personnalisé d'un utilisateur. Renvoie True si OK."""
+    if user_id not in KNOWN_USERS:
+        return False
+    name = (name or "").strip()
+    if not name:
+        return False
+    custom = _load_custom_names()
+    custom[user_id] = name
+    return _save_custom_names(custom)

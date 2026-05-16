@@ -178,6 +178,42 @@ def create_app() -> FastAPI:
             "display_name": tcauth.get_display_name(user_id),
         })
 
+    @app.post("/api/me_update")
+    async def me_update(request: Request) -> JSONResponse:
+        """Met à jour le profil personnel de l'utilisateur connecté :
+        - display_name : nom affiché (stocké par user_id, personnel à chaque
+          utilisateur — Jordan et Thomas ont chacun le leur)
+        - email : email d'expéditeur par défaut (partagé via outreach.from_email)
+        """
+        user_id = getattr(request.state, "user_id", None)
+        if not user_id:
+            return JSONResponse(status_code=401,
+                                content={"ok": False, "error": "auth_required"})
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        payload = payload or {}
+        display_name = (payload.get("display_name") or "").strip()
+        email = (payload.get("email") or "").strip()
+        if not display_name:
+            return JSONResponse(content={"ok": False, "error": "Le nom est requis."})
+        # Enregistre le display_name personnalisé pour ce user_id
+        if not tcauth.set_display_name(user_id, display_name):
+            return JSONResponse(content={"ok": False, "error": "Sauvegarde du nom impossible."})
+        # Email partagé : on passe par save_user_identity (qui écrit outreach.from_email)
+        if email:
+            try:
+                api_instance.save_user_identity({"full_name": display_name, "email": email})
+            except Exception as exc:
+                logger.warning("me_update outreach save : %s", exc)
+        return JSONResponse(content={
+            "ok": True,
+            "user_id": user_id,
+            "display_name": display_name,
+            "email": email,
+        })
+
     # ---------------- Web Push notifications ----------------
 
     @app.get("/api/push/public_key")

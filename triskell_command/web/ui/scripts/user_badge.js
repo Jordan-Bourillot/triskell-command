@@ -217,7 +217,13 @@ const UserBadge = {
       saveBtn.disabled = true;
       saveBtn.innerHTML = 'Enregistrement…';
       try {
-        const r = await App.api.save_user_identity({ full_name: fullVal, email: emailVal });
+        // /api/me_update enregistre :
+        //  - le display_name PAR utilisateur (Jordan/Thomas ont chacun le leur,
+        //    stocké dans ~/.triskell-command/user_display_names.json)
+        //  - l'email d'expéditeur partagé (outreach.from_email)
+        // Important : passer par App.api.me_update pour que le mode démo
+        // l'intercepte correctement (faux succès en démo, vraie écriture sinon).
+        const r = await App.api.me_update({ display_name: fullVal, email: emailVal });
         if (r && r.ok) {
           // Met à jour le badge en local + côté App.currentUser
           App.currentUser = App.currentUser || {};
