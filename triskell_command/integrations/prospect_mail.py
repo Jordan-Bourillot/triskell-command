@@ -149,26 +149,36 @@ Ton job : rédiger un mail court, sincère, qui leur fait découvrir CE site
 qu'il a fait pour eux, en mettant l'accent sur le soin apporté et sur ce
 qu'il leur apporte concrètement.
 
-Règles absolues :
-- Tu reçois plusieurs MODÈLES de mails déjà rédigés par Jordan. Tu CHOISIS
-  celui qui colle le mieux à cette cible et tu l'adaptes (tu ne le sors pas
-  brut). Si aucun ne colle, tu pars d'une page blanche en gardant le style.
-- Le mail DOIT inclure le lien cliquable vers le site (passe par un
-  <a href="URL_DU_SITE">...</a>), avec un texte d'ancre clair ("Découvrir
-  le site", "Voir ce que j'ai imaginé pour vous", etc.). Utilise
-  EXACTEMENT l'URL que je te donne.
-- Une APERÇU IMAGE du site sera attaché au mail. Insère un placeholder
-  `<img src="cid:prospect_preview">` à un endroit pertinent (juste après
-  l'accroche, ou avant la CTA, au choix). Si l'image n'est pas dispo, le
-  frontend retirera la balise sans souci.
-- Cite 1 ou 2 éléments PRÉCIS de la cible (un projet, une page, une phrase,
-  un produit / service). Ça doit prouver que tu as vraiment regardé qui
-  ils sont.
-- Ton court : 110-200 mots max corps du mail. Accroche → ce que tu as fait
-  → preview + lien → ce que ça leur apporte → CTA douce.
+LES MODÈLES ENREGISTRÉS SONT EN HTML COMPLET (avec styles inline,
+couleurs, blocs structurés, mises en forme). Tu DOIS :
+- Choisir le modèle qui correspond le mieux à la cible.
+- RÉUTILISER son HTML complet : tu conserves la structure (divs, tables,
+  styles inline, couleurs, polices, boutons, séparateurs, padding,
+  background-color, etc.) telle quelle.
+- Tu remplaces UNIQUEMENT le contenu textuel par du contenu personnalisé
+  pour cette cible précise. Le rendu visuel du mail doit rester celui
+  du modèle.
+- Si le modèle contient un bouton CTA, tu remplaces son texte et son href
+  par les bons éléments. Si plusieurs CTA, tu choisis celui qui sert le
+  mieux le message ; tu peux retirer les autres en gardant la structure
+  cohérente.
+- Si le modèle contient une zone "aperçu du site", tu y mets
+  <img src="cid:prospect_preview" alt="..." style="...">. Sinon, tu
+  insères ce <img> à un endroit pertinent (juste après l'accroche ou
+  avant la CTA).
+- Si AUCUN modèle ne colle vraiment, tu pars d'une page blanche en
+  HTML simple (<p>, <strong>, <a href>, <img>).
+
+Règles de contenu :
+- Le mail DOIT inclure le lien cliquable vers le site. Utilise
+  EXACTEMENT l'URL fournie dans le <a href="URL">.
+- Cite 1 ou 2 éléments PRÉCIS de la cible (projet, page, produit, ligne
+  éditoriale) — ça doit prouver que tu as vraiment regardé qui ils sont.
+- Ton : 110-200 mots max corps du mail. Accroche → ce que tu as fait pour
+  eux → preview + lien → bénéfice → CTA douce.
 - Pas de "Bonjour Madame/Monsieur". Si tu trouves le prénom dans le site,
   utilise-le. Sinon "Bonjour" tout court.
-- Ne signe PAS le mail (signature ajoutée automatiquement).
+- Ne signe PAS le mail (signature ajoutée automatiquement par le composer).
 - Pas d'invention : si tu ne sais pas, ne dis rien.
 
 Tu réponds OBLIGATOIREMENT au format JSON strict avec ces clés :
@@ -176,7 +186,7 @@ Tu réponds OBLIGATOIREMENT au format JSON strict avec ces clés :
   "target_name": "Nom de la personne ou de l'entreprise (texte court)",
   "used_template": "Nom du modèle utilisé (ou 'aucun')",
   "subject": "Objet du mail (court, sans guillemets autour)",
-  "body_html": "<p>...</p> HTML simple : <p>, <br>, <strong>, <em>, <a href>, <img src=\\"cid:prospect_preview\\">."
+  "body_html": "Le HTML complet du mail, fidèle au modèle (styles inline conservés)."
 }
 """
 
@@ -238,19 +248,28 @@ def generate(url: str, category: str, templates: list[dict],
     except Exception as exc:
         return {"ok": False, "error": f"Erreur d'analyse : {exc}"}
 
-    # Construction du prompt utilisateur
+    # Construction du prompt utilisateur — on envoie le HTML BRUT des modèles
+    # pour que Claude réutilise la structure (styles inline, couleurs, blocs).
+    # Limite : ~3500 chars de HTML par modèle, ~8 modèles max (sinon le prompt
+    # explose). Si un modèle est trop long, on tronque proprement.
     tpl_block = "AUCUN MODÈLE ENREGISTRÉ."
     if templates:
-        lines = []
-        for t in templates[:20]:
-            name = (t.get("name") or "").strip()
+        MAX_HTML_PER_TPL = 3500
+        MAX_TPLS = 8
+        chunks = []
+        for i, t in enumerate(templates[:MAX_TPLS]):
+            name = (t.get("name") or "").strip() or f"Modèle {i+1}"
             subj = (t.get("subject_default") or "").strip()
-            # On garde un extrait du body (HTML stripped)
-            raw_html = t.get("body_html") or ""
-            body_clean = re.sub(r"<[^>]+>", " ", raw_html)
-            body_clean = re.sub(r"\s+", " ", body_clean).strip()[:500]
-            lines.append(f"- Nom : {name}\n  Objet par défaut : {subj}\n  Aperçu : {body_clean}")
-        tpl_block = "\n".join(lines)
+            raw_html = (t.get("body_html") or "").strip()
+            if len(raw_html) > MAX_HTML_PER_TPL:
+                raw_html = raw_html[:MAX_HTML_PER_TPL] + "\n<!-- [tronqué - HTML complet trop long] -->"
+            chunks.append(
+                f"--- MODÈLE #{i+1} ---\n"
+                f"Nom : {name}\n"
+                f"Objet par défaut : {subj or '(aucun)'}\n"
+                f"HTML complet :\n{raw_html}"
+            )
+        tpl_block = "\n\n".join(chunks)
 
     user_prompt = (
         f"{CATEGORY_HINTS.get(category, '')}\n\n"
@@ -280,7 +299,7 @@ def generate(url: str, category: str, templates: list[dict],
         client = Anthropic(api_key=ai_keys["anthropic"])
         resp = client.messages.create(
             model="claude-sonnet-4-5",
-            max_tokens=1200,
+            max_tokens=4000,
             system=SYSTEM_PROMPT_BASE,
             messages=[{"role": "user", "content": user_prompt}],
         )
