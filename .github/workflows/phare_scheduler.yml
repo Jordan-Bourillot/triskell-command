@@ -1,0 +1,49 @@
+name: Phare scheduler (cron horaire)
+
+# Tourne toutes les heures pour exécuter le tick du scheduler Le Phare,
+# en complètement autonome (pas besoin que Triskell Command desktop tourne
+# sur le PC de Jordan). Voir scripts/phare_tick.py pour le détail.
+
+on:
+  schedule:
+    # Toutes les heures à HH:05 (laisse 5 min de marge si le cron GH est lent).
+    # Le tick lui-même vérifie l'heure UTC et lance les missions appropriées.
+    - cron: '5 * * * *'
+  workflow_dispatch:   # bouton « Run workflow » dans l'onglet Actions
+
+# Évite que deux ticks tournent en parallèle si un précédent traîne
+concurrency:
+  group: phare-scheduler
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Triskell Command
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Clone triskell-core (sibling repo)
+        run: |
+          git clone --depth 1 https://github.com/Jordan-Bourillot/triskell-core.git ../triskell-core
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ../triskell-core
+          pip install -r requirements.txt
+
+      - name: Run scheduler tick
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/phare_tick.py

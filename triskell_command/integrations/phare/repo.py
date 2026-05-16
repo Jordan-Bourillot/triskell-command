@@ -31,12 +31,37 @@ def _client():
     return c
 
 
+_ADMIN_SB_CACHE: Any = None
+
+
 def _sb():
-    """Renvoie l'instance supabase-py brute, ou None."""
+    """Renvoie l'instance supabase-py brute, ou None.
+
+    Ordre de résolution :
+    1. Session utilisateur authentifiée (cas normal : app desktop / web)
+    2. Fallback CI/cron : variables d'env SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+       (utilisé par scripts/phare_tick.py et le workflow GitHub Actions)
+    """
     c = _client()
-    if c is None:
+    if c is not None:
+        return getattr(c, "client", None) or getattr(c, "_client", None)
+    # ----- Fallback service_role pour exécution en CI / batch -----
+    global _ADMIN_SB_CACHE
+    if _ADMIN_SB_CACHE is not None:
+        return _ADMIN_SB_CACHE
+    import os
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not url or not key:
         return None
-    return getattr(c, "client", None) or getattr(c, "_client", None)
+    try:
+        from supabase import create_client
+        _ADMIN_SB_CACHE = create_client(url, key)
+        logger.info("phare.repo : utilisation du fallback service_role (CI/batch)")
+        return _ADMIN_SB_CACHE
+    except Exception as exc:
+        logger.warning("phare._sb fallback service_role: %s", exc)
+        return None
 
 
 # ---------------------------------------------------------------------------

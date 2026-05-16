@@ -46,16 +46,13 @@ def _resolve_api_key(app_state) -> str:
 
 
 def _resolve_api_key_from_supabase() -> str:
-    """Fallback : clé Anthropic depuis shared_settings.ai si présent."""
+    """Fallback : clé Anthropic depuis shared_settings.ai_keys si présent.
+
+    Réutilise `repo._sb()` qui gère AUSSI le fallback service_role en CI/cron
+    (variables d'env SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).
+    """
     try:
-        from triskell_core.db import get_client, SupabaseNotConfigured
-        try:
-            c = get_client()
-        except SupabaseNotConfigured:
-            return ""
-        if not c.is_authenticated:
-            return ""
-        sb = getattr(c, "client", None) or getattr(c, "_client", None)
+        sb = repo._sb()
         if sb is None:
             return ""
         rows = (sb.table("shared_settings").select("value")
