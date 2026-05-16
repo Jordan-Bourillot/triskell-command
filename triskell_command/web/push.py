@@ -122,10 +122,25 @@ def list_subscriptions(user_id: Optional[str] = None) -> list[dict]:
 def send_push(title: str, body: str, *,
               user_id: Optional[str] = None,
               tag: Optional[str] = None,
+              tag_group: Optional[str] = None,
               url: Optional[str] = None,
+              priority: str = "normal",
+              actions: Optional[list] = None,
               extra_data: Optional[dict] = None) -> dict:
     """Envoie une notification push à toutes les subscriptions d'un user
     (ou à toutes si user_id est None).
+
+    priority : 'urgent' / 'normal' / 'low'.
+      - urgent : vibration forte, reste affichée jusqu'au clic, préfixe 🔴
+      - normal : comportement par défaut
+      - low    : silencieux, pas de vibration (utile pour les digests)
+
+    tag_group : si plusieurs notifs avec le même tag_group arrivent dans
+      les 5 min, le Service Worker les agrège en "X événements".
+      Tags suggérés : 'replies', 'sales', 'clients', 'system'.
+
+    actions : liste de {action, title, icon?} pour boutons d'action dans
+      la notif (max 2, supporté seulement par Chrome).
 
     Renvoie {"sent": n, "failed": k, "removed": m} (les subs invalides
     sont nettoyées automatiquement).
@@ -146,10 +161,17 @@ def send_push(title: str, body: str, *,
     priv = os.environ["VAPID_PRIVATE_KEY"]
     subject = os.environ.get("VAPID_SUBJECT") or "mailto:contact@triskell-studio.fr"
 
+    # Validation priorité
+    if priority not in ("urgent", "normal", "low"):
+        priority = "normal"
+
     payload = json.dumps({
         "title": title,
         "body": body[:300],
         "tag": tag or "triskell-command",
+        "tag_group": tag_group or tag or "triskell-command",
+        "priority": priority,
+        "actions": actions or [],
         "data": {**(extra_data or {}), **({"url": url} if url else {})},
     })
 

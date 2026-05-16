@@ -741,6 +741,49 @@ const DemoMode = {
       return 'Jordan';
     },
 
+    // ============ Revenue overview ============
+    revenue_overview() {
+      // Mois en cours = mai 2026 (cf. memory currentDate)
+      return {
+        ok: true,
+        current_month:  { label: 'mai 2026',   total_cents: 8324000, transactions_count: 14 },
+        previous_month: { label: 'avril 2026', total_cents: 7682000, transactions_count: 12 },
+        last_7_days:    { total_cents: 2140000, transactions_count: 4 },
+        last_30_days:   { total_cents: 8120000, transactions_count: 14 },
+        top_clients_month: [
+          { client_name: 'Cabinet Dupont & Co',     client_email: 'sophie@dupont-co.fr',         product: 'Refonte complète',     amount_cents: 1450000, source: 'stripe' },
+          { client_name: 'Hôtel Le Cèdre',          client_email: 'contact@hotel-le-cedre.fr',   product: 'Site + réservation',   amount_cents: 1380000, source: 'stripe' },
+          { client_name: 'Boulangerie Lefèvre',     client_email: 'marc@boulangerie-lefevre.fr', product: 'Pack Sites + SEO',     amount_cents:  680000, source: 'stripe' },
+          { client_name: 'Pharmacie Centrale',      client_email: 'lea@pharmacie-centrale.fr',   product: 'Site + prise RDV',     amount_cents:  620000, source: 'stripe' },
+          { client_name: 'Studio Yoga Soleil',      client_email: 'thomas@yogasoleil.fr',        product: 'Refonte + booking',    amount_cents:  580000, source: 'stripe' },
+          { client_name: 'Cabinet Médical Nord',    client_email: 'olivier@medical-nord.fr',     product: 'Site + prise RDV',     amount_cents:  520000, source: 'stripe' },
+          { client_name: 'École Andante',           client_email: 'manon@andante-musique.fr',    product: 'Site + paiement',      amount_cents:  480000, source: 'stripe' },
+          { client_name: 'Atelier Missor',          client_email: 'camille@missor.fr',           product: 'Site vitrine + SEO',   amount_cents:  450000, source: 'stripe' },
+          { client_name: 'Pack Électricien (AppSumo)', client_email: 'electricien@example.com',  product: 'Pack Électricien Pro', amount_cents:  240000, source: 'appsumo' },
+          { client_name: 'Studio PDF (paiement manuel)', client_email: 'studio@example.com',     product: 'Studio PDF',           amount_cents:  180000, source: 'manual' },
+        ],
+        by_source_month: {
+          'stripe':   7480000,
+          'appsumo':   480000,
+          'manual':    364000,
+        },
+        by_product_month: {
+          'Sites web':       4920000,
+          'SEO (RankUs)':    1840000,
+          'Vidéo (WoW)':      820000,
+          'Pack Électricien': 480000,
+          'Studio PDF':       264000,
+        },
+        forecast: {
+          projected_month_cents:   12450000,
+          confidence_low_cents:     9960000,
+          confidence_high_cents:   14940000,
+          pipeline_count:          13,
+          conversion_rate_pct:     35,
+        },
+      };
+    },
+
     // (tracker_stats déjà défini plus haut)
 
     // ============ Funnel / Pipeline (apiPrefix) ============

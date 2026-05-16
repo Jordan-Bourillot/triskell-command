@@ -421,6 +421,7 @@ const App = {
       case 'brain':     return Brain.render(target);
       case 'drafts':    return Drafts.render(target);
       case 'funnel':    return Funnel.render(target);
+      case 'revenue':   return Revenue.render(target);
       case 'clients':   return Clients.render(target);
       case 'phare':     return Phare.render(target);
       case 'wow':       return Wow.render(target);

@@ -122,6 +122,11 @@ const DemoFakeValidator = {
     prospect_generate_mail: {
       required: ['ok', 'subject', 'body_html'],
     },
+    revenue_overview: {
+      required: ['ok', 'current_month.total_cents', 'previous_month.total_cents',
+                 'last_7_days.total_cents', 'last_30_days.total_cents',
+                 'top_clients_month', 'by_source_month', 'by_product_month', 'forecast'],
+    },
   },
 
   /** Lit un chemin "a.b.c" sur un objet. */
