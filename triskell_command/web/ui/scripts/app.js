@@ -446,7 +446,7 @@ const App = {
             En attendant, ouvre <code class="text-xs px-1.5 py-0.5 rounded bg-bg">python run.py</code>
             pour utiliser cet écran.
           </p>
-          <button class="btn btn-secondary" onclick="App.show('morning')">← Retour à la Matinale</button>
+          <button class="btn btn-secondary" onclick="App.show('morning')">← Retour au Cockpit</button>
         </div>
       </section>
     `;

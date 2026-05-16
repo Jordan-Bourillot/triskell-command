@@ -157,7 +157,7 @@ const Config = {
         <section>
           <div class="section-label">Connexion Supabase</div>
           <p class="text-sm text-text-muted mb-4">
-            Ta session vers la base partagée Triskell. Indispensable pour Matinale,
+            Ta session vers la base partagée Triskell. Indispensable pour le Cockpit,
             Brouillons, Réponses, Projets clients, etc.
           </p>
           <div class="card p-5 flex items-center justify-between">
@@ -231,7 +231,7 @@ const Config = {
 
     const signoutBtn = document.getElementById('cfg-auth-signout');
     if (signoutBtn) signoutBtn.onclick = async () => {
-      if (!confirm('Se déconnecter de Supabase ?\n\nLes pages Matinale, Brouillons, Réponses, etc. ne fonctionneront plus tant que tu ne te reconnectes pas.')) return;
+      if (!confirm('Se déconnecter de Supabase ?\n\nLes pages Cockpit, Brouillons, Réponses, etc. ne fonctionneront plus tant que tu ne te reconnectes pas.')) return;
       await App.api.auth_sign_out();
       this.refresh();
     };
@@ -1106,7 +1106,7 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
             <div>
               <div class="text-sm font-medium">Activer l'envoi auto via Phantombuster</div>
               <div class="text-xs text-text-muted">
-                Si désactivé, les relances LinkedIn restent à envoyer manuellement (3 clics depuis la Matinale).
+                Si désactivé, les relances LinkedIn restent à envoyer manuellement (3 clics depuis le Cockpit).
               </div>
             </div>
           </label>

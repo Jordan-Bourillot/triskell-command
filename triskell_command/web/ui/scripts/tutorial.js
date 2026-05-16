@@ -23,8 +23,8 @@ const Tutorial = {
             "Tu peux rouvrir cette visite à tout moment depuis Réglages → " +
             "Visite guidée." },
 
-    // ---- 1. La Matinale ----
-    { icon: '☀️', title: '1. Le Matin — ton seul écran à ouvrir',
+    // ---- 1. La Cockpit ----
+    { icon: '🎛️', title: '1. Le Cockpit — ton seul écran à ouvrir',
       lead: 'Tout en 5 minutes par jour.', goto: 'morning',
       body: "Tu y vois en un coup d'œil :\n" +
             "• La priorité du jour (calculée par l'app).\n" +
@@ -173,7 +173,7 @@ const Tutorial = {
       lead: 'Quand le mail ne suffit pas.',
       body: "L'app détecte les prospects sans réponse après 5 jours et " +
             "génère pour chacun un message LinkedIn court personnalisé.\n\n" +
-            "Tu les vois dans la Matinale (bloc « LinkedIn — relances à " +
+            "Tu les vois dans la Cockpit (bloc « LinkedIn — relances à " +
             "faire »). 3 clics par fiche : copier le message, ouvrir le " +
             "profil, marquer fait.\n\n" +
             "Si tu as Phantombuster (~70€/mois), bouton « ⚡ Tout envoyer » " +

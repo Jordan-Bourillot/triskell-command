@@ -45,7 +45,7 @@ const Onboarding = {
             On commence par te connaître ?
           </h2>
           <p class="text-text-secondary text-sm leading-relaxed">
-            L'app utilisera ton prénom pour personnaliser la Matinale et
+            L'app utilisera ton prénom pour personnaliser le Cockpit et
             signer les mails que l'IA rédige pour toi.
           </p>
         </div>

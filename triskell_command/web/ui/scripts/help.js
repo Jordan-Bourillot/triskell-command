@@ -11,9 +11,9 @@
 
 const Help = {
   tips: {
-    // ---------------- Matinale ----------------
+    // ---------------- Cockpit ----------------
     morning: {
-      title: 'Le Matin',
+      title: 'Le Cockpit',
       lead: 'Ton seul écran à ouvrir le matin.',
       sections: [
         {
@@ -81,7 +81,7 @@ const Help = {
         {
           h: '🌙 Auto-pilote programmé',
           p: "Coche cette case : le pipeline tourne tout seul vers 3h du matin. " +
-             "Tu te lèves, ta Matinale est déjà pleine."
+             "Tu te lèves, ton Cockpit est déjà plein."
         },
       ],
     },

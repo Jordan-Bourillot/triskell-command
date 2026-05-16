@@ -79,6 +79,16 @@ const Morning = {
       this._openComposeChoice();
     };
 
+    // Pastilles "NEW" sur les nouveautés du Cockpit
+    if (window.NewBadge) {
+      const brainBtn = document.getElementById('m-brain');
+      const alloBtn  = document.getElementById('m-allo-claude');
+      const composeBtn = document.getElementById('m-compose-mail');
+      if (brainBtn)   window.NewBadge.attach(brainBtn,   'cockpit-brain-v1');
+      if (alloBtn)    window.NewBadge.attach(alloBtn,    'cockpit-allo-claude-v1');
+      if (composeBtn) window.NewBadge.attach(composeBtn, 'cockpit-compose-choice-v1');
+    }
+
     // 2. Charge le digest et hydrate
     const slot = document.getElementById('m-content');
     if (!App.api) {

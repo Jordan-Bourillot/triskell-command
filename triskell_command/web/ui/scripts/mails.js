@@ -75,6 +75,12 @@ const Mails = {
     document.getElementById('m-refresh').onclick = () => this._load();
     document.getElementById('m-new').onclick = () => this._openComposer({});
     document.getElementById('m-prospect').onclick = () => this._openProspectFlow();
+
+    // Pastille "NEW" sur le bouton Prospection en direct
+    if (window.NewBadge) {
+      const pBtn = document.getElementById('m-prospect');
+      if (pBtn) window.NewBadge.attach(pBtn, 'mails-prospect-v1');
+    }
     document.querySelectorAll('[data-mtab]').forEach(btn => {
       btn.onclick = () => this._switchTab(btn.dataset.mtab);
     });
