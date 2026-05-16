@@ -63,6 +63,14 @@ const Morning = {
               </svg>
               Allô Claude
             </button>
+            <button id="m-focus" class="btn btn-secondary" title="Mode Concentration — masque notifs et KPIs pour bosser sans être interrompu">
+              <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <circle cx="12" cy="12" r="6"/>
+                <circle cx="12" cy="12" r="2"/>
+              </svg>
+              Concentration
+            </button>
           </div>
         </div>
 
@@ -78,6 +86,17 @@ const Morning = {
     document.getElementById('m-compose-mail').onclick = () => {
       this._openComposeChoice();
     };
+    const focusBtn = document.getElementById('m-focus');
+    if (focusBtn) {
+      focusBtn.onclick = () => {
+        if (typeof FocusMode === 'undefined') return;
+        if (FocusMode.isOn()) {
+          FocusMode.showOverlay();
+        } else {
+          FocusMode.openStartDialog();
+        }
+      };
+    }
 
     // Pastilles "NEW" sur les nouveautés du Cockpit
     if (window.NewBadge) {
@@ -87,6 +106,7 @@ const Morning = {
       if (brainBtn)   window.NewBadge.attach(brainBtn,   'cockpit-brain-v1');
       if (alloBtn)    window.NewBadge.attach(alloBtn,    'cockpit-allo-claude-v1');
       if (composeBtn) window.NewBadge.attach(composeBtn, 'cockpit-compose-choice-v1');
+      if (focusBtn)   window.NewBadge.attach(focusBtn,   'cockpit-focus-v1');
     }
 
     // 2. Charge le digest et hydrate
