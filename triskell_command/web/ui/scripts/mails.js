@@ -35,6 +35,12 @@ const Mails = {
               <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
               Nouveau mail
             </button>
+            <button id="m-prospect" class="btn btn-secondary"
+                    style="background: linear-gradient(135deg, #7c6acc, #e85d2c); color: white; border: 0;"
+                    title="Mail de prospection en direct — Claude analyse le site cible et adapte le modèle">
+              <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+              Prospection en direct
+            </button>
             <button id="m-refresh" class="btn btn-secondary">Rafraîchir</button>
           </div>
         </div>
@@ -68,6 +74,7 @@ const Mails = {
 
     document.getElementById('m-refresh').onclick = () => this._load();
     document.getElementById('m-new').onclick = () => this._openComposer({});
+    document.getElementById('m-prospect').onclick = () => this._openProspectFlow();
     document.querySelectorAll('[data-mtab]').forEach(btn => {
       btn.onclick = () => this._switchTab(btn.dataset.mtab);
     });
@@ -1693,6 +1700,18 @@ const Mails = {
       }
     }
 
+    // Pré-remplissage du corps HTML (workflow prospection en direct)
+    if (opts.prefilledBodyHtml) {
+      // Si signature présente, insère le body AVANT la signature
+      const sigStart = htmlArea.innerHTML.indexOf(SIG_MARK_HTML);
+      if (sigStart >= 0) {
+        const sigBlock = htmlArea.innerHTML.slice(sigStart);
+        htmlArea.innerHTML = opts.prefilledBodyHtml + '<p><br></p>' + sigBlock;
+      } else {
+        htmlArea.innerHTML = opts.prefilledBodyHtml;
+      }
+    }
+
     // Bind du dropdown signature : remplace dans le body
     const sigSelect = overlay.querySelector('#cmp-signature');
     if (sigSelect) {
@@ -2074,6 +2093,165 @@ const Mails = {
         sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>Envoyer';
       }
     };
+  },
+
+  /** Workflow Prospection en direct :
+   *  1. Choix Célébrité / Entreprise
+   *  2. Saisie URL du site cible
+   *  3. Claude analyse + génère le mail
+   *  4. Ouvre le composer pré-rempli */
+  _openProspectFlow() {
+    const ov = document.createElement('div');
+    ov.className = 'fixed inset-0 z-[210] flex items-center justify-center p-4';
+    ov.style.background = 'rgba(15,23,42,0.78)';
+    ov.style.backdropFilter = 'blur(10px)';
+    let step = 'category'; // 'category' | 'url' | 'loading'
+    let chosenCategory = null;
+
+    const render = () => {
+      if (step === 'category') {
+        ov.innerHTML = `
+          <div class="bg-surface rounded-2xl shadow-hero w-full max-w-lg border border-border animate-slide-up overflow-hidden">
+            <div class="px-6 pt-5 pb-4 flex items-start justify-between border-b border-border bg-surface-elevated">
+              <div>
+                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">PROSPECTION EN DIRECT</div>
+                <h3 class="text-lg font-bold">Quel type de cible ?</h3>
+                <p class="text-xs text-text-muted mt-1">Claude adaptera le ton, les arguments et le modèle utilisé selon le type de personne ou d'entreprise.</p>
+              </div>
+              <button id="pf-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
+            </div>
+            <div class="p-5 grid grid-cols-2 gap-3">
+              <button data-cat="celebrity"
+                      class="text-left p-5 rounded-2xl border-2 border-border hover:border-accent hover:bg-accent/5 transition-all">
+                <div class="text-3xl mb-2">⭐</div>
+                <div class="text-base font-bold text-text">Célébrités</div>
+                <div class="text-xs text-text-muted mt-1 leading-snug">Artistes, sportifs, créateurs, influenceurs. Ton respectueux et admirateur. Focus sur leur travail et leurs projets.</div>
+              </button>
+              <button data-cat="business"
+                      class="text-left p-5 rounded-2xl border-2 border-border hover:border-accent hover:bg-accent/5 transition-all">
+                <div class="text-3xl mb-2">🏢</div>
+                <div class="text-base font-bold text-text">Autres (entreprises)</div>
+                <div class="text-xs text-text-muted mt-1 leading-snug">Commerces, cabinets, restaurants, artisans. Ton commercial et concret. Focus sur leurs services et leur secteur.</div>
+              </button>
+            </div>
+          </div>
+        `;
+        ov.querySelector('#pf-close').onclick = close;
+        ov.querySelectorAll('[data-cat]').forEach(b => {
+          b.onclick = () => {
+            chosenCategory = b.dataset.cat;
+            step = 'url';
+            render();
+          };
+        });
+      } else if (step === 'url') {
+        const catLabel = chosenCategory === 'celebrity' ? 'Célébrité' : 'Entreprise';
+        const catIcon = chosenCategory === 'celebrity' ? '⭐' : '🏢';
+        ov.innerHTML = `
+          <div class="bg-surface rounded-2xl shadow-hero w-full max-w-lg border border-border animate-slide-up overflow-hidden">
+            <div class="px-6 pt-5 pb-4 flex items-start justify-between border-b border-border bg-surface-elevated">
+              <div>
+                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">PROSPECTION ${catLabel.toUpperCase()}</div>
+                <h3 class="text-lg font-bold">${catIcon} URL du site à analyser</h3>
+                <p class="text-xs text-text-muted mt-1">Colle l'adresse du site officiel ou de la page web. Claude va l'analyser et générer un mail personnalisé.</p>
+              </div>
+              <button id="pf-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
+            </div>
+            <div class="p-5 space-y-3">
+              <input id="pf-url" type="url" placeholder="https://www.exemple.com"
+                     class="w-full px-3 py-3 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
+              <div id="pf-url-error" class="text-xs text-danger min-h-[1rem]"></div>
+            </div>
+            <div class="px-5 py-4 border-t border-border bg-surface-elevated flex items-center justify-between gap-2">
+              <button id="pf-back" class="text-xs text-text-muted hover:text-text">← Changer de catégorie</button>
+              <div class="flex items-center gap-2">
+                <button id="pf-cancel" class="btn btn-secondary">Annuler</button>
+                <button id="pf-go" class="btn btn-primary">
+                  <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                  Générer le mail
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+        ov.querySelector('#pf-close').onclick = close;
+        ov.querySelector('#pf-cancel').onclick = close;
+        ov.querySelector('#pf-back').onclick = () => { step = 'category'; render(); };
+        const urlInput = ov.querySelector('#pf-url');
+        setTimeout(() => urlInput.focus(), 50);
+        urlInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); ov.querySelector('#pf-go').click(); }
+        });
+        ov.querySelector('#pf-go').onclick = async () => {
+          const errEl = ov.querySelector('#pf-url-error');
+          let url = urlInput.value.trim();
+          if (!url) { errEl.textContent = '✗ URL manquante.'; return; }
+          // Auto-ajout https:// si absent
+          if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+          try { new URL(url); } catch { errEl.textContent = '✗ URL invalide.'; return; }
+          errEl.textContent = '';
+          step = 'loading';
+          render();
+          try {
+            const r = await App.api.prospect_generate_mail({
+              url, category: chosenCategory,
+            });
+            if (r && r.ok) {
+              close();
+              this._openComposer({
+                prefilledSubject: r.subject || '',
+                prefilledBodyHtml: r.body_html || '',
+                title: `Prospection : ${r.target_name || url}`,
+              });
+            } else {
+              step = 'url';
+              render();
+              setTimeout(() => {
+                const e2 = ov.querySelector('#pf-url-error');
+                if (e2) e2.textContent = `✗ ${(r && r.error) || 'Erreur lors de la génération.'}`;
+                const u2 = ov.querySelector('#pf-url');
+                if (u2) u2.value = url;
+              }, 50);
+            }
+          } catch (e) {
+            step = 'url';
+            render();
+            setTimeout(() => {
+              const e2 = ov.querySelector('#pf-url-error');
+              if (e2) e2.textContent = `✗ ${e.message || e}`;
+              const u2 = ov.querySelector('#pf-url');
+              if (u2) u2.value = url;
+            }, 50);
+          }
+        };
+      } else if (step === 'loading') {
+        ov.innerHTML = `
+          <div class="bg-surface rounded-2xl shadow-hero w-full max-w-lg border border-border animate-slide-up overflow-hidden">
+            <div class="p-12 text-center">
+              <div class="w-16 h-16 mx-auto mb-5 rounded-2xl flex items-center justify-center"
+                   style="background: linear-gradient(135deg, #7c6acc, #e85d2c);">
+                <svg class="w-8 h-8 text-white animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path d="M21 12a9 9 0 11-9-9"/>
+                </svg>
+              </div>
+              <div class="text-base font-bold text-text mb-1">Claude analyse le site…</div>
+              <div class="text-xs text-text-muted">Récupération du contenu, choix du modèle, personnalisation du mail. Compte 15-30 secondes.</div>
+            </div>
+          </div>
+        `;
+      }
+    };
+
+    const close = () => {
+      document.removeEventListener('keydown', escListener);
+      ov.remove();
+    };
+    const escListener = (e) => { if (e.key === 'Escape' && step !== 'loading') close(); };
+    document.addEventListener('keydown', escListener);
+    ov.addEventListener('click', (e) => { if (e.target === ov && step !== 'loading') close(); });
+
+    render();
+    document.body.appendChild(ov);
   },
 
   /** Affiche un bandeau "Brouillon trouvé" en haut du composer.

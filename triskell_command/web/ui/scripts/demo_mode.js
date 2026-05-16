@@ -427,6 +427,36 @@ const DemoMode = {
     messages_list() { return { ok: true, messages: [] }; },
     messages_me() { return { ok: true, user_id: 'jordan', display_name: 'Jordan' }; },
 
+    // ============ Prospection en direct (démo) ============
+    prospect_generate_mail(payload) {
+      const cat = (payload && payload.category) || 'business';
+      const url = (payload && payload.url) || 'exemple.com';
+      if (cat === 'celebrity') {
+        return {
+          ok: true,
+          target_name: 'Doumbé',
+          used_template: 'Approche créateur',
+          subject: 'Quelques mots après votre dernier combat',
+          body_html: '<p>Bonjour Cédric,</p>'
+            + '<p>Je suis tombé sur votre dernier post Instagram où vous parlez de votre prochain projet — la sincérité de votre approche m\'a marqué.</p>'
+            + '<p>Je dirige <strong>Triskell Studio</strong>, un petit collectif qui aide les créateurs à mieux structurer leur présence en ligne (sites, SEO, vidéo). Pas pour faire votre site à votre place — vous en avez déjà un. Plutôt pour offrir un regard neuf sur des détails techniques qui pourraient amplifier votre audience.</p>'
+            + '<p>Si l\'idée vous parle, on peut prendre 15 min en visio ? Je vous montre ce que je vois, sans engagement.</p>',
+          source_url: url, category: cat,
+        };
+      }
+      return {
+        ok: true,
+        target_name: 'Boulangerie Lefèvre',
+        used_template: 'Approche commerce local',
+        subject: 'Boulangerie Lefèvre : 3 idées concrètes pour gagner en visibilité',
+        body_html: '<p>Bonjour Marc,</p>'
+          + '<p>Je suis tombé sur le site de votre boulangerie en cherchant un pâtissier dans le secteur de Plérin — votre carte des spécialités m\'a fait sourire (le kouign-amann breton, vrai bon réflexe).</p>'
+          + '<p>J\'ai jeté un œil rapide à votre fiche Google et à votre site : <strong>il y a 3 choses simples qui pourraient vous amener plus de clients</strong> sans changer votre routine. Je dirige <em>Lagriffe Studio</em>, on bosse beaucoup avec des commerces locaux comme le vôtre.</p>'
+          + '<p>15 min en visio pour vous les montrer ? Si vous voyez l\'intérêt, on regarde la suite. Sinon, vous repartez avec les idées et c\'est tout.</p>',
+        source_url: url, category: cat,
+      };
+    },
+
     // ============ Funnel / Pipeline (apiPrefix) ============
     // Pour lagriffe / rankus / wow — chacun a un pipeline avec sa propre méthode.
     lagriffe_list_intakes() {

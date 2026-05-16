@@ -1179,6 +1179,46 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def prospect_generate_mail(self, payload: dict) -> dict:
+        """Analyse l'URL d'un site cible et génère un mail de prospection
+        personnalisé via Claude, en s'appuyant sur les modèles existants.
+
+        Payload :
+          - url      : URL du site (obligatoire)
+          - category : 'celebrity' ou 'business' (par défaut 'business')
+
+        Renvoie {ok, subject, body_html, target_name, used_template, ...}
+        """
+        p = payload or {}
+        url = (p.get("url") or "").strip()
+        category = (p.get("category") or "business").strip()
+        if not url:
+            return {"ok": False, "error": "URL manquante."}
+        if category not in ("celebrity", "business"):
+            category = "business"
+        # Récupère les modèles (best-effort)
+        templates = []
+        try:
+            r = self.mail_templates_list()
+            if r and r.get("ok"):
+                templates = r.get("templates") or []
+        except Exception as exc:
+            logger.debug("templates fetch: %s", exc)
+        # Clés IA depuis Supabase ou local
+        ai_keys = {}
+        try:
+            from ..integrations import shared_secrets
+            ai_keys = shared_secrets.get_ai_keys(
+                client=self._supabase(), app_state=self._app_state) or {}
+        except Exception as exc:
+            logger.debug("ai_keys: %s", exc)
+        try:
+            from ..integrations import prospect_mail
+            return prospect_mail.generate(url, category, templates, ai_keys)
+        except Exception as exc:
+            logger.exception("prospect_generate_mail failed")
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
     def mail_scheduled_cancel(self, payload: dict) -> dict:
         """Annule un mail programmé (s'il est encore pending)."""
         p = payload or {}
