@@ -241,6 +241,14 @@ def run_onpage_optim(site_id: str, page_path: str = "/",
         "files_touched": [p.get("file") for p in file_patches if p.get("file")],
     })
 
+    # Notif : si la PR a été ouverte avec succès → modif à valider (priorité normale)
+    if action and pr_result and pr_result.get("ok"):
+        try:
+            from . import notifications
+            notifications.notify_pending_action(site=site, action=action)
+        except Exception as exc:
+            logger.debug("notify_pending_action failed: %s", exc)
+
     return {"ok": True, "action_id": (action or {}).get("id"),
             "patches_abstract": abstract_patches,
             "patches_file": file_patches,
@@ -380,6 +388,12 @@ def run_analyst(site_id: str, *, app_state=None) -> dict:
             "detail_md": (out.get("trend_summary_md") or "") + f"\n\nReco : {reco_str}",
             "status": "draft", "impact": 2, "effort": 1,
         })
+        # Notif : bulletin matinal, priorité basse (informationnel)
+        try:
+            from . import notifications
+            notifications.notify_bulletin(site=site, bulletin=out)
+        except Exception as exc:
+            logger.debug("notify_bulletin failed: %s", exc)
 
     return {"ok": True, "bulletin": out, "metrics_days": len(metrics)}
 
