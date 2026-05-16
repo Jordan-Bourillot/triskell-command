@@ -288,7 +288,7 @@ const Brain = {
     return `
       <div class="mt-3" id="${idPrefix}-att">
         <div class="flex items-center gap-2 flex-wrap">
-          <label class="btn btn-secondary text-xs cursor-pointer">
+          <label class="text-xs text-text-muted hover:text-accent cursor-pointer inline-flex items-center gap-1 transition">
             📎 Ajouter une image
             <input type="file" accept="image/*" multiple id="${idPrefix}-file" class="hidden">
           </label>
