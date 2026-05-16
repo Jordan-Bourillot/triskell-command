@@ -76,10 +76,7 @@ const Morning = {
     };
     document.getElementById('m-allo-claude').onclick = () => Claude.open();
     document.getElementById('m-compose-mail').onclick = () => {
-      // Bascule sur la vue Mails et ouvre directement le composer
-      App.show('mails');
-      // Petit délai pour que la vue Mails ait le temps de charger les comptes
-      setTimeout(() => Mails._openComposer({}), 200);
+      this._openComposeChoice();
     };
 
     // 2. Charge le digest et hydrate
@@ -257,6 +254,76 @@ const Morning = {
   },
 
   // -------- Bloc 1 : priorité du jour (UNE seule) --------
+  /** Mini-modale "Que veux-tu écrire ?" qui propose les 2 modes :
+   *  - Nouveau mail (composer vide classique)
+   *  - Prospection en direct (workflow Claude analyse + génère) */
+  _openComposeChoice() {
+    const ov = document.createElement('div');
+    ov.className = 'fixed inset-0 z-[210] flex items-center justify-center p-4';
+    ov.style.background = 'rgba(15,23,42,0.78)';
+    ov.style.backdropFilter = 'blur(10px)';
+    ov.innerHTML = `
+      <div class="bg-surface rounded-2xl shadow-hero w-full max-w-lg border border-border animate-slide-up overflow-hidden">
+        <div class="px-6 pt-5 pb-4 flex items-start justify-between border-b border-border bg-surface-elevated">
+          <div>
+            <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">COMPOSER UN MAIL</div>
+            <h3 class="text-lg font-bold">Que veux-tu écrire ?</h3>
+            <p class="text-xs text-text-muted mt-1">Mail classique, ou présentation d'un site déjà réalisé pour la cible.</p>
+          </div>
+          <button id="cc-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
+        </div>
+        <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button data-cc="new"
+                  class="text-left p-5 rounded-2xl border-2 border-border hover:border-accent hover:bg-accent/5 transition-all">
+            <div class="w-10 h-10 rounded-xl bg-accent/15 text-accent flex items-center justify-center mb-3">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            </div>
+            <div class="text-base font-bold text-text">Nouveau mail</div>
+            <div class="text-xs text-text-muted mt-1 leading-snug">Composer un mail vierge : tu écris tout, choisis ton expéditeur, tes pièces jointes, ta signature.</div>
+          </button>
+          <button data-cc="prospect"
+                  class="text-left p-5 rounded-2xl border-2 border-border hover:border-accent transition-all relative overflow-hidden"
+                  style="background: linear-gradient(135deg, hsl(var(--accent) / 0.08), rgba(232,93,44,0.08));">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center mb-3 text-white shadow-soft"
+                 style="background: linear-gradient(135deg, #7c6acc, #e85d2c);">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            </div>
+            <div class="text-base font-bold text-text">Prospection en direct</div>
+            <div class="text-xs text-text-muted mt-1 leading-snug">Tu colles l'URL d'un site que tu as fait pour une célébrité ou une entreprise — Claude rédige le mail de présentation.</div>
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(ov);
+
+    const close = () => {
+      document.removeEventListener('keydown', escListener);
+      ov.remove();
+    };
+    const escListener = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', escListener);
+    ov.querySelector('#cc-close').onclick = close;
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+
+    const goMails = (cb) => {
+      close();
+      // Si on est déjà sur la vue Mails, on évite le re-render
+      if (App.currentView === 'mails') {
+        cb();
+      } else {
+        App.show('mails');
+        setTimeout(cb, 200);
+      }
+    };
+
+    ov.querySelector('[data-cc="new"]').onclick = () => {
+      goMails(() => Mails._openComposer({}));
+    };
+    ov.querySelector('[data-cc="prospect"]').onclick = () => {
+      goMails(() => Mails._openProspectFlow());
+    };
+  },
+
   _renderPriority(d) {
     const q = d.queue || {};
     const nInt = q.replies_unhandled_interested || 0;
