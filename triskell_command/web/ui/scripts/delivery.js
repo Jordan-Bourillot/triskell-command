@@ -148,7 +148,7 @@ const Delivery = {
           <code class="text-[11px] bg-bg px-1.5 py-0.5 rounded">{deliverables_list}</code>
           <code class="text-[11px] bg-bg px-1.5 py-0.5 rounded">{signature}</code>
         </div>
-        ${this._input('Sujet du mail', 'welcome_subject', welcome.subject || '')}
+        ${this._input('Objet du mail', 'welcome_subject', welcome.subject || '')}
         ${this._textarea('Corps du mail', 'welcome_body', welcome.body || '', 10)}
 
         <div class="mt-5">
@@ -259,7 +259,7 @@ const Delivery = {
                    class="w-full px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
           </div>
           <div class="col-span-10">
-            <label class="text-xs text-text-muted">Sujet</label>
+            <label class="text-xs text-text-muted">Objet</label>
             <input type="text" data-fu-subject="${idx}" value="${this._esc(fu.subject || '')}"
                    class="w-full px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
           </div>
@@ -416,13 +416,13 @@ const Delivery = {
     out.innerHTML = `
       <div class="border border-border rounded-xl p-4 mb-4">
         <div class="text-[10px] font-bold tracking-widest text-text-muted mb-1">MAIL DE BIENVENUE</div>
-        <div class="font-semibold text-sm mb-2">${this._esc(w.subject || '(sans sujet)')}</div>
+        <div class="font-semibold text-sm mb-2">${this._esc(w.subject || '(sans objet)')}</div>
         <pre class="whitespace-pre-wrap font-mono text-xs leading-relaxed text-text-secondary">${this._esc(w.body || '')}</pre>
       </div>
       ${fus.map((fu, i) => `
         <div class="border border-border rounded-xl p-4 mb-3">
           <div class="text-[10px] font-bold tracking-widest text-text-muted mb-1">RELANCE J+${fu.days}</div>
-          <div class="font-semibold text-sm mb-2">${this._esc(fu.subject || '(sans sujet)')}</div>
+          <div class="font-semibold text-sm mb-2">${this._esc(fu.subject || '(sans objet)')}</div>
           <pre class="whitespace-pre-wrap font-mono text-xs leading-relaxed text-text-secondary">${this._esc(fu.body || '')}</pre>
         </div>
       `).join('')}

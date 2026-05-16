@@ -109,15 +109,19 @@ const DemoMode = {
   // Méthodes "write" qu'on remplace par un faux succès silencieux
   isWriteMethod(method) {
     if (!method) return false;
-    return /^(save|delete|remove|set|create|add|push|migrate|reset|sync|seed)_/.test(method)
-        || /_(save|delete|remove|send|set|create|add|upload|update|reset|migrate|schedule|cancel)$/.test(method)
+    return /^(save|delete|remove|set|create|add|push|migrate|reset|sync|seed|dispatch)_/.test(method)
+        || /_(save|delete|remove|send|set|create|add|upload|update|reset|migrate|schedule|cancel|test|run|run_now|now|audit|merge|approve|reject|mark|convert|dispatch|reply|action|poll)$/.test(method)
         || method === 'mail_send'
         || method === 'mail_send_reply'
         || method === 'mail_schedule'
         || method === 'mail_scheduled_cancel'
+        || method === 'phare_run_audit'
+        || method === 'phare_merge_action'
+        || method === 'replies_poll_now'
+        || method === 'multichannel_dispatch_phantombuster'
         || method.includes('_send_')
         || ['avatar_upload', 'push_subscribe', 'push_test', 'push_unsubscribe',
-            'claude_ask', 'claude_consume_pending'].includes(method);
+            'claude_ask', 'claude_consume_pending', 'cycle_theme'].includes(method);
   },
 
   /** Intercepte un appel API.
@@ -382,40 +386,63 @@ const DemoMode = {
         ],
       };
     },
-    // Format attendu pour l'onglet Site : page détaillée d'un site
+    // Format attendu pour l'onglet Site : data.site, data.audit, data.keywords, data.actions
     phare_site(payload) {
-      const id = payload && payload.id;
+      const id = (payload && payload.id) || 's1';
+      const now = Date.now();
       return {
         ok: true,
         site: {
-          id, name: 'Site démo', domain: 'demo.fr',
-          clicks_30d: 1840, avg_position_30d: 8.3,
-          score: 87, impressions_30d: 24820,
-          top_keywords: [
-            { keyword: 'kouign-amann breton', position: 3, clicks: 142, search_volume: 480 },
-            { keyword: 'boulangerie plérin',  position: 2, clicks: 89,  search_volume: 320 },
-            { keyword: 'pain spéciaux 22',    position: 7, clicks: 41,  search_volume: 190 },
-          ],
+          id,
+          name: 'Triskell Studio',
+          domain: 'triskell-studio.fr',
+          clicks_30d: 12480,
+          avg_position_30d: 4.2,
+          impressions_30d: 124580,
         },
+        audit: {
+          score: 92,
+          checked_at: new Date(now - 3600_000).toISOString(),
+          summary: 'Site bien optimisé. Quelques améliorations marginales possibles.',
+        },
+        keywords: [
+          { keyword: 'agence web bretagne',          position: 3,  search_volume: 720, clicks: 142 },
+          { keyword: 'création site internet 22',    position: 2,  search_volume: 480, clicks: 124 },
+          { keyword: 'site vitrine entreprise',      position: 5,  search_volume: 1800,clicks: 89 },
+          { keyword: 'lagriffe studio',              position: 1,  search_volume: 90,  clicks: 64 },
+          { keyword: 'rankus seo',                   position: 1,  search_volume: 50,  clicks: 38 },
+          { keyword: 'développeur web plérin',       position: 4,  search_volume: 210, clicks: 28 },
+          { keyword: 'tarif site internet artisan',  position: 8,  search_volume: 320, clicks: 18 },
+        ],
+        actions: [
+          { id: 'a1', title: 'Schema Organization à enrichir', kind: 'schema',     status: 'pending', created_at: new Date(now - 7200_000).toISOString() },
+          { id: 'a2', title: 'Backlink obtenu — Le Télégramme', kind: 'backlinks', status: 'merged',  created_at: new Date(now - 86400_000).toISOString() },
+          { id: 'a3', title: 'Page services rafraîchie',        kind: 'refresh',   status: 'merged',  created_at: new Date(now - 172800_000).toISOString() },
+        ],
       };
     },
 
-    // ============ Tracker (analytics sites) ============
+    // ============ Tracker (analytics sites + tracking d'ouverture mails) ============
+    // Format attendu par config.js : sent_7d, opened_7d, open_rate_7d
     tracker_stats() {
       return {
         ok: true,
+        // Tracking d'ouverture mails (config.js)
+        sent_7d: 312,
+        opened_7d: 134,
+        open_rate_7d: 43.0,
+        sent_30d: 1247,
+        opened_30d: 528,
+        open_rate_30d: 42.3,
+        clicks_7d: 28,
+        clicks_30d: 89,
+        // Analytics sites (autre vue éventuelle)
         period_days: 30,
         visiteurs_uniques: 18420,
         pages_vues: 47830,
         taux_rebond: 38,
         temps_moyen_seconds: 142,
         conversions: 89,
-        top_pages: [
-          { path: '/contact', views: 6240, conversions: 42 },
-          { path: '/services', views: 4820, conversions: 28 },
-          { path: '/', views: 12450, conversions: 12 },
-          { path: '/tarifs', views: 3120, conversions: 7 },
-        ],
       };
     },
 
@@ -482,27 +509,241 @@ const DemoMode = {
       };
     },
 
-    // ============ Autopilot status ============
+    // ============ Autopilot ============
+    // Format attendu : config (objet libre), log (array de strings), stats (counters)
+    autopilot_get_config() {
+      return {
+        ok: true,
+        config: {
+          mode: 'validation',
+          source: 'sirene',
+          naf_codes: ['56.10A', '47.24Z'],
+          departments: ['22', '29', '35', '56'],
+          max_per_day: 50,
+          schedule_enabled: true,
+          schedule_hour: 3,
+        },
+      };
+    },
     autopilot_status() {
+      const now = new Date();
+      const t = (d) => d.toISOString().slice(11, 19);
+      const log = [
+        `[${t(now)}] ✓ 12 prospects qualifiés depuis Sirene`,
+        `[${t(new Date(now - 60_000))}] ✓ Mail envoyé à Cabinet Dupont & Co (sophie@dupont-co.fr)`,
+        `[${t(new Date(now - 180_000))}] ✓ Réponse classifiée "intéressé" — Boulangerie Lefèvre`,
+        `[${t(new Date(now - 360_000))}] ✓ 8 nouveaux prospects scrapés (Maps · Plérin)`,
+        `[${t(new Date(now - 600_000))}] ✓ Mail envoyé à Atelier Missor (camille@missor.fr)`,
+        `[${t(new Date(now - 900_000))}] ✓ 5 prospects enrichis (email trouvé via clearbit)`,
+        `[${t(new Date(now - 1500_000))}] ✓ Convoi terminé : 18 mails envoyés, 0 erreur`,
+      ];
       return {
         ok: true,
         running: true,
-        prospects_scrapes_today: 42,
-        mails_envoyes_today: 18,
-        reponses_today: 4,
-        log: [
-          { ts: new Date().toISOString(), level: 'info', msg: '✓ 12 prospects qualifiés depuis Sirene' },
-          { ts: new Date(Date.now()-300_000).toISOString(), level: 'info', msg: '✓ Mail envoyé à Cabinet Dupont & Co' },
-          { ts: new Date(Date.now()-600_000).toISOString(), level: 'info', msg: '✓ Réponse classifiée : "Intéressé" — Boulangerie Lefèvre' },
-          { ts: new Date(Date.now()-1200_000).toISOString(), level: 'info', msg: '✓ 8 nouveaux prospects scrapés (Maps)' },
-        ],
+        log,
+        log_len: log.length,
+        stats: {
+          searched: 124,
+          enriched: 87,
+          drafts_sent: 18,
+          drafts_pending: 3,
+          replies_detected: 4,
+          errors: [],
+        },
       };
     },
 
     // ============ Messages internes Jordan/Thomas ============
-    messages_count_unread() { return { ok: true, count: 0 }; },
-    messages_list() { return { ok: true, messages: [] }; },
+    messages_count_unread() { return { ok: true, count: 2 }; },
+    messages_list() {
+      const now = Date.now();
+      return {
+        ok: true,
+        messages: [
+          { id: 'm1', body: "J'ai bouclé la maquette pour Cabinet Dupont. Tu valides ?", created_at: new Date(now - 7200_000).toISOString(), sender_id: 'thomas' },
+          { id: 'm2', body: "Top, c'est validé. Tu peux livrer.",                          created_at: new Date(now - 6600_000).toISOString(), sender_id: 'jordan' },
+          { id: 'm3', body: "Marc Lefèvre vient de payer. Lance le kit ?",                 created_at: new Date(now - 1800_000).toISOString(), sender_id: 'thomas' },
+          { id: 'm4', body: "Déjà parti. Bien joué !",                                     created_at: new Date(now - 1500_000).toISOString(), sender_id: 'jordan' },
+          { id: 'm5', body: "RDV avec Atelier Missor dans 1h, je te tiens au courant.",    created_at: new Date(now - 600_000).toISOString(),  sender_id: 'thomas' },
+        ],
+      };
+    },
     messages_me() { return { ok: true, user_id: 'jordan', display_name: 'Jordan' }; },
+    messages_other_user() { return { ok: true, other: { user_id: 'thomas', display_name: 'Thomas' } }; },
+    messages_peer_typing() { return { ok: true, typing: false }; },
+
+    // ============ Allô Claude — conseil interactif ============
+    claude_ask(payload) {
+      const q = (payload && payload.question) || '';
+      if (q) {
+        return {
+          ok: true, demo: true,
+          urgency: 'medium',
+          headline: 'Bonne piste — voici ce que je creuserais',
+          advice: `Tu as posé : « ${q} »\n\nVu l'état actuel de ta boîte (12 prospects intéressés à recontacter, 18 mails envoyés aujourd'hui), je commencerais par les réponses positives — c'est là que se trouvent tes meilleures chances de conversion. Pour le reste, le pipeline tourne tout seul.`,
+          suggested_view: 'replies',
+          suggested_action_label: 'Voir les réponses',
+        };
+      }
+      return {
+        ok: true, demo: true,
+        urgency: 'medium',
+        headline: 'Tu as 12 prospects intéressés à recontacter aujourd\'hui',
+        advice: "Ils ont répondu positivement à un de tes mails — c'est ta meilleure piste pour transformer. Ouvre la vue Réponses, lis ce qu'ils ont écrit, et envoie-leur le brouillon que l'app a préparé en l'adaptant si besoin.\n\nPas plus de 2 heures avant de répondre — au-delà, ils refroidissent.",
+        suggested_view: 'replies',
+        suggested_action_label: 'Voir les réponses',
+      };
+    },
+    claude_consume_pending() {
+      // Aucun conseil proactif en attente en mode démo
+      return null;
+    },
+
+    // ============ Réglages / Configurations ============
+    get_settings() {
+      return {
+        ok: true,
+        theme: 'dark',
+        ai: { api_keys: { anthropic: 'sk-ant-***-demo', google: 'AIza***-demo' } },
+        outreach: { from_email: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot' },
+      };
+    },
+    auth_status() {
+      return { ok: true, connected: true, user_id: 'jordan', display_name: 'Jordan', email: 'contact@triskell-studio.fr' };
+    },
+    lead_to_client_get_config() {
+      return { ok: true, config: { enabled: true, mode: 'strong_signals', last_run_at: new Date(Date.now() - 1800_000).toISOString() } };
+    },
+    stripe_get_config() {
+      return { ok: true, config: { enabled: true, secret_key_set: true, last_run_at: new Date(Date.now() - 300_000).toISOString(), payments_count_30d: 14 } };
+    },
+    calendly_get_config() {
+      return { ok: true, config: { enabled: true, pat_set: true, event_type_uri: 'https://calendly.com/jordan-triskell/15min' } };
+    },
+    calendly_list_event_types() {
+      return { ok: true, event_types: [
+        { uri: 'https://calendly.com/jordan-triskell/15min', name: 'RDV 15 min — Découverte' },
+        { uri: 'https://calendly.com/jordan-triskell/30min', name: 'RDV 30 min — Brief projet' },
+      ] };
+    },
+    phantombuster_get_config() {
+      return { ok: true, config: { enabled: false, api_key_set: false } };
+    },
+    tracker_get_config() {
+      return { ok: true, config: { enabled: true, domain_set: true } };
+    },
+
+    // ============ Delivery Kits ============
+    delivery_kits_list() {
+      return {
+        ok: true,
+        kits: {
+          'pack-elec': {
+            product_name: 'Pack Électricien Pro',
+            welcome: {
+              subject: "Bienvenue chez Pack Électricien — voici tout ce qu'il vous faut",
+              body: "Bonjour {client_name},\n\nMerci pour votre confiance. Vous trouverez ci-dessous l'accès complet à Pack Électricien Pro.\n\n{deliverables_list}\n\nÀ toute question, je suis là.\n\n{signature}",
+            },
+            follow_ups: [
+              { days: 3,  subject: "Comment se passe la prise en main ?",  body: "Bonjour {client_name},\nPetit point 3 jours après votre achat — tout se passe bien ?" },
+              { days: 14, subject: "Une astuce qui peut vous faire gagner du temps", body: "Bonjour {client_name},\nUne astuce que j'utilise tous les jours…" },
+              { days: 30, subject: "Vous reviendriez ? (1 question)",      body: "Bonjour {client_name},\nSi vous aviez à recommander Pack Élec à un confrère, vous le feriez ?" },
+            ],
+          },
+          'studio-pdf': {
+            product_name: 'Studio PDF',
+            welcome: {
+              subject: "Studio PDF — vos templates sont prêts",
+              body: "Bonjour {client_name},\n\nVoici l'accès à votre Studio PDF.\n\n{deliverables_list}\n\n{signature}",
+            },
+            follow_ups: [
+              { days: 7,  subject: "Premier rapport généré ?",   body: "Bonjour {client_name}, tu as pu tester ton premier rapport ?" },
+              { days: 30, subject: "Témoignage rapide ?",        body: "Si Studio PDF te plaît, 2 phrases comme témoignage me feraient très plaisir." },
+            ],
+          },
+          'obelisk': {
+            product_name: 'Obelisk',
+            welcome: {
+              subject: "Obelisk — bienvenue dans la prospection multi-plateformes",
+              body: "Bonjour {client_name},\n\nVoici votre accès Obelisk.\n\n{deliverables_list}\n\n{signature}",
+            },
+            follow_ups: [
+              { days: 5,  subject: "Premier scrape lancé ?",     body: "Tu as pu lancer ton premier scrape sur Obelisk ?" },
+              { days: 30, subject: "Bilan du mois",              body: "Petit point un mois après — combien de prospects extraits ?" },
+            ],
+          },
+        },
+      };
+    },
+    delivery_kit_preview(payload) {
+      const key = (payload && payload.product_key) || 'pack-elec';
+      const all = DemoMode._fake.delivery_kits_list();
+      const kit = (all.kits || {})[key];
+      if (!kit) return { ok: false, error: 'Kit introuvable' };
+      return { ok: true, welcome: kit.welcome, follow_ups: kit.follow_ups };
+    },
+
+    // ============ A/B Test ============
+    ab_get_results() {
+      const now = Date.now();
+      return {
+        ok: true,
+        campaigns: [
+          {
+            id: 'ab1',
+            name: "Premier contact froid — boulangeries",
+            active: true,
+            verdict: 'significant',
+            winner_variant_id: 'v2',
+            created_at: new Date(now - 14 * 86400_000).toISOString(),
+            variants: [
+              { id: 'v1', subject: "Une idée pour {company_name}",        sent_count: 142, reply_count: 8,  reply_rate: 5.6,  enough_data: true },
+              { id: 'v2', subject: "{company_name} — 30 secondes ?",      sent_count: 138, reply_count: 18, reply_rate: 13.0, enough_data: true },
+              { id: 'v3', subject: "Petit cadeau pour {company_name}",    sent_count: 140, reply_count: 6,  reply_rate: 4.3,  enough_data: true },
+            ],
+          },
+          {
+            id: 'ab2',
+            name: "Relance — cabinets médicaux",
+            active: true,
+            verdict: 'not_enough_data',
+            winner_variant_id: null,
+            created_at: new Date(now - 5 * 86400_000).toISOString(),
+            variants: [
+              { id: 'v1', subject: "On garde le contact ?",               sent_count: 22, reply_count: 1, reply_rate: 4.5,  enough_data: false },
+              { id: 'v2', subject: "Une mise à jour pour vous",           sent_count: 21, reply_count: 2, reply_rate: 9.5,  enough_data: false },
+            ],
+          },
+        ],
+      };
+    },
+
+    // ============ Apps catalog (Spotlight) ============
+    get_apps_catalog() {
+      return {
+        ok: true,
+        apps: [
+          { id: 'lagriffe',  name: 'Lagriffe Studio', tagline: 'Sites web sur mesure',     category: 'Triskell', url: 'https://lagriffe-studio.fr' },
+          { id: 'rankus',    name: 'RankUs Studio',   tagline: 'SEO autonome',             category: 'Triskell', url: 'https://rankus-studio.fr' },
+          { id: 'wow',       name: 'Studio WoW',      tagline: 'Vidéos qui claquent',      category: 'Triskell', url: 'https://studio-wow.fr' },
+          { id: 'antavirus', name: 'Le Druide',       tagline: 'Antivirus grand public',   category: 'Triskell', url: 'https://antavirus.fr' },
+          { id: 'obelisk',   name: 'Obelisk',         tagline: 'Prospection multi-plateformes', category: 'Outils', url: '' },
+          { id: 'pack-elec', name: 'Pack Électricien',tagline: 'Tout pour les électriciens',category: 'Outils', url: '' },
+        ],
+      };
+    },
+
+    // ============ Onboarding — déjà fait en démo ============
+    get_current_user() {
+      return { ok: true, needs_onboarding: false, first_name: 'Jordan', full_name: 'Jordan Bourillot', email: 'contact@triskell-studio.fr' };
+    },
+    get_user_name() {
+      return 'Jordan';
+    },
+
+    // (tracker_stats déjà défini plus haut)
+
+    // ============ Funnel / Pipeline (apiPrefix) ============
 
     // ============ Prospection en direct (démo) ============
     prospect_generate_mail(payload) {

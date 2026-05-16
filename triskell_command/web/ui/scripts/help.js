@@ -115,9 +115,11 @@ const Help = {
              "type de RDV par défaut)."
         },
         {
-          h: '🐻 Ouvrir / Répondre via Teddy Mail',
-          p: "Lance Teddy Mail (ton client mail) ou ouvre directement une " +
-             "fenêtre de composition pré-remplie en réponse au prospect."
+          h: '✉ Répondre directement',
+          p: "Bouton « Répondre » sur chaque carte : ouvre le composer mail " +
+             "intégré, déjà pré-rempli avec le destinataire et l'objet. " +
+             "Tu peux mettre en forme (HTML), ajouter des pièces jointes, " +
+             "programmer l'envoi plus tard ou enregistrer en brouillon."
         },
       ],
     },

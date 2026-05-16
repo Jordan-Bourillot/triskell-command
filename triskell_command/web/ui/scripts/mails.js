@@ -214,7 +214,7 @@ const Mails = {
     const fromAddr = (m.extra && m.extra.from) || '';
     const accountId = (m.extra && m.extra.account_id) || '';
     const ts = this._fmtDate(m.ts);
-    const subject = m.subject || '(sans sujet)';
+    const subject = m.subject || '(sans objet)';
     const body = (m.body || '').slice(0, 200);
     const bodyExcerpt = body || (m.extra && m.extra.body_excerpt) || '';
     return `
@@ -244,7 +244,7 @@ const Mails = {
   // ----------------------------------------------------------------------
   _openDetail(m) {
     const extra = m.extra || {};
-    const subject = m.subject || '(sans sujet)';
+    const subject = m.subject || '(sans objet)';
     const fromAddr = extra.from || '';
     const fromInitial = (fromAddr[0] || '?').toUpperCase();
     const accountId = extra.account_id || '';
@@ -569,7 +569,7 @@ const Mails = {
         const fromAddr = extra.from || '(inconnu)';
         const accountId = extra.account_id || '';
         const accountLabel = (this.state.accounts.find(a => a.id === accountId) || {}).label || accountId || '';
-        const subject = m.subject || '(sans sujet)';
+        const subject = m.subject || '(sans objet)';
         const body = (extra.body_excerpt || m.body || '').slice(0, 100);
         const notif = new Notification(`📬 ${fromAddr}`, {
           body: `${subject}${accountLabel ? '\n→ ' + accountLabel : ''}${body ? '\n\n' + body : ''}`,
@@ -676,7 +676,7 @@ const Mails = {
     overlay.className = 'fixed inset-0 z-[230] flex items-center justify-center p-4';
     overlay.style.background = 'rgba(15,23,42,0.7)';
     overlay.style.backdropFilter = 'blur(8px)';
-    const subject = meta.subject || '(sans sujet)';
+    const subject = meta.subject || '(sans objet)';
     const from = meta.from || '';
     const to = meta.to || '(destinataire)';
     overlay.innerHTML = `

@@ -114,7 +114,7 @@ const ABTest = {
         <div class="text-xs font-bold tracking-widest w-10 ${isWinner ? 'text-success' : 'text-text-muted'}">
           ${this._esc(v.id || '')} ${isWinner ? '👑' : ''}
         </div>
-        <div class="flex-1 text-sm">${this._esc(v.subject || '(sans sujet)')}</div>
+        <div class="flex-1 text-sm">${this._esc(v.subject || '(sans objet)')}</div>
         <div class="text-xs text-text-muted whitespace-nowrap">
           ${sent} envoyés · ${reply} réponses
         </div>
@@ -154,8 +154,8 @@ const ABTest = {
           <input id="abn-name" placeholder="Nom de la campagne (ex : Premier contact froid)"
                  class="w-full px-4 py-2.5 text-sm rounded-xl bg-bg border border-border focus:outline-none focus:border-accent" />
           <div>
-            <label class="text-xs text-text-muted block mb-2">Variantes de sujet (1 par ligne, 2 minimum) :</label>
-            <textarea id="abn-variants" rows="6" placeholder="Une idée pour {company_name}&#10;{company_name} — 30 secondes ?&#10;Sujet variante 3"
+            <label class="text-xs text-text-muted block mb-2">Variantes d'objet (1 par ligne, 2 minimum) :</label>
+            <textarea id="abn-variants" rows="6" placeholder="Une idée pour {company_name}&#10;{company_name} — 30 secondes ?&#10;Objet variante 3"
                       class="w-full px-4 py-2.5 text-sm rounded-xl bg-bg border border-border focus:outline-none focus:border-accent font-mono leading-relaxed"></textarea>
           </div>
           <div class="text-xs text-text-muted">
