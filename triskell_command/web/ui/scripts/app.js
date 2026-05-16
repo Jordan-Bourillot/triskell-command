@@ -89,6 +89,11 @@ const App = {
           return async (payload) => this._httpDesktopFallback(method, payload);
         }
         return async (payload) => {
+          // Mode démo : intercepte avant tout appel réseau
+          if (typeof DemoMode !== 'undefined' && DemoMode.isOn && DemoMode.isOn()) {
+            const intercepted = DemoMode.intercept(method, payload);
+            if (intercepted.handled) return intercepted.result;
+          }
           const body = (payload === undefined || payload === null) ? null : JSON.stringify(payload);
           const r = await fetch(`/api/${method}`, {
             method: 'POST',

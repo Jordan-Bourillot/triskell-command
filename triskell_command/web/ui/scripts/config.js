@@ -55,6 +55,7 @@ const Config = {
     }
     const slot = document.getElementById('cfg-content');
     slot.innerHTML = this._renderAuth(authStatus) +
+                     this._renderDemoMode() +
                      this._renderAppearance(s) +
                      this._renderAi(s) +
                      this._renderOutreach(s) +
@@ -76,6 +77,75 @@ const Config = {
     this._bindCalendly();
     this._bindPhantombuster();
     this._bindTracker();
+    this._bindDemoMode();
+  },
+
+  _renderDemoMode() {
+    const isOn = (typeof DemoMode !== 'undefined' && DemoMode.isOn && DemoMode.isOn());
+    return `
+      <section>
+        <div class="section-label">Mode démo</div>
+        <p class="text-sm text-text-muted mb-4">
+          Pour réaliser des visuels promotionnels.
+          Quand il est activé, tu peux cliquer partout dans l'app, naviguer dans tous les onglets :
+          rien n'est réel (pas d'envoi de mail, pas de modification en base, aucune action ne part au serveur).
+          Les chiffres et stats sont remplacés par des données fictives crédibles, comme si la boîte tournait à plein régime.
+        </p>
+        <div class="card p-6">
+          ${isOn ? `
+            <div class="flex items-start gap-4">
+              <div class="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0"
+                   style="background: linear-gradient(135deg, #ef4444, #f97316);">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+              </div>
+              <div class="flex-1">
+                <div class="font-bold text-base text-text mb-1">Mode démo activé</div>
+                <div class="text-sm text-text-muted mb-3">
+                  Aucune action n'est réelle. Toutes les vraies données reviendront dès que tu désactives.
+                </div>
+                <button id="demo-mode-off" class="btn btn-secondary">
+                  Désactiver le mode démo
+                </button>
+              </div>
+            </div>
+          ` : `
+            <div class="flex items-start gap-4">
+              <div class="w-12 h-12 rounded-2xl bg-bg flex items-center justify-center shrink-0 border border-border">
+                <svg class="w-6 h-6 text-text-muted" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                </svg>
+              </div>
+              <div class="flex-1">
+                <div class="font-bold text-base text-text mb-1">Désactivé</div>
+                <div class="text-sm text-text-muted mb-3">
+                  En l'activant, tu pourras naviguer librement avec des données fictives, sans risque d'envoyer un vrai mail
+                  ou de modifier ta base. Idéal pour des captures d'écran.
+                </div>
+                <button id="demo-mode-on"
+                        class="btn btn-primary"
+                        style="background: linear-gradient(135deg, #ef4444, #f97316); border: none;">
+                  Activer le mode démo
+                </button>
+                <div class="text-[11px] text-text-muted mt-2">L'app se recharge automatiquement après activation.</div>
+              </div>
+            </div>
+          `}
+        </div>
+      </section>
+    `;
+  },
+
+  _bindDemoMode() {
+    const onBtn  = document.getElementById('demo-mode-on');
+    const offBtn = document.getElementById('demo-mode-off');
+    if (onBtn) onBtn.onclick = () => {
+      if (typeof DemoMode !== 'undefined') DemoMode.setOn(true);
+    };
+    if (offBtn) offBtn.onclick = () => {
+      if (typeof DemoMode !== 'undefined') DemoMode.setOn(false);
+    };
   },
 
   _renderAuth(authStatus) {
