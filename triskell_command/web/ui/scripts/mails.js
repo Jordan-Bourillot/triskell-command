@@ -900,8 +900,8 @@ const Mails = {
               <div class="flex items-center justify-between mb-1 gap-2">
                 <label class="block text-[11px] font-medium text-text-secondary">Destinataires</label>
                 <div class="flex items-center gap-1 text-[10px] font-semibold">
-                  <button id="cmp-toggle-cc" type="button" class="px-1.5 py-0.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Afficher le champ Cc">+ Cc</button>
-                  <button id="cmp-toggle-bcc" type="button" class="px-1.5 py-0.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Afficher le champ Cci (copie cachée)">+ Cci</button>
+                  <button id="cmp-toggle-cc" type="button" class="px-1.5 py-0.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Afficher ou masquer le champ Cc">+ Cc</button>
+                  <button id="cmp-toggle-bcc" type="button" class="px-1.5 py-0.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Afficher ou masquer le champ Cci (copie cachée)">+ Cci</button>
                 </div>
               </div>
               <div id="cmp-to-wrap" class="chips-input chips-input--to"
@@ -915,7 +915,10 @@ const Mails = {
 
           <!-- Cc / Cci (masqués par défaut) -->
           <div id="cmp-cc-row" class="hidden">
-            <label class="block text-[11px] font-medium text-text-secondary mb-1">Cc <span class="text-text-muted font-normal">(copie visible)</span></label>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-[11px] font-medium text-text-secondary">Cc <span class="text-text-muted font-normal">(copie visible)</span></label>
+              <button id="cmp-cc-remove" type="button" class="text-text-muted hover:text-danger text-sm leading-none px-1" title="Retirer le champ Cc" aria-label="Retirer le champ Cc">×</button>
+            </div>
             <div id="cmp-cc-wrap" class="chips-input"
                  data-input-id="cmp-cc-input">
               <input id="cmp-cc-input" type="text" autocomplete="off"
@@ -923,7 +926,10 @@ const Mails = {
             </div>
           </div>
           <div id="cmp-bcc-row" class="hidden">
-            <label class="block text-[11px] font-medium text-text-secondary mb-1">Cci <span class="text-text-muted font-normal">(copie cachée — les autres destinataires ne la voient pas)</span></label>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-[11px] font-medium text-text-secondary">Cci <span class="text-text-muted font-normal">(copie cachée — les autres destinataires ne la voient pas)</span></label>
+              <button id="cmp-bcc-remove" type="button" class="text-text-muted hover:text-danger text-sm leading-none px-1" title="Retirer le champ Cci" aria-label="Retirer le champ Cci">×</button>
+            </div>
             <div id="cmp-bcc-wrap" class="chips-input"
                  data-input-id="cmp-bcc-input">
               <input id="cmp-bcc-input" type="text" autocomplete="off"
@@ -1255,17 +1261,35 @@ const Mails = {
       chipsTo.setValues(parts);
     }
 
-    // Toggle des lignes Cc / Cci
+    // Toggle des lignes Cc / Cci — montrer si caché, vider + cacher si visible
+    const ccRow = overlay.querySelector('#cmp-cc-row');
+    const bccRow = overlay.querySelector('#cmp-bcc-row');
+    const hideCc = () => {
+      chipsCc.setValues([]);
+      ccRow.classList.add('hidden');
+    };
+    const hideBcc = () => {
+      chipsBcc.setValues([]);
+      bccRow.classList.add('hidden');
+    };
     overlay.querySelector('#cmp-toggle-cc').onclick = () => {
-      const row = overlay.querySelector('#cmp-cc-row');
-      row.classList.remove('hidden');
-      chipsCc.focus();
+      if (ccRow.classList.contains('hidden')) {
+        ccRow.classList.remove('hidden');
+        chipsCc.focus();
+      } else {
+        hideCc();
+      }
     };
     overlay.querySelector('#cmp-toggle-bcc').onclick = () => {
-      const row = overlay.querySelector('#cmp-bcc-row');
-      row.classList.remove('hidden');
-      chipsBcc.focus();
+      if (bccRow.classList.contains('hidden')) {
+        bccRow.classList.remove('hidden');
+        chipsBcc.focus();
+      } else {
+        hideBcc();
+      }
     };
+    overlay.querySelector('#cmp-cc-remove').onclick = hideCc;
+    overlay.querySelector('#cmp-bcc-remove').onclick = hideBcc;
 
     // Gestion mode Texte / HTML
     let mode = 'text';

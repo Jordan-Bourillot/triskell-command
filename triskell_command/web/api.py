@@ -1815,8 +1815,25 @@ class Api:
                 )
             path.write_text(full, encoding="utf-8")
             logger.info("bug_report écrit : %s", path.name)
+
+            # Capture d'écran jointe (data URL base64) — écrite à côté du .txt
+            screenshot = p.get("screenshot")
+            screenshot_filename = None
+            if isinstance(screenshot, str) and screenshot.startswith("data:image/"):
+                try:
+                    import base64 as _b64
+                    header, _, b64data = screenshot.partition(",")
+                    mime = header.split(";")[0].replace("data:", "") or "image/png"
+                    ext = {"image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg", "image/gif": "gif", "image/webp": "webp"}.get(mime, "png")
+                    img_path = base / f"bug-{ts}.{ext}"
+                    img_path.write_bytes(_b64.b64decode(b64data))
+                    screenshot_filename = img_path.name
+                    logger.info("bug_report capture jointe : %s", img_path.name)
+                except Exception:
+                    logger.exception("bug_report capture")
+
             # TODO V2 : envoyer un mail à contact@triskell-studio.fr
-            return {"ok": True, "filename": path.name}
+            return {"ok": True, "filename": path.name, "screenshot": screenshot_filename}
         except Exception as exc:
             logger.exception("bug_report")
             return {"ok": False, "error": str(exc)}

@@ -29,40 +29,52 @@ const BugReport = {
     const s = document.createElement('style');
     s.id = 'bug-report-styles';
     s.textContent = `
-      #bug-report-fab {
-        position: fixed; bottom: 16px; left: 16px;
-        z-index: 99998;
-        width: 36px; height: 36px;
-        border-radius: 50%;
-        background: hsl(var(--surface-elevated));
-        border: 1px solid hsl(var(--border));
-        color: hsl(var(--text-muted));
-        display: flex; align-items: center; justify-content: center;
+      #br-screenshot-dropzone {
+        border: 1px dashed hsl(var(--border));
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+        text-align: center;
         cursor: pointer;
-        opacity: 0.6;
-        transition: opacity 160ms, transform 160ms;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+        transition: border-color 160ms, background 160ms;
+        font-size: 11px;
       }
-      #bug-report-fab:hover { opacity: 1; transform: scale(1.05); }
-      #bug-report-fab svg { width: 18px; height: 18px; }
+      #br-screenshot-dropzone:hover,
+      #br-screenshot-dropzone.dragover {
+        border-color: hsl(var(--accent));
+        background: hsl(var(--accent) / 0.05);
+      }
+      #br-screenshot-preview-wrap {
+        position: relative;
+        margin-top: 0.5rem;
+      }
+      #br-screenshot-preview {
+        max-width: 100%;
+        max-height: 200px;
+        border-radius: 0.5rem;
+        border: 1px solid hsl(var(--border));
+        display: block;
+      }
+      #br-screenshot-remove {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        width: 24px; height: 24px;
+        border-radius: 50%;
+        background: rgba(0,0,0,0.6);
+        color: white;
+        border: none;
+        cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 14px; line-height: 1;
+      }
+      #br-screenshot-remove:hover { background: rgba(0,0,0,0.8); }
     `;
     document.head.appendChild(s);
   },
 
   _injectButton() {
-    if (document.getElementById('bug-report-fab')) return;
-    const btn = document.createElement('button');
-    btn.id = 'bug-report-fab';
-    btn.title = 'Signaler un bug';
-    btn.setAttribute('aria-label', 'Signaler un bug');
-    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 2L3.5 8v8L12 22l8.5-6V8z"/>
-      <line x1="12" y1="22" x2="12" y2="10"/>
-      <line x1="3.5" y1="8" x2="12" y2="14"/>
-      <line x1="20.5" y1="8" x2="12" y2="14"/>
-    </svg>`;
-    btn.onclick = () => this.open();
-    document.body.appendChild(btn);
+    // Le bouton vit maintenant dans la barre du bas de la sidebar
+    // (cf. index.html "Tuto · Réglages · Signaler un bug"). Plus de FAB flottant.
   },
 
   // ----- Collecte du contexte automatique -----
@@ -127,6 +139,7 @@ const BugReport = {
   open() {
     if (document.getElementById('bug-report-modal')) return;
     const ctx = this._gatherContext();
+    let screenshotDataUrl = null;
 
     const ov = document.createElement('div');
     ov.id = 'bug-report-modal';
@@ -149,6 +162,18 @@ const BugReport = {
             <label class="block text-[11px] font-medium text-text-secondary mb-1 uppercase tracking-wider">Ce qui ne va pas</label>
             <textarea id="br-msg" rows="5" placeholder="Ex : Quand je clique sur 'Composer un mail' depuis le Cockpit, la modale ne s'ouvre pas..."
                       class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent resize-y"></textarea>
+          </div>
+
+          <div>
+            <label class="block text-[11px] font-medium text-text-secondary mb-1 uppercase tracking-wider">Capture d'écran <span class="text-text-muted normal-case font-normal">(optionnel)</span></label>
+            <div id="br-screenshot-dropzone" class="text-text-muted">
+              <span id="br-screenshot-hint">Clique pour choisir un fichier, glisse-dépose une image ici, ou colle (Ctrl+V) une capture</span>
+              <input id="br-screenshot-input" type="file" accept="image/*" class="hidden"/>
+            </div>
+            <div id="br-screenshot-preview-wrap" class="hidden">
+              <img id="br-screenshot-preview" alt="Aperçu de la capture"/>
+              <button id="br-screenshot-remove" type="button" title="Retirer la capture" aria-label="Retirer la capture">×</button>
+            </div>
           </div>
 
           <details class="text-xs">
@@ -183,8 +208,85 @@ const BugReport = {
     msgInput.addEventListener('input', refreshPreview);
     setTimeout(() => msgInput.focus(), 50);
 
+    // ----- Capture d'écran : file picker / drag-drop / paste -----
+    const dropzone = ov.querySelector('#br-screenshot-dropzone');
+    const fileInput = ov.querySelector('#br-screenshot-input');
+    const previewWrap = ov.querySelector('#br-screenshot-preview-wrap');
+    const previewImg = ov.querySelector('#br-screenshot-preview');
+    const removeBtn = ov.querySelector('#br-screenshot-remove');
+
+    const setScreenshot = (dataUrl) => {
+      screenshotDataUrl = dataUrl;
+      previewImg.src = dataUrl;
+      previewWrap.classList.remove('hidden');
+      dropzone.classList.add('hidden');
+    };
+    const clearScreenshot = () => {
+      screenshotDataUrl = null;
+      previewImg.removeAttribute('src');
+      previewWrap.classList.add('hidden');
+      dropzone.classList.remove('hidden');
+      fileInput.value = '';
+    };
+    const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const handleFile = async (file) => {
+      if (!file || !file.type.startsWith('image/')) return;
+      // Limite douce : 8 Mo (data URL fait ~33 % de plus en taille)
+      if (file.size > 8 * 1024 * 1024) {
+        alert('Image trop lourde (max 8 Mo).');
+        return;
+      }
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        setScreenshot(dataUrl);
+      } catch (e) {
+        alert('Lecture du fichier impossible.');
+      }
+    };
+
+    dropzone.onclick = () => fileInput.click();
+    fileInput.onchange = (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) handleFile(f);
+    };
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      const f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) handleFile(f);
+    });
+    removeBtn.onclick = clearScreenshot;
+
+    // Paste depuis le presse-papier (Ctrl+V n'importe où dans la modale)
+    const pasteListener = (e) => {
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (const it of items) {
+        if (it.type && it.type.startsWith('image/')) {
+          const f = it.getAsFile();
+          if (f) {
+            e.preventDefault();
+            handleFile(f);
+            return;
+          }
+        }
+      }
+    };
+    ov.addEventListener('paste', pasteListener);
+
     const close = () => {
       document.removeEventListener('keydown', escListener);
+      ov.removeEventListener('paste', pasteListener);
       ov.remove();
     };
     const escListener = (e) => { if (e.key === 'Escape') close(); };
@@ -220,6 +322,7 @@ const BugReport = {
             message: msgInput.value,
             context: ctx,
             full_report: text,
+            screenshot: screenshotDataUrl || null,
           });
           if (r && r.ok) {
             status.textContent = '✓ Rapport envoyé. Merci !';
@@ -245,4 +348,9 @@ const BugReport = {
 };
 
 window.BugReport = BugReport;
-window.addEventListener('DOMContentLoaded', () => BugReport.init());
+window.addEventListener('DOMContentLoaded', () => {
+  BugReport.init();
+  // Câblage du bouton "Signaler un bug" dans le footer de la sidebar.
+  const footerBtn = document.getElementById('footer-bug-report');
+  if (footerBtn) footerBtn.addEventListener('click', () => BugReport.open());
+});
