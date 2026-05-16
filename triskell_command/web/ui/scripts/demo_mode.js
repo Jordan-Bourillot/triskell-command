@@ -455,20 +455,30 @@ const DemoMode = {
     },
 
     // ============ Santé système ============
+    // Format attendu par health.js : summary + delivrabilité + workers (array)
     system_health() {
       return {
         ok: true,
-        services: {
-          supabase:    { ok: true, latency_ms: 38 },
-          smtp:        { ok: true, latency_ms: 142 },
-          imap:        { ok: true, latency_ms: 218 },
-          anthropic:   { ok: true, latency_ms: 412 },
-          stripe:      { ok: true, latency_ms: 95 },
-          google_sc:   { ok: true, latency_ms: 188 },
-          calendly:    { ok: true, latency_ms: 76 },
+        summary: { healthy: 9, warning: 0, error: 0 },
+        "delivrabilité": {
+          sent_24h: 18,
+          sent_7d: 624,
+          replies_7d: 89,
+          reply_rate_7d: 14,
+          smtp_configured: true,
+          imap_configured: true,
         },
-        uptime_pct: 99.97,
-        last_check: new Date().toISOString(),
+        workers: [
+          { name: 'imap_replies',         label: 'Lecture des réponses IMAP', health: 'healthy', running: true, last_run_at: new Date(Date.now() - 60_000).toISOString(),  last_run_result: { processed: 4, errors: 0 }, last_error: '', extra: '4 nouvelles réponses traitées' },
+          { name: 'auto_responder',       label: 'Réponse auto aux intéressés', health: 'healthy', running: true, last_run_at: new Date(Date.now() - 120_000).toISOString(), last_run_result: { processed: 4, errors: 0 }, last_error: '', extra: '1 brouillon préparé' },
+          { name: 'drip',                 label: 'Relances drip', health: 'healthy', running: true, last_run_at: new Date(Date.now() - 240_000).toISOString(), last_run_result: { processed: 4, errors: 0 }, last_error: '', extra: '3 relances envoyées' },
+          { name: 'post_sale',            label: 'Suivi après vente', health: 'healthy', running: true, last_run_at: new Date(Date.now() - 360_000).toISOString(), last_run_result: { processed: 4, errors: 0 }, last_error: '', extra: 'NPS J+30 envoyés (2)' },
+          { name: 'lead_to_client',       label: 'Bascule prospects → clients', health: 'healthy', running: true, last_run_at: new Date(Date.now() - 480_000).toISOString(), last_run_result: { processed: 4, errors: 0 }, last_error: '', extra: '1 conversion détectée' },
+          { name: 'multichannel_followup',label: 'Relances multi-canal LinkedIn', health: 'healthy', running: true, last_run_at: new Date(Date.now() - 600_000).toISOString(), last_run_result: { processed: 4, errors: 0 }, last_error: '', extra: '8 suggestions en file' },
+          { name: 'dormant_recycler',     label: 'Recyclage des prospects dormants', health: 'healthy', running: true, last_run_at: new Date(Date.now() - 1800_000).toISOString(), last_run_result: { processed: 4, errors: 0 }, last_error: '', extra: '5/jour max respecté' },
+          { name: 'stripe_poller',        label: 'Surveillance des paiements Stripe', health: 'healthy', running: true, last_run_at: new Date(Date.now() - 300_000).toISOString(), last_run_result: { processed: 4, errors: 0 }, last_error: '', extra: '2 paiements ce mois' },
+          { name: 'scheduled_mails',      label: 'Envoi des mails programmés', health: 'healthy', running: true, last_run_at: new Date(Date.now() - 30_000).toISOString(), last_run_result: { processed: 4, errors: 0 }, last_error: '', extra: '3 mails en file pour demain' },
+        ],
       };
     },
 
