@@ -54,21 +54,47 @@ const Config = {
       } catch (e) {}
     }
     const slot = document.getElementById('cfg-content');
-    slot.innerHTML = this._renderAuth(authStatus) +
-                     this._renderDemoMode() +
-                     this._renderBackups() +
-                     this._renderAppearance(s) +
-                     this._renderAi(s) +
-                     this._renderOutreach(s) +
-                     this._renderMailAccounts() +
-                     this._renderSignature() +
-                     this._renderStripe(stripeCfg) +
-                     this._renderCalendly(calendlyCfg) +
-                     this._renderPhantombuster(phantomCfg) +
-                     this._renderTracker(trackerCfg) +
-                     this._renderLeadToClient(l2c) +
-                     this._renderDelivery() +
-                     this._renderTutorial();
+
+    // Groupes d'onglets : chaque onglet regroupe plusieurs renderers existants.
+    const groups = [
+      { key: 'account',      label: 'Compte',         html: this._renderAuth(authStatus) },
+      { key: 'appearance',   label: 'Apparence',      html: this._renderAppearance(s) },
+      { key: 'mails',        label: 'Mails',          html: this._renderOutreach(s) + this._renderMailAccounts() + this._renderSignature() },
+      { key: 'ai',           label: 'Intelligence Artificielle', html: this._renderAi(s) },
+      { key: 'integrations', label: 'Intégrations',   html: this._renderStripe(stripeCfg) + this._renderCalendly(calendlyCfg) + this._renderPhantombuster(phantomCfg) + this._renderTracker(trackerCfg) },
+      { key: 'automations',  label: 'Automatisations', html: this._renderLeadToClient(l2c) + this._renderDelivery() },
+      { key: 'system',       label: 'Système',        html: this._renderBackups() + this._renderDemoMode() + this._renderTutorial() },
+    ];
+
+    // Préférence de dernier onglet sélectionné, sinon le premier
+    let activeKey = localStorage.getItem('cfg-active-tab') || groups[0].key;
+    if (!groups.find(g => g.key === activeKey)) activeKey = groups[0].key;
+
+    const tabsHTML = groups.map(g =>
+      `<button type="button" data-cfg-tab="${g.key}" class="cfg-tab${g.key === activeKey ? ' active' : ''}">${g.label}</button>`
+    ).join('');
+
+    const panelsHTML = groups.map(g =>
+      `<div data-cfg-panel="${g.key}" class="space-y-12${g.key === activeKey ? '' : ' hidden'}">${g.html}</div>`
+    ).join('');
+
+    slot.innerHTML = `
+      <nav class="cfg-tabs">${tabsHTML}</nav>
+      <div class="cfg-panels">${panelsHTML}</div>
+    `;
+
+    // Toggle d'onglet
+    slot.querySelectorAll('[data-cfg-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const k = btn.dataset.cfgTab;
+        localStorage.setItem('cfg-active-tab', k);
+        slot.querySelectorAll('[data-cfg-tab]').forEach(b => b.classList.toggle('active', b.dataset.cfgTab === k));
+        slot.querySelectorAll('[data-cfg-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.cfgPanel !== k));
+        // Scroll en haut du contenu Réglages
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+    });
+
     this._bind();
     this._bindAuth();
     this._bindMailAccounts();

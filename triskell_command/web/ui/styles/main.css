@@ -113,6 +113,45 @@ html, body {
 }
 .nav-item.active svg { color: hsl(var(--accent)); }
 
+/* Onglets de la page Réglages */
+.cfg-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid hsl(var(--border));
+  margin-bottom: 28px;
+  position: sticky;
+  top: 0;
+  background: hsl(var(--bg));
+  z-index: 5;
+  padding-top: 4px;
+}
+.cfg-tab {
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 500;
+  color: hsl(var(--text-muted));
+  border: none;
+  background: transparent;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: color 150ms, border-color 150ms, background 150ms;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  white-space: nowrap;
+}
+.cfg-tab:hover {
+  color: hsl(var(--text));
+  background: hsl(var(--surface-elevated) / 0.5);
+}
+.cfg-tab.active {
+  color: hsl(var(--accent));
+  border-bottom-color: hsl(var(--accent));
+  font-weight: 600;
+}
+.cfg-panels { max-width: 48rem; }
+
 /* Item mis en évidence : Boîte mail (toujours visible et marqué) */
 .nav-item-featured {
   background: hsl(var(--accent) / 0.10);
