@@ -995,6 +995,16 @@ html, body {
   box-shadow: 0 0 0 3px hsl(var(--accent) / 0.18);
 }
 .phare-input:disabled { opacity: 0.6; }
+/* Fix Chrome autofill qui force un fond clair + texte clair (invisible) */
+.phare-input:-webkit-autofill,
+.phare-input:-webkit-autofill:hover,
+.phare-input:-webkit-autofill:focus,
+.phare-input:-webkit-autofill:active {
+  -webkit-text-fill-color: hsl(var(--text)) !important;
+  -webkit-box-shadow: 0 0 0 1000px hsl(var(--bg)) inset !important;
+  caret-color: hsl(var(--text)) !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
 
 /* Modale */
 .phare-modal {
