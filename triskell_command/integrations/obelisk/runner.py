@@ -161,37 +161,60 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
             "found": 0, "enriched": 0, "drafts": 0,
             "phantom_inserted": 0, "phantom_skipped": 0,
             "per_platform": {},
+            "niches_run": [],
         }
+
+        # Support multi-niches : « entrepreneur, coaching, growth » →
+        # ["entrepreneur", "coaching", "growth"]. Pour chacune on relance
+        # le pipeline natif. La dédup côté Supabase (platform_url, handle+source)
+        # évite les doublons cross-niches.
+        niche_list = [n.strip() for n in (niche or "").split(",") if n.strip()]
+        if not niche_list:
+            niche_list = [niche or ""]
 
         # 1) Pipeline natif (YouTube, Twitch, Reddit, etc.)
         if native_platforms:
             cfg.platforms = native_platforms
-            log(f"Démarrage recherche natives '{niche}' sur "
-                f"{', '.join(native_platforms)}…")
-            # Snapshot des match_keys connues AVANT le run pour détecter
-            # les nouveaux ensuite (le pipeline écrit dans un fichier local).
-            before_keys = _read_local_prospects_keys()
-            stats = run_creators_pipeline(cfg, progress=log) or {}
-            agg_stats["found"]    += int(stats.get("found", 0) or 0)
-            agg_stats["enriched"] += int(stats.get("enriched", 0) or 0)
-            agg_stats["drafts"]   += int(stats.get("drafts", 0) or 0)
-            agg_stats["per_platform"]["_native"] = stats
-            # ⚡ Upload les nouveaux prospects (qui ont été écrits localement
-            # par le pipeline) vers Supabase, sinon l'UI Triskell ne les voit
-            # JAMAIS — le pipeline natif vient de l'app standalone et
-            # n'écrit pas dans Supabase de lui-même.
-            _upload_new_locals_to_supabase(
-                before_keys=before_keys, niche=niche, log=log,
-                agg_stats=agg_stats, filters=filters)
+            for idx, sub_niche in enumerate(niche_list, 1):
+                if len(niche_list) > 1:
+                    log(f"════════ NICHE {idx}/{len(niche_list)} : "
+                        f"« {sub_niche} » ════════")
+                cfg.niche = sub_niche
+                log(f"Démarrage recherche natives '{sub_niche}' sur "
+                    f"{', '.join(native_platforms)}…")
+                # Snapshot des match_keys connues AVANT le run pour détecter
+                # les nouveaux ensuite (le pipeline écrit dans un fichier local).
+                before_keys = _read_local_prospects_keys()
+                stats = run_creators_pipeline(cfg, progress=log) or {}
+                agg_stats["found"]    += int(stats.get("found", 0) or 0)
+                agg_stats["enriched"] += int(stats.get("enriched", 0) or 0)
+                agg_stats["drafts"]   += int(stats.get("drafts", 0) or 0)
+                agg_stats["niches_run"].append(sub_niche)
+                key = f"_native_{sub_niche}" if len(niche_list) > 1 else "_native"
+                agg_stats["per_platform"][key] = stats
+                # ⚡ Upload les nouveaux prospects (qui ont été écrits localement
+                # par le pipeline) vers Supabase, sinon l'UI Triskell ne les voit
+                # JAMAIS — le pipeline natif vient de l'app standalone et
+                # n'écrit pas dans Supabase de lui-même.
+                _upload_new_locals_to_supabase(
+                    before_keys=before_keys, niche=sub_niche, log=log,
+                    agg_stats=agg_stats, filters=filters)
 
         # 2) Phantoms (LinkedIn / Instagram / TikTok)
+        # Le multi-hashtag est déjà natif côté Phantom Instagram / TikTok
+        # (séparateur « + »). Mon helper _ensure_two_hashtags transforme la
+        # niche en hashtags. Pour LinkedIn, c'est un keyword unique → si
+        # plusieurs niches, on relance le phantom une fois par niche.
         if phantom_platforms:
-            _run_phantom_platforms(
-                niche=niche,
-                platforms=phantom_platforms,
-                max_per_platform=max_per_platform,
-                log=log,
-                agg_stats=agg_stats,
+            for sub_niche in niche_list:
+                if len(niche_list) > 1:
+                    log(f"════════ NICHE « {sub_niche} » (PhantomBuster) ════════")
+                _run_phantom_platforms(
+                    niche=sub_niche,
+                    platforms=phantom_platforms,
+                    max_per_platform=max_per_platform,
+                    log=log,
+                    agg_stats=agg_stats,
                 filters=filters,
             )
 

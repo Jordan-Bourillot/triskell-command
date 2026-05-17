@@ -1061,8 +1061,9 @@ const Obelisk = {
           <p class="text-sm text-text-muted mb-5">Décris ta cible. Obelisk balaie les plateformes activées (12 dispos, dont LinkedIn / Instagram / TikTok via PhantomBuster), enrichit les profils et stocke tout dans ton CRM.</p>
 
           <label class="block mb-4">
-            <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Niche / mot-clé</div>
-            <input id="ob-s-niche" placeholder="ex : coaching business, dev fullstack solo, électricien Bretagne…" value="${this._esc(cfg.niche || '')}" style="width:100%; padding:10px 14px; border-radius:8px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 14px;">
+            <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Niche(s) — séparées par virgules pour en lancer plusieurs</div>
+            <input id="ob-s-niche" placeholder="ex : entrepreneur, coaching, growth, formation" value="${this._esc(cfg.niche || '')}" style="width:100%; padding:10px 14px; border-radius:8px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 14px;">
+            <div class="text-[11px] text-text-muted mt-1">Une virgule = une recherche supplémentaire. Tout est fusionné dans un seul job, avec dédup automatique.</div>
           </label>
 
           <div class="block mb-4">
