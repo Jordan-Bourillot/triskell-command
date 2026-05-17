@@ -492,9 +492,19 @@ const Morning = {
     const nDraftsP = q.drafts_prospect_pending || 0;
     const nDraftsC = q.drafts_convoy_pending || 0;
     const nDrafts = nDraftsP + nDraftsC;
+    const nReview = q.drafts_convoy_needs_review || 0;
 
     let kicker, title, body, cta, target, state;
-    if (nInt > 0) {
+    if (nReview > 0) {
+      kicker = '⚠ MAILS BLOQUÉS — À VÉRIFIER';
+      title  = nReview === 1
+        ? '1 mail bloqué (variable non remplie)'
+        : `${nReview} mails bloqués (variables non remplies)`;
+      body   = "Le système a refusé d'envoyer ces mails parce qu'il manquait des infos (genre prénom). Ouvre-les pour les compléter ou les supprimer.";
+      cta    = 'Voir les mails bloqués →';
+      target = 'drafts';
+      state  = 'warn';
+    } else if (nInt > 0) {
       kicker = 'EN CHASSE — PRIORITÉ MAXIMALE';
       title  = nInt === 1
         ? '1 prospect intéressé à recontacter'
