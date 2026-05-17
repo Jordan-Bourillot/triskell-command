@@ -211,17 +211,15 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
 # ---------------------------------------------------------------------------
 # Upload des prospects locaux (écrits par le pipeline natif) vers Supabase
 # ---------------------------------------------------------------------------
-_LOCAL_PROSPECTS_FILE = ("triskell-prospect", "prospects.json")
-
-
+# Le pipeline natif écrit dans ~/.ledenicheur/prospects.json (PAS dans
+# ~/.triskell-prospect/prospects.json — c'est l'app Le Dénicheur qui a
+# créé ce dossier historiquement).
 def _local_prospects_path():
     from pathlib import Path
-    return Path.home() / f".{_LOCAL_PROSPECTS_FILE[0]}" / _LOCAL_PROSPECTS_FILE[1]
+    return Path.home() / ".ledenicheur" / "prospects.json"
 
 
 def _read_local_prospects() -> list[dict]:
-    """Lit le fichier ~/.triskell-prospect/prospects.json (peut être absent
-    au premier run). Renvoie une liste de dicts."""
     import json
     p = _local_prospects_path()
     if not p.exists():
@@ -233,95 +231,134 @@ def _read_local_prospects() -> list[dict]:
         return []
 
 
+def _prospect_local_key(p: dict) -> str:
+    """Même clé que le pipeline natif : platform|id."""
+    return f"{p.get('platform', '')}|{p.get('id', '')}"
+
+
 def _read_local_prospects_keys() -> set[str]:
-    """Snapshot des match_keys actuellement connues dans le fichier local.
-    Sert à détecter les NOUVEAUX prospects après un run du pipeline natif."""
-    out: set[str] = set()
-    for p in _read_local_prospects():
-        for k in (p.get("match_keys") or []):
-            if isinstance(k, str) and k:
-                out.add(k)
-    return out
+    """Snapshot des (platform|id) actuellement connus dans le fichier local."""
+    return {_prospect_local_key(p) for p in _read_local_prospects()
+            if _prospect_local_key(p) != "|"}
+
+
+def _platform_url_from_local(p: dict) -> str:
+    """Construit l'URL profil depuis platform+id (heuristique par source)."""
+    platform = (p.get("platform") or "").lower()
+    pid = p.get("id") or ""
+    handle = p.get("custom_url") or p.get("login") or p.get("username") or ""
+    if not pid and not handle:
+        return ""
+    if platform == "youtube":
+        if handle:
+            return f"https://www.youtube.com/@{handle}"
+        return f"https://www.youtube.com/channel/{pid}"
+    if platform == "twitch":
+        return f"https://www.twitch.tv/{handle or pid}"
+    if platform == "reddit":
+        return f"https://www.reddit.com/user/{handle or pid}"
+    if platform == "bluesky":
+        return f"https://bsky.app/profile/{handle or pid}"
+    if platform == "github":
+        return f"https://github.com/{handle or pid}"
+    if platform == "dailymotion":
+        return f"https://www.dailymotion.com/{handle or pid}"
+    if platform == "kick":
+        return f"https://kick.com/{handle or pid}"
+    # Fallback : on prend l'URL stockée s'il y en a une
+    return (p.get("url") or p.get("profile_url") or
+            p.get("channel_url") or "")
 
 
 def _local_prospect_to_supabase_row(p: dict, niche: str,
                                       now_iso: str) -> dict:
-    """Convertit un dict Prospect (format local) en row Supabase prospects."""
+    """Convertit un dict prospect (format ~/.ledenicheur/prospects.json)
+    en row Supabase prospects."""
+    name = (p.get("name") or p.get("title") or p.get("login")
+            or p.get("display_name") or p.get("username") or "")
+    handle = (p.get("custom_url") or p.get("login") or p.get("username")
+              or p.get("handle") or "")
+    platform = (p.get("platform") or "").lower()
+    pid = p.get("id") or ""
+    platform_url = _platform_url_from_local(p)
     emails = p.get("emails") or []
     phones = p.get("phones") or []
-    sources_raw = p.get("sources") or []
-    # Normalise sources : format attendu côté Supabase
-    sources = []
-    for s in sources_raw:
-        if not isinstance(s, dict):
-            continue
-        sources.append({
-            "name":      s.get("name") or "",
-            "source_id": s.get("source_id") or "",
-            "url":       s.get("url") or "",
-            "found_at":  s.get("found_at") or now_iso,
-        })
-    name = p.get("name") or p.get("legal_name") or p.get("handle") or ""
-    # Le platform_url : on prend la 1ère source qui a une URL plausible
-    platform_url = ""
-    for s in sources:
-        if s.get("url"):
-            platform_url = s["url"]
+    urls_in_bio = p.get("urls_in_bio") or []
+    # 1er URL non-social comme website
+    website = ""
+    for u in urls_in_bio:
+        if isinstance(u, str) and u and not any(
+            s in u for s in ("youtube.com", "twitch.tv", "reddit.com",
+                              "bsky.app", "github.com", "tiktok.com",
+                              "instagram.com", "linkedin.com")
+        ):
+            website = u
             break
+    subscribers = (p.get("subscribers") or p.get("subscriberCount")
+                   or p.get("followers") or p.get("followers_count"))
+    try:
+        subscribers = int(subscribers) if subscribers not in (None, "") else None
+    except Exception:
+        subscribers = None
+    description = (p.get("description") or p.get("bio") or
+                   p.get("snippet") or "")[:1000]
+    source_entry = {
+        "name":      f"obelisk_{platform}" if platform else "obelisk",
+        "source_id": pid,
+        "url":       platform_url,
+        "found_at":  p.get("found_at") or now_iso,
+    }
     return {
         "name":          name,
-        "handle":        p.get("handle") or "",
-        "legal_name":    p.get("legal_name") or "",
+        "handle":        handle,
+        "legal_name":    "",
         "emails":        list(emails) if isinstance(emails, list) else [],
         "phones":        list(phones) if isinstance(phones, list) else [],
-        "website":       p.get("website") or "",
-        "other_urls":    list(p.get("other_urls") or []),
-        "address":       p.get("address") or "",
-        "city":          p.get("city") or "",
-        "postal_code":   p.get("postal_code") or "",
+        "website":       website,
+        "other_urls":    list(urls_in_bio) if isinstance(urls_in_bio, list) else [],
+        "address":       "",
+        "city":          "",
+        "postal_code":   "",
         "country":       p.get("country") or "",
-        "industry":      p.get("industry") or niche,
-        "description":   (p.get("description") or "")[:1000],
+        "industry":      niche,
+        "description":   description,
         "language":      p.get("language") or "",
         "monetized":     bool(p.get("monetized")),
         "monetization_reasons": list(p.get("monetization_reasons") or []),
-        "has_legal_mentions":   bool(p.get("has_legal_mentions")),
+        "has_legal_mentions":   False,
         "score":         int(p.get("score") or 0),
         "score_label":   p.get("score_label") or "",
-        "subscribers":   p.get("subscribers"),
+        "subscribers":   subscribers,
         "platform_url":  platform_url,
         "status":        p.get("status") or "new",
-        "tags":          list(p.get("tags") or []) + [niche],
-        "notes":         p.get("notes") or "",
-        "sources":       sources,
-        "match_keys":    list(p.get("match_keys") or []),
+        "tags":          [platform, niche] if platform else [niche],
+        "notes":         "",
+        "sources":       [source_entry],
+        "match_keys":    [platform_url] if platform_url else [],
     }
 
 
 def _upload_new_locals_to_supabase(*, before_keys: set[str], niche: str,
                                      log, agg_stats: dict) -> None:
-    """Détecte les nouveaux prospects ajoutés par le pipeline natif dans le
-    fichier local et les uploade vers la table Supabase `prospects` avec
-    workspace_id (sinon les RLS rejettent silencieusement)."""
+    """Détecte les nouveaux prospects ajoutés par le pipeline natif dans
+    ~/.ledenicheur/prospects.json et les uploade vers la table Supabase
+    `prospects` avec workspace_id (sinon les RLS rejettent silencieusement)."""
     after = _read_local_prospects()
     if not after:
         log("⚠ Fichier prospects local introuvable ou vide — rien à uploader.")
         return
-    # Filtre les nouveaux : ceux dont aucun match_key n'était dans le set avant
+    # Filtre les nouveaux : ceux dont la clé (platform|id) n'était pas avant
     new_rows: list[dict] = []
     for p in after:
-        keys = [k for k in (p.get("match_keys") or []) if isinstance(k, str)]
-        if not keys:
-            # Pas de match_key fiable → on prend si name non vide
-            if not (p.get("name") or p.get("handle")):
-                continue
-            new_rows.append(p)
+        k = _prospect_local_key(p)
+        if not k or k == "|":
             continue
-        if any(k in before_keys for k in keys):
-            continue  # déjà connu avant ce run
+        if k in before_keys:
+            continue
         new_rows.append(p)
     if not new_rows:
-        log("ℹ Aucun nouveau prospect détecté dans le fichier local.")
+        log("ℹ Aucun nouveau prospect détecté dans le fichier local "
+            f"(total local = {len(after)}).")
         return
     log(f"📤 Upload de {len(new_rows)} nouveau(x) prospect(s) vers Supabase…")
     sb = repo._sb()
