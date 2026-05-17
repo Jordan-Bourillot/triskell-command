@@ -1345,7 +1345,28 @@ const Mails = {
           htmlArea.innerHTML = textArea.value
             .split(/\n\n+/).map(p => `<p>${this._escape(p).replace(/\n/g, '<br>')}</p>`).join('');
         }
+        // Force Chrome à utiliser <p> pour les nouveaux paragraphes (Entrée),
+        // sinon les boutons "liste" / "titre" / "citation" ne trouvent pas
+        // de bloc à transformer.
+        try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (_) {}
+        // Si la zone est vide : on amorce avec un paragraphe vide pour que
+        // formatBlock / insertList aient un bloc cible dès le premier mot.
+        if (!htmlArea.innerHTML.trim()) {
+          htmlArea.innerHTML = '<p><br></p>';
+        }
         htmlArea.focus();
+        // Place le curseur dans le premier paragraphe (sinon il flotte hors bloc)
+        try {
+          const firstBlock = htmlArea.querySelector('p, div, h1, h2, h3, blockquote, li');
+          if (firstBlock) {
+            const range = document.createRange();
+            range.selectNodeContents(firstBlock);
+            range.collapse(false);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        } catch (_) {}
       }
     };
     textBtn.onclick = () => setMode('text');
@@ -1641,6 +1662,70 @@ const Mails = {
           return;
         }
         htmlArea.focus();
+        // Pour les commandes "bloc" (listes, titre, citation), si l'aire
+        // contient des nœuds texte bruts ou des <br> hors paragraphe, on
+        // re-emballe tout en <p> d'abord — sinon Chrome ne sait pas quel
+        // bloc transformer et le bouton paraît ne rien faire.
+        const isBlockCmd = (
+          cmd === 'insertUnorderedList' ||
+          cmd === 'insertOrderedList' ||
+          cmd.startsWith('formatBlock-')
+        );
+        if (isBlockCmd) {
+          const hasRawChild = Array.from(htmlArea.childNodes).some(n =>
+            n.nodeType === Node.TEXT_NODE ||
+            (n.nodeType === Node.ELEMENT_NODE && n.tagName === 'BR')
+          );
+          if (hasRawChild) {
+            // Sauvegarde l'offset texte du curseur pour le replacer après wrap
+            const sel = window.getSelection();
+            let caretText = '';
+            if (sel.rangeCount && htmlArea.contains(sel.anchorNode)) {
+              const pre = document.createRange();
+              pre.selectNodeContents(htmlArea);
+              pre.setEnd(sel.anchorNode, sel.anchorOffset);
+              caretText = pre.toString();
+            }
+            // Découpe le contenu par <br>/<div>/<p> en lignes et réemballe en <p>
+            const html = htmlArea.innerHTML
+              .replace(/<div[^>]*>/gi, '\n')
+              .replace(/<\/div>/gi, '')
+              .replace(/<br\s*\/?>/gi, '\n');
+            const tmp = document.createElement('div');
+            tmp.innerHTML = html;
+            const lines = (tmp.innerText || '').split('\n');
+            htmlArea.innerHTML = lines
+              .map(l => `<p>${this._escape(l) || '<br>'}</p>`).join('');
+            // Replace le curseur à la même position texte
+            try {
+              let remaining = caretText.length;
+              const walker = document.createTreeWalker(htmlArea, NodeFilter.SHOW_TEXT);
+              let node, placed = false;
+              while ((node = walker.nextNode())) {
+                if (remaining <= node.length) {
+                  const r = document.createRange();
+                  r.setStart(node, remaining);
+                  r.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(r);
+                  placed = true;
+                  break;
+                }
+                remaining -= node.length;
+              }
+              if (!placed) {
+                const last = htmlArea.lastElementChild;
+                if (last) {
+                  const r = document.createRange();
+                  r.selectNodeContents(last);
+                  r.collapse(false);
+                  sel.removeAllRanges();
+                  sel.addRange(r);
+                }
+              }
+            } catch (_) {}
+          }
+        }
         if (cmd === 'createLink') {
           const url = prompt('URL du lien :', 'https://');
           if (url) document.execCommand('createLink', false, url);
