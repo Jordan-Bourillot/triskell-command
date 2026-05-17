@@ -113,6 +113,25 @@ html, body {
 }
 .nav-item.active svg { color: hsl(var(--accent)); }
 
+/* Item mis en évidence : Boîte mail (toujours visible et marqué) */
+.nav-item-featured {
+  background: hsl(var(--accent) / 0.10);
+  color: hsl(var(--text));
+  font-weight: 600;
+  border: 1px solid hsl(var(--accent) / 0.25);
+  position: relative;
+}
+.nav-item-featured svg { color: hsl(var(--accent)); }
+.nav-item-featured:hover {
+  background: hsl(var(--accent) / 0.18);
+  border-color: hsl(var(--accent) / 0.45);
+}
+.nav-item-featured.active {
+  background: hsl(var(--accent) / 0.22);
+  color: hsl(var(--accent));
+  border-color: hsl(var(--accent) / 0.55);
+}
+
 .nav-item-sm {
   display: flex;
   align-items: center;
