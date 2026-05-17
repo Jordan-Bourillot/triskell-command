@@ -291,10 +291,12 @@ function makePipelineView(config) {
       const fullName = `${sel.client_first_name || ''} ${sel.client_last_name || ''}`.trim();
       const status = sel.status;
 
+      const TERMINAL_STATUSES = ['rejected', 'failed', 'final_failed', 'live'];
+      const canAbandon = !TERMINAL_STATUSES.includes(status);
+
       const buttons = [];
       if (status === 'pending_validation') {
         buttons.push({ id: 'pv-act-approve', label: 'Approuver (≈15 € en tokens)', cls: 'btn-primary' });
-        buttons.push({ id: 'pv-act-reject',  label: 'Refuser',                     cls: 'btn-secondary' });
       }
       if (status === 'approved') {
         buttons.push({ id: 'pv-act-dispatch', label: 'Forcer le lancement maintenant', cls: 'btn-primary' });
@@ -306,13 +308,27 @@ function makePipelineView(config) {
       buttons.push({ id: 'pv-act-detail', label: 'Ouvrir le détail complet', cls: 'btn-primary' });
       buttons.push({ id: 'pv-act-logs', label: 'Voir les logs de cette demande', cls: 'btn-secondary' });
 
+      // Bouton « Abandonner » — toujours visible sauf demandes déjà terminales.
+      // Pour pending_validation on garde le mot « Refuser » (sens commercial),
+      // pour les autres étapes c'est un retrait du pipeline.
+      if (canAbandon) {
+        buttons.push({
+          id: 'pv-act-reject',
+          label: status === 'pending_validation'
+            ? 'Refuser cette demande'
+            : 'Abandonner / Sortir du pipeline',
+          cls: 'btn-secondary',
+          style: 'color: hsl(var(--danger)); border-color: hsl(var(--danger) / 0.45); margin-top: 8px;',
+        });
+      }
+
       pane.innerHTML = `
         <div class="card p-5">
           <div class="text-[10px] font-bold tracking-widest text-accent mb-1">DEMANDE SÉLECTIONNÉE</div>
           <div class="text-base font-bold mb-1">${this._escape(fullName)}</div>
           <div class="text-xs text-text-muted mb-4">${this._escape(sel.company_name || '')}</div>
           <div class="flex flex-col gap-2">
-            ${buttons.map(b => `<button id="${b.id}" class="btn ${b.cls}">${this._escape(b.label)}</button>`).join('')}
+            ${buttons.map(b => `<button id="${b.id}" class="btn ${b.cls}"${b.style ? ` style="${b.style}"` : ''}>${this._escape(b.label)}</button>`).join('')}
           </div>
           <div id="pv-action-status" class="mt-3 text-xs text-text-muted"></div>
         </div>
@@ -341,11 +357,20 @@ function makePipelineView(config) {
 
       const rejectBtn = document.getElementById('pv-act-reject');
       if (rejectBtn) rejectBtn.onclick = async () => {
-        const reason = prompt('Motif du refus (optionnel) :') ?? null;
-        if (reason === null) return;
-        setMsg('Refus…');
+        const isAbandon = status !== 'pending_validation';
+        const verb = isAbandon ? 'Abandonner' : 'Refuser';
+        const warn = isAbandon
+          ? `\n\nLa demande sortira du pipeline (statut « refusé »). Aucun mail ne part. Réversible uniquement en base.`
+          : '';
+        if (!confirm(`${verb} cette demande ?\n\n${fullName} · ${sel.company_name || ''}${warn}`)) return;
+        const reason = prompt(`Motif de l'${verb.toLowerCase()} (optionnel) :`) ?? '';
+        setMsg(`${verb}…`);
         const r = await this._call('reject_intake', { id: sel.id, reason });
-        if (r && r.ok) { setMsg('Demande refusée.'); await this._loadIntakes(); }
+        if (r && r.ok) {
+          setMsg(isAbandon ? 'Demande abandonnée.' : 'Demande refusée.');
+          this.state.selectedId = null;
+          await this._loadIntakes();
+        }
         else setMsg(`Échec : ${r && r.error || 'inconnu'}`, true);
       };
 
@@ -495,6 +520,11 @@ function makePipelineView(config) {
           <div class="px-6 py-3 border-t border-border bg-surface-elevated flex items-center justify-between gap-2">
             <button id="pvd-logs" class="text-xs text-text-muted hover:text-accent">→ Voir la chronologie</button>
             <div class="flex gap-2">
+              ${!['rejected', 'failed', 'final_failed', 'live'].includes(intake.status) ? `
+                <button id="pvd-abandon" class="btn btn-secondary"
+                        style="color: hsl(var(--danger)); border-color: hsl(var(--danger) / 0.45);">
+                  ${intake.status === 'pending_validation' ? 'Refuser' : 'Abandonner'}
+                </button>` : ''}
               <button id="pvd-close-2" class="btn btn-secondary">Fermer</button>
             </div>
           </div>
@@ -509,6 +539,24 @@ function makePipelineView(config) {
         this.state.selectedId = intake.id;
         close();
         this.switchTab('logs');
+      };
+      const abandonBtn = overlay.querySelector('#pvd-abandon');
+      if (abandonBtn) abandonBtn.onclick = async () => {
+        const isAbandon = intake.status !== 'pending_validation';
+        const verb = isAbandon ? 'Abandonner' : 'Refuser';
+        const warn = isAbandon
+          ? `\n\nLa demande sortira du pipeline (statut « refusé »). Aucun mail ne part.`
+          : '';
+        if (!confirm(`${verb} cette demande ?\n\n${fullName} · ${intake.company_name || ''}${warn}`)) return;
+        const reason = prompt(`Motif (optionnel) :`) ?? '';
+        const r = await this._call('reject_intake', { id: intake.id, reason });
+        if (r && r.ok) {
+          close();
+          this._toast(isAbandon ? '✓ Demande abandonnée' : '✓ Demande refusée');
+          this.refresh();
+        } else {
+          this._toast(`Échec : ${(r && r.error) || 'inconnu'}`, 'error');
+        }
       };
       document.addEventListener('keydown', function esc(e) {
         if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
@@ -895,7 +943,6 @@ function makePipelineView(config) {
       const acts = [];
       if (intake.status === 'pending_validation') {
         acts.push({ id: 'approve', label: 'Approuver', cls: 'primary' });
-        acts.push({ id: 'reject', label: 'Refuser', cls: 'secondary' });
       }
       if (intake.status === 'approved') {
         acts.push({ id: 'dispatch', label: 'Lancer fabrication', cls: 'primary' });
@@ -907,6 +954,14 @@ function makePipelineView(config) {
         acts.push({ id: 'approve_final', label: 'Valider et envoyer', cls: 'primary' });
       }
       acts.push({ id: 'detail', label: 'Détail', cls: 'secondary' });
+      // Abandon disponible partout sauf terminal
+      if (!['rejected', 'failed', 'final_failed', 'live'].includes(intake.status)) {
+        acts.push({
+          id: 'reject',
+          label: intake.status === 'pending_validation' ? 'Refuser' : 'Abandonner',
+          cls: 'secondary',
+        });
+      }
       return acts;
     },
 
@@ -914,9 +969,16 @@ function makePipelineView(config) {
       const fullName = `${intake.client_first_name || ''} ${intake.client_last_name || ''}`.trim();
       if (actId === 'detail') return this._openIntakeDetail(intake);
       if (actId === 'reject') {
-        const reason = prompt('Motif du refus (optionnel) :') ?? null;
-        if (reason === null) return;
-        await this._call('reject_intake', { id: intake.id, reason });
+        const isAbandon = intake.status !== 'pending_validation';
+        const verb = isAbandon ? 'Abandonner' : 'Refuser';
+        const warn = isAbandon
+          ? `\n\nLa demande sortira du pipeline (statut « refusé »). Aucun mail ne part.`
+          : '';
+        if (!confirm(`${verb} cette demande ?\n\n${fullName} · ${intake.company_name || ''}${warn}`)) return;
+        const reason = prompt(`Motif (optionnel) :`) ?? '';
+        const r = await this._call('reject_intake', { id: intake.id, reason });
+        if (r && r.ok) this._toast(isAbandon ? '✓ Demande abandonnée' : '✓ Demande refusée');
+        else this._toast(`Échec : ${(r && r.error) || 'inconnu'}`, 'error');
         await this._loadPipeline();
         return;
       }
