@@ -395,6 +395,16 @@ def _upload_new_locals_to_supabase(*, before_keys: set[str], niche: str,
         log("ℹ Aucun nouveau prospect détecté dans le fichier local "
             f"(total local = {len(after)}).")
         return
+    # === ENRICHISSEMENT EMAIL ===
+    # Avant le filtre, on tente de récupérer un email pour TOUS les
+    # prospects qui n'en ont pas (bio, site web, /contact, /about, Linktree…).
+    # Critique pour que le filtre `only_with_email` ne dégage pas 100 %
+    # des trouvés (les plateformes sociales exposent rarement l'email).
+    try:
+        from .. import email_enricher
+        email_enricher.enrich_batch(new_rows, log=log)
+    except Exception as exc:
+        log(f"⚠ Enrichisseur email indisponible ({exc}) — on continue sans.")
     # Applique les filtres user (only_with_email, audience, etc.) au format
     # Prospect "local". Comme la structure des rows est différente du format
     # Supabase, on construit un mini-row temporaire pour réutiliser

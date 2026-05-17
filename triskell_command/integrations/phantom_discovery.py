@@ -446,6 +446,16 @@ def discover_profiles(
             prospects.append(p)
     log(f"✔ {len(prospects)} profils valides après mapping")
 
+    # === ENRICHISSEMENT EMAIL ===
+    # PhantomBuster ne donne quasi jamais d'email côté hashtag/keyword
+    # collectors — on tente de récupérer une adresse via bio, site web,
+    # /contact, etc. AVANT le filtre, sinon `only_with_email` vide tout.
+    try:
+        from . import email_enricher
+        email_enricher.enrich_batch(prospects, log=log)
+    except Exception as exc:
+        log(f"⚠ Enrichisseur email indisponible ({exc}) — on continue sans.")
+
     # Filtrage post-fetch (audience, monétisation, pays, etc.)
     if filters:
         try:
