@@ -346,7 +346,14 @@ const MailTemplates = {
         ` : ''}
 
         <div class="mt-field">
-          <label>Corps HTML</label>
+          <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
+            <label style="margin:0; padding:0;">Corps HTML</label>
+            <button id="mt-insert-product" type="button"
+                    class="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-border text-text-muted hover:border-accent hover:text-accent transition-colors"
+                    title="Insérer un produit du Catalogue Triskell">
+              + Produit du Catalogue
+            </button>
+          </div>
           <textarea id="mt-body-html" spellcheck="false" placeholder="<p>Bonjour {{first_name}},</p>…">${this._esc(t.body_html || '')}</textarea>
         </div>
 
@@ -380,6 +387,15 @@ const MailTemplates = {
     // Binds
     e.querySelectorAll('[data-mt-pane]').forEach(b => b.onclick = () => this._switchPane(b.dataset.mtPane));
     e.querySelectorAll('[data-mt-insert]').forEach(c => c.onclick = () => this._insertPlaceholder(c.dataset.mtInsert));
+    const prodBtn = document.getElementById('mt-insert-product');
+    if (prodBtn && typeof Catalogue !== 'undefined') {
+      prodBtn.onclick = () => {
+        Catalogue.pickProduct((product) => {
+          if (!product) return;
+          this._insertPlaceholder(Catalogue.snippetHtml(product));
+        });
+      };
+    }
     document.getElementById('mt-save').onclick = () => this.save();
     const delBtn = document.getElementById('mt-delete');
     if (delBtn) delBtn.onclick = () => this.deleteCurrent();
