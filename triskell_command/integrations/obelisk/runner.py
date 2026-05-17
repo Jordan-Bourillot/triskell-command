@@ -111,6 +111,12 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
         ucfg["niche"] = niche
         ucfg["platforms"] = platforms
         ucfg["max_per_platform"] = max_per_platform
+
+        # ⚡ CRITIQUE : sync les clés API stockées en Supabase vers le
+        # fichier local ~/.ledenicheur/config.json que le pipeline natif
+        # va lire. Sans ça, ce pipeline ne trouve aucune clé et toutes
+        # les sources sont skippées avec "clé API manquante".
+        _sync_keys_to_ledenicheur(ucfg, log)
         # Aligne only_unmonetized avec le mode de monétisation choisi
         if filters.get("monetized_mode") == "unmonetized":
             ucfg["only_unmonetized"] = True
@@ -190,6 +196,60 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
                     finished_at=datetime.now(timezone.utc).isoformat())
     finally:
         _RUNNING.pop(job_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Sync des clés API : Supabase → fichier ~/.ledenicheur/config.json
+# ---------------------------------------------------------------------------
+def _sync_keys_to_ledenicheur(ucfg: dict, log) -> None:
+    """Recopie les clés API stockées en Supabase (via obelisk_user_config)
+    vers le fichier local ~/.ledenicheur/config.json. C'est ce fichier
+    que `triskell_core.prospect.creators_pipeline.run_creators_pipeline`
+    lit pour trouver youtube_api_key, twitch_*, etc.
+
+    Sans cette synchro, le pipeline natif skippe toutes les sources avec
+    « clé API manquante » même si l'utilisateur a bien renseigné ses clés
+    dans Triskell.
+    """
+    import json
+    from pathlib import Path
+    keys_to_sync = (
+        "youtube_api_key", "youtube_api_keys",
+        "twitch_client_id", "twitch_client_secret",
+        "github_token",
+        "mastodon_instances",
+        "apple_podcasts_country", "apple_podcasts_lang",
+    )
+    payload: dict = {}
+    for k in keys_to_sync:
+        v = ucfg.get(k)
+        if v not in (None, "", [], {}):
+            payload[k] = v
+    if not payload:
+        log("⚠ Aucune clé API trouvée dans la config Supabase à synchroniser.")
+        return
+    try:
+        target_dir = Path.home() / ".ledenicheur"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        cfg_file = target_dir / "config.json"
+        existing: dict = {}
+        if cfg_file.exists():
+            try:
+                existing = json.loads(cfg_file.read_text(encoding="utf-8"))
+                if not isinstance(existing, dict):
+                    existing = {}
+            except Exception:
+                existing = {}
+        merged = {**existing, **payload}
+        cfg_file.write_text(
+            json.dumps(merged, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        log(f"🔑 {len(payload)} clé(s) API synchronisée(s) "
+            f"vers ~/.ledenicheur/config.json "
+            f"({', '.join(sorted(payload.keys()))})")
+    except Exception as exc:
+        log(f"⚠ Synchro des clés API échouée : {exc}")
 
 
 # ---------------------------------------------------------------------------
