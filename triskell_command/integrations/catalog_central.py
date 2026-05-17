@@ -122,7 +122,7 @@ _DEFAULT_SITES = [
         "features": [
             {"title": "Création offerte", "detail": "Tu valides le site avant de payer."},
             {"title": "4 pages incluses", "detail": "Accueil, Services, À propos, Contact."},
-            {"title": "5 fonctionnalités au choix", "detail": "Google Maps, WhatsApp, horaires, avis Google, mode sombre…"},
+            {"title": "5 fonctionnalités au choix parmi une dizaine", "detail": "Google Maps, WhatsApp, horaires, avis Google, mode sombre, formulaire contact, galerie photos, blog, multilingue, popup promo…"},
             {"title": "Mise en ligne sous 24 h", "detail": "Après validation, ton site est en ligne le lendemain."},
             {"title": "SEO optimisé d'origine", "detail": "Code propre, balises bien faites — Google te lit dès le départ."},
         ],
