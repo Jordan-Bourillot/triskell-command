@@ -703,6 +703,186 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def phare_reject_action(self, payload: dict) -> dict:
+        """Refuse une recommandation : status → 'rejected'.
+
+        Payload : { id: str, reason?: str }
+        """
+        aid = ((payload or {}).get("id") or "").strip()
+        reason = ((payload or {}).get("reason") or "").strip()
+        if not aid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.phare import orchestrator
+            return orchestrator.reject_action(aid, reason=reason)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def phare_home(self, payload: dict | None = None) -> dict:
+        """Vue d'accueil 1-minute : 1 carte par site avec son état global.
+
+        Renvoie pour chaque site :
+        - id, name, domain, is_external_client, is_active
+        - health (0-100 ou null) — Lighthouse SEO du dernier audit
+        - health_tone : 'ok' (>=80) / 'warn' (50-79) / 'bad' (<50) / 'unknown'
+        - clicks_30d, clicks_30d_prev, delta_pct (peut être null)
+        - pending_count : actions en attente (draft + pending_review + preview)
+        - has_bulletin : bulletin Analyste publié dans les dernières 24h
+        - last_run_at : date du dernier passage d'un agent
+        """
+        p = payload or {}
+        out: dict = {"ok": True, "sites": []}
+        try:
+            from ..integrations.phare import repo
+            sites = repo.list_sites(active_only=not bool(p.get("include_inactive")))
+            if p.get("external_only"):
+                sites = [s for s in sites if s.get("is_external_client")]
+            elif p.get("internal_only"):
+                sites = [s for s in sites if not s.get("is_external_client")]
+            for s in sites:
+                sid = s.get("id")
+                latest = repo.latest_audit(sid) or {}
+                actions = repo.list_actions(site_id=sid, limit=100) or []
+                pending = [a for a in actions
+                           if (a.get("status") or "") in ("draft", "preview", "pending_review")]
+                metrics30 = repo.metrics_window(sid, days=30) or []
+                clicks30 = sum((m.get("organic_clicks") or 0) for m in metrics30)
+                metrics_prev = []
+                try:
+                    metrics_prev = repo.metrics_window(sid, days=60) or []
+                except Exception:
+                    metrics_prev = []
+                clicks_prev = sum((m.get("organic_clicks") or 0) for m in metrics_prev) - clicks30
+                delta_pct = None
+                if clicks_prev > 0:
+                    delta_pct = round(((clicks30 - clicks_prev) / clicks_prev) * 100.0, 1)
+                # Bulletin Analyste du jour ?
+                from datetime import datetime as _dt, timedelta as _td
+                cutoff = (_dt.now() - _td(hours=30)).isoformat()
+                has_bull = any(
+                    (a.get("agent") == "analyste") and ((a.get("created_at") or "") >= cutoff)
+                    for a in actions
+                )
+                # Tone santé
+                health = latest.get("lighthouse_seo")
+                tone = "unknown"
+                if isinstance(health, (int, float)):
+                    if health >= 80: tone = "ok"
+                    elif health >= 50: tone = "warn"
+                    else: tone = "bad"
+                # Dernier passage agent
+                last_run = None
+                if actions:
+                    last_run = max((a.get("created_at") or "" for a in actions), default=None) or None
+                out["sites"].append({
+                    "id": sid,
+                    "name": s.get("name") or s.get("domain"),
+                    "domain": s.get("domain"),
+                    "is_external_client": bool(s.get("is_external_client")),
+                    "is_active": bool(s.get("is_active", True)),
+                    "stack": s.get("stack") or "",
+                    "priority": s.get("priority") or 50,
+                    "health": health,
+                    "health_tone": tone,
+                    "clicks_30d": clicks30,
+                    "delta_pct": delta_pct,
+                    "pending_count": len(pending),
+                    "has_bulletin": has_bull,
+                    "last_run_at": last_run,
+                })
+            # Tri : priorité décroissante puis nom
+            out["sites"].sort(key=lambda x: (-(x.get("priority") or 0),
+                                             (x.get("name") or "").lower()))
+            return out
+        except Exception as exc:
+            logger.warning("phare_home: %s", exc)
+            return {"ok": False, "error": str(exc), "sites": []}
+
+    def phare_site_dashboard(self, payload: dict) -> dict:
+        """Vue détail 1-minute d'un site : tout en 1 appel.
+
+        Renvoie :
+        - site : ligne phare_sites complète
+        - kpis : { clicks_30d, position_avg, health, delta_pct }
+        - to_review : actions status in (draft, pending_review, preview), triées par impact
+        - recently_done : actions status=merged (10 dernières)
+        - rejected_recent : actions status=rejected (5 dernières)
+        - bulletin : dernier bulletin Analyste (action kind=recommandation agent=analyste, 48h)
+        - in_progress : missions en cours d'écriture (heuristique : draft sans contenu)
+        """
+        sid = ((payload or {}).get("id") or "").strip()
+        if not sid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.phare import repo
+            from datetime import datetime as _dt, timedelta as _td
+            site = repo.get_site(sid)
+            if not site:
+                return {"ok": False, "error": "site introuvable"}
+            latest = repo.latest_audit(sid) or {}
+            actions = repo.list_actions(site_id=sid, limit=200) or []
+            metrics30 = repo.metrics_window(sid, days=30) or []
+            clicks30 = sum((m.get("organic_clicks") or 0) for m in metrics30)
+            positions = [m.get("avg_position") for m in metrics30
+                         if isinstance(m.get("avg_position"), (int, float))]
+            position_avg = round(sum(positions) / len(positions), 1) if positions else None
+            metrics_prev_all = []
+            try:
+                metrics_prev_all = repo.metrics_window(sid, days=60) or []
+            except Exception:
+                pass
+            clicks_prev = sum((m.get("organic_clicks") or 0) for m in metrics_prev_all) - clicks30
+            delta_pct = None
+            if clicks_prev > 0:
+                delta_pct = round(((clicks30 - clicks_prev) / clicks_prev) * 100.0, 1)
+            # Classification des actions
+            to_review = []
+            done = []
+            rejected = []
+            bulletin = None
+            cutoff_bull = (_dt.now() - _td(hours=48)).isoformat()
+            for a in actions:
+                st = (a.get("status") or "").lower()
+                if st in ("draft", "pending_review", "preview"):
+                    to_review.append(a)
+                elif st == "merged":
+                    done.append(a)
+                elif st == "rejected":
+                    rejected.append(a)
+                if (a.get("agent") == "analyste"
+                        and (a.get("created_at") or "") >= cutoff_bull
+                        and bulletin is None):
+                    bulletin = a
+            # Tri "à regarder" : impact desc puis date desc
+            to_review.sort(key=lambda x: (-(x.get("impact") or 0),
+                                          -(len(x.get("created_at") or ""))),)
+            # Tone santé
+            health = latest.get("lighthouse_seo")
+            tone = "unknown"
+            if isinstance(health, (int, float)):
+                if health >= 80: tone = "ok"
+                elif health >= 50: tone = "warn"
+                else: tone = "bad"
+            return {
+                "ok": True,
+                "site": site,
+                "audit": latest,
+                "kpis": {
+                    "clicks_30d": clicks30,
+                    "position_avg": position_avg,
+                    "health": health,
+                    "health_tone": tone,
+                    "delta_pct": delta_pct,
+                },
+                "to_review": to_review[:20],
+                "recently_done": done[:10],
+                "rejected_recent": rejected[:5],
+                "bulletin": bulletin,
+            }
+        except Exception as exc:
+            logger.warning("phare_site_dashboard: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def phare_site_upsert(self, payload: dict) -> dict:
         """Crée ou met à jour un site dans Le Phare.
 

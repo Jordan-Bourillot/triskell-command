@@ -1,31 +1,27 @@
-/* Vue Le Phare — agence SEO autonome multi-sites
+/* Le Phare — refonte 2026-05-17
  *
- * Architecture refondue 2026-05-16 :
- *   - 'hub'      → page d'accueil : phare géant + 3 cartes (NOS SITES / SITES CLIENTS / AGENTS SEO)
- *   - 'sites'    → nos sites Triskell (interne)
- *   - 'clients'  → sites clients externes
- *   - 'agents'   → les 8 agents SEO avec statut et "Lancer maintenant"
- *   - 'site'     → focus 1 site (audit, mots-clés, actions)
- *   - 'prs'      → modifications en attente de validation (clé interne, label "À valider" en UI)
- *   - 'reports'  → bulletins de l'Analyste
+ * Philosophie : compréhensible en 30 secondes, utilisable en 1 minute par site.
  *
- * Navigation : toujours via boutons clairs, jamais d'onglet caché.
- * Retour : bouton "← Le Phare" sur chaque sous-vue.
+ * Trois vues seulement :
+ *   - 'home'      → grille de cartes site (chacune = santé + chiffre clé + nb à regarder)
+ *   - 'site'      → vue détail 1-minute (3 chiffres + à toi de jouer + ce qui a été fait)
+ *   - 'coulisses' → vue cachée des 8 agents (qui bossent en arrière-plan)
+ *
+ * Plus d'onglet « À valider » séparé : les recos sont actionnables direct sur le site.
+ * Plus d'onglet « Bulletins » séparé : le bulletin du jour s'affiche en haut du site.
+ * Statuts simplifiés en 4 mots : « À regarder », « Appliqué », « Refusé », « Périmé ».
  */
 
 const Phare = {
-  view: 'hub',
+  view: 'home',
   selectedSite: null,
+  filter: 'all',         // 'all' | 'internal' | 'external'
+  _onboardKey: 'phare_onboarded_v1',
 
   async render(container) {
-    if (this.view === 'hub')     return this._renderHub(container);
-    if (this.view === 'sites')   return this._renderSitesList(container, { externalOnly: false });
-    if (this.view === 'clients') return this._renderSitesList(container, { externalOnly: true });
-    if (this.view === 'agents')  return this._renderAgents(container);
-    if (this.view === 'site')    return this._renderSiteDetail(container);
-    if (this.view === 'prs')     return this._renderPRs(container);
-    if (this.view === 'reports') return this._renderReports(container);
-    return this._renderHub(container);
+    if (this.view === 'site')      return this._renderSite(container);
+    if (this.view === 'coulisses') return this._renderCoulisses(container);
+    return this._renderHome(container);
   },
 
   _go(view, opts = {}) {
@@ -35,637 +31,519 @@ const Phare = {
   },
 
   // ════════════════════════════════════════════════════════════════════
-  //  VUE 0 — HUB / SALLE DE CONTRÔLE (refonte 2026-05-17)
-  //  Objectif : voir en 5 secondes ce qui tourne, ce qui est prévu,
-  //  ce qui vient d'être fait. Les sous-vues sont accessibles en haut.
+  //  VUE HOME — grille de cartes site (1 ligne, 1 site, 1 décision)
   // ════════════════════════════════════════════════════════════════════
-  async _renderHub(container) {
+  async _renderHome(container) {
     container.innerHTML = `
-      <section class="phare-cr-page animate-fade-in">
-        <!-- Bandeau hero compact : phare miniature + titre -->
-        <header class="phare-cr-hero">
-          <div class="phare-cr-hero-left">
-            <div class="phare-cr-mini-phare" aria-hidden="true">${this._lighthouseSvg()}</div>
-            <div>
-              <div class="phare-kicker">VISIBILITÉ · SALLE DE CONTRÔLE</div>
-              <h1 class="phare-title">Le Phare.</h1>
-              <p class="phare-subtitle">Huit agents Claude qui veillent, optimisent et publient pendant que tu dors.</p>
-            </div>
+      <section class="phare-page animate-fade-in">
+        <header class="phare-home-head">
+          <div class="phare-home-head-left">
+            <div class="phare-kicker">LE PHARE · SEO AUTONOME</div>
+            <h1 class="phare-title">Tes sites.</h1>
+            <p class="phare-subtitle">Les robots préparent des améliorations. Tu valides ou tu refuses. C'est tout.</p>
           </div>
-          <nav class="phare-cr-nav" aria-label="Sections du Phare">
-            <button class="phare-cr-navbtn" data-go="sites">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V8l7-5 7 5v13"/></svg>
-              <span>Nos sites</span>
+          <div class="phare-home-head-right">
+            <button class="btn btn-primary" data-act="add">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M12 5v14M5 12h14"/></svg>
+              Ajouter un site
             </button>
-            <button class="phare-cr-navbtn" data-go="clients">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="4"/><path d="M3 21v-1a6 6 0 0 1 12 0v1"/></svg>
-              <span>Clients</span>
-            </button>
-            <button class="phare-cr-navbtn" data-go="agents">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 4.8L20 8l-4 3.6L17 17l-5-2.6L7 17l1-5.4L4 8l5.6-1.2z"/></svg>
-              <span>Agents</span>
-            </button>
-            <button class="phare-cr-navbtn phare-cr-navbtn--alert" data-go="prs">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11"/></svg>
-              <span>À valider</span>
-              <span class="phare-cr-navbadge" id="ph-cr-badge">—</span>
-            </button>
-            <button class="phare-cr-navbtn" data-go="reports">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
-              <span>Bulletins</span>
-            </button>
-          </nav>
+          </div>
         </header>
 
-        <!-- ZONE 1 — EN CE MOMENT (grosse carte live) -->
-        <div class="phare-cr-live" id="ph-cr-live">
-          <div class="phare-cr-live-pulse"><span class="phare-cr-pulse-dot"></span></div>
-          <div class="phare-cr-live-body">
-            <div class="phare-cr-live-label">EN CE MOMENT</div>
-            <div class="phare-cr-live-text">Chargement de l'état du système…</div>
-            <div class="phare-cr-live-meta"></div>
-          </div>
-        </div>
+        <nav class="phare-filter" aria-label="Filtrer les sites">
+          <button class="phare-filter-btn ${this.filter === 'all' ? 'is-active' : ''}" data-filter="all">Tous</button>
+          <button class="phare-filter-btn ${this.filter === 'internal' ? 'is-active' : ''}" data-filter="internal">Nos sites</button>
+          <button class="phare-filter-btn ${this.filter === 'external' ? 'is-active' : ''}" data-filter="external">Clients</button>
+          <button class="phare-filter-spacer" aria-hidden="true"></button>
+          <button class="phare-coulisses-btn" data-act="coulisses" title="Voir les 8 robots qui surveillent tes sites">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+            En coulisses
+          </button>
+        </nav>
 
-        <!-- ZONE 2 + 3 — Agenda + Feed en 2 colonnes -->
-        <div class="phare-cr-split">
-          <article class="phare-cr-zone">
-            <header class="phare-cr-zone-head">
-              <h2>Cette semaine</h2>
-              <span class="phare-cr-zone-sub">Le planning des 7 jours à venir</span>
-            </header>
-            <div class="phare-cr-agenda" id="ph-cr-agenda">${this._buildAgenda()}</div>
-          </article>
-
-          <article class="phare-cr-zone">
-            <header class="phare-cr-zone-head">
-              <h2>Dernières actions</h2>
-              <span class="phare-cr-zone-sub">Les 10 dernières missions terminées</span>
-            </header>
-            <div class="phare-cr-feed" id="ph-cr-feed">
-              <div class="phare-cr-feed-loading">Chargement du fil…</div>
-            </div>
-          </article>
+        <div id="ph-home-grid">
+          <div class="phare-loading">Chargement de tes sites…</div>
         </div>
       </section>
     `;
-    // Wiring de la navigation
-    container.querySelectorAll('[data-go]').forEach(btn => {
-      btn.onclick = () => this._go(btn.dataset.go);
+
+    container.querySelector('[data-act="add"]').onclick = () => this._openSiteDialog({});
+    container.querySelector('[data-act="coulisses"]').onclick = () => this._go('coulisses');
+    container.querySelectorAll('[data-filter]').forEach(b => {
+      b.onclick = () => { this.filter = b.dataset.filter; this._renderHome(container); };
     });
-    // Charge le pulse en arrière-plan + planifie un refresh toutes les 30s
-    this._refreshControlRoom();
-    if (this._crTimer) clearInterval(this._crTimer);
-    this._crTimer = setInterval(() => {
-      // Ne tourne que si la vue Hub est encore affichée
-      if (this.view === 'hub' && document.getElementById('ph-cr-live')) {
-        this._refreshControlRoom();
-      } else {
-        clearInterval(this._crTimer);
-        this._crTimer = null;
-      }
-    }, 30000);
-  },
 
-  async _refreshControlRoom() {
-    if (!App.api) return;
-    let pulse = null;
-    try {
-      pulse = await App.api.phare_dashboard_pulse();
-    } catch (e) { pulse = null; }
-    if (!pulse || !pulse.ok) {
-      this._renderCrLive({ state: 'error' });
-      this._renderCrFeed([], {});
-      return;
-    }
-    const sched = pulse.scheduler || {};
-    const recent = pulse.recent_actions || [];
-    const sitesMap = pulse.sites_map || {};
-    const pending = pulse.pending_count || 0;
-    // Badge "À valider"
-    const badge = document.getElementById('ph-cr-badge');
-    if (badge) {
-      badge.textContent = pending === 0 ? '0' : String(pending);
-      badge.classList.toggle('phare-cr-navbadge--hot', pending > 0);
-    }
-    // Live + Feed
-    this._renderCrLive({
-      running: !!sched.running,
-      lastTickAt: sched.last_run_at,
-      lastResult: sched.last_run_result,
-      recent,
-      sitesMap,
-    });
-    this._renderCrFeed(recent, sitesMap);
-  },
-
-  _renderCrLive(opts) {
-    const el = document.getElementById('ph-cr-live');
-    if (!el) return;
-    const body = el.querySelector('.phare-cr-live-body');
-    if (!body) return;
-    if (opts.state === 'error') {
-      el.classList.remove('phare-cr-live--active', 'phare-cr-live--idle');
-      el.classList.add('phare-cr-live--error');
-      body.innerHTML = `
-        <div class="phare-cr-live-label">SYSTÈME</div>
-        <div class="phare-cr-live-text">Impossible de lire l'état des agents.</div>
-        <div class="phare-cr-live-meta">Le scheduler est peut-être en pause. Recharge la page ou ouvre les Réglages.</div>
-      `;
-      return;
-    }
-    const lastTick = opts.lastTickAt ? new Date(opts.lastTickAt) : null;
-    const now = new Date();
-    const ageMin = lastTick ? Math.floor((now - lastTick) / 60000) : null;
-    // "Active" si tick < 5 min
-    const isActive = !!opts.running && lastTick && ageMin !== null && ageMin < 5;
-    el.classList.toggle('phare-cr-live--active', isActive);
-    el.classList.toggle('phare-cr-live--idle', !isActive && !!opts.running);
-    el.classList.toggle('phare-cr-live--off', !opts.running);
-    el.classList.remove('phare-cr-live--error');
-
-    if (!opts.running) {
-      body.innerHTML = `
-        <div class="phare-cr-live-label">SCHEDULER À L'ARRÊT</div>
-        <div class="phare-cr-live-text">Aucun agent n'est en service.</div>
-        <div class="phare-cr-live-meta">Ouvre l'onglet Le Phare dans Triskell Command pour démarrer le robot.</div>
-      `;
-      return;
-    }
-    if (isActive) {
-      // Dernière action vue dans le résultat du tick (si dispo)
-      const actions = (opts.lastResult && opts.lastResult.actions_done) || [];
-      const last = actions[actions.length - 1] || null;
-      const mission = last ? (last.mission || '?') : '—';
-      const siteId = last ? (last.site_id || last.site || '') : '';
-      const siteName = siteId ? (opts.sitesMap[siteId] || siteId) : '';
-      body.innerHTML = `
-        <div class="phare-cr-live-label">EN COURS</div>
-        <div class="phare-cr-live-text">
-          ${last
-            ? `Mission <strong>« ${this._esc(this._missionLabel(mission))} »</strong>${siteName ? ` sur <strong>${this._esc(siteName)}</strong>` : ''}`
-            : `Le scheduler vient de tourner — vérification du planning…`}
-        </div>
-        <div class="phare-cr-live-meta">Dernier passage il y a ${ageMin <= 0 ? 'quelques secondes' : `${ageMin} min`}</div>
-      `;
-      return;
-    }
-    // Idle : calculer la prochaine mission planifiée
-    const next = this._nextScheduledMission();
-    body.innerHTML = `
-      <div class="phare-cr-live-label">TOUT EST CALME</div>
-      <div class="phare-cr-live-text">${next
-        ? `Prochaine mission : <strong>${this._esc(next.label)}</strong> ${this._esc(next.when)}`
-        : `Aucune mission planifiée dans la semaine.`}</div>
-      <div class="phare-cr-live-meta">Dernier passage du scheduler ${ageMin === null ? 'inconnu' : (ageMin < 60 ? `il y a ${ageMin} min` : `il y a ${Math.floor(ageMin/60)} h`)}</div>
-    `;
-  },
-
-  _renderCrFeed(actions, sitesMap) {
-    const el = document.getElementById('ph-cr-feed');
-    if (!el) return;
-    if (!actions.length) {
-      el.innerHTML = `<div class="phare-cr-feed-empty">Pas encore d'historique. Lance une mission depuis « Agents » pour démarrer.</div>`;
-      return;
-    }
-    const items = actions.slice(0, 10).map(a => {
-      const mission = this._missionLabel(a.mission || a.action_type || a.type || '?');
-      const site = sitesMap[a.site_id] || a.site_id || '';
-      const status = (a.status || '').toLowerCase();
-      const statusInfo = this._statusInfo(status);
-      const when = this._relativeTime(a.created_at || a.updated_at);
-      return `
-        <div class="phare-cr-feed-item">
-          <span class="phare-cr-feed-dot phare-cr-feed-dot--${statusInfo.tone}" title="${this._esc(statusInfo.label)}"></span>
-          <div class="phare-cr-feed-body">
-            <div class="phare-cr-feed-line">
-              <strong>${this._esc(mission)}</strong>
-              ${site ? `· <span class="phare-cr-feed-site">${this._esc(site)}</span>` : ''}
-            </div>
-            <div class="phare-cr-feed-meta">${this._esc(when)} · ${this._esc(statusInfo.label)}</div>
-          </div>
-        </div>
-      `;
-    }).join('');
-    el.innerHTML = items;
-  },
-
-  // ───────── Helpers Salle de Contrôle ─────────
-  _missionLabel(key) {
-    const map = {
-      audit: 'Audit technique',
-      keywords: 'Veille mots-clés',
-      tisseur: 'Maillage interne',
-      analyst: 'Bulletin Analyste',
-      analyste: 'Bulletin Analyste',
-      backlinks: 'Recherche backlinks',
-      strategy: 'Plan stratégique',
-      optim_onpage: 'Optimisation on-page',
-      ctr_optim: 'Optimisation CTR',
-      snippet_hunt: 'Chasse aux extraits enrichis',
-      geo_check: 'Surveillance GEO (IA)',
-      cannibalization: 'Anti-cannibalisation',
-      zombies: 'Pages zombies',
-      image_seo: 'SEO images',
-      refresh: 'Rafraîchissement contenu',
-      competitors: 'Suivi concurrents',
-      rollback_check: 'Vérif post-merge',
-      sitemap: 'Mise à jour sitemap',
-      algo_watch: "Veille algo Google",
-      ab_record: 'Mesure A/B test',
-      brand_scan: 'Surveillance marque',
-      outreach_draft: 'Préparation outreach',
-      outreach_follow: 'Relance outreach',
-      local_seo: 'SEO local (GBP)',
-      cro: 'Analyse CRO Clarity',
-      bulletin_pdf: 'Bulletin PDF mensuel',
-      full_cycle: 'Cycle complet',
-    };
-    return map[key] || key;
-  },
-
-  _statusInfo(status) {
-    const map = {
-      merged: { tone: 'ok', label: 'Validée et publiée' },
-      ok: { tone: 'ok', label: 'Terminée' },
-      done: { tone: 'ok', label: 'Terminée' },
-      pending_review: { tone: 'warn', label: 'En attente de ta validation' },
-      preview: { tone: 'warn', label: 'Aperçu généré' },
-      draft: { tone: 'warn', label: 'Brouillon prêt' },
-      rejected: { tone: 'bad', label: 'Refusée' },
-      expired: { tone: 'bad', label: 'Expirée' },
-      error: { tone: 'bad', label: 'Échec' },
-    };
-    return map[status] || { tone: 'neutral', label: status || 'Inconnue' };
-  },
-
-  _relativeTime(iso) {
-    if (!iso) return 'il y a un instant';
-    const d = new Date(iso);
-    if (isNaN(d)) return iso;
-    const diffMin = Math.floor((Date.now() - d) / 60000);
-    if (diffMin < 1) return "à l'instant";
-    if (diffMin < 60) return `il y a ${diffMin} min`;
-    const diffH = Math.floor(diffMin / 60);
-    if (diffH < 24) return `il y a ${diffH} h`;
-    const diffJ = Math.floor(diffH / 24);
-    if (diffJ === 1) return 'hier';
-    if (diffJ < 7) return `il y a ${diffJ} jours`;
-    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
-  },
-
-  // Planning hebdo en dur (reflète scheduler._tick côté Python)
-  _WEEKLY_PLAN: [
-    // day: 0=dim, 1=lun, ..., 6=sam ; mission lisible humain
-    { day: 1, hour: 6,  label: 'Audit technique',         site: 'roulement, 1 site/h jusqu\'à 22h' },
-    { day: 1, hour: 7,  label: 'Veille mots-clés',        site: 'tous les sites' },
-    { day: 1, hour: 9,  label: 'Maillage interne',        site: 'tous les sites' },
-    { day: 4, hour: 7,  label: 'Veille mots-clés',        site: 'tous les sites' },
-    { day: 2, hour: 10, label: 'Optimisation on-page',    site: '1 site / cycle' },
-    { day: 3, hour: 9,  label: 'Recherche backlinks',     site: '1 site / cycle' },
-    { day: 3, hour: 10, label: 'Optimisation on-page',    site: '1 site / cycle' },
-    { day: 5, hour: 10, label: 'Optimisation on-page',    site: '1 site / cycle' },
-    { day: 2, hour: 9,  label: 'Surveillance marque',     site: '1 site' },
-    { day: 3, hour: 9,  label: 'Préparation outreach',    site: '1 site' },
-    { day: 4, hour: 9,  label: 'SEO local (GBP)',         site: 'sites avec place_id' },
-    { day: 5, hour: 9,  label: 'Analyse CRO Clarity',     site: '1 site' },
-    // Quotidien
-    { dailyHour: 6, label: "Veille algo Google", site: 'global' },
-    { dailyHour: 7, label: 'Mesure A/B test',    site: 'global' },
-    { dailyHour: 8, label: 'Bulletin Analyste',  site: 'top 3 sites' },
-    { dailyHour: 10, label: 'Relance outreach',  site: 'global' },
-    // Mensuel (1er du mois)
-    { monthly: true, hour: 9,  label: "Plan stratégique (Opus)", site: 'écosystème complet' },
-    { monthly: true, hour: 10, label: 'Bulletin PDF mensuel',    site: 'tous les sites' },
-  ],
-
-  _buildAgenda() {
-    const days = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
-    const now = new Date();
-    const today = now.getDay();
-    const currentHour = now.getHours();
-    const out = [];
-    for (let i = 0; i < 7; i++) {
-      const targetDay = (today + i) % 7;
-      const dateObj = new Date(now);
-      dateObj.setDate(now.getDate() + i);
-      const isFirstOfMonth = dateObj.getDate() === 1;
-      // Construit la liste des missions pour ce jour
-      const events = [];
-      for (const ev of this._WEEKLY_PLAN) {
-        if (ev.monthly) {
-          if (isFirstOfMonth) events.push({ hour: ev.hour, label: ev.label, site: ev.site });
-          continue;
-        }
-        if (ev.dailyHour !== undefined) {
-          events.push({ hour: ev.dailyHour, label: ev.label, site: ev.site });
-          continue;
-        }
-        if (ev.day === targetDay) {
-          events.push({ hour: ev.hour, label: ev.label, site: ev.site });
-        }
-      }
-      events.sort((a, b) => a.hour - b.hour);
-      const headerLabel = i === 0 ? "Aujourd'hui" : (i === 1 ? 'Demain' : `${days[targetDay]} ${dateObj.getDate()}`);
-      const evHtml = events.length
-        ? events.map(ev => {
-            const past = (i === 0 && ev.hour < currentHour);
-            return `
-              <div class="phare-cr-agenda-item${past ? ' phare-cr-agenda-item--past' : ''}">
-                <span class="phare-cr-agenda-hour">${String(ev.hour).padStart(2, '0')}h</span>
-                <span class="phare-cr-agenda-label">${this._esc(ev.label)}</span>
-                <span class="phare-cr-agenda-site">${this._esc(ev.site)}</span>
-              </div>`;
-          }).join('')
-        : `<div class="phare-cr-agenda-empty">Rien de prévu</div>`;
-      out.push(`
-        <div class="phare-cr-agenda-day${i === 0 ? ' phare-cr-agenda-day--today' : ''}">
-          <div class="phare-cr-agenda-day-header">${headerLabel}</div>
-          <div class="phare-cr-agenda-day-body">${evHtml}</div>
-        </div>
-      `);
-    }
-    return out.join('');
-  },
-
-  _nextScheduledMission() {
-    const now = new Date();
-    const todayDow = now.getDay();
-    const currentHour = now.getHours();
-    let best = null;
-    for (let i = 0; i < 8; i++) {
-      const dow = (todayDow + i) % 7;
-      const date = new Date(now);
-      date.setDate(now.getDate() + i);
-      const isFirstOfMonth = date.getDate() === 1;
-      const candidates = [];
-      for (const ev of this._WEEKLY_PLAN) {
-        if (ev.monthly) {
-          if (isFirstOfMonth) candidates.push({ hour: ev.hour, label: ev.label });
-          continue;
-        }
-        if (ev.dailyHour !== undefined) {
-          candidates.push({ hour: ev.dailyHour, label: ev.label });
-          continue;
-        }
-        if (ev.day === dow) candidates.push({ hour: ev.hour, label: ev.label });
-      }
-      candidates.sort((a, b) => a.hour - b.hour);
-      for (const c of candidates) {
-        if (i === 0 && c.hour <= currentHour) continue;
-        best = { label: c.label, when: i === 0
-          ? `aujourd'hui à ${String(c.hour).padStart(2, '0')}h`
-          : (i === 1 ? `demain à ${String(c.hour).padStart(2, '0')}h`
-                     : `${date.toLocaleDateString('fr-FR', { weekday: 'long' })} à ${String(c.hour).padStart(2, '0')}h`),
-        };
-        return best;
-      }
-    }
-    return best;
-  },
-
-  _lighthouseSvg() {
-    // Phare en style éditorial épuré : silhouette fine, line art doux,
-    // un seul accent coloré (la lampe). Halo généreux mais cadré dans le viewBox.
-    // S'adapte aux 3 thèmes via hsl(var(--text)) / var(--accent-glow).
-    return `
-      <svg class="phare-svg" viewBox="-60 -20 400 560" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <defs>
-          <!-- Halo de lumière diffus, doux, généreux -->
-          <radialGradient id="phareHalo" cx="50%" cy="50%" r="50%">
-            <stop offset="0%"  stop-color="hsl(var(--accent-glow) / 0.40)"/>
-            <stop offset="45%" stop-color="hsl(var(--accent) / 0.10)"/>
-            <stop offset="100%" stop-color="hsl(var(--accent) / 0)"/>
-          </radialGradient>
-          <!-- Lampe : noyau chaud qui irradie -->
-          <radialGradient id="phareLamp" cx="50%" cy="50%" r="50%">
-            <stop offset="0%"  stop-color="hsl(var(--warning))"/>
-            <stop offset="60%" stop-color="hsl(var(--warning) / 0.55)"/>
-            <stop offset="100%" stop-color="hsl(var(--warning) / 0)"/>
-          </radialGradient>
-        </defs>
-
-        <!-- Halo large, centré sur la lampe à y=200, contenu dans le viewBox -->
-        <circle cx="140" cy="200" r="180" fill="url(#phareHalo)"/>
-
-        <!-- Petite ligne d'horizon (suggestion de mer, très subtile) -->
-        <line x1="20" y1="478" x2="260" y2="478"
-              stroke="hsl(var(--text) / 0.10)" stroke-width="1"/>
-
-        <!-- Socle minimaliste : trapèze fin -->
-        <path d="M108 478 L172 478 L162 462 L118 462 Z"
-              fill="hsl(var(--text) / 0.85)"/>
-
-        <!-- Corps du phare : silhouette élancée (trapèze fin) -->
-        <path d="M124 462 L116 250 L164 250 L156 462 Z"
-              fill="hsl(var(--text) / 0.92)"/>
-
-        <!-- Une seule bande accent, fine et désaturée (suggère le breton sans crier) -->
-        <rect x="118" y="356" width="44" height="14"
-              fill="hsl(var(--danger) / 0.72)"/>
-
-        <!-- Plateforme : ligne fine -->
-        <rect x="110" y="244" width="60" height="6" rx="1"
-              fill="hsl(var(--text) / 0.88)"/>
-
-        <!-- Lanterne : carré épuré, juste un trait + la lampe à l'intérieur -->
-        <rect x="120" y="194" width="40" height="50" rx="2"
-              fill="hsl(var(--bg))"
-              stroke="hsl(var(--text) / 0.88)" stroke-width="1.8"/>
-
-        <!-- Halo de la lampe (douceur) -->
-        <circle cx="140" cy="216" r="26" fill="url(#phareLamp)" opacity="0.9"/>
-        <!-- Noyau de la lampe -->
-        <circle cx="140" cy="216" r="7"
-                fill="hsl(var(--warning))"/>
-
-        <!-- Toit : triangle minimaliste -->
-        <path d="M112 194 L140 168 L168 194 Z"
-              fill="hsl(var(--text) / 0.92)"/>
-
-        <!-- Antenne ultra fine, terminée par un point -->
-        <line x1="140" y1="168" x2="140" y2="146"
-              stroke="hsl(var(--text) / 0.78)" stroke-width="1.4"
-              stroke-linecap="round"/>
-        <circle cx="140" cy="144" r="2.2" fill="hsl(var(--text) / 0.78)"/>
-      </svg>
-    `;
-  },
-
-  // ════════════════════════════════════════════════════════════════════
-  //  Header commun : retour vers le hub + titre
-  // ════════════════════════════════════════════════════════════════════
-  _backHeader(kicker, title, subtitle, rightHtml = '') {
-    return `
-      <header class="mb-6 sm:mb-8">
-        <button class="phare-back" onclick="Phare.view='hub'; App.show('phare');">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M19 12H5M12 19l-7-7 7-7"/>
-          </svg>
-          Le Phare
-        </button>
-        <div class="flex items-start justify-between gap-3 mt-3">
-          <div class="min-w-0 flex-1">
-            <div class="hero-kicker mb-2">${this._esc(kicker)}</div>
-            <h1 class="hero-title hero-title--md mb-2">${this._esc(title)}</h1>
-            ${subtitle ? `<p class="hero-subtitle">${this._esc(subtitle)}</p>` : ''}
-          </div>
-          ${rightHtml}
-        </div>
-      </header>
-    `;
-  },
-
-  // ════════════════════════════════════════════════════════════════════
-  //  VUE — Sites (interne) OU Clients (externe)
-  // ════════════════════════════════════════════════════════════════════
-  async _renderSitesList(container, { externalOnly }) {
-    const kicker  = externalOnly ? 'AGENCE — SITES CLIENTS' : 'AGENCE — NOS SITES';
-    const title   = externalOnly ? 'Sites clients.' : 'Nos sites Triskell.';
-    const subt    = externalOnly
-      ? "Les sites externes qu'on accompagne. Chaque client reçoit son rapport SEO."
-      : "Les sites de l'écosystème Triskell. Audit, optimisation, maillage : tout en continu.";
-    const addLabel = externalOnly ? 'Ajouter un client' : 'Ajouter un site';
-
-    const right = `
-      <button class="btn btn-primary" data-act="add">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px">
-          <path d="M12 5v14M5 12h14"/>
-        </svg>
-        ${addLabel}
-      </button>
-    `;
-
-    container.innerHTML = `
-      <section class="animate-slide-up">
-        ${this._backHeader(kicker, title, subt, right)}
-        <div id="ph-sites-list">
-          <div class="text-center py-12 text-text-muted">Chargement…</div>
-        </div>
-      </section>
-    `;
-    container.querySelector('[data-act="add"]').onclick = () => this._openSiteDialog({ externalOnly });
+    // Onboarding au premier lancement (après que le DOM soit posé)
+    setTimeout(() => this._maybeShowOnboarding(), 100);
 
     if (!App.api) {
-      document.getElementById('ph-sites-list').innerHTML = this._previewSites(externalOnly);
+      this._renderHomeGrid(this._previewSites());
       return;
     }
-
     let data;
-    try { data = await App.api.phare_sites({ external_only: externalOnly }); }
+    try { data = await App.api.phare_home({}); }
     catch (e) {
-      document.getElementById('ph-sites-list').innerHTML = `<div class="card p-6 text-danger">Erreur : ${this._esc(String(e))}</div>`;
+      document.getElementById('ph-home-grid').innerHTML =
+        `<div class="phare-empty"><div class="phare-empty-icon">⚠️</div>
+         <h2>Connexion à la base impossible</h2>
+         <p>Le Phare lit ses chiffres dans Supabase. Vérifie ta connexion ou tes réglages.</p>
+         <button class="btn btn-secondary" onclick="App.show('config')">Aller dans Réglages</button></div>`;
       return;
     }
     if (!data || !data.ok) {
-      document.getElementById('ph-sites-list').innerHTML = `
-        <div class="card p-10 text-center">
-          <div class="text-3xl mb-3">🔌</div>
-          <h2 class="text-xl font-semibold mb-2">Connexion requise</h2>
-          <p class="text-text-secondary mb-6">Le Phare lit ses chiffres dans la base partagée Triskell. Connecte-toi pour activer ce module.</p>
-          <button class="btn btn-primary" onclick="App.show('config')">Aller dans Réglages</button>
-        </div>`;
+      document.getElementById('ph-home-grid').innerHTML =
+        `<div class="phare-empty"><div class="phare-empty-icon">🔌</div>
+         <h2>Le Phare n'est pas encore branché</h2>
+         <p>${this._esc(data?.error || 'Impossible de lire les sites.')}</p></div>`;
       return;
     }
-    const list = (data.sites || []).filter(s =>
-      externalOnly ? !!s.is_external_client : !s.is_external_client
-    );
-    this._renderSitesTable(document.getElementById('ph-sites-list'), list, { externalOnly });
+    this._renderHomeGrid(data.sites || []);
   },
 
-  _renderSitesTable(slot, list, { externalOnly }) {
-    if (list.length === 0) {
+  _renderHomeGrid(sites) {
+    const filtered = sites.filter(s => {
+      if (this.filter === 'internal') return !s.is_external_client;
+      if (this.filter === 'external') return !!s.is_external_client;
+      return true;
+    });
+    const slot = document.getElementById('ph-home-grid');
+    if (!slot) return;
+    if (filtered.length === 0) {
+      const label = this.filter === 'external' ? 'client' : 'site';
       slot.innerHTML = `
-        <div class="card p-10 text-center">
-          <div class="text-3xl mb-3">📭</div>
-          <h2 class="text-xl font-semibold mb-2">Aucun site pour l'instant</h2>
-          <p class="text-text-secondary mb-6">
-            ${externalOnly
-              ? "Aucun site client enregistré. Clique sur « Ajouter un client » pour démarrer."
-              : "Aucun site Triskell suivi. Clique sur « Ajouter un site » pour démarrer."}
-          </p>
+        <div class="phare-empty">
+          <div class="phare-empty-icon">📭</div>
+          <h2>Aucun ${label} pour l'instant</h2>
+          <p>Ajoute un premier ${label} avec le bouton en haut à droite. Les robots commenceront à le surveiller dès la prochaine heure.</p>
         </div>`;
       return;
     }
-    slot.innerHTML = `
-      <div class="card overflow-hidden">
-        <table class="w-full text-sm">
-          <thead>
-            <tr style="background: hsl(var(--bg)); border-bottom: 1px solid hsl(var(--border));">
-              <th class="text-left px-5 py-3 font-semibold text-text-muted text-xs tracking-widest">SITE</th>
-              <th class="text-left px-5 py-3 font-semibold text-text-muted text-xs tracking-widest">DOMAINE</th>
-              <th class="text-right px-5 py-3 font-semibold text-text-muted text-xs tracking-widest">PERF</th>
-              <th class="text-right px-5 py-3 font-semibold text-text-muted text-xs tracking-widest">SEO</th>
-              <th class="text-right px-5 py-3 font-semibold text-text-muted text-xs tracking-widest">CLICS 30J</th>
-              <th class="text-right px-5 py-3 font-semibold text-text-muted text-xs tracking-widest">ACTIONS</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${list.map(s => {
-              const perf = this._scoreCell(s.lighthouse_perf);
-              const seo  = this._scoreCell(s.lighthouse_seo);
-              const clicks = this._fmt(s.clicks_30d ?? s.organic_clicks_30d);
-              return `
-                <tr class="border-b border-border last:border-0 hover:bg-bg/50 transition-colors">
-                  <td class="px-5 py-4">
-                    <div class="font-semibold">${this._esc(s.name || s.domain || '—')}</div>
-                    ${s.stack ? `<div class="text-xs text-text-muted mt-0.5">${this._esc(s.stack)}</div>` : ''}
-                  </td>
-                  <td class="px-5 py-4 text-text-muted text-xs">${this._esc(s.domain || '')}</td>
-                  <td class="px-5 py-4 text-right">${perf}</td>
-                  <td class="px-5 py-4 text-right">${seo}</td>
-                  <td class="px-5 py-4 text-right">${clicks}</td>
-                  <td class="px-5 py-4 text-right">
-                    <div class="inline-flex gap-2">
-                      <button class="btn-mini" data-focus="${this._esc(s.id || '')}">Ouvrir</button>
-                      <button class="btn-mini" data-edit="${this._esc(s.id || '')}">Éditer</button>
-                      <button class="btn-mini btn-mini-danger" data-disable="${this._esc(s.id || '')}" data-name="${this._esc(s.name || '')}">Désactiver</button>
-                    </div>
-                  </td>
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-    `;
-    slot.querySelectorAll('[data-focus]').forEach(b => {
-      b.onclick = () => this._go('site', { siteId: b.dataset.focus });
-    });
-    slot.querySelectorAll('[data-edit]').forEach(b => {
-      b.onclick = async () => {
-        const id = b.dataset.edit;
-        const data = await App.api.phare_site({ id });
-        if (data && data.ok) this._openSiteDialog({ externalOnly, site: data.site || { id } });
-      };
-    });
-    slot.querySelectorAll('[data-disable]').forEach(b => {
-      b.onclick = async () => {
-        const id = b.dataset.disable;
-        const name = b.dataset.name;
-        if (!confirm(`Désactiver « ${name} » ?\n\nLes agents arrêteront de surveiller ce site. Tu pourras le réactiver plus tard.`)) return;
-        try {
-          await App.api.phare_site_deactivate({ id });
-          this._toast('✓ Site désactivé');
-          this._renderSitesList(document.getElementById('content'), { externalOnly });
-        } catch (e) { this._toast('Erreur : ' + e, 'error'); }
-      };
+    slot.innerHTML = `<div class="phare-cards-grid">${filtered.map(s => this._siteCard(s)).join('')}</div>`;
+    slot.querySelectorAll('[data-open]').forEach(b => {
+      b.onclick = () => this._go('site', { siteId: b.dataset.open });
     });
   },
 
-  _scoreCell(score) {
-    if (score == null || score === '') return '<span class="text-text-muted">—</span>';
-    const v = Number(score);
-    if (isNaN(v)) return '<span class="text-text-muted">—</span>';
-    let color = 'hsl(var(--danger))';
-    if (v >= 90) color = 'hsl(var(--success))';
-    else if (v >= 70) color = 'hsl(var(--text))';
-    else if (v >= 50) color = 'hsl(var(--warning))';
-    return `<span style="color:${color};font-weight:600">${v}</span>`;
+  _siteCard(s) {
+    const tone = s.health_tone || 'unknown';
+    const dot = { ok: '🟢', warn: '🟠', bad: '🔴', unknown: '⚪' }[tone] || '⚪';
+    const healthLabel = { ok: 'Santé bonne', warn: 'À surveiller', bad: 'Problèmes',
+                          unknown: 'Pas encore d\'audit' }[tone];
+    const pending = s.pending_count || 0;
+    const delta = s.delta_pct;
+    const clicks = s.clicks_30d || 0;
+    // Phrase situation : choisit la plus parlante
+    let situation = '';
+    if (clicks === 0 && pending === 0) {
+      situation = 'Pas encore de données — les robots arrivent.';
+    } else if (delta !== null && delta !== undefined && Math.abs(delta) >= 5) {
+      const sign = delta > 0 ? '+' : '';
+      const trend = delta > 0 ? 'visites en hausse' : 'visites en baisse';
+      situation = `<strong>${sign}${delta}%</strong> de ${trend} ce mois-ci`;
+    } else if (clicks > 0) {
+      situation = `${this._fmt(clicks)} visites ce mois-ci`;
+    } else {
+      situation = healthLabel;
+    }
+    // Action attendue
+    let action;
+    if (pending > 0) {
+      const word = pending === 1 ? 'proposition' : 'propositions';
+      action = `<div class="phare-card-todo phare-card-todo--hot">
+                  <strong>${pending}</strong> ${word} à regarder
+                </div>`;
+    } else {
+      action = `<div class="phare-card-todo">✓ Rien à faire pour l'instant</div>`;
+    }
+    const bullet = s.has_bulletin
+      ? `<span class="phare-card-bullet" title="Bulletin du jour disponible">📰 Bulletin du jour</span>` : '';
+    return `
+      <article class="phare-site-card phare-site-card--${tone}">
+        <header class="phare-site-card-head">
+          <div class="phare-site-card-dot" aria-hidden="true">${dot}</div>
+          <div class="phare-site-card-name">
+            <div class="phare-site-card-title">${this._esc(s.name || s.domain || '—')}</div>
+            <div class="phare-site-card-domain">${this._esc(s.domain || '')}</div>
+          </div>
+          ${s.is_external_client ? `<span class="phare-site-card-tag">Client</span>` : ''}
+        </header>
+        <div class="phare-site-card-situation">${situation}</div>
+        ${action}
+        ${bullet}
+        <footer class="phare-site-card-foot">
+          <button class="btn btn-primary phare-site-card-open" data-open="${this._esc(s.id || '')}">
+            Ouvrir
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="margin-left:6px"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+        </footer>
+      </article>
+    `;
   },
 
   // ════════════════════════════════════════════════════════════════════
-  //  Modale d'ajout / édition de site
+  //  VUE SITE — 1-minute : 3 chiffres + à toi de jouer + ce qui a été fait
+  // ════════════════════════════════════════════════════════════════════
+  async _renderSite(container) {
+    if (!this.selectedSite) { this._go('home'); return; }
+    container.innerHTML = `
+      <section class="phare-page animate-fade-in">
+        ${this._backHeader()}
+        <div id="ph-site-body"><div class="phare-loading">Chargement du site…</div></div>
+      </section>
+    `;
+    container.querySelector('[data-act="back"]').onclick = () => this._go('home');
+    if (!App.api) {
+      document.getElementById('ph-site-body').innerHTML =
+        `<div class="phare-empty"><div class="phare-empty-icon">🔌</div><h2>Mode aperçu</h2><p>Pas de données.</p></div>`;
+      return;
+    }
+    let data;
+    try { data = await App.api.phare_site_dashboard({ id: this.selectedSite }); }
+    catch (e) {
+      document.getElementById('ph-site-body').innerHTML =
+        `<div class="phare-empty"><div class="phare-empty-icon">⚠️</div><h2>Erreur</h2><p>${this._esc(String(e))}</p></div>`;
+      return;
+    }
+    if (!data || !data.ok) {
+      document.getElementById('ph-site-body').innerHTML =
+        `<div class="phare-empty"><div class="phare-empty-icon">⚠️</div><h2>Erreur</h2><p>${this._esc(data?.error || 'Site introuvable')}</p></div>`;
+      return;
+    }
+    const s = data.site || {};
+    const kpis = data.kpis || {};
+    const toReview = data.to_review || [];
+    const done = data.recently_done || [];
+    const bull = data.bulletin || null;
+
+    document.getElementById('ph-site-body').innerHTML = `
+      <header class="phare-site-hero">
+        <div class="phare-site-hero-left">
+          <div class="phare-kicker">SITE</div>
+          <h1 class="phare-title">${this._esc(s.name || s.domain || '—')}</h1>
+          <p class="phare-subtitle"><a href="https://${this._esc(s.domain || '')}" target="_blank" rel="noopener">${this._esc(s.domain || '')}</a></p>
+        </div>
+        <div class="phare-site-hero-right">
+          <button class="btn btn-secondary" data-act="audit">Lancer un audit</button>
+          <button class="btn btn-secondary" data-act="edit">Réglages du site</button>
+        </div>
+      </header>
+
+      <!-- 3 chiffres clés -->
+      <div class="phare-kpis">
+        ${this._kpi('Visites (30 j)', this._fmt(kpis.clicks_30d || 0),
+                    kpis.delta_pct !== null && kpis.delta_pct !== undefined
+                      ? `${kpis.delta_pct > 0 ? '+' : ''}${kpis.delta_pct}% vs 30 j avant`
+                      : '—',
+                    kpis.delta_pct > 0 ? 'good' : (kpis.delta_pct < 0 ? 'bad' : null))}
+        ${this._kpi('Position moyenne', kpis.position_avg != null ? kpis.position_avg : '—',
+                    kpis.position_avg != null && kpis.position_avg <= 10 ? 'Top 10 Google' : 'Sur Google', null)}
+        ${this._kpi('Santé SEO', kpis.health != null ? `${kpis.health}/100` : '—',
+                    { ok: 'Bon état', warn: 'À surveiller', bad: 'À soigner',
+                      unknown: 'Pas encore audité' }[kpis.health_tone] || '—',
+                    kpis.health_tone === 'ok' ? 'good' : (kpis.health_tone === 'bad' ? 'bad' : null))}
+      </div>
+
+      <!-- Bulletin du jour si présent -->
+      ${bull ? this._bulletinCard(bull) : ''}
+
+      <!-- À TOI DE JOUER -->
+      <div class="phare-section">
+        <header class="phare-section-head">
+          <h2>À toi de jouer</h2>
+          <span class="phare-section-sub">
+            ${toReview.length === 0
+              ? 'Rien en attente — tu peux respirer.'
+              : `${toReview.length} proposition${toReview.length > 1 ? 's' : ''} des robots, à valider ou refuser.`}
+          </span>
+        </header>
+        <div id="ph-todo-list">
+          ${toReview.length === 0
+            ? `<div class="phare-empty-inline">✓ Rien à valider pour l'instant. Les robots travaillent en arrière-plan.</div>`
+            : toReview.map(a => this._actionCard(a, 'todo')).join('')}
+        </div>
+      </div>
+
+      <!-- CE QUI A ÉTÉ FAIT -->
+      <div class="phare-section">
+        <header class="phare-section-head">
+          <h2>Ce qui a été fait</h2>
+          <span class="phare-section-sub">
+            ${done.length === 0 ? 'Pas encore de modifications appliquées.'
+                                 : `Les ${done.length} dernières modifications validées.`}
+          </span>
+        </header>
+        <div>
+          ${done.length === 0
+            ? `<div class="phare-empty-inline">Quand tu valideras une proposition, elle apparaîtra ici.</div>`
+            : done.map(a => this._actionCard(a, 'done')).join('')}
+        </div>
+      </div>
+
+      <!-- EN COULISSES (repliable) -->
+      <details class="phare-coulisses-details">
+        <summary>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/></svg>
+          En coulisses — qui surveille ce site ?
+        </summary>
+        <div class="phare-coulisses-mini">
+          <p>8 robots Claude tournent en arrière-plan sur ton site, chacun avec sa spécialité.</p>
+          <button class="btn btn-secondary btn-sm" data-act="coulisses">Voir les 8 robots</button>
+        </div>
+      </details>
+    `;
+
+    document.getElementById('ph-site-body').querySelector('[data-act="audit"]').onclick = async () => {
+      try {
+        await App.api.phare_run_audit({ id: this.selectedSite });
+        this._toast('✓ Audit lancé — le résultat apparaîtra dans quelques minutes');
+      } catch (e) { this._toast('Erreur : ' + e, 'error'); }
+    };
+    document.getElementById('ph-site-body').querySelector('[data-act="edit"]').onclick = () => {
+      this._openSiteDialog({ site: s, externalOnly: !!s.is_external_client });
+    };
+    document.getElementById('ph-site-body').querySelector('[data-act="coulisses"]').onclick = () =>
+      this._go('coulisses');
+    // Wire OK / Non / Voir détail
+    this._wireActionButtons(document.getElementById('ph-site-body'));
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  //  Carte d'action (proposition) — affichage + boutons
+  // ════════════════════════════════════════════════════════════════════
+  _actionCard(a, mode) {
+    const agentLabel = this._agentShortName(a.agent || '');
+    const date = (a.created_at || '').slice(0, 10);
+    const impact = a.impact || 0;
+    const impactDots = '●'.repeat(Math.max(0, Math.min(5, impact)))
+                     + '○'.repeat(5 - Math.max(0, Math.min(5, impact)));
+    const summary = a.detail_md || a.summary || '';
+    const summaryShort = summary.length > 240
+      ? this._esc(summary.slice(0, 240)) + '…'
+      : this._esc(summary);
+    if (mode === 'done') {
+      return `
+        <article class="phare-action phare-action--done">
+          <div class="phare-action-head">
+            <div class="phare-action-icon">✓</div>
+            <div class="phare-action-body">
+              <div class="phare-action-title">${this._esc(a.title || a.kind || '—')}</div>
+              <div class="phare-action-meta">${this._esc(agentLabel)} · Appliqué le ${date || '—'}</div>
+            </div>
+            ${a.github_pr_url ? `<a class="phare-action-link" href="${this._esc(a.github_pr_url)}" target="_blank" rel="noopener">Voir la modif</a>` : ''}
+          </div>
+        </article>`;
+    }
+    return `
+      <article class="phare-action phare-action--todo" data-aid="${this._esc(a.id || '')}">
+        <div class="phare-action-head">
+          <div class="phare-action-icon phare-action-icon--todo">${this._actionEmoji(a.agent)}</div>
+          <div class="phare-action-body">
+            <div class="phare-action-title">${this._esc(a.title || a.kind || '—')}</div>
+            <div class="phare-action-meta">
+              Proposition de ${this._esc(agentLabel)} · ${date || '—'}
+              ${impact ? `<span class="phare-action-impact" title="Impact estimé">${impactDots}</span>` : ''}
+            </div>
+          </div>
+        </div>
+        ${summaryShort ? `<div class="phare-action-summary">${summaryShort}</div>` : ''}
+        ${a.netlify_preview_url ? `<a class="phare-action-link" href="${this._esc(a.netlify_preview_url)}" target="_blank" rel="noopener">Voir l'aperçu avant validation →</a>` : ''}
+        <footer class="phare-action-foot">
+          <button class="btn btn-secondary btn-reject" data-reject="${this._esc(a.id || '')}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+            Poubelle
+          </button>
+          <button class="btn btn-primary" data-approve="${this._esc(a.id || '')}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>
+            OK, applique
+          </button>
+        </footer>
+      </article>
+    `;
+  },
+
+  _wireActionButtons(root) {
+    root.querySelectorAll('[data-approve]').forEach(b => {
+      b.onclick = async () => {
+        const id = b.dataset.approve;
+        b.disabled = true; b.textContent = 'Application…';
+        try {
+          const res = await App.api.phare_merge_action({ id, force: false });
+          if (res && res.ok) {
+            this._toast('✓ Modification appliquée');
+            this._renderSite(document.getElementById('content'));
+          } else {
+            // Si checks KO, propose "Publier quand même"
+            if (res && res.decision && res.decision !== 'merge') {
+              if (confirm("Les vérifications automatiques ne sont pas toutes vertes. Publier quand même ?")) {
+                const r2 = await App.api.phare_merge_action({ id, force: true });
+                if (r2 && r2.ok) { this._toast('✓ Publié (forcé)'); this._renderSite(document.getElementById('content')); }
+                else this._toast('Erreur : ' + (r2?.error || 'inconnue'), 'error');
+              } else { b.disabled = false; b.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>OK, applique'; }
+            } else {
+              this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
+              b.disabled = false;
+            }
+          }
+        } catch (e) { this._toast('Erreur : ' + e, 'error'); b.disabled = false; }
+      };
+    });
+    root.querySelectorAll('[data-reject]').forEach(b => {
+      b.onclick = async () => {
+        const id = b.dataset.reject;
+        const reason = prompt("Pourquoi refuser cette proposition ?\n(Tu peux laisser vide.)", "");
+        if (reason === null) return; // annulé
+        b.disabled = true; b.textContent = 'Refus…';
+        try {
+          const res = await App.api.phare_reject_action({ id, reason: reason || '' });
+          if (res && res.ok) {
+            this._toast('Proposition mise à la poubelle');
+            this._renderSite(document.getElementById('content'));
+          } else {
+            this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
+            b.disabled = false;
+          }
+        } catch (e) { this._toast('Erreur : ' + e, 'error'); b.disabled = false; }
+      };
+    });
+  },
+
+  _bulletinCard(b) {
+    const date = (b.created_at || '').slice(0, 10);
+    const summary = (b.detail_md || b.summary || '').slice(0, 320);
+    return `
+      <article class="phare-bulletin">
+        <header class="phare-bulletin-head">
+          <span class="phare-bulletin-icon">📰</span>
+          <div>
+            <div class="phare-bulletin-label">Bulletin du jour</div>
+            <div class="phare-bulletin-title">${this._esc(b.title || 'Résumé de la journée')}</div>
+          </div>
+          <span class="phare-bulletin-date">${date}</span>
+        </header>
+        ${summary ? `<p class="phare-bulletin-body">${this._esc(summary)}${(b.detail_md || '').length > 320 ? '…' : ''}</p>` : ''}
+      </article>
+    `;
+  },
+
+  _kpi(label, value, sub, tone) {
+    return `
+      <div class="phare-kpi${tone ? ' phare-kpi--' + tone : ''}">
+        <div class="phare-kpi-label">${this._esc(label)}</div>
+        <div class="phare-kpi-value">${this._esc(String(value))}</div>
+        <div class="phare-kpi-sub">${this._esc(sub)}</div>
+      </div>
+    `;
+  },
+
+  _backHeader() {
+    return `
+      <button class="phare-back" data-act="back">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Tes sites
+      </button>
+    `;
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  //  VUE COULISSES — les 8 robots (caché, accessible depuis En coulisses)
+  // ════════════════════════════════════════════════════════════════════
+  async _renderCoulisses(container) {
+    container.innerHTML = `
+      <section class="phare-page animate-fade-in">
+        <button class="phare-back" data-act="back">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          Retour
+        </button>
+        <header class="phare-home-head">
+          <div class="phare-home-head-left">
+            <div class="phare-kicker">EN COULISSES</div>
+            <h1 class="phare-title">Les 8 robots.</h1>
+            <p class="phare-subtitle">Chacun a sa spécialité. Ensemble, ils gardent tes sites au sommet, 24/7.</p>
+          </div>
+        </header>
+        <div id="ph-coulisses-grid"><div class="phare-loading">Chargement…</div></div>
+      </section>
+    `;
+    container.querySelector('[data-act="back"]').onclick = () => this._go(this.selectedSite ? 'site' : 'home');
+    let agents = this._defaultAgents();
+    if (App.api) {
+      try {
+        const res = await App.api.phare_agents_status();
+        if (res && res.ok && Array.isArray(res.agents)) agents = res.agents;
+      } catch (e) { /* fallback */ }
+    }
+    const grid = document.getElementById('ph-coulisses-grid');
+    grid.innerHTML = `
+      <div class="phare-agents-grid">
+        ${agents.map(a => `
+          <article class="phare-agent-card">
+            <div class="phare-agent-head">
+              <div class="phare-agent-emoji">${a.emoji || '🤖'}</div>
+              <div class="phare-agent-name-block">
+                <div class="phare-agent-name">${this._esc(a.label || a.name)}</div>
+                <div class="phare-agent-tagline">${this._esc(a.tagline || '')}</div>
+              </div>
+            </div>
+            <p class="phare-agent-desc">${this._esc(a.description || '')}</p>
+            <div class="phare-agent-meta">
+              <div><span class="lbl">Quand</span><span class="val">${this._esc(a.cadence || '—')}</span></div>
+              <div><span class="lbl">Dernier passage</span><span class="val">${a.last_run_at ? this._relTime(a.last_run_at) : 'jamais'}</span></div>
+            </div>
+            <footer class="phare-agent-foot">
+              ${a.name !== 'chef_orchestre'
+                ? `<button class="btn btn-secondary btn-sm" data-run="${this._esc(a.name)}">Lancer maintenant</button>`
+                : `<span class="phare-agent-note">Plan mensuel — 1er du mois 9h</span>`}
+            </footer>
+          </article>
+        `).join('')}
+      </div>
+    `;
+    grid.querySelectorAll('[data-run]').forEach(b => {
+      b.onclick = async () => {
+        b.disabled = true; const lbl = b.textContent; b.textContent = 'Lancement…';
+        try {
+          const payload = { agent: b.dataset.run };
+          if (this.selectedSite) payload.site_id = this.selectedSite;
+          const res = await App.api.phare_run_agent(payload);
+          if (res && res.ok) this._toast('✓ Mission lancée en arrière-plan');
+          else this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
+        } catch (e) { this._toast('Erreur : ' + e, 'error'); }
+        finally { b.disabled = false; b.textContent = lbl; }
+      };
+    });
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  //  ONBOARDING — bulle au premier lancement
+  // ════════════════════════════════════════════════════════════════════
+  _maybeShowOnboarding() {
+    try { if (localStorage.getItem(this._onboardKey)) return; } catch (e) { return; }
+    const dlg = document.createElement('div');
+    dlg.className = 'phare-onboard';
+    dlg.innerHTML = `
+      <div class="phare-onboard-backdrop"></div>
+      <div class="phare-onboard-card">
+        <div class="phare-onboard-emoji">💡</div>
+        <h2>Bienvenue dans Le Phare</h2>
+        <p>Voici tes sites. Sur chacun, <strong>8 robots Claude</strong> préparent des améliorations SEO pendant que tu dors.</p>
+        <p>Tu as juste deux choses à faire :</p>
+        <ol class="phare-onboard-steps">
+          <li><strong>Cliquer sur un site</strong> pour voir ce qu'on te propose</li>
+          <li>Pour chaque proposition : <strong>OK, applique</strong> ou <strong>Poubelle</strong>. C'est tout.</li>
+        </ol>
+        <p class="phare-onboard-foot">Pas besoin de comprendre le code ou le SEO. Si une proposition te plaît, tu valides. Sinon, tu jettes.</p>
+        <button class="btn btn-primary" data-close>J'ai compris, montre-moi mes sites</button>
+      </div>
+    `;
+    document.body.appendChild(dlg);
+    dlg.querySelector('[data-close]').onclick = () => {
+      try { localStorage.setItem(this._onboardKey, '1'); } catch (e) {}
+      dlg.remove();
+    };
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  //  MODAL — ajouter / éditer un site (conservée de l'ancienne version)
   // ════════════════════════════════════════════════════════════════════
   _openSiteDialog({ externalOnly = false, site = null } = {}) {
     const isEdit = !!(site && site.id);
@@ -677,14 +555,14 @@ const Phare = {
       <div class="phare-modal-card">
         <header class="phare-modal-head">
           <div>
-            <div class="hero-kicker mb-1">${externalOnly ? 'SITE CLIENT' : 'NOS SITES'}</div>
-            <h2 class="text-xl font-semibold">${isEdit ? 'Modifier le site' : (externalOnly ? 'Ajouter un client' : 'Ajouter un site')}</h2>
+            <div class="phare-kicker mb-1">${isEdit ? 'RÉGLAGES DU SITE' : 'NOUVEAU SITE'}</div>
+            <h2 class="text-xl font-semibold">${isEdit ? (s.name || 'Modifier le site') : 'Ajouter un site'}</h2>
           </div>
-          <button class="phare-modal-close" data-close>×</button>
+          <button class="phare-modal-close" data-close aria-label="Fermer">×</button>
         </header>
         <div class="phare-modal-body">
           <p class="text-sm text-text-muted mb-4">
-            Remplis les infos du site. Les huit agents commenceront à le surveiller dès la prochaine heure.
+            Remplis les infos du site. Les robots commenceront à le surveiller dès la prochaine heure.
           </p>
           <form id="ph-site-form" class="space-y-3">
             ${this._field('name', 'Nom du site', s.name || '', 'Ex : Cabinet Dupont', true)}
@@ -698,7 +576,7 @@ const Phare = {
             ${this._field('notes', 'Notes internes', s.notes || '', '(secteur, particularités…)', false)}
             <label class="flex items-center gap-2 pt-2">
               <input type="checkbox" name="is_external_client" ${(externalOnly || s.is_external_client) ? 'checked' : ''}>
-              <span class="text-sm">Site d'un client externe (active la fiche client + rapport mensuel)</span>
+              <span class="text-sm">Site d'un client externe</span>
             </label>
           </form>
         </div>
@@ -723,8 +601,7 @@ const Phare = {
         netlify_site_id: (fd.get('netlify_site_id') || '').toString().trim(),
         stack: (fd.get('stack') || 'html').toString().trim(),
         priority: parseInt(fd.get('priority') || '50', 10) || 50,
-        key_paths: (fd.get('key_paths') || '/')
-          .toString().split('\n').map(x => x.trim()).filter(Boolean).slice(0, 10),
+        key_paths: (fd.get('key_paths') || '/').toString().split('\n').map(x => x.trim()).filter(Boolean).slice(0, 10),
         notes: (fd.get('notes') || '').toString().trim(),
         is_external_client: form.querySelector('[name="is_external_client"]').checked,
         is_active: true,
@@ -735,16 +612,13 @@ const Phare = {
       }
       try {
         const res = await App.api.phare_site_upsert(payload);
-        if (!res || !res.ok) {
-          this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
-          return;
-        }
+        if (!res || !res.ok) { this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error'); return; }
         close();
-        this._toast(isEdit ? '✓ Site mis à jour' : '✓ Site ajouté — les agents prennent le relais');
-        this._renderSitesList(document.getElementById('content'), { externalOnly });
+        this._toast(isEdit ? '✓ Site mis à jour' : '✓ Site ajouté — les robots prennent le relais');
+        if (isEdit && this.view === 'site') this._renderSite(document.getElementById('content'));
+        else this._renderHome(document.getElementById('content'));
       } catch (e) { this._toast('Erreur : ' + e, 'error'); }
     };
-    // Focus initial
     setTimeout(() => dlg.querySelector('input[name="name"]').focus(), 50);
   },
 
@@ -755,8 +629,7 @@ const Phare = {
         <input type="${type}" name="${this._esc(name)}" value="${this._esc(value)}"
                placeholder="${this._esc(placeholder)}"
                class="phare-input" ${required ? 'required' : ''}>
-      </div>
-    `;
+      </div>`;
   },
   _selectField(name, label, value, options) {
     return `
@@ -765,8 +638,7 @@ const Phare = {
         <select name="${this._esc(name)}" class="phare-input">
           ${options.map(o => `<option value="${o}" ${o === value ? 'selected' : ''}>${o}</option>`).join('')}
         </select>
-      </div>
-    `;
+      </div>`;
   },
   _textareaField(name, label, value, placeholder) {
     return `
@@ -774,386 +646,84 @@ const Phare = {
         <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">${this._esc(label)}</label>
         <textarea name="${this._esc(name)}" rows="3" placeholder="${this._esc(placeholder)}"
                   class="phare-input" style="font-family:ui-monospace,monospace;font-size:13px">${this._esc(value)}</textarea>
-      </div>
-    `;
+      </div>`;
   },
 
   // ════════════════════════════════════════════════════════════════════
-  //  VUE — AGENTS SEO (8 champions)
+  //  Helpers — emoji, libellés, fmt
   // ════════════════════════════════════════════════════════════════════
-  async _renderAgents(container) {
-    container.innerHTML = `
-      <section class="animate-slide-up">
-        ${this._backHeader('AGENCE — AGENTS SEO',
-          'Les huit champions.',
-          "Chacun a sa spécialité. Ensemble, ils gardent tes sites au sommet, 24/7.")}
-        <div id="ph-agents-grid">
-          <div class="text-center py-12 text-text-muted">Chargement…</div>
-        </div>
-      </section>
-    `;
-    let agents = this._defaultAgents();
-    if (App.api) {
-      try {
-        const res = await App.api.phare_agents_status();
-        if (res && res.ok && Array.isArray(res.agents)) agents = res.agents;
-      } catch (e) { /* fallback sur defaults */ }
-    }
-    const grid = document.getElementById('ph-agents-grid');
-    grid.innerHTML = `
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
-        ${agents.map(a => `
-          <article class="agent-card">
-            <div class="agent-card-head">
-              <div class="agent-card-emoji">${a.emoji || '🤖'}</div>
-              <div class="flex-1 min-w-0">
-                <div class="agent-card-name">${this._esc(a.label || a.name)}</div>
-                <div class="agent-card-role">${this._esc(a.tagline || a.role || '')}</div>
-              </div>
-              <span class="agent-card-model">${this._esc(a.model_short || a.model || 'Sonnet 4.6')}</span>
-            </div>
-            <div class="agent-card-desc">${this._esc(a.description || '')}</div>
-            <div class="agent-card-stats">
-              <div><span class="lbl">Cadence</span><span class="val">${this._esc(a.cadence || '—')}</span></div>
-              <div><span class="lbl">Dernier passage</span><span class="val">${a.last_run_at ? this._relTime(a.last_run_at) : 'jamais'}</span></div>
-              <div><span class="lbl">Statut</span><span class="val">${this._agentStatus(a.status)}</span></div>
-            </div>
-            <div class="agent-card-foot">
-              <button class="btn-mini" data-agent="${this._esc(a.name)}" data-act="explain">Voir ses missions</button>
-              ${a.name !== 'chef_orchestre' ? `<button class="btn-mini btn-mini-primary" data-agent="${this._esc(a.name)}" data-act="run">Lancer maintenant</button>` : `<span class="agent-card-note">Plan mensuel — 1er du mois 9h</span>`}
-            </div>
-          </article>
-        `).join('')}
-      </div>
-    `;
-    grid.querySelectorAll('[data-act="explain"]').forEach(b => {
-      b.onclick = () => this._showAgentDetail(b.dataset.agent, agents);
-    });
-    grid.querySelectorAll('[data-act="run"]').forEach(b => {
-      b.onclick = async () => {
-        if (!App.api) { this._toast('Mode preview — pas de lancement réel.', 'error'); return; }
-        b.disabled = true; b.textContent = 'Lancement…';
-        try {
-          const res = await App.api.phare_run_agent({ agent: b.dataset.agent });
-          if (res && res.ok) this._toast('✓ Mission lancée en arrière-plan');
-          else this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
-        } catch (e) { this._toast('Erreur : ' + e, 'error'); }
-        finally { b.disabled = false; b.textContent = 'Lancer maintenant'; }
-      };
-    });
-  },
-
-  _showAgentDetail(agentName, agents) {
-    const a = agents.find(x => x.name === agentName);
-    if (!a) return;
-    const dlg = document.createElement('div');
-    dlg.className = 'phare-modal';
-    dlg.innerHTML = `
-      <div class="phare-modal-backdrop" data-close></div>
-      <div class="phare-modal-card">
-        <header class="phare-modal-head">
-          <div class="flex items-center gap-3">
-            <div class="text-3xl">${a.emoji || '🤖'}</div>
-            <div>
-              <div class="hero-kicker mb-1">AGENT</div>
-              <h2 class="text-xl font-semibold">${this._esc(a.label || a.name)}</h2>
-            </div>
-          </div>
-          <button class="phare-modal-close" data-close>×</button>
-        </header>
-        <div class="phare-modal-body">
-          <p class="text-sm mb-4">${this._esc(a.description || '')}</p>
-          <div class="section-label">Missions</div>
-          <ul class="text-sm space-y-1.5 mb-4">
-            ${(a.missions || []).map(m => `<li>• ${this._esc(m)}</li>`).join('')}
-          </ul>
-          ${a.cadence ? `<div class="section-label">Cadence</div><p class="text-sm mb-2">${this._esc(a.cadence)}</p>` : ''}
-          ${a.model ? `<div class="section-label">Modèle Claude</div><p class="text-sm">${this._esc(a.model)}</p>` : ''}
-        </div>
-        <footer class="phare-modal-foot">
-          <button class="btn btn-secondary" data-close>Fermer</button>
-        </footer>
-      </div>
-    `;
-    document.body.appendChild(dlg);
-    dlg.querySelectorAll('[data-close]').forEach(el => el.onclick = () => dlg.remove());
-  },
-
-  _agentStatus(s) {
-    const map = {
-      'idle':    '<span style="color:hsl(var(--text-muted))">Au repos</span>',
-      'running': '<span style="color:hsl(var(--accent));font-weight:600">En mission</span>',
-      'ok':      '<span style="color:hsl(var(--success));font-weight:600">Prêt</span>',
-      'error':   '<span style="color:hsl(var(--danger));font-weight:600">Erreur</span>',
+  _agentShortName(agent) {
+    const m = {
+      auditeur: "l'Auditeur",
+      veilleur: 'le Veilleur',
+      redacteur: 'le Rédacteur',
+      optimiseur_onpage: "l'Optimiseur",
+      tisseur: 'le Tisseur',
+      chasseur_backlinks: 'le Chasseur de backlinks',
+      analyste: "l'Analyste",
+      chef_orchestre: "le Chef d'Orchestre",
     };
-    return map[s] || '<span style="color:hsl(var(--success));font-weight:600">Prêt</span>';
+    return m[agent] || agent || 'un robot';
+  },
+
+  _actionEmoji(agent) {
+    const m = {
+      auditeur: '🔍', veilleur: '🎯', redacteur: '✍️',
+      optimiseur_onpage: '⚡', tisseur: '🕸️',
+      chasseur_backlinks: '🪝', analyste: '📊', chef_orchestre: '👑',
+    };
+    return m[agent] || '💡';
   },
 
   _defaultAgents() {
     return [
       { name: 'auditeur', label: "L'Auditeur Technique", emoji: '🔍',
         tagline: 'Détecte tout ce qui freine.',
-        description: "Passe chaque site au peigne fin : pages lentes, balises manquantes, liens cassés, problèmes Core Web Vitals. Note de santé sur 100.",
-        missions: ["Analyser le crawl + Lighthouse + PageSpeed", "Identifier les 5 problèmes critiques", "Lister les quick wins (effort < 30 min)"],
-        cadence: 'Lundi 6h-22h, 1 site par heure',
-        model: 'claude-sonnet-4-6', model_short: 'Sonnet 4.6', status: 'ok' },
+        description: "Passe chaque site au peigne fin : pages lentes, balises manquantes, liens cassés. Note de santé sur 100.",
+        cadence: 'Lundi 6h-22h, 1 site par heure' },
       { name: 'veilleur', label: 'Le Veilleur Mots-Clés', emoji: '🎯',
-        tagline: "Trouve les mots-clés qui payent.",
-        description: "Analyse tes positions GSC + les SERP concurrents pour repérer les mots-clés à fort potentiel. Construit le cocon sémantique.",
-        missions: ["10 mots-clés prioritaires (volume FR > 50)", "20 long-traîne en cluster", "Cocon sémantique (thème pivot + sous-thèmes)"],
-        cadence: 'Lundi & jeudi 7h',
-        model: 'claude-sonnet-4-6', model_short: 'Sonnet 4.6', status: 'ok' },
+        tagline: 'Trouve les mots-clés qui payent.',
+        description: "Analyse tes positions Google et la concurrence pour repérer les mots-clés à fort potentiel.",
+        cadence: 'Lundi & jeudi 7h' },
       { name: 'redacteur', label: 'Le Rédacteur', emoji: '✍️',
         tagline: 'Écrit comme un humain. Mieux.',
-        description: "Produit des articles SEO complets (1000-1500 mots) à partir des briefs du Veilleur. Voix Triskell, anti-slop activé.",
-        missions: ["Brief + article complet à partir d'un mot-clé", "Structure H1/H2/H3 propre", "Suggestions de maillage interne"],
-        cadence: 'À la demande (déclenché par le Chef d\'Orchestre)',
-        model: 'claude-sonnet-4-6', model_short: 'Sonnet 4.6', status: 'ok' },
+        description: "Produit des articles SEO complets à partir des mots-clés trouvés par le Veilleur.",
+        cadence: 'À la demande' },
       { name: 'optimiseur_onpage', label: "L'Optimiseur On-Page", emoji: '⚡',
         tagline: 'Affûte chaque page au scalpel.',
-        description: "Réécrit titres, meta descriptions, Hn, alts et JSON-LD pour booster le SEO sans toucher au contenu. Soumet la modification en validation.",
-        missions: ["Réécriture des balises (titre, méta, Hn, alt, JSON-LD)", "Score avant/après estimé", "Modif soumise + aperçu Netlify"],
-        cadence: 'Mar/Mer/Ven 10h, 1 site par cycle',
-        model: 'claude-sonnet-4-6', model_short: 'Sonnet 4.6', status: 'ok' },
+        description: "Réécrit titres, descriptions, balises et alts pour booster ton référencement.",
+        cadence: 'Mar/Mer/Ven 10h' },
       { name: 'tisseur', label: 'Le Tisseur', emoji: '🕸️',
         tagline: 'Relie tous tes sites en cocon.',
-        description: "Maillage interne intra-site + inter-sites Triskell. Détecte les pages orphelines, propose les liens manquants.",
-        missions: ["Liens internes manquants", "Liens inter-sites Triskell (cocon global)", "Pages orphelines à reconnecter"],
-        cadence: 'Lundi 9h',
-        model: 'claude-sonnet-4-6', model_short: 'Sonnet 4.6', status: 'ok' },
-      { name: 'chasseur_backlinks', label: 'Le Chasseur Backlinks', emoji: '🪝',
+        description: "Maillage interne + inter-sites Triskell. Détecte les pages orphelines.",
+        cadence: 'Lundi 9h' },
+      { name: 'chasseur_backlinks', label: 'Le Chasseur de Backlinks', emoji: '🪝',
         tagline: 'Va chercher les liens externes.',
-        description: "Analyse le gap concurrentiel, repère les mentions non-liées, identifie les opportunités HARO. Score d'impact 0-100.",
-        missions: ["Top 10 opportunités d'acquisition", "5 HARO/expert quotes envisageables", "5 mentions non-liées à transformer"],
-        cadence: 'Mercredi 9h',
-        model: 'claude-sonnet-4-6', model_short: 'Sonnet 4.6', status: 'ok' },
+        description: "Identifie les opportunités d'obtenir des liens depuis d'autres sites.",
+        cadence: 'Mercredi 9h' },
       { name: 'analyste', label: "L'Analyste", emoji: '📊',
         tagline: 'Te dit la vérité chaque matin.',
-        description: "Lit tes métriques GSC sur 30 jours, repère les pages qui montent / descendent, chiffre le ROI des actions Phare.",
-        missions: ["Bulletin quotidien 8h (top 3 sites)", "Pages qui décollent / décrochent", "Recommandation pour la semaine"],
-        cadence: 'Tous les jours 8h',
-        model: 'claude-sonnet-4-6', model_short: 'Sonnet 4.6', status: 'ok' },
+        description: "Lit tes métriques et te dit ce qui monte, ce qui descend, et ce qu'il faut faire.",
+        cadence: 'Tous les jours 8h' },
       { name: 'chef_orchestre', label: "Le Chef d'Orchestre", emoji: '👑',
         tagline: 'Le cerveau stratégique. Opus.',
-        description: "Une fois par mois, le modèle le plus puissant prend tout l'écosystème en main et trace le plan du mois pour les 7 autres.",
-        missions: ["3 sites prioritaires du mois", "1 chantier transverse", "Briefs cadrés pour chaque agent", "Critères de succès chiffrés"],
-        cadence: '1er du mois 9h',
-        model: 'claude-opus-4-7', model_short: 'Opus 4.7', status: 'ok' },
+        description: "Une fois par mois, le modèle Claude le plus puissant trace le plan du mois pour les 7 autres.",
+        cadence: '1er du mois 9h' },
     ];
   },
 
-  // ════════════════════════════════════════════════════════════════════
-  //  VUE — Détail site
-  // ════════════════════════════════════════════════════════════════════
-  async _renderSiteDetail(container) {
-    if (!this.selectedSite) {
-      container.innerHTML = `
-        <section class="animate-slide-up">
-          ${this._backHeader('SITE', 'Choisis un site', "Reviens à « Nos sites » et clique sur un site pour voir son détail.")}
-          <button class="btn btn-secondary" onclick="Phare.view='sites'; App.show('phare');">← Nos sites</button>
-        </section>
-      `;
-      return;
-    }
-    container.innerHTML = `
-      <section class="animate-slide-up">
-        ${this._backHeader('SITE', 'Chargement…', '')}
-        <div id="ph-site-body"><div class="text-center py-12 text-text-muted">Chargement…</div></div>
-      </section>
-    `;
-    if (!App.api) {
-      document.getElementById('ph-site-body').innerHTML = `<div class="card p-6 text-text-muted">Mode preview.</div>`;
-      return;
-    }
-    let data;
-    try { data = await App.api.phare_site({ id: this.selectedSite }); }
-    catch (e) {
-      document.getElementById('ph-site-body').innerHTML = `<div class="card p-6 text-danger">Erreur : ${this._esc(String(e))}</div>`;
-      return;
-    }
-    if (!data || !data.ok) {
-      document.getElementById('ph-site-body').innerHTML = `<div class="card p-6 text-danger">${this._esc(data?.error || 'Erreur')}</div>`;
-      return;
-    }
-    const s = data.site || {};
-    const audit = data.audit || {};
-    const kws = data.keywords || [];
-    const acts = data.actions || [];
-
-    // Met à jour le header avec le vrai nom
-    container.querySelector('section').innerHTML = `
-      ${this._backHeader('SITE', s.name || s.domain || '—', s.domain || '', `
-        <button class="btn btn-primary" data-act="audit">Lancer un audit</button>
-      `)}
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-5 mb-6 sm:mb-10">
-        ${this._stat({label: 'Score audit', value: audit.score != null ? audit.score : '—'})}
-        ${this._stat({label: 'Mots-clés suivis', value: kws.length})}
-        ${this._stat({label: 'Actions ouvertes', value: acts.length, accent: acts.length > 0 ? 'warning' : ''})}
-      </div>
-
-      <div class="section-label">Top mots-clés</div>
-      <div class="card mb-10 overflow-hidden">
-        ${kws.length === 0
-          ? `<div class="text-center py-10 text-text-muted text-sm">Aucun mot-clé encore. Le Veilleur va passer lundi ou jeudi à 7h.</div>`
-          : `<div class="divide-y divide-border">
-              ${kws.slice(0, 10).map(k => `
-                <div class="px-5 py-3 flex items-center justify-between text-sm">
-                  <div class="flex-1 truncate font-semibold">${this._esc(k.keyword || k.query || '—')}</div>
-                  <div class="text-text-muted text-xs ml-4">Position ${k.position != null ? Number(k.position).toFixed(1) : '—'} · ${this._fmt(k.search_volume || k.volume) || '—'}/mo</div>
-                </div>
-              `).join('')}
-            </div>`}
-      </div>
-
-      <div class="section-label">Actions récentes</div>
-      <div class="card overflow-hidden">
-        ${acts.length === 0
-          ? `<div class="text-center py-10 text-text-muted text-sm">Aucune action en cours.</div>`
-          : `<div class="divide-y divide-border">
-              ${acts.slice(0, 10).map(a => {
-                const statusLabels = {
-                  pending_review: 'à valider',
-                  merged: 'publié',
-                  rejected: 'refusé',
-                  draft: 'brouillon',
-                  preview: 'aperçu prêt',
-                  expired: 'expiré',
-                };
-                const statusLabel = statusLabels[a.status] || a.status || 'inconnu';
-                return `
-                <div class="px-5 py-3 flex items-center justify-between text-sm">
-                  <div class="flex-1">
-                    <div class="font-semibold">${this._esc(a.title || a.kind || '—')}</div>
-                    <div class="text-xs text-text-muted">${this._esc(a.kind || '')} · ${(a.created_at || '').slice(0,10)}</div>
-                  </div>
-                  <span class="text-xs px-2 py-1 rounded-full font-semibold
-                              ${a.status === 'pending_review' ? 'bg-warning/15 text-warning' : ''}
-                              ${a.status === 'merged' ? 'bg-success/15 text-success' : ''}
-                              ${a.status === 'rejected' ? 'bg-danger/15 text-danger' : ''}
-                              ${!['pending_review','merged','rejected'].includes(a.status) ? 'bg-bg text-text-muted' : ''}">
-                    ${this._esc(statusLabel)}
-                  </span>
-                </div>
-              `;}).join('')}
-            </div>`}
-      </div>
-    `;
-    const auditBtn = container.querySelector('[data-act="audit"]');
-    if (auditBtn) {
-      auditBtn.onclick = async () => {
-        try {
-          await App.api.phare_run_audit({ id: this.selectedSite });
-          this._toast('✓ Audit lancé en arrière-plan');
-        } catch (e) { this._toast('Erreur : ' + e, 'error'); }
-      };
-    }
-  },
-
-  // ════════════════════════════════════════════════════════════════════
-  //  VUE — Modifs à valider
-  // ════════════════════════════════════════════════════════════════════
-  async _renderPRs(container) {
-    container.innerHTML = `
-      <section class="animate-slide-up">
-        ${this._backHeader('AGENCE — VALIDATION', 'À valider.', "Les modifications proposées par les agents qui attendent ton feu vert.")}
-        <div id="ph-prs-body"><div class="text-center py-12 text-text-muted">Chargement…</div></div>
-      </section>
-    `;
-    if (!App.api) {
-      document.getElementById('ph-prs-body').innerHTML = `<div class="card p-6 text-text-muted">Mode preview.</div>`;
-      return;
-    }
-    let data;
-    try { data = await App.api.phare_pending_actions(); }
-    catch (e) {
-      document.getElementById('ph-prs-body').innerHTML = `<div class="card p-6 text-danger">Erreur : ${this._esc(String(e))}</div>`;
-      return;
-    }
-    const slot = document.getElementById('ph-prs-body');
-    if (!data || !data.ok) {
-      slot.innerHTML = `<div class="card p-6 text-danger">${this._esc(data?.error || 'Erreur')}</div>`;
-      return;
-    }
-    const acts = data.actions || [];
-    if (acts.length === 0) {
-      slot.innerHTML = `
-        <div class="card p-6 sm:p-12 text-center">
-          <div class="text-4xl mb-3">✓</div>
-          <h2 class="text-xl font-semibold mb-2">Rien à valider</h2>
-          <p class="text-text-secondary max-w-lg mx-auto">Tout est mergé ou en cours d'analyse. Les agents continuent leur ronde.</p>
-        </div>`;
-      return;
-    }
-    slot.innerHTML = `
-      <div class="space-y-4">
-        ${acts.map(a => `
-          <article class="card p-6">
-            <header class="flex items-start justify-between gap-4 mb-3">
-              <div>
-                <div class="font-semibold text-base">${this._esc(a.title || a.kind || '—')}</div>
-                <div class="text-xs text-text-muted">${this._esc(a.kind || '')} · ${(a.created_at || '').slice(0,16)}</div>
-              </div>
-              <span class="text-xs px-2.5 py-1 rounded-full bg-warning/15 text-warning font-semibold">à valider</span>
-            </header>
-            ${a.summary ? `<p class="text-sm text-text-secondary mb-4">${this._esc(a.summary)}</p>` : ''}
-            <footer class="flex justify-end gap-2 pt-3 border-t border-border">
-              <button class="btn btn-secondary" data-merge="${this._esc(a.id)}" data-force="false">Valider et publier</button>
-              <button class="btn btn-primary" data-merge="${this._esc(a.id)}" data-force="true">Publier quand même</button>
-            </footer>
-          </article>
-        `).join('')}
-      </div>
-    `;
-    slot.querySelectorAll('[data-merge]').forEach(btn => {
-      btn.onclick = async () => {
-        try {
-          await App.api.phare_merge_action({ id: btn.dataset.merge, force: btn.dataset.force === 'true' });
-          this._renderPRs(container);
-        } catch (e) { this._toast('Erreur : ' + e, 'error'); }
-      };
-    });
-  },
-
-  // ════════════════════════════════════════════════════════════════════
-  //  VUE — Bulletins
-  // ════════════════════════════════════════════════════════════════════
-  async _renderReports(container) {
-    container.innerHTML = `
-      <section class="animate-slide-up">
-        ${this._backHeader('AGENCE — BULLETINS', "Bulletins de l'Analyste.",
-          "Les rapports hebdomadaires et le plan stratégique mensuel.")}
-        <div class="card p-6 sm:p-12 text-center">
-          <div class="text-4xl mb-3">📰</div>
-          <h2 class="text-xl font-semibold mb-2">Pas encore de bulletin</h2>
-          <p class="text-text-secondary max-w-lg mx-auto">
-            L'Analyste produit son rapport tous les matins à 8h sur les 3 sites prioritaires.
-            Le Chef d'Orchestre (Opus) trace le plan du mois le 1er à 9h.
-          </p>
-        </div>
-      </section>
-    `;
-  },
-
-  // ════════════════════════════════════════════════════════════════════
-  //  Utils
-  // ════════════════════════════════════════════════════════════════════
-  _stat({label, value, delta, accent}) {
-    const cls = accent ? `accent-${accent}` : '';
-    return `
-      <div class="stat-card ${cls}">
-        <div class="label">${this._esc(label)}</div>
-        <div class="value">${this._esc(String(value))}</div>
-        ${delta ? `<div class="delta">${this._esc(delta)}</div>` : ''}
-      </div>
-    `;
-  },
-
-  _fmt(n) {
-    if (n == null || n === '') return '—';
-    const x = Number(n);
-    if (isNaN(x)) return String(n);
-    if (x >= 10000) return (x / 1000).toFixed(1) + 'k';
-    return x.toLocaleString('fr-FR');
+  _previewSites() {
+    return [
+      { id: 'demo1', name: 'Pack Électricien', domain: 'pack-elec.triskell-studio.fr',
+        is_external_client: false, health: 92, health_tone: 'ok', clicks_30d: 1840,
+        delta_pct: 12, pending_count: 2, has_bulletin: true },
+      { id: 'demo2', name: 'Studio PDF', domain: 'studio-pdf.triskell-studio.fr',
+        is_external_client: false, health: 88, health_tone: 'ok', clicks_30d: 920,
+        delta_pct: -3, pending_count: 0, has_bulletin: false },
+      { id: 'demo3', name: 'Bobeez', domain: 'bobeez.triskell-studio.fr',
+        is_external_client: false, health: 64, health_tone: 'warn', clicks_30d: 410,
+        delta_pct: 8, pending_count: 5, has_bulletin: false },
+    ];
   },
 
   _esc(s) {
@@ -1161,38 +731,30 @@ const Phare = {
       '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
     }[c]));
   },
-
+  _fmt(n) {
+    if (n == null || n === '') return '—';
+    const x = Number(n);
+    if (isNaN(x)) return String(n);
+    if (x >= 10000) return (x / 1000).toFixed(1) + 'k';
+    return x.toLocaleString('fr-FR');
+  },
   _relTime(iso) {
     if (!iso) return 'jamais';
     try {
       const d = new Date(iso);
       const sec = Math.max(0, (Date.now() - d.getTime()) / 1000);
-      if (sec < 60) return 'à l\'instant';
+      if (sec < 60) return "à l’instant";
       if (sec < 3600) return `il y a ${Math.floor(sec/60)} min`;
       if (sec < 86400) return `il y a ${Math.floor(sec/3600)} h`;
       return `il y a ${Math.floor(sec/86400)} j`;
     } catch (e) { return iso; }
   },
-
   _toast(msg, kind = 'success') {
     const t = document.createElement('div');
     t.textContent = msg;
     const bg = kind === 'error' ? 'hsl(var(--danger))' : 'hsl(var(--success))';
-    t.style.cssText = `position:fixed;bottom:32px;right:32px;background:${bg};color:white;padding:12px 20px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.18);z-index:9999;font-weight:600;font-size:14px;animation:fadeIn .2s ease-out`;
+    t.style.cssText = `position:fixed;bottom:32px;right:32px;background:${bg};color:white;padding:12px 20px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.18);z-index:9999;font-weight:600;font-size:14px`;
     document.body.appendChild(t);
     setTimeout(() => t.remove(), 3500);
-  },
-
-  _previewSites(externalOnly) {
-    const list = externalOnly
-      ? [{ id: 'demo', name: '(Aucun client externe)', domain: 'exemple-client.fr', clicks_30d: 0 }]
-      : [
-        { id: '1', name: 'Pack Électricien', domain: 'pack-elec.triskell-studio.fr', clicks_30d: 1840, lighthouse_perf: 92, lighthouse_seo: 100, stack: 'astro' },
-        { id: '2', name: 'Studio PDF', domain: 'studio-pdf.triskell-studio.fr', clicks_30d: 920, lighthouse_perf: 88, lighthouse_seo: 95, stack: 'next' },
-        { id: '3', name: 'Bobeez', domain: 'bobeez.triskell-studio.fr', clicks_30d: 410, lighthouse_perf: 84, lighthouse_seo: 92, stack: 'astro' },
-      ];
-    const tmp = document.createElement('div');
-    this._renderSitesTable(tmp, list, { externalOnly });
-    return tmp.innerHTML;
   },
 };
