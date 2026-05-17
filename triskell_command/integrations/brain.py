@@ -117,11 +117,10 @@ def _user_alias(client) -> str:
     if client is None:
         return "jordan"
     try:
-        sb = getattr(client, "client", None) or getattr(client, "_client", None)
-        if sb:
-            user = sb.auth.get_user()
-            email = getattr(getattr(user, "user", None) or user, "email", "") or ""
-            return USER_ALIASES.get(email.lower(), "jordan")
+        sb = client.raw
+        user = sb.auth.get_user()
+        email = getattr(getattr(user, "user", None) or user, "email", "") or ""
+        return USER_ALIASES.get(email.lower(), "jordan")
     except Exception: pass
     return "jordan"
 
@@ -132,7 +131,10 @@ def _sb(client=None):
     if s is not None:
         return s
     if client is not None:
-        return getattr(client, "client", None) or getattr(client, "_client", None)
+        try:
+            return client.raw
+        except Exception:
+            return None
     return None
 
 

@@ -1857,7 +1857,7 @@ class Api:
             # Source 2 : email_history kind=payment_received (best-effort)
             try:
                 client = self._supabase()
-                sb = getattr(client, "client", None) or getattr(client, "_client", None) if client else None
+                sb = client.raw if client else None
                 if sb is not None:
                     res = (sb.table("email_history")
                             .select("ts,subject,extra")
@@ -2082,9 +2082,11 @@ class Api:
             client = self._supabase()
             if not client:
                 return {"ok": False, "error": "Base partagée non connectée"}
-            sb = getattr(client, "client", None) or getattr(client, "_client", None)
-            if sb is None:
-                return {"ok": False, "error": "Client Supabase introuvable"}
+            # Avant : getattr(client, "client") or getattr(client, "_client")
+            # — pattern fragile qui retourne None tant que _ensure_sdk()
+            # n'a pas ete declenche ailleurs. On utilise client.raw qui
+            # garantit l'init du SDK.
+            sb = client.raw
             q = (sb.table("email_history")
                  .select("id,kind,ts,subject,body,prospect_id,message_id,extra")
                  .order("ts", desc=True).limit(limit))
