@@ -44,6 +44,12 @@ class Api:
         }
         self._autopilot_lock = threading.Lock()
 
+        # État runtime des campagnes Convoi (génération de mails + envoi).
+        # Clés = campaign_id ; valeur = dict {running, log, log_len, error, stats}.
+        # Permet au front de poller sans recréer une boucle de génération.
+        self._convoy_runtime: dict[str, dict] = {}
+        self._convoy_lock = threading.Lock()
+
     # ------------------------------------------------------------------
     # Settings / thème
     # ------------------------------------------------------------------
@@ -634,6 +640,45 @@ class Api:
             return {"ok": True, "actions": actions}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    def phare_dashboard_pulse(self) -> dict:
+        """Pulse de la salle de contrôle : tout d'un coup pour la home du Phare.
+
+        Renvoie :
+        - scheduler.running / last_tick_at / last_run_result
+        - recent_actions : les 10 derniers événements (actions Phare)
+        - pending_count : nombre de modifs en attente
+        - sites_map : id → name (pour resolver site_id sans 2e appel)
+        """
+        out: dict = {"ok": True}
+        # 1. Statut du scheduler en mémoire
+        try:
+            from ..integrations.phare import scheduler
+            out["scheduler"] = scheduler.get_status()
+        except Exception as exc:
+            out["scheduler"] = {"running": False, "error": str(exc)}
+        # 2. Dernières actions persistées (10 max, tous sites confondus)
+        try:
+            from ..integrations.phare import repo
+            recent = repo.list_actions(limit=10) or []
+            out["recent_actions"] = recent
+            pending = [a for a in (repo.list_actions(limit=50) or [])
+                       if (a.get("status") or "") == "pending_review"]
+            out["pending_count"] = len(pending)
+        except Exception as exc:
+            out["recent_actions"] = []
+            out["pending_count"] = 0
+            out.setdefault("warnings", []).append(f"actions: {exc}")
+        # 3. Map id → nom pour résoudre les site_id côté UI
+        try:
+            from ..integrations.phare import repo
+            sites = repo.list_sites(active_only=False) or []
+            out["sites_map"] = {s.get("id"): s.get("name") or s.get("domain")
+                                for s in sites if s.get("id")}
+        except Exception as exc:
+            out["sites_map"] = {}
+            out.setdefault("warnings", []).append(f"sites: {exc}")
+        return out
 
     def phare_run_audit(self, payload: dict) -> dict:
         sid = (payload or {}).get("id") or ""
@@ -4234,3 +4279,704 @@ class Api:
         except Exception as exc:
             logger.debug("messages_peer_typing: %s", exc)
             return {"ok": False, "error": str(exc), "typing": False}
+
+    # ==================================================================
+    # Le Convoi — Importer une liste (PDF/Word/Excel/Image/Texte)
+    # ==================================================================
+    # Le front pilote 5 étapes :
+    #  1. Upload du fichier → extraction texte (fast path tabulaire si CSV/XLSX)
+    #  2. Vérification du tableau de prospects extraits
+    #  3. Catalogue + brief IA → génération des mails (un par prospect)
+    #  4. Mode auto/validation + cap + délai + lancement
+    #  5. Suivi des envois
+    # Persistance partagée Supabase ou disque local — vu côté
+    # integrations.convoy_runner. L'API ici se contente d'orchestrer.
+
+    def _convoy_runtime_get(self, campaign_id: str) -> dict:
+        """Renvoie l'entrée runtime d'une campagne (créée si absente)."""
+        with self._convoy_lock:
+            rt = self._convoy_runtime.get(campaign_id)
+            if rt is None:
+                rt = {
+                    "gen_running": False,
+                    "gen_log": [],
+                    "gen_error": "",
+                    "send_running": False,
+                    "send_log": [],
+                    "send_error": "",
+                    "send_stop": None,   # callable pour interrompre l'envoi
+                    "raw_text": "",      # texte brut du dernier upload
+                }
+                self._convoy_runtime[campaign_id] = rt
+            return rt
+
+    def _convoy_ai_config(self) -> dict | None:
+        prov = self._app_state.get("ai", "selected_provider", default="anthropic")
+        model = self._app_state.get("ai", "selected_model", default="claude-sonnet-4-5")
+        keys = self._app_state.get("ai", "api_keys", default={}) or {}
+        if not keys.get(prov):
+            return None
+        return {"provider": prov, "model": model, "api_keys": keys}
+
+    def _convoy_smtp_config(self) -> dict | None:
+        o = self._app_state.get("outreach", default={}) or {}
+        required = ("smtp_host", "smtp_port", "smtp_user", "smtp_password",
+                    "from_email")
+        if any(not o.get(k) for k in required):
+            return None
+        return {
+            "smtp_host": o.get("smtp_host"),
+            "smtp_port": int(o.get("smtp_port", 587)),
+            "smtp_user": o.get("smtp_user"),
+            "smtp_password": o.get("smtp_password"),
+            "from_email": o.get("from_email"),
+            "from_name": o.get("from_name", ""),
+        }
+
+    def _convoy_serialize(self, camp) -> dict:
+        """ConvoyCampaign → dict sérialisable pour le front."""
+        return camp.to_dict()
+
+    # ---- Catalogue central ---------------------------------------------------
+    def convoy_get_catalog(self) -> dict:
+        try:
+            from ..integrations import catalog_repo
+            return {"ok": True, "catalog": catalog_repo.get_catalog()}
+        except Exception as exc:
+            logger.warning("convoy_get_catalog: %s", exc)
+            return {"ok": False, "error": str(exc), "catalog": []}
+
+    def convoy_save_catalog(self, payload: dict | None = None) -> dict:
+        items = (payload or {}).get("catalog") or []
+        try:
+            from ..integrations import catalog_repo
+            ok = catalog_repo.set_catalog(items)
+            return {"ok": bool(ok), "catalog": catalog_repo.get_catalog()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ---- Liste / lecture / création / suppression / renommage ---------------
+    def convoy_list_campaigns(self) -> dict:
+        try:
+            from ..integrations import convoy_runner
+            camps = convoy_runner.list_campaigns()
+            rows = []
+            for c in camps:
+                counts = c.counts()
+                rows.append({
+                    "id": c.id,
+                    "name": c.name,
+                    "created_at": c.created_at,
+                    "mode": c.mode,
+                    "source_file": c.source_file,
+                    "counts": counts,
+                })
+            return {"ok": True, "campaigns": rows}
+        except Exception as exc:
+            logger.warning("convoy_list_campaigns: %s", exc)
+            return {"ok": False, "error": str(exc), "campaigns": []}
+
+    def convoy_get_campaign(self, payload: dict | None = None) -> dict:
+        cid = ((payload or {}).get("campaign_id") or "").strip()
+        if not cid:
+            return {"ok": False, "error": "campaign_id requis"}
+        try:
+            from ..integrations import convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            return {"ok": True, "campaign": self._convoy_serialize(camp)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_new_campaign(self, payload: dict | None = None) -> dict:
+        try:
+            from datetime import datetime
+            import uuid
+            from ..integrations import catalog_repo, convoy_runner
+            name = ((payload or {}).get("name") or "").strip() or \
+                f"Convoi du {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+            cap_default = int(
+                self._app_state.get("outreach", "daily_cap", default=40) or 40
+            )
+            camp = convoy_runner.ConvoyCampaign(
+                id=uuid.uuid4().hex,
+                name=name,
+                created_at=datetime.now().isoformat(timespec="seconds"),
+                source_file="",
+                mode="validation",
+                user_brief="",
+                catalog=catalog_repo.get_catalog(),
+                drafts=[],
+                daily_cap=cap_default,
+                delay_seconds=60,
+            )
+            camp.save()
+            return {"ok": True, "campaign": self._convoy_serialize(camp)}
+        except Exception as exc:
+            logger.exception("convoy_new_campaign")
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_rename_campaign(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        cid = (p.get("campaign_id") or "").strip()
+        name = (p.get("name") or "").strip()
+        if not cid or not name:
+            return {"ok": False, "error": "campaign_id + name requis"}
+        try:
+            from ..integrations import convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            camp.name = name
+            camp.save()
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_delete_campaign(self, payload: dict | None = None) -> dict:
+        cid = ((payload or {}).get("campaign_id") or "").strip()
+        if not cid:
+            return {"ok": False, "error": "campaign_id requis"}
+        try:
+            from ..integrations import convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            ok = convoy_runner.delete_campaign(camp)
+            with self._convoy_lock:
+                self._convoy_runtime.pop(cid, None)
+            return {"ok": bool(ok)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ---- Étape 1 : upload + parse + (fast path tabulaire) -------------------
+    def convoy_upload_and_parse(self, payload: dict | None = None) -> dict:
+        """Reçoit un fichier en base64, l'écrit dans le dossier de la campagne,
+        le parse, et tente le mapping direct (csv/xlsx). Renvoie un aperçu
+        + d'éventuels prospects pré-détectés.
+
+        payload = {campaign_id, filename, content_b64}
+        """
+        import base64
+        import uuid
+        from pathlib import Path
+        p = payload or {}
+        cid = (p.get("campaign_id") or "").strip()
+        filename = (p.get("filename") or "").strip()
+        content_b64 = p.get("content_b64") or ""
+        if not cid or not filename or not content_b64:
+            return {"ok": False, "error": "campaign_id + filename + content_b64 requis"}
+        try:
+            from ..integrations import convoy_parser, convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            # Garde le suffixe d'origine pour le parser
+            safe = Path(filename).name
+            ext = Path(safe).suffix.lower()
+            if ext not in convoy_parser.SUPPORTED_EXTENSIONS:
+                return {"ok": False, "error":
+                        f"Format non supporté : {ext or '(sans extension)'}"}
+            try:
+                raw_bytes = base64.b64decode(content_b64, validate=False)
+            except Exception as exc:
+                return {"ok": False, "error": f"Fichier illisible : {exc}"}
+
+            uploads_dir = (convoy_runner.CONVOY_DIR / "uploads" / cid)
+            uploads_dir.mkdir(parents=True, exist_ok=True)
+            target = uploads_dir / f"{uuid.uuid4().hex}{ext}"
+            target.write_bytes(raw_bytes)
+
+            try:
+                parsed = convoy_parser.parse_file(target)
+            except convoy_parser.ParserError as exc:
+                return {"ok": False, "error": str(exc)}
+            text = parsed.get("text", "") or ""
+            rows = parsed.get("rows", []) or []
+            warnings = parsed.get("warnings", []) or []
+
+            # Fast path tabulaire (csv/xlsx avec colonne email reconnaissable)
+            prospects = convoy_parser.rows_to_prospects(rows) if rows else []
+
+            # Persistance côté campagne
+            camp.source_file = str(target)
+            camp.save()
+
+            # Stocke le texte brut pour l'étape extraction IA si besoin
+            rt = self._convoy_runtime_get(cid)
+            with self._convoy_lock:
+                rt["raw_text"] = text
+
+            return {
+                "ok": True,
+                "format": parsed.get("format", ""),
+                "filename": safe,
+                "text_preview": text[:4000],
+                "text_truncated": len(text) > 4000,
+                "rows_count": len(rows),
+                "warnings": warnings,
+                "fast_path_prospects": prospects,
+            }
+        except Exception as exc:
+            logger.exception("convoy_upload_and_parse")
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_extract_prospects_ai(self, payload: dict | None = None) -> dict:
+        """Appelle l'IA sur le texte brut du dernier upload pour structurer
+        les prospects. Crée un draft vide par prospect dans la campagne.
+        """
+        cid = ((payload or {}).get("campaign_id") or "").strip()
+        if not cid:
+            return {"ok": False, "error": "campaign_id requis"}
+        try:
+            from ..integrations import convoy_ai, convoy_parser, convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            rt = self._convoy_runtime_get(cid)
+            with self._convoy_lock:
+                text = rt.get("raw_text") or ""
+            if not text:
+                # Si le serveur a redémarré, on reparse le fichier source
+                if camp.source_file:
+                    try:
+                        parsed = convoy_parser.parse_file(camp.source_file)
+                        text = parsed.get("text", "") or ""
+                        with self._convoy_lock:
+                            rt["raw_text"] = text
+                    except Exception:
+                        pass
+            if not text.strip():
+                return {"ok": False, "error":
+                        "Texte vide — recharge un fichier."}
+            ai_cfg = self._convoy_ai_config()
+            if not ai_cfg:
+                return {"ok": False, "error":
+                        "Clé IA absente — configure-la dans Réglages."}
+            basics = convoy_parser.harvest_basics(text)
+            prospects = convoy_ai.extract_prospects(
+                text,
+                emails_hint=basics.get("emails", []),
+                phones_hint=basics.get("phones", []),
+                urls_hint=basics.get("urls", []),
+                provider=ai_cfg["provider"],
+                model=ai_cfg["model"],
+                api_keys=ai_cfg["api_keys"],
+            )
+            return self._convoy_apply_prospects(camp, prospects)
+        except Exception as exc:
+            logger.exception("convoy_extract_prospects_ai")
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_apply_fast_path(self, payload: dict | None = None) -> dict:
+        """Reçoit la liste de prospects du fast path (mapping CSV/XLSX direct)
+        et la matérialise en drafts vides dans la campagne.
+
+        payload = {campaign_id, prospects: [...]}
+        """
+        p = payload or {}
+        cid = (p.get("campaign_id") or "").strip()
+        prospects = p.get("prospects") or []
+        if not cid:
+            return {"ok": False, "error": "campaign_id requis"}
+        try:
+            from ..integrations import convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            return self._convoy_apply_prospects(camp, prospects)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def _convoy_apply_prospects(self, camp, prospects: list) -> dict:
+        """Remplace les drafts d'une campagne par des drafts vides issus de
+        la liste de prospects (étape 1→2 du flux)."""
+        import uuid
+        from ..integrations import convoy_ai, convoy_runner
+        new_drafts = []
+        for raw in (prospects or []):
+            if not isinstance(raw, dict):
+                continue
+            cleaned = {k: (raw.get(k) or "") for k in convoy_ai.PROSPECT_FIELDS}
+            if not any(cleaned.values()):
+                continue
+            new_drafts.append(convoy_runner.ConvoyDraft(
+                id=uuid.uuid4().hex,
+                prospect=cleaned,
+            ))
+        camp.drafts = new_drafts
+        camp.save()
+        # Compteurs de validation pour l'UI
+        ok = warn = err = 0
+        for d in camp.drafts:
+            v = convoy_ai.validate_prospect(d.prospect)
+            sev = v.get("severity")
+            if sev == "ok": ok += 1
+            elif sev == "warning": warn += 1
+            else: err += 1
+        return {
+            "ok": True,
+            "campaign": self._convoy_serialize(camp),
+            "stats": {"complete": ok, "incomplete": warn, "missing_email": err,
+                      "total": len(camp.drafts)},
+        }
+
+    # ---- Étape 2 : édition d'un prospect (ligne du tableau) -----------------
+    def convoy_update_prospect(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        cid = (p.get("campaign_id") or "").strip()
+        did = (p.get("draft_id") or "").strip()
+        prospect = p.get("prospect") or {}
+        if not cid or not did or not isinstance(prospect, dict):
+            return {"ok": False, "error": "campaign_id + draft_id + prospect requis"}
+        try:
+            from ..integrations import convoy_ai, convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            for d in camp.drafts:
+                if d.id == did:
+                    # Merge propre — n'écrase que les champs canoniques fournis
+                    for k in convoy_ai.PROSPECT_FIELDS:
+                        if k in prospect:
+                            d.prospect[k] = str(prospect.get(k) or "").strip()
+                    camp.save()
+                    return {"ok": True}
+            return {"ok": False, "error": "Brouillon introuvable"}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ---- Étape 3 : brief + catalogue + génération IA ------------------------
+    def convoy_save_compose(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        cid = (p.get("campaign_id") or "").strip()
+        if not cid:
+            return {"ok": False, "error": "campaign_id requis"}
+        try:
+            from ..integrations import catalog_repo, convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            if "user_brief" in p:
+                camp.user_brief = str(p.get("user_brief") or "")
+            if "catalog" in p and isinstance(p.get("catalog"), list):
+                catalog_repo.set_catalog(p["catalog"])
+                camp.catalog = p["catalog"]
+            camp.save()
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_generate_messages(self, payload: dict | None = None) -> dict:
+        """Lance la génération IA des mails en thread daemon, retour immédiat.
+        Le front polle convoy_generation_status pour suivre.
+
+        payload = {campaign_id, limit?: int}
+        """
+        from datetime import datetime
+        p = payload or {}
+        cid = (p.get("campaign_id") or "").strip()
+        limit = p.get("limit")
+        if not cid:
+            return {"ok": False, "error": "campaign_id requis"}
+        try:
+            from ..integrations import convoy_ai, convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            ai_cfg = self._convoy_ai_config()
+            if not ai_cfg:
+                return {"ok": False, "error":
+                        "Clé IA absente — configure-la dans Réglages."}
+
+            rt = self._convoy_runtime_get(cid)
+            with self._convoy_lock:
+                if rt.get("gen_running"):
+                    return {"ok": False, "error": "Génération déjà en cours."}
+                rt["gen_running"] = True
+                rt["gen_log"] = []
+                rt["gen_error"] = ""
+
+            sender = (
+                self._app_state.get("outreach", "from_name", default="")
+                or self._app_state.get("outreach", "mon_prenom", default="")
+                or "L'équipe"
+            )
+
+            targets = [d for d in camp.drafts
+                       if convoy_ai.validate_prospect(d.prospect).get("ok")]
+            if isinstance(limit, int) and limit > 0:
+                targets = targets[:limit]
+
+            def push(msg: str) -> None:
+                line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
+                with self._convoy_lock:
+                    rt["gen_log"].append(line)
+                    if len(rt["gen_log"]) > 500:
+                        del rt["gen_log"][: len(rt["gen_log"]) - 500]
+
+            def worker():
+                try:
+                    push(f"Génération de {len(targets)} mail(s)…")
+                    for i, draft in enumerate(targets, 1):
+                        try:
+                            msg = convoy_ai.generate_message(
+                                draft.prospect,
+                                catalog=camp.catalog,
+                                sender_name=sender,
+                                user_brief=camp.user_brief,
+                                provider=ai_cfg["provider"],
+                                model=ai_cfg["model"],
+                                api_keys=ai_cfg["api_keys"],
+                            )
+                            draft.subject = msg.get("subject", "")
+                            draft.body = msg.get("body", "")
+                            draft.offer_name = msg.get("offer_name", "")
+                            push(f"  ({i}/{len(targets)}) {draft.prospect.get('email','')} OK")
+                        except Exception as exc:
+                            draft.error = f"génération échouée : {exc}"
+                            push(f"  ({i}/{len(targets)}) ✗ {exc}")
+                        camp.save()
+                    push("✓ Génération terminée.")
+                except Exception as exc:
+                    with self._convoy_lock:
+                        rt["gen_error"] = str(exc)
+                    push(f"✗ {exc}")
+                finally:
+                    with self._convoy_lock:
+                        rt["gen_running"] = False
+
+            threading.Thread(
+                target=worker, daemon=True, name=f"ConvoyGen-{cid[:8]}"
+            ).start()
+            return {"ok": True, "started": True, "target_count": len(targets)}
+        except Exception as exc:
+            logger.exception("convoy_generate_messages")
+            with self._convoy_lock:
+                rt = self._convoy_runtime.get(cid)
+                if rt: rt["gen_running"] = False
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_generation_status(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        cid = (p.get("campaign_id") or "").strip()
+        since = int(p.get("since") or 0)
+        if not cid:
+            return {"ok": False, "error": "campaign_id requis"}
+        rt = self._convoy_runtime_get(cid)
+        with self._convoy_lock:
+            log = rt.get("gen_log") or []
+            return {
+                "ok": True,
+                "running": bool(rt.get("gen_running")),
+                "error": rt.get("gen_error") or "",
+                "log": log[since:],
+                "log_len": len(log),
+            }
+
+    # ---- Étape 4 : réglages d'envoi + lancement -----------------------------
+    def convoy_save_send_settings(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        cid = (p.get("campaign_id") or "").strip()
+        if not cid:
+            return {"ok": False, "error": "campaign_id requis"}
+        try:
+            from ..integrations import convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            if "mode" in p:
+                m = (p.get("mode") or "").strip()
+                if m in ("auto", "validation"):
+                    camp.mode = m
+            if "daily_cap" in p:
+                try: camp.daily_cap = max(1, int(p.get("daily_cap")))
+                except Exception: pass
+            if "delay_seconds" in p:
+                try: camp.delay_seconds = max(5, int(p.get("delay_seconds")))
+                except Exception: pass
+            if "schedule_at" in p:
+                camp.schedule_at = str(p.get("schedule_at") or "").strip()
+            camp.save()
+            return {"ok": True, "campaign": self._convoy_serialize(camp)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_approve_draft(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        cid = (p.get("campaign_id") or "").strip()
+        did = (p.get("draft_id") or "").strip()
+        if not cid or not did:
+            return {"ok": False, "error": "campaign_id + draft_id requis"}
+        try:
+            from ..integrations import convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            # Sauve d'abord les édits éventuels
+            if "subject" in p or "body" in p:
+                convoy_runner.update_draft(
+                    camp, did,
+                    subject=p.get("subject"),
+                    body=p.get("body"),
+                )
+                camp = convoy_runner.load_campaign(cid)  # reload après save
+            ok = convoy_runner.approve_draft(camp, did)
+            return {"ok": bool(ok)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_reject_draft(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        cid = (p.get("campaign_id") or "").strip()
+        did = (p.get("draft_id") or "").strip()
+        if not cid or not did:
+            return {"ok": False, "error": "campaign_id + draft_id requis"}
+        try:
+            from ..integrations import convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            ok = convoy_runner.reject_draft(camp, did)
+            return {"ok": bool(ok)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_update_draft(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        cid = (p.get("campaign_id") or "").strip()
+        did = (p.get("draft_id") or "").strip()
+        if not cid or not did:
+            return {"ok": False, "error": "campaign_id + draft_id requis"}
+        try:
+            from ..integrations import convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            ok = convoy_runner.update_draft(
+                camp, did,
+                subject=p.get("subject"),
+                body=p.get("body"),
+            )
+            return {"ok": bool(ok)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_approve_all(self, payload: dict | None = None) -> dict:
+        cid = ((payload or {}).get("campaign_id") or "").strip()
+        if not cid:
+            return {"ok": False, "error": "campaign_id requis"}
+        try:
+            from ..integrations import convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            n = convoy_runner.approve_all_pending(camp)
+            return {"ok": True, "approved": n}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_start_send(self, payload: dict | None = None) -> dict:
+        """Démarre l'envoi des mails approuvés en thread daemon."""
+        from datetime import datetime
+        cid = ((payload or {}).get("campaign_id") or "").strip()
+        if not cid:
+            return {"ok": False, "error": "campaign_id requis"}
+        try:
+            from ..integrations import convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if not camp:
+                return {"ok": False, "error": "Campagne introuvable"}
+            smtp_cfg = self._convoy_smtp_config()
+            if not smtp_cfg:
+                return {"ok": False, "error":
+                        "Compte mail non configuré — vérifie Réglages."}
+
+            rt = self._convoy_runtime_get(cid)
+            with self._convoy_lock:
+                if rt.get("send_running"):
+                    return {"ok": False, "error": "Envoi déjà en cours."}
+
+            # Mode auto : on approuve tout d'abord
+            if camp.mode == "auto":
+                convoy_runner.approve_all_pending(camp)
+                camp = convoy_runner.load_campaign(cid)  # reload
+
+            approved = [d for d in camp.drafts if d.status == "approved"]
+            if not approved:
+                return {"ok": False, "error":
+                        "Aucun brouillon approuvé. Valide-les un par un "
+                        "ou passe en mode auto."}
+
+            with self._convoy_lock:
+                rt["send_running"] = True
+                rt["send_log"] = []
+                rt["send_error"] = ""
+
+            def push(msg: str) -> None:
+                line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
+                with self._convoy_lock:
+                    rt["send_log"].append(line)
+                    if len(rt["send_log"]) > 500:
+                        del rt["send_log"][: len(rt["send_log"]) - 500]
+
+            def worker():
+                try:
+                    push(f"Envoi de {len(approved)} mail(s)…")
+                    convoy_runner.run_campaign_send(
+                        camp, smtp_cfg=smtp_cfg, progress=push,
+                        stop_flag=lambda: bool(rt.get("send_stop_flag")),
+                    )
+                    push("Terminé.")
+                except Exception as exc:
+                    with self._convoy_lock:
+                        rt["send_error"] = str(exc)
+                    push(f"✗ {exc}")
+                finally:
+                    with self._convoy_lock:
+                        rt["send_running"] = False
+                        rt["send_stop_flag"] = False
+
+            threading.Thread(
+                target=worker, daemon=True, name=f"ConvoySend-{cid[:8]}",
+            ).start()
+            return {"ok": True, "started": True, "approved": len(approved)}
+        except Exception as exc:
+            logger.exception("convoy_start_send")
+            return {"ok": False, "error": str(exc)}
+
+    def convoy_send_status(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        cid = (p.get("campaign_id") or "").strip()
+        since = int(p.get("since") or 0)
+        if not cid:
+            return {"ok": False, "error": "campaign_id requis"}
+        rt = self._convoy_runtime_get(cid)
+        with self._convoy_lock:
+            log = rt.get("send_log") or []
+            out = {
+                "ok": True,
+                "running": bool(rt.get("send_running")),
+                "error": rt.get("send_error") or "",
+                "log": log[since:],
+                "log_len": len(log),
+            }
+        # Renvoie aussi un snapshot des compteurs (utile à l'UI)
+        try:
+            from ..integrations import convoy_runner
+            camp = convoy_runner.load_campaign(cid)
+            if camp:
+                out["counts"] = camp.counts()
+        except Exception:
+            pass
+        return out
+
+    def convoy_stop_send(self, payload: dict | None = None) -> dict:
+        cid = ((payload or {}).get("campaign_id") or "").strip()
+        if not cid:
+            return {"ok": False, "error": "campaign_id requis"}
+        rt = self._convoy_runtime_get(cid)
+        with self._convoy_lock:
+            rt["send_stop_flag"] = True
+        return {"ok": True}

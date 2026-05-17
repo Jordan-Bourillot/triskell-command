@@ -35,98 +35,393 @@ const Phare = {
   },
 
   // ════════════════════════════════════════════════════════════════════
-  //  VUE 0 — HUB (page d'accueil somptueuse)
+  //  VUE 0 — HUB / SALLE DE CONTRÔLE (refonte 2026-05-17)
+  //  Objectif : voir en 5 secondes ce qui tourne, ce qui est prévu,
+  //  ce qui vient d'être fait. Les sous-vues sont accessibles en haut.
   // ════════════════════════════════════════════════════════════════════
   async _renderHub(container) {
     container.innerHTML = `
-      <section class="phare-hub animate-fade-in">
-        <!-- Faisceau lumineux derrière (SVG décoratif) -->
-        <div class="phare-beam" aria-hidden="true"></div>
+      <section class="phare-cr-page animate-fade-in">
+        <!-- Bandeau hero compact : phare miniature + titre -->
+        <header class="phare-cr-hero">
+          <div class="phare-cr-hero-left">
+            <div class="phare-cr-mini-phare" aria-hidden="true">${this._lighthouseSvg()}</div>
+            <div>
+              <div class="phare-kicker">VISIBILITÉ · SALLE DE CONTRÔLE</div>
+              <h1 class="phare-title">Le Phare.</h1>
+              <p class="phare-subtitle">Huit agents Claude qui veillent, optimisent et publient pendant que tu dors.</p>
+            </div>
+          </div>
+          <nav class="phare-cr-nav" aria-label="Sections du Phare">
+            <button class="phare-cr-navbtn" data-go="sites">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V8l7-5 7 5v13"/></svg>
+              <span>Nos sites</span>
+            </button>
+            <button class="phare-cr-navbtn" data-go="clients">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="4"/><path d="M3 21v-1a6 6 0 0 1 12 0v1"/></svg>
+              <span>Clients</span>
+            </button>
+            <button class="phare-cr-navbtn" data-go="agents">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 4.8L20 8l-4 3.6L17 17l-5-2.6L7 17l1-5.4L4 8l5.6-1.2z"/></svg>
+              <span>Agents</span>
+            </button>
+            <button class="phare-cr-navbtn phare-cr-navbtn--alert" data-go="prs">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11"/></svg>
+              <span>À valider</span>
+              <span class="phare-cr-navbadge" id="ph-cr-badge">—</span>
+            </button>
+            <button class="phare-cr-navbtn" data-go="reports">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+              <span>Bulletins</span>
+            </button>
+          </nav>
+        </header>
 
-        <!-- Colonne gauche : le phare en grand -->
-        <div class="phare-tower">
-          ${this._lighthouseSvg()}
-          <div class="phare-tower-caption">
-            <div class="phare-kicker">VISIBILITÉ</div>
-            <h1 class="phare-title">Le Phare.</h1>
-            <p class="phare-subtitle">Ton agence SEO autonome. Huit agents Claude qui veillent, optimisent et publient sur tes sites pendant que tu dors.</p>
+        <!-- ZONE 1 — EN CE MOMENT (grosse carte live) -->
+        <div class="phare-cr-live" id="ph-cr-live">
+          <div class="phare-cr-live-pulse"><span class="phare-cr-pulse-dot"></span></div>
+          <div class="phare-cr-live-body">
+            <div class="phare-cr-live-label">EN CE MOMENT</div>
+            <div class="phare-cr-live-text">Chargement de l'état du système…</div>
+            <div class="phare-cr-live-meta"></div>
           </div>
         </div>
 
-        <!-- Colonne droite : 3 grosses cartes-boutons -->
-        <div class="phare-cards">
-          <button class="phare-card" data-go="sites">
-            <div class="phare-card-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6M9 12h.01M15 12h.01"/>
-              </svg>
-            </div>
-            <div class="phare-card-body">
-              <div class="phare-card-title">Nos sites</div>
-              <div class="phare-card-desc">Les sites Triskell internes : surveiller, auditer, optimiser.</div>
-            </div>
-            <div class="phare-card-arrow">→</div>
-          </button>
+        <!-- ZONE 2 + 3 — Agenda + Feed en 2 colonnes -->
+        <div class="phare-cr-split">
+          <article class="phare-cr-zone">
+            <header class="phare-cr-zone-head">
+              <h2>Cette semaine</h2>
+              <span class="phare-cr-zone-sub">Le planning des 7 jours à venir</span>
+            </header>
+            <div class="phare-cr-agenda" id="ph-cr-agenda">${this._buildAgenda()}</div>
+          </article>
 
-          <button class="phare-card" data-go="clients">
-            <div class="phare-card-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="9" cy="8" r="4"/><path d="M3 21v-1a6 6 0 0 1 12 0v1"/>
-                <circle cx="17" cy="9" r="3"/><path d="M21 21v-.5a4.5 4.5 0 0 0-6-4.2"/>
-              </svg>
+          <article class="phare-cr-zone">
+            <header class="phare-cr-zone-head">
+              <h2>Dernières actions</h2>
+              <span class="phare-cr-zone-sub">Les 10 dernières missions terminées</span>
+            </header>
+            <div class="phare-cr-feed" id="ph-cr-feed">
+              <div class="phare-cr-feed-loading">Chargement du fil…</div>
             </div>
-            <div class="phare-card-body">
-              <div class="phare-card-title">Sites clients</div>
-              <div class="phare-card-desc">Les sites externes qu'on accompagne. Rapport mensuel automatique.</div>
-            </div>
-            <div class="phare-card-arrow">→</div>
-          </button>
-
-          <button class="phare-card" data-go="agents">
-            <div class="phare-card-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 2l2.4 4.8L20 8l-4 3.6L17 17l-5-2.6L7 17l1-5.4L4 8l5.6-1.2z"/>
-              </svg>
-            </div>
-            <div class="phare-card-body">
-              <div class="phare-card-title">Agents SEO</div>
-              <div class="phare-card-desc">Les huit champions Claude. Voir leur statut, lancer une mission.</div>
-            </div>
-            <div class="phare-card-arrow">→</div>
-          </button>
-
-          <!-- Liens secondaires (À valider, Bulletins) — discrets sous les 3 grosses cartes -->
-          <div class="phare-secondary">
-            <button class="phare-link" data-go="prs">
-              <span>À valider</span>
-              <span class="phare-link-meta" id="ph-prs-count">—</span>
-            </button>
-            <button class="phare-link" data-go="reports">
-              <span>Bulletins</span>
-              <span class="phare-link-meta">de l'Analyste</span>
-            </button>
-          </div>
+          </article>
         </div>
       </section>
     `;
-    // Wiring
+    // Wiring de la navigation
     container.querySelectorAll('[data-go]').forEach(btn => {
       btn.onclick = () => this._go(btn.dataset.go);
     });
-    // Compteur des modifs en attente de validation (chargement non-bloquant)
-    this._loadPendingCount();
+    // Charge le pulse en arrière-plan + planifie un refresh toutes les 30s
+    this._refreshControlRoom();
+    if (this._crTimer) clearInterval(this._crTimer);
+    this._crTimer = setInterval(() => {
+      // Ne tourne que si la vue Hub est encore affichée
+      if (this.view === 'hub' && document.getElementById('ph-cr-live')) {
+        this._refreshControlRoom();
+      } else {
+        clearInterval(this._crTimer);
+        this._crTimer = null;
+      }
+    }, 30000);
   },
 
-  async _loadPendingCount() {
+  async _refreshControlRoom() {
     if (!App.api) return;
+    let pulse = null;
     try {
-      const data = await App.api.phare_pending_actions();
-      const el = document.getElementById('ph-prs-count');
-      if (!el) return;
-      const n = (data && data.ok) ? (data.actions || []).length : 0;
-      el.textContent = n === 0 ? 'rien à valider' : (n === 1 ? '1 modif en attente' : `${n} modifs en attente`);
-      if (n > 0) el.style.color = 'hsl(var(--warning))';
-    } catch (e) { /* silencieux */ }
+      pulse = await App.api.phare_dashboard_pulse();
+    } catch (e) { pulse = null; }
+    if (!pulse || !pulse.ok) {
+      this._renderCrLive({ state: 'error' });
+      this._renderCrFeed([], {});
+      return;
+    }
+    const sched = pulse.scheduler || {};
+    const recent = pulse.recent_actions || [];
+    const sitesMap = pulse.sites_map || {};
+    const pending = pulse.pending_count || 0;
+    // Badge "À valider"
+    const badge = document.getElementById('ph-cr-badge');
+    if (badge) {
+      badge.textContent = pending === 0 ? '0' : String(pending);
+      badge.classList.toggle('phare-cr-navbadge--hot', pending > 0);
+    }
+    // Live + Feed
+    this._renderCrLive({
+      running: !!sched.running,
+      lastTickAt: sched.last_run_at,
+      lastResult: sched.last_run_result,
+      recent,
+      sitesMap,
+    });
+    this._renderCrFeed(recent, sitesMap);
+  },
+
+  _renderCrLive(opts) {
+    const el = document.getElementById('ph-cr-live');
+    if (!el) return;
+    const body = el.querySelector('.phare-cr-live-body');
+    if (!body) return;
+    if (opts.state === 'error') {
+      el.classList.remove('phare-cr-live--active', 'phare-cr-live--idle');
+      el.classList.add('phare-cr-live--error');
+      body.innerHTML = `
+        <div class="phare-cr-live-label">SYSTÈME</div>
+        <div class="phare-cr-live-text">Impossible de lire l'état des agents.</div>
+        <div class="phare-cr-live-meta">Le scheduler est peut-être en pause. Recharge la page ou ouvre les Réglages.</div>
+      `;
+      return;
+    }
+    const lastTick = opts.lastTickAt ? new Date(opts.lastTickAt) : null;
+    const now = new Date();
+    const ageMin = lastTick ? Math.floor((now - lastTick) / 60000) : null;
+    // "Active" si tick < 5 min
+    const isActive = !!opts.running && lastTick && ageMin !== null && ageMin < 5;
+    el.classList.toggle('phare-cr-live--active', isActive);
+    el.classList.toggle('phare-cr-live--idle', !isActive && !!opts.running);
+    el.classList.toggle('phare-cr-live--off', !opts.running);
+    el.classList.remove('phare-cr-live--error');
+
+    if (!opts.running) {
+      body.innerHTML = `
+        <div class="phare-cr-live-label">SCHEDULER À L'ARRÊT</div>
+        <div class="phare-cr-live-text">Aucun agent n'est en service.</div>
+        <div class="phare-cr-live-meta">Ouvre l'onglet Le Phare dans Triskell Command pour démarrer le robot.</div>
+      `;
+      return;
+    }
+    if (isActive) {
+      // Dernière action vue dans le résultat du tick (si dispo)
+      const actions = (opts.lastResult && opts.lastResult.actions_done) || [];
+      const last = actions[actions.length - 1] || null;
+      const mission = last ? (last.mission || '?') : '—';
+      const siteId = last ? (last.site_id || last.site || '') : '';
+      const siteName = siteId ? (opts.sitesMap[siteId] || siteId) : '';
+      body.innerHTML = `
+        <div class="phare-cr-live-label">EN COURS</div>
+        <div class="phare-cr-live-text">
+          ${last
+            ? `Mission <strong>« ${this._esc(this._missionLabel(mission))} »</strong>${siteName ? ` sur <strong>${this._esc(siteName)}</strong>` : ''}`
+            : `Le scheduler vient de tourner — vérification du planning…`}
+        </div>
+        <div class="phare-cr-live-meta">Dernier passage il y a ${ageMin <= 0 ? 'quelques secondes' : `${ageMin} min`}</div>
+      `;
+      return;
+    }
+    // Idle : calculer la prochaine mission planifiée
+    const next = this._nextScheduledMission();
+    body.innerHTML = `
+      <div class="phare-cr-live-label">TOUT EST CALME</div>
+      <div class="phare-cr-live-text">${next
+        ? `Prochaine mission : <strong>${this._esc(next.label)}</strong> ${this._esc(next.when)}`
+        : `Aucune mission planifiée dans la semaine.`}</div>
+      <div class="phare-cr-live-meta">Dernier passage du scheduler ${ageMin === null ? 'inconnu' : (ageMin < 60 ? `il y a ${ageMin} min` : `il y a ${Math.floor(ageMin/60)} h`)}</div>
+    `;
+  },
+
+  _renderCrFeed(actions, sitesMap) {
+    const el = document.getElementById('ph-cr-feed');
+    if (!el) return;
+    if (!actions.length) {
+      el.innerHTML = `<div class="phare-cr-feed-empty">Pas encore d'historique. Lance une mission depuis « Agents » pour démarrer.</div>`;
+      return;
+    }
+    const items = actions.slice(0, 10).map(a => {
+      const mission = this._missionLabel(a.mission || a.action_type || a.type || '?');
+      const site = sitesMap[a.site_id] || a.site_id || '';
+      const status = (a.status || '').toLowerCase();
+      const statusInfo = this._statusInfo(status);
+      const when = this._relativeTime(a.created_at || a.updated_at);
+      return `
+        <div class="phare-cr-feed-item">
+          <span class="phare-cr-feed-dot phare-cr-feed-dot--${statusInfo.tone}" title="${this._esc(statusInfo.label)}"></span>
+          <div class="phare-cr-feed-body">
+            <div class="phare-cr-feed-line">
+              <strong>${this._esc(mission)}</strong>
+              ${site ? `· <span class="phare-cr-feed-site">${this._esc(site)}</span>` : ''}
+            </div>
+            <div class="phare-cr-feed-meta">${this._esc(when)} · ${this._esc(statusInfo.label)}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    el.innerHTML = items;
+  },
+
+  // ───────── Helpers Salle de Contrôle ─────────
+  _missionLabel(key) {
+    const map = {
+      audit: 'Audit technique',
+      keywords: 'Veille mots-clés',
+      tisseur: 'Maillage interne',
+      analyst: 'Bulletin Analyste',
+      analyste: 'Bulletin Analyste',
+      backlinks: 'Recherche backlinks',
+      strategy: 'Plan stratégique',
+      optim_onpage: 'Optimisation on-page',
+      ctr_optim: 'Optimisation CTR',
+      snippet_hunt: 'Chasse aux extraits enrichis',
+      geo_check: 'Surveillance GEO (IA)',
+      cannibalization: 'Anti-cannibalisation',
+      zombies: 'Pages zombies',
+      image_seo: 'SEO images',
+      refresh: 'Rafraîchissement contenu',
+      competitors: 'Suivi concurrents',
+      rollback_check: 'Vérif post-merge',
+      sitemap: 'Mise à jour sitemap',
+      algo_watch: "Veille algo Google",
+      ab_record: 'Mesure A/B test',
+      brand_scan: 'Surveillance marque',
+      outreach_draft: 'Préparation outreach',
+      outreach_follow: 'Relance outreach',
+      local_seo: 'SEO local (GBP)',
+      cro: 'Analyse CRO Clarity',
+      bulletin_pdf: 'Bulletin PDF mensuel',
+      full_cycle: 'Cycle complet',
+    };
+    return map[key] || key;
+  },
+
+  _statusInfo(status) {
+    const map = {
+      merged: { tone: 'ok', label: 'Validée et publiée' },
+      ok: { tone: 'ok', label: 'Terminée' },
+      done: { tone: 'ok', label: 'Terminée' },
+      pending_review: { tone: 'warn', label: 'En attente de ta validation' },
+      preview: { tone: 'warn', label: 'Aperçu généré' },
+      draft: { tone: 'warn', label: 'Brouillon prêt' },
+      rejected: { tone: 'bad', label: 'Refusée' },
+      expired: { tone: 'bad', label: 'Expirée' },
+      error: { tone: 'bad', label: 'Échec' },
+    };
+    return map[status] || { tone: 'neutral', label: status || 'Inconnue' };
+  },
+
+  _relativeTime(iso) {
+    if (!iso) return 'il y a un instant';
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    const diffMin = Math.floor((Date.now() - d) / 60000);
+    if (diffMin < 1) return "à l'instant";
+    if (diffMin < 60) return `il y a ${diffMin} min`;
+    const diffH = Math.floor(diffMin / 60);
+    if (diffH < 24) return `il y a ${diffH} h`;
+    const diffJ = Math.floor(diffH / 24);
+    if (diffJ === 1) return 'hier';
+    if (diffJ < 7) return `il y a ${diffJ} jours`;
+    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+  },
+
+  // Planning hebdo en dur (reflète scheduler._tick côté Python)
+  _WEEKLY_PLAN: [
+    // day: 0=dim, 1=lun, ..., 6=sam ; mission lisible humain
+    { day: 1, hour: 6,  label: 'Audit technique',         site: 'roulement, 1 site/h jusqu\'à 22h' },
+    { day: 1, hour: 7,  label: 'Veille mots-clés',        site: 'tous les sites' },
+    { day: 1, hour: 9,  label: 'Maillage interne',        site: 'tous les sites' },
+    { day: 4, hour: 7,  label: 'Veille mots-clés',        site: 'tous les sites' },
+    { day: 2, hour: 10, label: 'Optimisation on-page',    site: '1 site / cycle' },
+    { day: 3, hour: 9,  label: 'Recherche backlinks',     site: '1 site / cycle' },
+    { day: 3, hour: 10, label: 'Optimisation on-page',    site: '1 site / cycle' },
+    { day: 5, hour: 10, label: 'Optimisation on-page',    site: '1 site / cycle' },
+    { day: 2, hour: 9,  label: 'Surveillance marque',     site: '1 site' },
+    { day: 3, hour: 9,  label: 'Préparation outreach',    site: '1 site' },
+    { day: 4, hour: 9,  label: 'SEO local (GBP)',         site: 'sites avec place_id' },
+    { day: 5, hour: 9,  label: 'Analyse CRO Clarity',     site: '1 site' },
+    // Quotidien
+    { dailyHour: 6, label: "Veille algo Google", site: 'global' },
+    { dailyHour: 7, label: 'Mesure A/B test',    site: 'global' },
+    { dailyHour: 8, label: 'Bulletin Analyste',  site: 'top 3 sites' },
+    { dailyHour: 10, label: 'Relance outreach',  site: 'global' },
+    // Mensuel (1er du mois)
+    { monthly: true, hour: 9,  label: "Plan stratégique (Opus)", site: 'écosystème complet' },
+    { monthly: true, hour: 10, label: 'Bulletin PDF mensuel',    site: 'tous les sites' },
+  ],
+
+  _buildAgenda() {
+    const days = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+    const now = new Date();
+    const today = now.getDay();
+    const currentHour = now.getHours();
+    const out = [];
+    for (let i = 0; i < 7; i++) {
+      const targetDay = (today + i) % 7;
+      const dateObj = new Date(now);
+      dateObj.setDate(now.getDate() + i);
+      const isFirstOfMonth = dateObj.getDate() === 1;
+      // Construit la liste des missions pour ce jour
+      const events = [];
+      for (const ev of this._WEEKLY_PLAN) {
+        if (ev.monthly) {
+          if (isFirstOfMonth) events.push({ hour: ev.hour, label: ev.label, site: ev.site });
+          continue;
+        }
+        if (ev.dailyHour !== undefined) {
+          events.push({ hour: ev.dailyHour, label: ev.label, site: ev.site });
+          continue;
+        }
+        if (ev.day === targetDay) {
+          events.push({ hour: ev.hour, label: ev.label, site: ev.site });
+        }
+      }
+      events.sort((a, b) => a.hour - b.hour);
+      const headerLabel = i === 0 ? "Aujourd'hui" : (i === 1 ? 'Demain' : `${days[targetDay]} ${dateObj.getDate()}`);
+      const evHtml = events.length
+        ? events.map(ev => {
+            const past = (i === 0 && ev.hour < currentHour);
+            return `
+              <div class="phare-cr-agenda-item${past ? ' phare-cr-agenda-item--past' : ''}">
+                <span class="phare-cr-agenda-hour">${String(ev.hour).padStart(2, '0')}h</span>
+                <span class="phare-cr-agenda-label">${this._esc(ev.label)}</span>
+                <span class="phare-cr-agenda-site">${this._esc(ev.site)}</span>
+              </div>`;
+          }).join('')
+        : `<div class="phare-cr-agenda-empty">Rien de prévu</div>`;
+      out.push(`
+        <div class="phare-cr-agenda-day${i === 0 ? ' phare-cr-agenda-day--today' : ''}">
+          <div class="phare-cr-agenda-day-header">${headerLabel}</div>
+          <div class="phare-cr-agenda-day-body">${evHtml}</div>
+        </div>
+      `);
+    }
+    return out.join('');
+  },
+
+  _nextScheduledMission() {
+    const now = new Date();
+    const todayDow = now.getDay();
+    const currentHour = now.getHours();
+    let best = null;
+    for (let i = 0; i < 8; i++) {
+      const dow = (todayDow + i) % 7;
+      const date = new Date(now);
+      date.setDate(now.getDate() + i);
+      const isFirstOfMonth = date.getDate() === 1;
+      const candidates = [];
+      for (const ev of this._WEEKLY_PLAN) {
+        if (ev.monthly) {
+          if (isFirstOfMonth) candidates.push({ hour: ev.hour, label: ev.label });
+          continue;
+        }
+        if (ev.dailyHour !== undefined) {
+          candidates.push({ hour: ev.dailyHour, label: ev.label });
+          continue;
+        }
+        if (ev.day === dow) candidates.push({ hour: ev.hour, label: ev.label });
+      }
+      candidates.sort((a, b) => a.hour - b.hour);
+      for (const c of candidates) {
+        if (i === 0 && c.hour <= currentHour) continue;
+        best = { label: c.label, when: i === 0
+          ? `aujourd'hui à ${String(c.hour).padStart(2, '0')}h`
+          : (i === 1 ? `demain à ${String(c.hour).padStart(2, '0')}h`
+                     : `${date.toLocaleDateString('fr-FR', { weekday: 'long' })} à ${String(c.hour).padStart(2, '0')}h`),
+        };
+        return best;
+      }
+    }
+    return best;
   },
 
   _lighthouseSvg() {
