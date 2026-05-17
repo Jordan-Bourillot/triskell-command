@@ -2456,14 +2456,20 @@ class Api:
             data = json.loads(apps_json.read_text(encoding="utf-8"))
         except Exception as exc:
             return {"ok": False, "error": f"parse: {exc}"}
+
+        # Charge les overrides utilisateur (produits desactives par toggle)
+        from ..integrations import catalog_overrides
+        disabled_ids = catalog_overrides.get_disabled_ids()
+
         out = []
         for app in data.get("apps", []):
             slug_info = ID_TO_SLUG.get(app.get("id"))
             if not slug_info:
                 continue
             slug, ext = slug_info
+            app_id = app.get("id")
             out.append({
-                "id":          app.get("id"),
+                "id":          app_id,
                 "name":        app.get("name"),
                 "tagline":     app.get("tagline", ""),
                 "category":    app.get("category", ""),
@@ -2490,8 +2496,26 @@ class Api:
                 "links":       app.get("links", []) or [],
                 "service":     app.get("service", {}) or {},
                 "plans":       app.get("plans", []) or [],
+                # Etat actif/inactif (toggle UI). Par defaut actif.
+                "is_active":   app_id not in disabled_ids,
             })
-        return {"ok": True, "apps": out}
+        return {"ok": True, "apps": out, "disabled_ids": sorted(disabled_ids)}
+
+    def catalog_set_active(self, payload: dict) -> dict:
+        """Active ou desactive un produit du catalogue (toggle UI).
+
+        Payload : {"id": "...", "active": true|false}
+        Quand un produit est inactif, il n'apparait plus dans le picker
+        des mails ni dans les suggestions de la prospection IA.
+        """
+        from ..integrations import catalog_overrides
+        p = payload or {}
+        pid = (p.get("id") or "").strip()
+        active = bool(p.get("active", True))
+        if not pid:
+            return {"ok": False, "error": "no_id"}
+        ok = catalog_overrides.set_disabled(pid, disabled=not active)
+        return {"ok": ok, "id": pid, "active": active}
 
     def open_url(self, payload: dict) -> dict:
         """Ouvre une URL dans le navigateur par défaut (depuis le launcher)."""

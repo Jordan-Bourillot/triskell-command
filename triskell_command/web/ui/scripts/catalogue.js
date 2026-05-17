@@ -118,10 +118,14 @@ const Catalogue = {
   // ---- Chargement & fusion sites + apps.json ----
   async _load() {
     let apps = [];
+    let disabledIds = new Set();
     if (App && App.api && typeof App.api.get_apps_catalog === 'function') {
       try {
         const data = await App.api.get_apps_catalog();
-        if (data && data.ok) apps = data.apps || [];
+        if (data && data.ok) {
+          apps = data.apps || [];
+          disabledIds = new Set(data.disabled_ids || []);
+        }
       } catch (e) { console.warn('catalogue: get_apps_catalog failed', e); }
     }
     // Normalise les apps pour avoir les mêmes champs que les sites hardcodés
@@ -138,9 +142,43 @@ const Catalogue = {
       plans:       a.plans || [],
       // URL d'ouverture publique : service.url > buy_url
       buy_url:     (a.service && a.service.url) || a.buy_url || '',
+      // is_active vient du backend ; par sécurité si manquant → true
+      is_active:   a.is_active !== false,
     }));
-    this._items = [...this.SITES, ...apps];
+    // Applique aussi les overrides aux sites hardcodés (Lagriffe, RankUs, WoW)
+    const sites = this.SITES.map(s => ({ ...s, is_active: !disabledIds.has(s.id) }));
+    this._items = [...sites, ...apps];
+    this._disabledIds = disabledIds;
     return this._items;
+  },
+
+  // ---- Toggle actif/inactif d'un produit ----
+  async _toggleActive(productId, makeActive) {
+    if (!App || !App.api || typeof App.api.catalog_set_active !== 'function') return;
+    // Optimistic update : on met à jour la mémoire avant la réponse serveur
+    const it = (this._items || []).find(x => x.id === productId);
+    if (it) it.is_active = makeActive;
+    if (this._disabledIds) {
+      if (makeActive) this._disabledIds.delete(productId);
+      else this._disabledIds.add(productId);
+    }
+    this._renderGrid();
+    try {
+      const r = await App.api.catalog_set_active({ id: productId, active: makeActive });
+      if (!r || !r.ok) {
+        // Rollback en cas d'erreur
+        if (it) it.is_active = !makeActive;
+        if (this._disabledIds) {
+          if (makeActive) this._disabledIds.add(productId);
+          else this._disabledIds.delete(productId);
+        }
+        this._renderGrid();
+      }
+    } catch (e) {
+      console.warn('catalog_set_active failed', e);
+      if (it) it.is_active = !makeActive;
+      this._renderGrid();
+    }
   },
 
   // ---- Rendu principal de la vue Catalogue ----
@@ -198,6 +236,15 @@ const Catalogue = {
     grid.querySelectorAll('[data-cat-id]').forEach(el => {
       el.onclick = () => this._openDetail(el.dataset.catId);
     });
+    grid.querySelectorAll('[data-toggle-id]').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const id = btn.dataset.toggleId;
+        const wasActive = btn.dataset.toggleActive === '1';
+        this._toggleActive(id, !wasActive);
+      };
+    });
   },
 
   _tile(it) {
@@ -218,25 +265,48 @@ const Catalogue = {
                   ? `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-success/15 text-success">Service</span>`
                   : '')));
 
+    const isActive = it.is_active !== false;
+    const toggleOn = isActive ? 'on' : 'off';
+    const toggle = `
+      <button data-toggle-id="${this._esc(it.id)}"
+              data-toggle-active="${isActive ? '1' : '0'}"
+              title="${isActive ? 'Cliquer pour désactiver' : 'Cliquer pour activer'} — un produit désactivé n'apparaît plus dans les mails ni dans la prospection IA"
+              class="catalog-toggle catalog-toggle-${toggleOn}"
+              style="position:absolute;top:10px;right:10px;width:36px;height:20px;border-radius:999px;border:none;cursor:pointer;
+                     background:${isActive ? '#10b981' : '#9ca3af'};
+                     transition:background 0.15s ease;
+                     padding:0;">
+        <span style="position:absolute;top:2px;left:${isActive ? '18px' : '2px'};
+                     width:16px;height:16px;border-radius:999px;background:#fff;
+                     transition:left 0.15s ease;
+                     box-shadow:0 1px 2px rgba(0,0,0,0.25);"></span>
+      </button>
+    `;
+
+    const dim = isActive ? '' : 'opacity:0.45;';
+
     return `
-      <button data-cat-id="${this._esc(it.id)}"
-              class="text-left bg-surface-elevated rounded-2xl p-4
-                     border border-border hover:border-accent
-                     transition-all duration-200 hover:shadow-soft
-                     focus:outline-none">
-        <div class="flex items-start gap-3 mb-2">
-          ${visual}
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 flex-wrap mb-0.5">
-              <div class="font-semibold text-[15px] leading-tight">${this._esc(it.name || '')}</div>
-              ${badge}
+      <div style="position:relative;${dim}">
+        <button data-cat-id="${this._esc(it.id)}"
+                class="text-left bg-surface-elevated rounded-2xl p-4 w-full
+                       border border-border hover:border-accent
+                       transition-all duration-200 hover:shadow-soft
+                       focus:outline-none">
+          <div class="flex items-start gap-3 mb-2 pr-10">
+            ${visual}
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap mb-0.5">
+                <div class="font-semibold text-[15px] leading-tight">${this._esc(it.name || '')}</div>
+                ${badge}
+              </div>
             </div>
           </div>
-        </div>
-        <p class="text-xs text-text-secondary line-clamp-2 leading-snug">
-          ${this._esc(it.tagline || '')}
-        </p>
-      </button>
+          <p class="text-xs text-text-secondary line-clamp-2 leading-snug">
+            ${this._esc(it.tagline || '')}
+          </p>
+        </button>
+        ${toggle}
+      </div>
     `;
   },
 
@@ -404,7 +474,9 @@ const Catalogue = {
    */
   async pickProduct(callback) {
     await this.list();
-    const items = this._items || [];
+    // Exclut les produits desactives du picker — ils ne doivent plus
+    // apparaitre dans les mails que Jordan compose.
+    const items = (this._items || []).filter(it => it.is_active !== false);
 
     let q = '';
     let cat = 'all';
