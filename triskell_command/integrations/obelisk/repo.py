@@ -237,6 +237,87 @@ def delete_creator(prospect_id: str) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+def delete_creators_bulk(prospect_ids: list[str]) -> dict:
+    """Supprime plusieurs créateurs d'un coup. Renvoie le nombre supprimé."""
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré", "deleted": 0}
+    ids = [str(i).strip() for i in (prospect_ids or []) if i]
+    if not ids:
+        return {"ok": True, "deleted": 0}
+    try:
+        # Le client Supabase Python ne supporte pas always le batch in_().
+        # On chunke par 50 pour rester sous la limite d'URL.
+        deleted = 0
+        for i in range(0, len(ids), 50):
+            chunk = ids[i:i + 50]
+            sb.table("prospects").delete().in_("id", chunk).execute()
+            deleted += len(chunk)
+        return {"ok": True, "deleted": deleted}
+    except Exception as exc:
+        logger.warning("obelisk.delete_creators_bulk: %s", exc)
+        return {"ok": False, "error": str(exc), "deleted": 0}
+
+
+def delete_creators_filtered(*,
+                              platform: str = "",
+                              status: str = "",
+                              min_score: int = 0,
+                              city: str = "",
+                              q: str = "",
+                              has_email: Optional[bool] = None) -> dict:
+    """Supprime tous les créateurs qui matchent les filtres donnés.
+    Réutilise list_creators pour récupérer les IDs, puis delete_bulk.
+
+    Renvoie {ok, deleted, matched}.
+    """
+    # On récupère par paquets jusqu'à épuisement
+    ids_total: list[str] = []
+    offset = 0
+    page_size = 200
+    while True:
+        page = list_creators(platform=platform, status=status,
+                              min_score=min_score, city=city, q=q,
+                              has_email=has_email,
+                              limit=page_size, offset=offset)
+        rows = (page or {}).get("rows") or []
+        if not rows:
+            break
+        ids_total.extend(r["id"] for r in rows if r.get("id"))
+        if len(rows) < page_size:
+            break
+        offset += page_size
+        if offset > 10_000:   # garde-fou
+            break
+    if not ids_total:
+        return {"ok": True, "deleted": 0, "matched": 0}
+    res = delete_creators_bulk(ids_total)
+    return {"ok": res.get("ok", False),
+            "deleted": res.get("deleted", 0),
+            "matched": len(ids_total),
+            "error":   res.get("error", "")}
+
+
+def delete_all_creators() -> dict:
+    """Supprime TOUS les créateurs (table prospects). Garde-fou côté API :
+    cette méthode doit être appelée seulement après double confirmation
+    utilisateur. La table est purgée intégralement (workspace-scoped via
+    les RLS Supabase normalement)."""
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré", "deleted": 0}
+    try:
+        # Count avant pour les stats
+        c = sb.table("prospects").select("id", count="exact").limit(1).execute()
+        before = int(c.count or 0)
+        # Delete all avec un filtre toujours vrai (id n'est jamais vide)
+        sb.table("prospects").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+        return {"ok": True, "deleted": before}
+    except Exception as exc:
+        logger.warning("obelisk.delete_all_creators: %s", exc)
+        return {"ok": False, "error": str(exc), "deleted": 0}
+
+
 # ---------------------------------------------------------------------------
 # Config Obelisk par user (clés API, IA, préférences, catalogue d'offres)
 # Stockée dans une table dédiée pour rester user-scoped propre.

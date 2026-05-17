@@ -2770,6 +2770,52 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def obelisk_delete_creators_bulk(self, payload: dict) -> dict:
+        """Suppression de plusieurs créateurs par leurs IDs."""
+        ids = (payload or {}).get("ids") or []
+        if not isinstance(ids, list) or not ids:
+            return {"ok": False, "error": "ids manquants"}
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.delete_creators_bulk(ids)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "deleted": 0}
+
+    def obelisk_delete_creators_filtered(self, payload: dict | None = None) -> dict:
+        """Supprime tous les créateurs qui matchent les filtres en cours.
+        Filtres : platform, status, min_score, city, q, has_email."""
+        p = payload or {}
+        has_email = p.get("has_email")
+        if has_email == "yes":   has_email = True
+        elif has_email == "no":  has_email = False
+        else:                    has_email = None
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.delete_creators_filtered(
+                platform=str(p.get("platform") or "").strip(),
+                status=str(p.get("status") or "").strip(),
+                min_score=int(p.get("min_score") or 0),
+                city=str(p.get("city") or "").strip(),
+                q=str(p.get("q") or "").strip(),
+                has_email=has_email,
+            )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "deleted": 0}
+
+    def obelisk_delete_all_creators(self, payload: dict | None = None) -> dict:
+        """⚠ Supprime TOUS les créateurs. Le client doit avoir affiché une
+        double confirmation utilisateur avant de l'appeler."""
+        confirm = (payload or {}).get("confirm") or ""
+        if confirm != "DELETE_ALL":
+            return {"ok": False,
+                    "error": "Confirmation manquante (payload.confirm doit valoir 'DELETE_ALL')",
+                    "deleted": 0}
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.delete_all_creators()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "deleted": 0}
+
     def obelisk_stats(self, payload: dict | None = None) -> dict:
         try:
             from ..integrations.obelisk import repo as r

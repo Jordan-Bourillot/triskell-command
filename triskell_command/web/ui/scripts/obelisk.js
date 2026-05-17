@@ -402,6 +402,46 @@ const Obelisk = {
         font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 11.5px;
         white-space: pre-wrap; color: hsl(var(--text-muted));
       }
+      /* Barre d'action bulk (suppression sélection / filtrés / tout) */
+      .ob-bulkbar {
+        position: sticky; top: 0; z-index: 5;
+        margin-bottom: 8px;
+        background: hsl(var(--surface));
+        border: 1px solid hsl(var(--border));
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      .ob-bulkbar-inner {
+        display: flex; align-items: center; gap: 10px;
+        padding: 10px 14px; flex-wrap: wrap;
+      }
+      .ob-bulkbar-info {
+        font-size: 13px; color: hsl(var(--text-secondary));
+      }
+      .ob-bulkbar-btn {
+        font-size: 12.5px !important; padding: 7px 12px !important;
+        white-space: nowrap;
+      }
+      .ob-bulkbar-danger {
+        background: hsl(var(--danger)); color: white; border: 0;
+      }
+      .ob-bulkbar-danger:hover {
+        background: hsl(var(--danger) / 0.85);
+      }
+      .ob-bulkbar-danger-soft {
+        background: hsl(var(--danger) / 0.1); color: hsl(var(--danger));
+        border: 1px solid hsl(var(--danger) / 0.4);
+      }
+      .ob-bulkbar-danger-soft:hover {
+        background: hsl(var(--danger) / 0.18);
+      }
+      .ob-table tr.is-selected {
+        background: hsl(var(--accent) / 0.08) !important;
+      }
+      .ob-table input[type="checkbox"] {
+        accent-color: hsl(var(--accent));
+        cursor: pointer;
+      }
 
       @media (max-width: 720px) {
         .ob-title { font-size: 22px; }
@@ -590,9 +630,15 @@ const Obelisk = {
           <div style="font-size: 13px; color: hsl(var(--text-muted));">Élargis tes filtres ou lance une nouvelle recherche.</div>
         </div>`;
     } else {
+      // Init de la sélection en mémoire si pas déjà fait
+      if (!(this.state.selectedIds instanceof Set)) {
+        this.state.selectedIds = new Set();
+      }
       wrap.innerHTML = `
+        <div id="ob-bulkbar" class="ob-bulkbar" hidden></div>
         <table class="ob-table">
           <thead><tr>
+            <th style="width:40px;"><input type="checkbox" id="ob-select-all" title="Tout sélectionner (page)"></th>
             <th>Créateur</th><th>Plateforme</th><th>Email</th><th>Score</th><th>Ville</th><th>Statut</th>
           </tr></thead>
           <tbody>
@@ -600,9 +646,11 @@ const Obelisk = {
           </tbody>
         </table>
       `;
+      this._bindRowSelection();
+      this._renderBulkbar();
       wrap.querySelectorAll('[data-ob-open]').forEach(tr => {
         tr.onclick = (ev) => {
-          if (ev.target.closest('select, button, a')) return;
+          if (ev.target.closest('select, button, a, input[type="checkbox"]')) return;
           this.openCreator(tr.dataset.obOpen);
         };
       });
@@ -636,8 +684,12 @@ const Obelisk = {
     const score = Math.max(0, Math.min(100, p.score || 0));
     const scoreVar = score >= 70 ? '--success' : score >= 40 ? '--warning' : '--text-muted';
     const status = p.status || 'new';
+    const sel = (this.state.selectedIds instanceof Set) && this.state.selectedIds.has(p.id);
     return `
-      <tr class="is-clickable" data-ob-open="${this._esc(p.id)}">
+      <tr class="is-clickable ${sel ? 'is-selected' : ''}" data-ob-open="${this._esc(p.id)}">
+        <td style="width:40px;">
+          <input type="checkbox" data-ob-select="${this._esc(p.id)}" ${sel ? 'checked' : ''}>
+        </td>
         <td>
           <div style="font-weight: 600; color: hsl(var(--text));">${this._esc(p.name || p.handle || p.legal_name || '(sans nom)')}</div>
           ${p.handle ? `<div style="font-size: 11.5px; color: hsl(var(--text-muted)); margin-top: 2px;">@${this._esc(p.handle)}</div>` : ''}
@@ -658,6 +710,147 @@ const Obelisk = {
         </td>
       </tr>
     `;
+  },
+
+  // ---- Sélection multiple + suppression en masse ----
+  _bindRowSelection() {
+    const wrap = document.getElementById('ob-table-wrap');
+    if (!wrap) return;
+    const all = wrap.querySelector('#ob-select-all');
+    if (all) {
+      // Si tous les rows de la page sont déjà sélectionnés, coche-le
+      const pageIds = this.state.rows.map(r => r.id).filter(Boolean);
+      const allSelected = pageIds.length > 0 && pageIds.every(
+        id => this.state.selectedIds.has(id));
+      all.checked = allSelected;
+      all.onchange = (e) => {
+        e.stopPropagation();
+        const checked = all.checked;
+        pageIds.forEach(id => {
+          if (checked) this.state.selectedIds.add(id);
+          else this.state.selectedIds.delete(id);
+        });
+        // Re-render rapide pour mettre à jour les checkboxes + bulkbar
+        wrap.querySelectorAll('[data-ob-select]').forEach(cb => {
+          cb.checked = this.state.selectedIds.has(cb.dataset.obSelect);
+          cb.closest('tr').classList.toggle('is-selected', cb.checked);
+        });
+        this._renderBulkbar();
+      };
+    }
+    wrap.querySelectorAll('[data-ob-select]').forEach(cb => {
+      cb.onclick = (e) => e.stopPropagation();
+      cb.onchange = () => {
+        const id = cb.dataset.obSelect;
+        if (cb.checked) this.state.selectedIds.add(id);
+        else this.state.selectedIds.delete(id);
+        cb.closest('tr').classList.toggle('is-selected', cb.checked);
+        if (all) {
+          const pageIds = this.state.rows.map(r => r.id).filter(Boolean);
+          all.checked = pageIds.every(i => this.state.selectedIds.has(i));
+        }
+        this._renderBulkbar();
+      };
+    });
+  },
+
+  _renderBulkbar() {
+    const bar = document.getElementById('ob-bulkbar');
+    if (!bar) return;
+    const n = this.state.selectedIds ? this.state.selectedIds.size : 0;
+    const total = this.state.total || 0;
+    const hasFilters = Object.values(this.state.filters || {}).some(
+      v => v !== '' && v !== 0);
+    bar.hidden = false;
+    bar.innerHTML = `
+      <div class="ob-bulkbar-inner">
+        <span class="ob-bulkbar-info">
+          ${n > 0
+            ? `<strong>${n}</strong> sélectionné${n > 1 ? 's' : ''}`
+            : `<strong>${total}</strong> créateur${total > 1 ? 's' : ''} au total`}
+        </span>
+        <span style="flex:1;"></span>
+        ${n > 0 ? `
+          <button class="btn btn-secondary ob-bulkbar-btn" data-ob-bulk="clear">
+            Tout désélectionner
+          </button>
+          <button class="btn ob-bulkbar-btn ob-bulkbar-danger" data-ob-bulk="delete-selected">
+            🗑 Supprimer la sélection (${n})
+          </button>
+        ` : `
+          ${hasFilters ? `
+            <button class="btn btn-secondary ob-bulkbar-btn" data-ob-bulk="delete-filtered">
+              Supprimer les résultats filtrés
+            </button>` : ''}
+          <button class="btn ob-bulkbar-btn ob-bulkbar-danger-soft" data-ob-bulk="delete-all">
+            ⚠ Tout supprimer
+          </button>
+        `}
+      </div>
+    `;
+    bar.querySelectorAll('[data-ob-bulk]').forEach(btn => {
+      btn.onclick = () => this._handleBulkAction(btn.dataset.obBulk);
+    });
+  },
+
+  async _handleBulkAction(action) {
+    if (action === 'clear') {
+      this.state.selectedIds = new Set();
+      this._loadCreators();
+      return;
+    }
+    if (action === 'delete-selected') {
+      const ids = Array.from(this.state.selectedIds);
+      if (ids.length === 0) return;
+      if (!confirm(`Supprimer ${ids.length} créateur${ids.length > 1 ? 's' : ''} sélectionné${ids.length > 1 ? 's' : ''} ?\n\nCette action est définitive.`)) {
+        return;
+      }
+      const r = await this._api('delete_creators_bulk', { ids });
+      if (r && r.ok) {
+        this.state.selectedIds = new Set();
+        await this._loadStats();
+        await this._loadCreators();
+      } else {
+        alert('Suppression échouée : ' + ((r && r.error) || 'erreur'));
+      }
+      return;
+    }
+    if (action === 'delete-filtered') {
+      const f = this.state.filters || {};
+      if (!confirm(`Supprimer TOUS les créateurs qui matchent les filtres actuels ?\n\nCette action est définitive.`)) {
+        return;
+      }
+      const r = await this._api('delete_creators_filtered', f);
+      if (r && r.ok) {
+        alert(`${r.deleted || 0} créateur(s) supprimé(s).`);
+        this.state.selectedIds = new Set();
+        await this._loadStats();
+        await this._loadCreators();
+      } else {
+        alert('Suppression échouée : ' + ((r && r.error) || 'erreur'));
+      }
+      return;
+    }
+    if (action === 'delete-all') {
+      // Double confirmation pour cette action destructive
+      const first = confirm('⚠ TOUT SUPPRIMER : tous tes créateurs Obelisk vont être effacés définitivement.\n\nContinuer ?');
+      if (!first) return;
+      const typed = prompt('Pour confirmer, tape « SUPPRIMER TOUT » exactement :');
+      if ((typed || '').trim() !== 'SUPPRIMER TOUT') {
+        alert('Confirmation incorrecte — rien supprimé.');
+        return;
+      }
+      const r = await this._api('delete_all_creators', { confirm: 'DELETE_ALL' });
+      if (r && r.ok) {
+        alert(`${r.deleted || 0} créateur(s) supprimé(s).`);
+        this.state.selectedIds = new Set();
+        await this._loadStats();
+        await this._loadCreators();
+      } else {
+        alert('Suppression échouée : ' + ((r && r.error) || 'erreur'));
+      }
+      return;
+    }
   },
 
   _inferPlatform(p) {
