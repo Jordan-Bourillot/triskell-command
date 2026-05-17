@@ -2514,8 +2514,39 @@ class Api:
         active = bool(p.get("active", True))
         if not pid:
             return {"ok": False, "error": "no_id"}
-        ok = catalog_overrides.set_disabled(pid, disabled=not active)
-        return {"ok": ok, "id": pid, "active": active}
+        # Source de verite : catalog_central (qui mirroir aussi catalog_overrides)
+        from ..integrations import catalog_central
+        r = catalog_central.set_active(pid, active)
+        # Compat ascendante si quelqu'un appelle l'ancien chemin
+        catalog_overrides.set_disabled(pid, disabled=not active)
+        return r
+
+    # ------------------------------------------------------------------
+    # Catalogue editable (produits + bundles)
+    # ------------------------------------------------------------------
+    def catalog_get_full(self) -> dict:
+        """Renvoie tous les produits + bundles editables (vue Catalogue)."""
+        from ..integrations import catalog_central
+        data = catalog_central.get_full()
+        return {"ok": True, **data}
+
+    def catalog_save_product(self, payload: dict) -> dict:
+        """Cree ou met a jour un produit. Payload = champs editables du produit."""
+        from ..integrations import catalog_central
+        return catalog_central.save_product(payload or {})
+
+    def catalog_delete_product(self, payload: dict) -> dict:
+        from ..integrations import catalog_central
+        return catalog_central.delete_product((payload or {}).get("id") or "")
+
+    def catalog_save_bundle(self, payload: dict) -> dict:
+        """Cree ou met a jour un pack."""
+        from ..integrations import catalog_central
+        return catalog_central.save_bundle(payload or {})
+
+    def catalog_delete_bundle(self, payload: dict) -> dict:
+        from ..integrations import catalog_central
+        return catalog_central.delete_bundle((payload or {}).get("id") or "")
 
     def open_url(self, payload: dict) -> dict:
         """Ouvre une URL dans le navigateur par défaut (depuis le launcher)."""

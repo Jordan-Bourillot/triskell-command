@@ -16,9 +16,10 @@
  *   - Catalogue.snippetHtml(product)    → bloc HTML prêt à coller (composer riche)
  *
  * Source de données :
- *   - Sites (Lagriffe, RankUs, WoW) : hardcodés ici (pas dans apps.json).
- *   - Tout le reste (outils + Eliks + AlphaCast etc.) : API.get_apps_catalog
- *     qui lit Triskell 0 - Lanceur/apps.json.
+ *   - API.catalog_get_full : produits + bundles editables, fusion des defauts
+ *     (apps.json + sites hardcodes serveur) avec les overrides Supabase.
+ *   - Fallback : API.get_apps_catalog (ancien chemin) si catalog_get_full n'est
+ *     pas dispo (rétrocompatibilité pendant le deploiement).
  */
 
 const Catalogue = {
@@ -117,21 +118,35 @@ const Catalogue = {
 
   // ---- Chargement & fusion sites + apps.json ----
   async _load() {
-    let apps = [];
+    let products = [];
+    let bundles = [];
     let disabledIds = new Set();
-    if (App && App.api && typeof App.api.get_apps_catalog === 'function') {
+    let usedFull = false;
+    // 1. Essai sur le nouveau endpoint (produits + bundles editables)
+    if (App && App.api && typeof App.api.catalog_get_full === 'function') {
+      try {
+        const data = await App.api.catalog_get_full();
+        if (data && data.ok) {
+          products = data.products || [];
+          bundles  = data.bundles  || [];
+          disabledIds = new Set(data.disabled_ids || []);
+          usedFull = true;
+        }
+      } catch (e) { console.warn('catalogue: catalog_get_full failed', e); }
+    }
+    // 2. Fallback : ancien endpoint apps.json + sites hardcodes locaux
+    if (!usedFull && App && App.api && typeof App.api.get_apps_catalog === 'function') {
       try {
         const data = await App.api.get_apps_catalog();
         if (data && data.ok) {
-          apps = data.apps || [];
+          products = [...(this.SITES || []), ...(data.apps || [])];
           disabledIds = new Set(data.disabled_ids || []);
         }
       } catch (e) { console.warn('catalogue: get_apps_catalog failed', e); }
     }
-    // Normalise les apps pour avoir les mêmes champs que les sites hardcodés
-    apps = apps.map(a => ({
+    // Normalise les produits pour garantir les champs utilises par la vue
+    products = products.map(a => ({
       ...a,
-      // garantit l'existence des champs utilisés par la vue
       description: a.description || '',
       sales_pitch: a.sales_pitch || '',
       motto:       a.motto || '',
@@ -140,16 +155,22 @@ const Catalogue = {
       links:       a.links || [],
       service:     a.service || {},
       plans:       a.plans || [],
-      // URL d'ouverture publique : service.url > buy_url
       buy_url:     (a.service && a.service.url) || a.buy_url || '',
-      // is_active vient du backend ; par sécurité si manquant → true
       is_active:   a.is_active !== false,
     }));
-    // Applique aussi les overrides aux sites hardcodés (Lagriffe, RankUs, WoW)
-    const sites = this.SITES.map(s => ({ ...s, is_active: !disabledIds.has(s.id) }));
-    this._items = [...sites, ...apps];
+    bundles = bundles.map(b => ({
+      ...b,
+      product_ids: b.product_ids || [],
+      is_active:   b.is_active !== false,
+    }));
+    this._items   = products;
+    this._bundles = bundles;
     this._disabledIds = disabledIds;
     return this._items;
+  },
+
+  byBundleId(id) {
+    return (this._bundles || []).find(b => b.id === id) || null;
   },
 
   // ---- Toggle actif/inactif d'un produit ----
@@ -210,7 +231,26 @@ const Catalogue = {
     const grid = document.getElementById('catalogue-grid');
     if (!grid) return;
 
-    // Groupe par catégorie
+    // Section Packs (toujours en haut si il y en a, sinon juste le bouton créer)
+    const bundles = this._bundles || [];
+    const bundlesHtml = `
+      <div class="mb-10">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-[11px] tracking-widest font-bold text-text-muted">PACKS &amp; OFFRES GROUPÉES</h2>
+          <button id="catalog-create-bundle"
+                  class="btn btn-secondary text-xs"
+                  style="padding:6px 12px;">+ Créer un pack</button>
+        </div>
+        ${bundles.length
+          ? `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+               ${bundles.map(b => this._bundleTile(b)).join('')}
+             </div>`
+          : `<p class="text-xs text-text-muted">Aucun pack créé. Clique sur « + Créer un pack » pour combiner plusieurs produits en une offre.</p>`
+        }
+      </div>
+    `;
+
+    // Groupe les produits par catégorie
     const groups = {};
     (this._items || []).forEach(it => {
       const cat = it.category || 'autre';
@@ -223,7 +263,12 @@ const Catalogue = {
       const label = this.CATEGORY_LABELS[cat] || cat;
       return `
         <div class="mb-10">
-          <h2 class="text-[11px] tracking-widest font-bold text-text-muted mb-4">${this._esc(label.toUpperCase())}</h2>
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-[11px] tracking-widest font-bold text-text-muted">${this._esc(label.toUpperCase())}</h2>
+            <button data-add-in-cat="${this._esc(cat)}"
+                    class="btn btn-secondary text-xs"
+                    style="padding:6px 12px;">+ Ajouter un produit</button>
+          </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             ${list.map(it => this._tile(it)).join('')}
           </div>
@@ -231,10 +276,13 @@ const Catalogue = {
       `;
     }).join('');
 
-    grid.innerHTML = sections;
+    grid.innerHTML = bundlesHtml + sections;
 
     grid.querySelectorAll('[data-cat-id]').forEach(el => {
       el.onclick = () => this._openDetail(el.dataset.catId);
+    });
+    grid.querySelectorAll('[data-bundle-id]').forEach(el => {
+      el.onclick = () => this._openBundleDetail(el.dataset.bundleId);
     });
     grid.querySelectorAll('[data-toggle-id]').forEach(btn => {
       btn.onclick = (e) => {
@@ -245,6 +293,51 @@ const Catalogue = {
         this._toggleActive(id, !wasActive);
       };
     });
+    const createBtn = document.getElementById('catalog-create-bundle');
+    if (createBtn) createBtn.onclick = () => this._openBundleEdit(null);
+    grid.querySelectorAll('[data-add-in-cat]').forEach(btn => {
+      btn.onclick = () => this._openProductEdit(null, btn.dataset.addInCat || '');
+    });
+  },
+
+  _bundleTile(b) {
+    const visual = b.logo
+      ? `<img src="${this._esc(b.logo)}" alt="" class="w-12 h-12 rounded-xl shrink-0" style="object-fit:contain;" />`
+      : `<div class="w-12 h-12 rounded-xl shrink-0 flex items-center justify-center text-white font-bold text-lg"
+              style="background:${this._esc(b.color || '#6366F1')};">${this._esc((b.name || 'P')[0])}</div>`;
+    const countTxt = (b.product_ids || []).length + ' produit' + ((b.product_ids || []).length > 1 ? 's' : '');
+    const priceBadge = b.price != null
+      ? `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-accent/15 text-accent">${b.price} €</span>`
+      : `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-warning/15 text-warning" style="background:rgba(217,119,6,0.15);color:#92400e;">PACK</span>`;
+    const isActive = b.is_active !== false;
+    return `
+      <div style="position:relative;${isActive ? '' : 'opacity:0.45;'}">
+        <button data-bundle-id="${this._esc(b.id)}"
+                class="text-left bg-surface-elevated rounded-2xl p-4 w-full
+                       border-2 border-accent/30 hover:border-accent
+                       transition-all duration-200 hover:shadow-soft
+                       focus:outline-none">
+          <div class="flex items-start gap-3 mb-2 pr-10">
+            ${visual}
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap mb-0.5">
+                <div class="font-semibold text-[15px] leading-tight">${this._esc(b.name || '')}</div>
+                ${priceBadge}
+              </div>
+              <div class="text-[10px] text-text-muted">${countTxt}</div>
+            </div>
+          </div>
+          <p class="text-xs text-text-secondary line-clamp-2 leading-snug">${this._esc(b.tagline || '')}</p>
+        </button>
+        <button data-toggle-id="${this._esc(b.id)}"
+                data-toggle-active="${isActive ? '1' : '0'}"
+                title="${isActive ? 'Désactiver ce pack' : 'Activer ce pack'}"
+                style="position:absolute;top:10px;right:10px;width:36px;height:20px;border-radius:999px;border:none;cursor:pointer;
+                       background:${isActive ? '#10b981' : '#9ca3af'};transition:background 0.15s ease;padding:0;">
+          <span style="position:absolute;top:2px;left:${isActive ? '18px' : '2px'};width:16px;height:16px;border-radius:999px;background:#fff;transition:left 0.15s ease;box-shadow:0 1px 2px rgba(0,0,0,0.25);"></span>
+        </button>
+      </div>
+    `;
   },
 
   _tile(it) {
@@ -411,8 +504,9 @@ const Catalogue = {
 
           <!-- Footer -->
           <div class="px-7 py-4 border-t border-border bg-surface-elevated flex items-center justify-between flex-wrap gap-2 sticky bottom-0">
-            <div class="text-xs text-text-muted truncate flex-1">
-              ${url ? `<span class="font-mono">${this._esc(url.replace(/^https?:\/\//, ''))}</span>` : ''}
+            <div class="flex gap-2">
+              <button id="catalogue-detail-edit" class="btn btn-secondary">✎ Modifier</button>
+              ${!it.is_builtin ? `<button id="catalogue-detail-delete" class="btn btn-secondary" style="color:#dc2626;">Supprimer</button>` : ''}
             </div>
             <div class="flex gap-2">
               <button id="catalogue-detail-copy" class="btn btn-secondary">Copier le pitch</button>
@@ -451,6 +545,351 @@ const Catalogue = {
         if (btn) { btn.textContent = 'Copié ✓'; setTimeout(() => { btn.textContent = 'Copier le pitch'; }, 1400); }
       } catch (e) { console.warn(e); }
     };
+    const editBtn = document.getElementById('catalogue-detail-edit');
+    if (editBtn) editBtn.onclick = () => { this._closeDetail(); this._openProductEdit(it.id, it.category || ''); };
+    const delBtn = document.getElementById('catalogue-detail-delete');
+    if (delBtn) delBtn.onclick = async () => {
+      if (!confirm(`Supprimer définitivement "${it.name}" du catalogue ?`)) return;
+      try {
+        const r = await App.api.catalog_delete_product({ id: it.id });
+        if (r && r.ok) {
+          this._items = (this._items || []).filter(x => x.id !== it.id);
+          this._closeDetail();
+          this._renderGrid();
+        } else {
+          alert('Suppression impossible : ' + (r && r.error || 'erreur inconnue'));
+        }
+      } catch (e) { alert('Erreur : ' + e); }
+    };
+  },
+
+  // ============================================================
+  // EDITION D'UN PRODUIT (modale formulaire)
+  // ============================================================
+  _openProductEdit(productId, defaultCategory) {
+    const isNew = !productId;
+    const it = isNew
+      ? { id: '', name: '', tagline: '', description: '', motto: '', sales_pitch: '',
+          category: defaultCategory || 'pro', kind: 'service', price: null, price_original: null,
+          price_from: '', price_note: '', buy_url: '', logo: '', color: '#6366F1',
+          initial: '', keywords: '', prospect_pitch: '' }
+      : ((this._items || []).find(x => x.id === productId) || null);
+    if (!it) return;
+    const cats = this.CATEGORY_ORDER;
+    const html = `
+      <div id="catalogue-detail-overlay"
+           class="fixed inset-0 z-[210] flex items-start justify-center pt-[6vh] px-4 transition-opacity duration-200"
+           style="background: rgba(15,23,42,0.55); backdrop-filter: blur(10px); opacity: 0;">
+        <div class="catalogue-detail-card bg-surface rounded-3xl shadow-hero
+                    w-full max-w-[760px] max-h-[88vh] overflow-y-auto
+                    transition-transform duration-200"
+             style="border: 1px solid hsl(var(--border)); transform: scale(0.96) translateY(8px);">
+          <div class="px-7 pt-6 pb-4 border-b border-border flex items-start justify-between gap-4">
+            <div>
+              <div class="hero-kicker mb-1">${isNew ? 'NOUVEAU PRODUIT' : 'ÉDITION'}</div>
+              <h2 class="text-2xl font-bold leading-tight">${isNew ? 'Créer un produit' : this._esc(it.name || '')}</h2>
+            </div>
+            <button id="cat-edit-close"
+                    class="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg transition-colors text-2xl leading-none shrink-0">×</button>
+          </div>
+          <form id="cat-edit-form" class="px-7 py-6 space-y-4">
+            ${this._field('name', 'Nom du produit', it.name, { required: true, placeholder: 'Ex : Pack Électricien Pro' })}
+            ${this._field('tagline', 'Phrase d\\'accroche (1 ligne)', it.tagline, { placeholder: 'Ex : Site web + outils métier pour électriciens' })}
+            ${this._fieldArea('description', 'Description complète', it.description, { rows: 4, placeholder: 'Présente le produit, ses bénéfices, qui c\\'est pour…' })}
+            ${this._fieldArea('motto', 'Devise (en italique sur la fiche)', it.motto, { rows: 2, placeholder: 'Ex : Pour les pros qui veulent un vrai site…' })}
+            <div class="grid grid-cols-2 gap-3">
+              ${this._fieldSelect('category', 'Section du catalogue', it.category, cats.map(c => ({ value: c, label: this.CATEGORY_LABELS[c] || c })))}
+              ${this._field('kind', 'Type', it.kind, { placeholder: 'service / product / app' })}
+            </div>
+            <div class="grid grid-cols-3 gap-3">
+              ${this._field('price', 'Prix (€)', it.price, { type: 'number', placeholder: '0' })}
+              ${this._field('price_original', 'Prix barré (€)', it.price_original, { type: 'number', placeholder: 'optionnel' })}
+              ${this._field('price_from', 'Texte « à partir de »', it.price_from, { placeholder: 'Ex : À partir de 49 €' })}
+            </div>
+            ${this._field('price_note', 'Note sur le tarif', it.price_note, { placeholder: 'Ex : par mois, paiement unique…' })}
+            ${this._field('buy_url', 'Lien public du produit', it.buy_url, { placeholder: 'https://…' })}
+            ${this._field('logo', 'URL de l\\'image / logo', it.logo, { placeholder: 'https://…/logo.png — laisse vide pour un avatar lettre' })}
+            <div class="grid grid-cols-2 gap-3">
+              ${this._field('color', 'Couleur fallback (si pas de logo)', it.color, { type: 'color' })}
+              ${this._field('initial', 'Initiale fallback', it.initial, { maxlength: 2, placeholder: 'Ex : L' })}
+            </div>
+            <div class="border-t border-border pt-4 mt-2">
+              <div class="text-[11px] tracking-widest font-bold text-text-muted mb-3">UTILISATION PAR L'IA EN PROSPECTION</div>
+              ${this._field('keywords', 'Mots-clés (séparés par virgules)', it.keywords, { placeholder: 'Ex : électricien, artisan, BTP' })}
+              ${this._fieldArea('prospect_pitch', 'Pitch court pour les mails de prospection', it.prospect_pitch, { rows: 3, placeholder: 'En 1-2 phrases : à qui s\\'adresse ce produit et pourquoi.' })}
+              <p class="text-[11px] text-text-muted mt-1">Ces deux champs guident l'IA quand elle écrit des mails — c'est ce qu'elle « connaît » sur ton produit.</p>
+            </div>
+          </form>
+          <div class="px-7 py-4 border-t border-border bg-surface-elevated flex items-center justify-end gap-2 sticky bottom-0">
+            <button id="cat-edit-cancel" class="btn btn-secondary">Annuler</button>
+            <button id="cat-edit-save" class="btn btn-primary">Enregistrer</button>
+          </div>
+        </div>
+      </div>
+    `;
+    const slot = document.getElementById('catalogue-detail-modal');
+    if (!slot) return;
+    slot.innerHTML = html;
+    const ov = document.getElementById('catalogue-detail-overlay');
+    requestAnimationFrame(() => {
+      if (ov) ov.style.opacity = '1';
+      const card = ov && ov.querySelector('.catalogue-detail-card');
+      if (card) card.style.transform = 'scale(1) translateY(0)';
+    });
+    document.getElementById('cat-edit-close').onclick = () => this._closeDetail();
+    document.getElementById('cat-edit-cancel').onclick = () => this._closeDetail();
+    ov.addEventListener('click', (e) => { if (e.target === ov) this._closeDetail(); });
+    document.getElementById('cat-edit-save').onclick = async () => {
+      const form = document.getElementById('cat-edit-form');
+      const data = {};
+      form.querySelectorAll('[name]').forEach(el => { data[el.name] = el.value; });
+      if (!isNew) data.id = it.id;
+      const saveBtn = document.getElementById('cat-edit-save');
+      saveBtn.disabled = true; saveBtn.textContent = 'Enregistrement…';
+      try {
+        const r = await App.api.catalog_save_product(data);
+        if (r && r.ok) {
+          this._items = null; this._loadPromise = null;
+          await this.list();
+          this._closeDetail();
+          this._renderGrid();
+        } else {
+          alert('Sauvegarde impossible : ' + (r && r.error || 'erreur inconnue'));
+          saveBtn.disabled = false; saveBtn.textContent = 'Enregistrer';
+        }
+      } catch (e) {
+        alert('Erreur : ' + e);
+        saveBtn.disabled = false; saveBtn.textContent = 'Enregistrer';
+      }
+    };
+  },
+
+  // ============================================================
+  // FICHE D'UN PACK (lecture)
+  // ============================================================
+  _openBundleDetail(bundleId) {
+    const b = this.byBundleId(bundleId);
+    if (!b) return;
+    const includedProducts = (b.product_ids || [])
+      .map(pid => (this._items || []).find(x => x.id === pid))
+      .filter(Boolean);
+    const includedHtml = includedProducts.length
+      ? includedProducts.map(p => `
+          <div class="flex items-center gap-3 p-3 bg-bg rounded-xl border border-border">
+            ${p.logo
+              ? `<img src="${this._esc(p.logo)}" class="w-10 h-10 rounded-lg" style="object-fit:contain;" />`
+              : `<div class="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold" style="background:${this._esc(p.color || '#6366F1')};">${this._esc((p.name || '?')[0])}</div>`}
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-semibold">${this._esc(p.name)}</div>
+              <div class="text-xs text-text-muted line-clamp-1">${this._esc(p.tagline || '')}</div>
+            </div>
+          </div>`).join('')
+      : '<p class="text-sm text-text-muted">Aucun produit dans ce pack. Modifie-le pour en ajouter.</p>';
+    const priceLine = b.price != null
+      ? `${b.price} €${b.price_note ? ` · <span class="text-text-muted">${this._esc(b.price_note)}</span>` : ''}`
+      : (b.price_note ? `<span class="text-text-muted">${this._esc(b.price_note)}</span>` : '');
+    const html = `
+      <div id="catalogue-detail-overlay"
+           class="fixed inset-0 z-[210] flex items-start justify-center pt-[6vh] px-4 transition-opacity duration-200"
+           style="background: rgba(15,23,42,0.55); backdrop-filter: blur(10px); opacity: 0;">
+        <div class="catalogue-detail-card bg-surface rounded-3xl shadow-hero w-full max-w-[720px] max-h-[88vh] overflow-y-auto transition-transform duration-200"
+             style="border: 1px solid hsl(var(--border)); transform: scale(0.96) translateY(8px);">
+          <div class="px-7 pt-6 pb-5 border-b border-border flex items-start justify-between gap-4">
+            <div>
+              <div class="hero-kicker mb-1">PACK</div>
+              <h2 class="text-2xl font-bold leading-tight mb-1">${this._esc(b.name || '')}</h2>
+              <p class="text-text-secondary text-sm">${this._esc(b.tagline || '')}</p>
+            </div>
+            <button id="cat-bundle-close" class="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg transition-colors text-2xl leading-none shrink-0">×</button>
+          </div>
+          <div class="px-7 py-6 space-y-6">
+            ${b.description ? `<p class="text-text leading-relaxed whitespace-pre-line">${this._esc(b.description)}</p>` : ''}
+            <div>
+              <div class="text-[11px] tracking-widest font-bold text-text-muted mb-3">CONTENU DU PACK</div>
+              <div class="space-y-2">${includedHtml}</div>
+            </div>
+            ${priceLine ? `<div><div class="text-[11px] tracking-widest font-bold text-text-muted mb-2">TARIF</div><div class="text-sm">${priceLine}</div></div>` : ''}
+          </div>
+          <div class="px-7 py-4 border-t border-border bg-surface-elevated flex items-center justify-between gap-2 sticky bottom-0">
+            <button id="cat-bundle-delete" class="btn btn-secondary" style="color:#dc2626;">Supprimer</button>
+            <div class="flex gap-2">
+              <button id="cat-bundle-edit" class="btn btn-secondary">✎ Modifier</button>
+              ${b.buy_url ? `<button id="cat-bundle-open" class="btn btn-primary">Ouvrir le lien</button>` : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    const slot = document.getElementById('catalogue-detail-modal');
+    if (!slot) return;
+    slot.innerHTML = html;
+    const ov = document.getElementById('catalogue-detail-overlay');
+    requestAnimationFrame(() => {
+      if (ov) ov.style.opacity = '1';
+      const card = ov && ov.querySelector('.catalogue-detail-card');
+      if (card) card.style.transform = 'scale(1) translateY(0)';
+    });
+    ov.addEventListener('click', (e) => { if (e.target === ov) this._closeDetail(); });
+    document.getElementById('cat-bundle-close').onclick = () => this._closeDetail();
+    document.getElementById('cat-bundle-edit').onclick = () => { this._closeDetail(); this._openBundleEdit(b.id); };
+    document.getElementById('cat-bundle-delete').onclick = async () => {
+      if (!confirm(`Supprimer le pack "${b.name}" ?`)) return;
+      try {
+        const r = await App.api.catalog_delete_bundle({ id: b.id });
+        if (r && r.ok) {
+          this._bundles = (this._bundles || []).filter(x => x.id !== b.id);
+          this._closeDetail();
+          this._renderGrid();
+        } else { alert('Suppression impossible'); }
+      } catch (e) { alert('Erreur : ' + e); }
+    };
+    const openBtn = document.getElementById('cat-bundle-open');
+    if (openBtn) openBtn.onclick = () => window.open(b.buy_url, '_blank', 'noopener,noreferrer');
+  },
+
+  // ============================================================
+  // EDITION D'UN PACK
+  // ============================================================
+  _openBundleEdit(bundleId) {
+    const isNew = !bundleId;
+    const b = isNew
+      ? { id: '', name: '', tagline: '', description: '', price: null, price_note: '',
+          buy_url: '', logo: '', color: '#6366F1', product_ids: [] }
+      : (this.byBundleId(bundleId) || null);
+    if (!b) return;
+    const productOptions = (this._items || []).map(p => {
+      const checked = (b.product_ids || []).includes(p.id) ? 'checked' : '';
+      return `
+        <label class="flex items-center gap-2 p-2 rounded-lg hover:bg-bg cursor-pointer">
+          <input type="checkbox" name="product_ids" value="${this._esc(p.id)}" ${checked} class="w-4 h-4"/>
+          ${p.logo
+            ? `<img src="${this._esc(p.logo)}" class="w-7 h-7 rounded" style="object-fit:contain;" />`
+            : `<div class="w-7 h-7 rounded flex items-center justify-center text-white text-xs font-bold" style="background:${this._esc(p.color || '#6366F1')};">${this._esc((p.name || '?')[0])}</div>`}
+          <span class="text-sm">${this._esc(p.name)}</span>
+        </label>
+      `;
+    }).join('');
+    const html = `
+      <div id="catalogue-detail-overlay"
+           class="fixed inset-0 z-[210] flex items-start justify-center pt-[6vh] px-4 transition-opacity duration-200"
+           style="background: rgba(15,23,42,0.55); backdrop-filter: blur(10px); opacity: 0;">
+        <div class="catalogue-detail-card bg-surface rounded-3xl shadow-hero w-full max-w-[720px] max-h-[88vh] overflow-y-auto transition-transform duration-200"
+             style="border: 1px solid hsl(var(--border)); transform: scale(0.96) translateY(8px);">
+          <div class="px-7 pt-6 pb-4 border-b border-border flex items-start justify-between gap-4">
+            <div>
+              <div class="hero-kicker mb-1">${isNew ? 'NOUVEAU PACK' : 'ÉDITION DU PACK'}</div>
+              <h2 class="text-2xl font-bold leading-tight">${isNew ? 'Créer un pack' : this._esc(b.name || '')}</h2>
+            </div>
+            <button id="cat-bedit-close" class="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg transition-colors text-2xl leading-none shrink-0">×</button>
+          </div>
+          <form id="cat-bedit-form" class="px-7 py-6 space-y-4">
+            ${this._field('name', 'Nom du pack', b.name, { required: true, placeholder: 'Ex : Pack lancement artisan' })}
+            ${this._field('tagline', 'Phrase d\\'accroche', b.tagline, { placeholder: 'Ex : Site + SEO + outils métier' })}
+            ${this._fieldArea('description', 'Description', b.description, { rows: 3, placeholder: 'Ce que contient le pack et pour qui' })}
+            <div class="grid grid-cols-2 gap-3">
+              ${this._field('price', 'Prix du pack (€)', b.price, { type: 'number' })}
+              ${this._field('price_note', 'Note tarif', b.price_note, { placeholder: 'Ex : -20% vs séparé' })}
+            </div>
+            ${this._field('buy_url', 'Lien public du pack', b.buy_url, { placeholder: 'https://…' })}
+            ${this._field('logo', 'URL de l\\'image', b.logo, { placeholder: 'https://…/pack.png — optionnel' })}
+            ${this._field('color', 'Couleur fallback', b.color, { type: 'color' })}
+            <div>
+              <label class="block text-sm font-semibold mb-2">Produits inclus</label>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[260px] overflow-y-auto p-2 border border-border rounded-xl">
+                ${productOptions || '<p class="text-xs text-text-muted col-span-2 p-2">Aucun produit dans le catalogue. Crée d\\'abord des produits.</p>'}
+              </div>
+            </div>
+          </form>
+          <div class="px-7 py-4 border-t border-border bg-surface-elevated flex items-center justify-end gap-2 sticky bottom-0">
+            <button id="cat-bedit-cancel" class="btn btn-secondary">Annuler</button>
+            <button id="cat-bedit-save" class="btn btn-primary">Enregistrer</button>
+          </div>
+        </div>
+      </div>
+    `;
+    const slot = document.getElementById('catalogue-detail-modal');
+    if (!slot) return;
+    slot.innerHTML = html;
+    const ov = document.getElementById('catalogue-detail-overlay');
+    requestAnimationFrame(() => {
+      if (ov) ov.style.opacity = '1';
+      const card = ov && ov.querySelector('.catalogue-detail-card');
+      if (card) card.style.transform = 'scale(1) translateY(0)';
+    });
+    ov.addEventListener('click', (e) => { if (e.target === ov) this._closeDetail(); });
+    document.getElementById('cat-bedit-close').onclick = () => this._closeDetail();
+    document.getElementById('cat-bedit-cancel').onclick = () => this._closeDetail();
+    document.getElementById('cat-bedit-save').onclick = async () => {
+      const form = document.getElementById('cat-bedit-form');
+      const data = {};
+      form.querySelectorAll('input[type=text], input[type=number], input[type=color], textarea, input[type=url], input:not([type])').forEach(el => {
+        if (el.name && el.name !== 'product_ids') data[el.name] = el.value;
+      });
+      data.product_ids = Array.from(form.querySelectorAll('input[name=product_ids]:checked')).map(c => c.value);
+      if (!isNew) data.id = b.id;
+      const btn = document.getElementById('cat-bedit-save');
+      btn.disabled = true; btn.textContent = 'Enregistrement…';
+      try {
+        const r = await App.api.catalog_save_bundle(data);
+        if (r && r.ok) {
+          this._items = null; this._loadPromise = null;
+          await this.list();
+          this._closeDetail();
+          this._renderGrid();
+        } else {
+          alert('Sauvegarde impossible : ' + (r && r.error || 'erreur inconnue'));
+          btn.disabled = false; btn.textContent = 'Enregistrer';
+        }
+      } catch (e) {
+        alert('Erreur : ' + e);
+        btn.disabled = false; btn.textContent = 'Enregistrer';
+      }
+    };
+  },
+
+  // ============================================================
+  // Helpers HTML formulaire
+  // ============================================================
+  _field(name, label, value, opts) {
+    opts = opts || {};
+    const v = value == null ? '' : value;
+    const type = opts.type || 'text';
+    return `
+      <label class="block">
+        <span class="block text-sm font-semibold mb-1">${label}${opts.required ? ' *' : ''}</span>
+        <input name="${this._esc(name)}" type="${type}"
+               value="${this._esc(String(v))}"
+               ${opts.placeholder ? `placeholder="${this._esc(opts.placeholder)}"` : ''}
+               ${opts.maxlength ? `maxlength="${opts.maxlength}"` : ''}
+               ${opts.required ? 'required' : ''}
+               class="w-full px-3 py-2 rounded-lg border border-border bg-bg text-text text-sm focus:outline-none focus:border-accent" />
+      </label>
+    `;
+  },
+
+  _fieldArea(name, label, value, opts) {
+    opts = opts || {};
+    const v = value == null ? '' : value;
+    return `
+      <label class="block">
+        <span class="block text-sm font-semibold mb-1">${label}</span>
+        <textarea name="${this._esc(name)}" rows="${opts.rows || 3}"
+                  ${opts.placeholder ? `placeholder="${this._esc(opts.placeholder)}"` : ''}
+                  class="w-full px-3 py-2 rounded-lg border border-border bg-bg text-text text-sm focus:outline-none focus:border-accent resize-y">${this._esc(String(v))}</textarea>
+      </label>
+    `;
+  },
+
+  _fieldSelect(name, label, value, options) {
+    const opts = (options || []).map(o => `<option value="${this._esc(o.value)}" ${o.value === value ? 'selected' : ''}>${this._esc(o.label)}</option>`).join('');
+    return `
+      <label class="block">
+        <span class="block text-sm font-semibold mb-1">${label}</span>
+        <select name="${this._esc(name)}" class="w-full px-3 py-2 rounded-lg border border-border bg-bg text-text text-sm focus:outline-none focus:border-accent">
+          ${opts}
+        </select>
+      </label>
+    `;
   },
 
   _closeDetail() {
