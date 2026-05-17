@@ -61,28 +61,75 @@ const Obelisk = {
     catch (e) { console.warn('obelisk.' + method, e); return null; }
   },
 
+  // ---------- Notifications : badge sidebar + données pour cockpit ----------
+  _SEEN_KEY: 'obelisk-last-seen',
+
+  _lastSeen() {
+    try { return localStorage.getItem(this._SEEN_KEY) || ''; }
+    catch (e) { return ''; }
+  },
+
+  _markAllSeenNow() {
+    try {
+      const now = new Date().toISOString().slice(0, 19);
+      localStorage.setItem(this._SEEN_KEY, now);
+    } catch (e) {}
+    this._updateNavBadge(0);
+  },
+
+  _updateNavBadge(count) {
+    const badge = document.getElementById('nav-obelisk-badge');
+    if (!badge) return;
+    if (count > 0) {
+      badge.textContent = String(count);
+      badge.hidden = false;
+    } else {
+      badge.hidden = true;
+      badge.textContent = '';
+    }
+  },
+
+  async checkNotifs() {
+    if (!App.api) return { count: 0, jobs: [] };
+    let data = null;
+    try {
+      data = await App.api.obelisk_unseen_done_jobs({ since: this._lastSeen() });
+    } catch (e) { return { count: 0, jobs: [] }; }
+    if (!data || !data.ok) return { count: 0, jobs: [] };
+    this._updateNavBadge(data.count || 0);
+    return { count: data.count || 0, jobs: data.jobs || [] };
+  },
+
+  _startNotifPolling() {
+    if (this._notifPollTimer) return;
+    // Premier tick rapide, ensuite toutes les 60 s
+    this.checkNotifs();
+    this._notifPollTimer = setInterval(() => this.checkNotifs(), 60_000);
+  },
+
   async render(container) {
     this._root = container;
+    // Quand l'utilisateur entre dans la vue Obelisk, on considère qu'il
+    // a "vu" toutes les recherches en attente → reset du badge.
+    this._markAllSeenNow();
     container.innerHTML = `
       <section class="animate-slide-up">
-        <div class="mb-6 flex items-end justify-between">
-          <div>
-            <div class="hero-kicker mb-2">OBELISK</div>
-            <h1 class="hero-title mb-3" style="font-size: 36px;">Trouve les créateurs vierges de ta niche.</h1>
-            <p class="hero-subtitle">12 plateformes scannées (dont LinkedIn / Instagram / TikTok via PhantomBuster), créateurs non monétisés détectés, emails enrichis, mails rédigés. Tu valides, tu envoies.</p>
+        <header class="ob-header">
+          <div class="ob-header-text">
+            <div class="hero-kicker">OBELISK</div>
+            <h1 class="ob-title">Trouve les créateurs vierges de ta niche</h1>
           </div>
-          <div class="flex gap-2">
-            <button id="ob-refresh" class="btn btn-secondary">Rafraîchir</button>
+          <div class="ob-header-actions">
+            <div id="ob-stats-inline" class="ob-stats-inline"></div>
+            <button id="ob-refresh" class="ob-icon-btn" title="Rafraîchir" aria-label="Rafraîchir">↻</button>
           </div>
-        </div>
+        </header>
 
-        <div id="ob-stats" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6"></div>
-
-        <div class="flex gap-2 mb-6 border-b border-border">
+        <nav class="ob-tabs">
           <button data-ob-tab="creators" class="ob-tab is-active">Créateurs</button>
           <button data-ob-tab="search"   class="ob-tab">Nouvelle recherche</button>
           <button data-ob-tab="settings" class="ob-tab">Réglages</button>
-        </div>
+        </nav>
 
         <div id="ob-content"></div>
       </section>
@@ -100,58 +147,191 @@ const Obelisk = {
     const s = document.createElement('style');
     s.id = 'ob-styles';
     s.textContent = `
+      /* Header compact */
+      .ob-header {
+        display: flex; align-items: flex-start; justify-content: space-between;
+        gap: 24px; margin-bottom: 18px; flex-wrap: wrap;
+      }
+      .ob-header-text { flex: 1; min-width: 0; }
+      .ob-title {
+        font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -.01em;
+        color: hsl(var(--text)); margin-top: 6px;
+        font-family: var(--font-display, inherit);
+      }
+      .ob-header-actions {
+        display: flex; align-items: center; gap: 14px;
+      }
+      .ob-stats-inline {
+        display: flex; align-items: center; gap: 18px;
+      }
+      .ob-stats-inline .stat {
+        display: flex; flex-direction: column; align-items: flex-end; line-height: 1;
+      }
+      .ob-stats-inline .stat .v {
+        font-size: 18px; font-weight: 700; color: hsl(var(--text));
+        font-variant-numeric: tabular-nums;
+      }
+      .ob-stats-inline .stat .l {
+        font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase;
+        color: hsl(var(--text-muted)); font-weight: 600; margin-top: 3px;
+      }
+      .ob-icon-btn {
+        width: 32px; height: 32px; border-radius: 8px;
+        background: hsl(var(--card)); border: 1px solid hsl(var(--border));
+        color: hsl(var(--text-muted)); font-size: 16px; line-height: 1;
+        display: inline-flex; align-items: center; justify-content: center;
+        cursor: pointer; transition: all 140ms;
+      }
+      .ob-icon-btn:hover { color: hsl(var(--text)); border-color: hsl(var(--text-muted) / .5); }
+
+      /* Tabs */
+      .ob-tabs {
+        display: flex; gap: 4px; margin-bottom: 22px;
+        border-bottom: 1px solid hsl(var(--border));
+      }
       .ob-tab {
         padding: 10px 18px; font-size: 13px; font-weight: 600;
-        color: hsl(var(--text-muted));
+        color: hsl(var(--text-muted)); background: none; border: none;
         border-bottom: 2px solid transparent;
         transition: color 160ms, border-color 160ms;
+        cursor: pointer;
       }
       .ob-tab:hover { color: hsl(var(--text)); }
       .ob-tab.is-active { color: hsl(var(--accent)); border-bottom-color: hsl(var(--accent)); }
-      .ob-stat {
-        background: hsl(var(--card)); border: 1px solid hsl(var(--border));
-        border-radius: 10px; padding: 14px 16px;
+
+      /* Empty state hero (zéro créateur) */
+      .ob-empty-hero {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding: 70px 24px; text-align: center;
+        background: linear-gradient(180deg, hsl(var(--card)), hsl(var(--card) / .4));
+        border: 1px dashed hsl(var(--border)); border-radius: 16px;
       }
-      .ob-stat .label { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: hsl(var(--text-muted)); font-weight: 700; }
-      .ob-stat .value { font-size: 24px; font-weight: 700; color: hsl(var(--text)); margin-top: 4px; line-height: 1; }
+      .ob-empty-hero .icon {
+        width: 56px; height: 56px; border-radius: 14px;
+        background: hsl(var(--accent) / .12); color: hsl(var(--accent));
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 28px; margin-bottom: 18px;
+      }
+      .ob-empty-hero h2 {
+        font-size: 22px; font-weight: 700; color: hsl(var(--text)); margin-bottom: 8px;
+      }
+      .ob-empty-hero p {
+        font-size: 14px; color: hsl(var(--text-muted)); max-width: 520px; line-height: 1.55;
+        margin-bottom: 22px;
+      }
+      .ob-empty-hero .ob-platforms-tease {
+        display: flex; flex-wrap: wrap; justify-content: center; gap: 6px;
+        margin-top: 18px; max-width: 520px;
+      }
+      .ob-empty-hero .ob-platforms-tease span {
+        font-size: 11px; color: hsl(var(--text-muted));
+        padding: 3px 9px; border-radius: 999px;
+        background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
+      }
+
+      /* Filtres : barre légère, sans cadre lourd */
       .ob-filters {
         display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-        padding: 10px; background: hsl(var(--card));
-        border: 1px solid hsl(var(--border)); border-radius: 10px;
-        margin-bottom: 12px;
+        margin-bottom: 14px;
       }
-      .ob-filters input, .ob-filters select {
-        padding: 7px 10px; border-radius: 7px; background: hsl(var(--bg));
-        color: hsl(var(--text)); border: 1px solid hsl(var(--border));
-        font-size: 12.5px; min-width: 120px;
+      .ob-search {
+        flex: 1; min-width: 240px; position: relative;
+      }
+      .ob-search input {
+        width: 100%; padding: 10px 14px 10px 38px; border-radius: 10px;
+        background: hsl(var(--card)); color: hsl(var(--text));
+        border: 1px solid hsl(var(--border)); font-size: 13.5px;
+      }
+      .ob-search::before {
+        content: ""; position: absolute; left: 14px; top: 50%;
+        width: 14px; height: 14px; transform: translateY(-50%);
+        background: hsl(var(--text-muted));
+        -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round'><circle cx='11' cy='11' r='7'/><path d='m20 20-3-3'/></svg>") center/contain no-repeat;
+                mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round'><circle cx='11' cy='11' r='7'/><path d='m20 20-3-3'/></svg>") center/contain no-repeat;
+      }
+      .ob-filters select, .ob-filters .ob-num {
+        padding: 9px 12px; border-radius: 10px;
+        background: hsl(var(--card)); color: hsl(var(--text));
+        border: 1px solid hsl(var(--border)); font-size: 13px;
       }
       .ob-filters input:focus, .ob-filters select:focus {
         outline: none; border-color: hsl(var(--accent));
-        box-shadow: 0 0 0 3px hsl(var(--accent) / .12);
+        box-shadow: 0 0 0 3px hsl(var(--accent) / .14);
       }
-      .ob-table {
-        width: 100%; border-collapse: collapse; font-size: 12.5px;
+      .ob-filters .ob-num { width: 110px; }
+
+      /* Active filter chips (résumé) */
+      .ob-active-filters {
+        display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;
+        font-size: 12px; color: hsl(var(--text-muted));
       }
+      .ob-active-filters .chip {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 3px 4px 3px 10px; border-radius: 999px;
+        background: hsl(var(--accent) / .1); color: hsl(var(--accent));
+        font-weight: 600;
+      }
+      .ob-active-filters .chip button {
+        width: 18px; height: 18px; border-radius: 50%;
+        background: hsl(var(--accent) / .15); color: hsl(var(--accent));
+        border: none; cursor: pointer; font-size: 11px; line-height: 1;
+      }
+      .ob-active-filters .clear-all {
+        font-size: 11.5px; color: hsl(var(--text-muted)); text-decoration: underline;
+        background: none; border: none; cursor: pointer; padding: 0 6px;
+      }
+
+      /* Tableau */
+      .ob-table-card {
+        background: hsl(var(--card)); border: 1px solid hsl(var(--border));
+        border-radius: 12px; overflow: hidden;
+      }
+      .ob-table { width: 100%; border-collapse: collapse; font-size: 13px; }
       .ob-table th {
         text-align: left; font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
         font-weight: 700; color: hsl(var(--text-muted));
-        padding: 10px 12px; border-bottom: 1px solid hsl(var(--border));
+        padding: 12px 14px; border-bottom: 1px solid hsl(var(--border));
+        background: hsl(var(--bg) / .4);
       }
       .ob-table td {
-        padding: 10px 12px; border-bottom: 1px solid hsl(var(--border));
-        vertical-align: top;
+        padding: 12px 14px; border-bottom: 1px solid hsl(var(--border) / .6);
+        vertical-align: middle;
       }
+      .ob-table tr:last-child td { border-bottom: none; }
       .ob-table tr.is-clickable { cursor: pointer; transition: background 100ms; }
-      .ob-table tr.is-clickable:hover { background: hsl(var(--bg)); }
+      .ob-table tr.is-clickable:hover { background: hsl(var(--accent) / .04); }
       .ob-pill {
-        display: inline-block; padding: 2px 8px; border-radius: 4px;
+        display: inline-block; padding: 3px 9px; border-radius: 999px;
         font-size: 10.5px; font-weight: 600;
+        background: hsl(var(--accent) / .12); color: hsl(var(--accent));
+      }
+      .ob-score {
+        display: inline-flex; align-items: center; gap: 8px;
+        font-variant-numeric: tabular-nums; font-weight: 700;
+      }
+      .ob-score-bar {
+        width: 36px; height: 4px; border-radius: 2px;
+        background: hsl(var(--border)); overflow: hidden; position: relative;
+      }
+      .ob-score-bar::after {
+        content: ""; position: absolute; inset: 0 auto 0 0;
+        width: var(--w, 0%); background: currentColor; border-radius: 2px;
       }
       .ob-status-select {
-        padding: 4px 8px; border-radius: 5px; font-size: 11.5px;
+        padding: 5px 26px 5px 10px; border-radius: 999px; font-size: 11.5px;
         background: hsl(var(--bg)); color: hsl(var(--text));
-        border: 1px solid hsl(var(--border));
+        border: 1px solid hsl(var(--border)); font-weight: 600;
+        appearance: none;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='3' stroke-linecap='round'><path d='m6 9 6 6 6-6'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 8px center;
       }
+      .ob-pager {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-top: 14px; font-size: 12px; color: hsl(var(--text-muted));
+      }
+
+      /* Drawer */
       .ob-drawer {
         position: fixed; top: 0; right: 0; bottom: 0; width: 100%; max-width: 520px;
         background: hsl(var(--card)); border-left: 1px solid hsl(var(--border));
@@ -165,12 +345,20 @@ const Obelisk = {
         opacity: 0; pointer-events: none; transition: opacity 160ms;
       }
       .ob-drawer-backdrop.is-open { opacity: 1; pointer-events: auto; }
+      .ob-drawer .ob-stat {
+        background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
+        border-radius: 10px; padding: 14px 16px;
+      }
+      .ob-drawer .ob-stat .label { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: hsl(var(--text-muted)); font-weight: 700; }
+      .ob-drawer .ob-stat .value { font-size: 24px; font-weight: 700; color: hsl(var(--text)); margin-top: 4px; line-height: 1; }
+
+      /* Onglet Recherche */
       .ob-platform-grid {
         display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
       }
       .ob-platform-chip {
         display: flex; align-items: center; gap: 6px;
-        padding: 8px 10px; border-radius: 7px; font-size: 12.5px;
+        padding: 8px 10px; border-radius: 8px; font-size: 12.5px;
         background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
         cursor: pointer; user-select: none;
       }
@@ -184,6 +372,12 @@ const Obelisk = {
         font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 11.5px;
         white-space: pre-wrap; color: hsl(var(--text-muted));
       }
+
+      @media (max-width: 720px) {
+        .ob-title { font-size: 22px; }
+        .ob-stats-inline { gap: 12px; }
+        .ob-stats-inline .stat .v { font-size: 16px; }
+      }
     `;
     document.head.appendChild(s);
   },
@@ -194,20 +388,23 @@ const Obelisk = {
   },
 
   async _loadStats() {
-    const wrap = document.getElementById('ob-stats');
+    const wrap = document.getElementById('ob-stats-inline');
     const res = await this._api('stats');
     const st = (res && res.ok && res.stats) ? res.stats : { total: 0, with_email: 0, qualified: 0, contacted: 0, won: 0 };
     this.state.stats = st;
+    if (!wrap) return;
+    // Si zéro partout, on cache les stats — l'empty hero portera tout le poids.
+    if (!st.total) { wrap.innerHTML = ''; return; }
     wrap.innerHTML = `
-      ${this._statCard('Total', st.total)}
-      ${this._statCard('Avec email', st.with_email)}
-      ${this._statCard('Qualifiés', st.qualified)}
-      ${this._statCard('Contactés', st.contacted)}
-      ${this._statCard('Gagnés', st.won)}
+      ${this._statInline('Total', st.total)}
+      ${this._statInline('Emails', st.with_email)}
+      ${this._statInline('Qualifiés', st.qualified)}
+      ${this._statInline('Contactés', st.contacted)}
+      ${this._statInline('Gagnés', st.won)}
     `;
   },
-  _statCard(label, value) {
-    return `<div class="ob-stat"><div class="label">${this._esc(label)}</div><div class="value">${Number(value || 0).toLocaleString('fr-FR')}</div></div>`;
+  _statInline(label, value) {
+    return `<div class="stat"><span class="v">${Number(value || 0).toLocaleString('fr-FR')}</span><span class="l">${this._esc(label)}</span></div>`;
   },
 
   async switchTab(name) {
@@ -221,11 +418,28 @@ const Obelisk = {
   // -------------------------------------------------------------------
   // Onglet Créateurs : filtres + tableau paginé
   // -------------------------------------------------------------------
+  _hasActiveFilters() {
+    const f = this.state.filters;
+    return !!(f.q || f.platform || f.status || f.has_email || f.min_score);
+  },
+
   async _renderCreators() {
     const c = document.getElementById('ob-content');
+    const totalAll = (this.state.stats && this.state.stats.total) || 0;
+
+    // Si aucun créateur en base ET aucun filtre actif → grand empty hero
+    if (totalAll === 0 && !this._hasActiveFilters()) {
+      c.innerHTML = this._emptyHeroHtml();
+      const cta = document.getElementById('ob-empty-cta');
+      if (cta) cta.onclick = () => this.switchTab('search');
+      return;
+    }
+
     c.innerHTML = `
       <div class="ob-filters">
-        <input id="ob-f-q" placeholder="Recherche libre (nom, handle, site, description)" value="${this._esc(this.state.filters.q)}" style="flex:1; min-width: 240px;">
+        <div class="ob-search">
+          <input id="ob-f-q" placeholder="Rechercher un nom, un handle, un site…" value="${this._esc(this.state.filters.q)}">
+        </div>
         <select id="ob-f-platform">
           <option value="">Toutes plateformes</option>
           ${this.PLATFORMS.map(p => `<option value="${p.id}" ${this.state.filters.platform === p.id ? 'selected' : ''}>${this._esc(p.label)}</option>`).join('')}
@@ -235,18 +449,20 @@ const Obelisk = {
           ${Object.entries(this.STATUS_LABELS).map(([k, l]) => `<option value="${k}" ${this.state.filters.status === k ? 'selected' : ''}>${this._esc(l)}</option>`).join('')}
         </select>
         <select id="ob-f-email">
-          <option value="">Avec ou sans email</option>
+          <option value="">Email : tous</option>
           <option value="yes" ${this.state.filters.has_email === 'yes' ? 'selected' : ''}>Avec email</option>
           <option value="no" ${this.state.filters.has_email === 'no' ? 'selected' : ''}>Sans email</option>
         </select>
-        <input id="ob-f-score" type="number" min="0" max="100" placeholder="Score min" value="${this.state.filters.min_score || ''}" style="width: 100px;">
-        <button id="ob-f-apply" class="btn btn-primary" style="padding: 7px 14px; font-size: 12.5px;">Filtrer</button>
-        <button id="ob-f-reset" class="btn btn-ghost" style="padding: 7px 14px; font-size: 12.5px;">Réinitialiser</button>
+        <input id="ob-f-score" class="ob-num" type="number" min="0" max="100" placeholder="Score ≥" value="${this.state.filters.min_score || ''}">
       </div>
-      <div id="ob-table-wrap" class="bg-card border border-border rounded-xl overflow-hidden"></div>
-      <div id="ob-pager" class="mt-3 flex items-center justify-between text-[12px] text-text-muted"></div>
+
+      <div id="ob-active-filters"></div>
+
+      <div id="ob-table-wrap" class="ob-table-card"></div>
+      <div id="ob-pager" class="ob-pager"></div>
     `;
-    document.getElementById('ob-f-apply').onclick = () => {
+
+    const applyFromInputs = () => {
       this.state.filters.q        = document.getElementById('ob-f-q').value;
       this.state.filters.platform = document.getElementById('ob-f-platform').value;
       this.state.filters.status   = document.getElementById('ob-f-status').value;
@@ -255,17 +471,74 @@ const Obelisk = {
       this.state.page = 0;
       this._loadCreators();
     };
-    document.getElementById('ob-f-reset').onclick = () => {
+
+    // La recherche libre filtre après une courte pause (debounce)
+    const qInput = document.getElementById('ob-f-q');
+    let qTimer;
+    qInput.addEventListener('input', () => {
+      clearTimeout(qTimer);
+      qTimer = setTimeout(applyFromInputs, 280);
+    });
+    // Les selects/score filtrent dès le change
+    ['ob-f-platform', 'ob-f-status', 'ob-f-email', 'ob-f-score'].forEach(id => {
+      document.getElementById(id).addEventListener('change', applyFromInputs);
+    });
+
+    await this._loadCreators();
+  },
+
+  _emptyHeroHtml() {
+    return `
+      <div class="ob-empty-hero">
+        <div class="icon">🔭</div>
+        <h2>Ton CRM est vierge.</h2>
+        <p>Décris ta cible (niche, secteur, mot-clé) et Obelisk balaie les plateformes
+           pour repérer les créateurs non monétisés, enrichir leurs emails et te préparer les drafts.</p>
+        <button id="ob-empty-cta" class="btn btn-primary" style="padding: 11px 22px; font-size: 14px;">
+          Lancer ma première recherche
+        </button>
+        <div class="ob-platforms-tease">
+          ${this.PLATFORMS.map(p => `<span>${this._esc(p.label)}</span>`).join('')}
+        </div>
+      </div>
+    `;
+  },
+
+  _renderActiveFilters() {
+    const wrap = document.getElementById('ob-active-filters');
+    if (!wrap) return;
+    const f = this.state.filters;
+    const chips = [];
+    if (f.q)         chips.push(['q', `« ${f.q} »`]);
+    if (f.platform)  chips.push(['platform', (this.PLATFORMS.find(p => p.id === f.platform) || {}).label || f.platform]);
+    if (f.status)    chips.push(['status', this.STATUS_LABELS[f.status] || f.status]);
+    if (f.has_email) chips.push(['has_email', f.has_email === 'yes' ? 'Avec email' : 'Sans email']);
+    if (f.min_score) chips.push(['min_score', `Score ≥ ${f.min_score}`]);
+    if (chips.length === 0) { wrap.className = ''; wrap.innerHTML = ''; return; }
+    wrap.className = 'ob-active-filters';
+    wrap.innerHTML = chips.map(([k, l]) =>
+      `<span class="chip">${this._esc(l)}<button data-ob-rmf="${k}" aria-label="Retirer">×</button></span>`
+    ).join('') + `<button class="clear-all" data-ob-clearall>Tout effacer</button>`;
+    wrap.querySelectorAll('[data-ob-rmf]').forEach(b => {
+      b.onclick = () => {
+        const k = b.dataset.obRmf;
+        this.state.filters[k] = (k === 'min_score') ? 0 : '';
+        this.state.page = 0;
+        this._renderCreators();
+      };
+    });
+    const clr = wrap.querySelector('[data-ob-clearall]');
+    if (clr) clr.onclick = () => {
       this.state.filters = { platform: '', status: '', min_score: 0, q: '', has_email: '' };
       this.state.page = 0;
       this._renderCreators();
     };
-    await this._loadCreators();
   },
 
   async _loadCreators() {
+    this._renderActiveFilters();
     const wrap = document.getElementById('ob-table-wrap');
-    wrap.innerHTML = '<div class="p-6 text-center text-text-muted text-sm">Chargement…</div>';
+    wrap.innerHTML = '<div style="padding: 36px; text-align: center; font-size: 13px; color: hsl(var(--text-muted));">Chargement…</div>';
     const offset = this.state.page * this.state.pageSize;
     const res = await this._api('list_creators', {
       ...this.state.filters,
@@ -273,18 +546,19 @@ const Obelisk = {
       offset,
     });
     if (!res || !res.ok) {
-      wrap.innerHTML = `<div class="p-6 text-danger text-sm">Erreur : ${this._esc(res && res.error || 'inconnu')}</div>`;
+      wrap.innerHTML = `<div style="padding: 24px; color: hsl(var(--danger)); font-size: 13px;">Erreur : ${this._esc(res && res.error || 'inconnu')}</div>`;
       return;
     }
     this.state.rows = res.rows || [];
     this.state.total = res.count || 0;
 
     if (this.state.rows.length === 0) {
-      wrap.innerHTML = `<div class="p-10 text-center text-text-muted">
-        <div class="text-3xl mb-3 opacity-50">🔭</div>
-        <div class="font-semibold text-text mb-1">Aucun créateur ne correspond.</div>
-        <div class="text-sm">Essaie d'élargir tes filtres, ou lance une nouvelle recherche.</div>
-      </div>`;
+      wrap.innerHTML = `
+        <div style="padding: 56px 24px; text-align: center;">
+          <div style="font-size: 32px; opacity: .5; margin-bottom: 12px;">🔭</div>
+          <div style="font-weight: 600; color: hsl(var(--text)); margin-bottom: 4px; font-size: 15px;">Aucun créateur ne correspond.</div>
+          <div style="font-size: 13px; color: hsl(var(--text-muted));">Élargis tes filtres ou lance une nouvelle recherche.</div>
+        </div>`;
     } else {
       wrap.innerHTML = `
         <table class="ob-table">
@@ -298,7 +572,6 @@ const Obelisk = {
       `;
       wrap.querySelectorAll('[data-ob-open]').forEach(tr => {
         tr.onclick = (ev) => {
-          // Évite d'ouvrir le drawer quand on clique sur un select
           if (ev.target.closest('select, button, a')) return;
           this.openCreator(tr.dataset.obOpen);
         };
@@ -316,7 +589,7 @@ const Obelisk = {
     const end   = Math.min(offset + this.state.pageSize, this.state.total);
     pager.innerHTML = `
       <div>${start}–${end} sur ${Number(this.state.total).toLocaleString('fr-FR')}</div>
-      <div class="flex gap-2">
+      <div style="display:flex; gap: 8px;">
         <button class="btn btn-ghost" ${this.state.page === 0 ? 'disabled' : ''} data-ob-prev>← Précédent</button>
         <button class="btn btn-ghost" ${this.state.page >= lastPage ? 'disabled' : ''} data-ob-next>Suivant →</button>
       </div>
@@ -330,19 +603,24 @@ const Obelisk = {
   _rowHtml(p) {
     const platform = this._inferPlatform(p);
     const emails = Array.isArray(p.emails) ? p.emails : [];
-    const score = p.score || 0;
-    const scoreColor = score >= 70 ? 'text-success' : score >= 40 ? 'text-warning' : 'text-text-muted';
+    const score = Math.max(0, Math.min(100, p.score || 0));
+    const scoreVar = score >= 70 ? '--success' : score >= 40 ? '--warning' : '--text-muted';
     const status = p.status || 'new';
     return `
       <tr class="is-clickable" data-ob-open="${this._esc(p.id)}">
         <td>
-          <div class="font-semibold text-text">${this._esc(p.name || p.handle || p.legal_name || '(sans nom)')}</div>
-          ${p.handle ? `<div class="text-[11px] text-text-muted">@${this._esc(p.handle)}</div>` : ''}
+          <div style="font-weight: 600; color: hsl(var(--text));">${this._esc(p.name || p.handle || p.legal_name || '(sans nom)')}</div>
+          ${p.handle ? `<div style="font-size: 11.5px; color: hsl(var(--text-muted)); margin-top: 2px;">@${this._esc(p.handle)}</div>` : ''}
         </td>
-        <td>${platform ? `<span class="ob-pill" style="background: hsl(var(--accent) / .1); color: hsl(var(--accent));">${this._esc(platform)}</span>` : '<span class="text-text-muted">—</span>'}</td>
-        <td>${emails[0] ? `<a href="mailto:${this._esc(emails[0])}" class="text-info hover:underline" onclick="event.stopPropagation()">${this._esc(emails[0])}</a>${emails.length > 1 ? ` <span class="text-text-muted">+${emails.length - 1}</span>` : ''}` : '<span class="text-text-muted">—</span>'}</td>
-        <td class="${scoreColor} font-semibold">${score}</td>
-        <td>${this._esc(p.city || '')}</td>
+        <td>${platform ? `<span class="ob-pill">${this._esc(platform)}</span>` : '<span style="color: hsl(var(--text-muted));">—</span>'}</td>
+        <td>${emails[0] ? `<a href="mailto:${this._esc(emails[0])}" style="color: hsl(var(--info));" onclick="event.stopPropagation()">${this._esc(emails[0])}</a>${emails.length > 1 ? ` <span style="color: hsl(var(--text-muted)); font-size: 11.5px;">+${emails.length - 1}</span>` : ''}` : '<span style="color: hsl(var(--text-muted));">—</span>'}</td>
+        <td>
+          <span class="ob-score" style="color: hsl(var(${scoreVar}));">
+            ${score}
+            <span class="ob-score-bar" style="--w: ${score}%;"></span>
+          </span>
+        </td>
+        <td style="color: hsl(var(--text-muted));">${this._esc(p.city || '—')}</td>
         <td>
           <select class="ob-status-select" data-ob-status="${this._esc(p.id)}">
             ${Object.entries(this.STATUS_LABELS).map(([k, l]) => `<option value="${k}" ${status === k ? 'selected' : ''}>${this._esc(l)}</option>`).join('')}

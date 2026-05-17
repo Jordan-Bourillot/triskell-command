@@ -178,6 +178,11 @@ const App = {
     // Met à jour le bandeau utilisateur
     if (typeof UserBadge !== 'undefined') UserBadge.refresh();
 
+    // Démarre le polling des notifs Obelisk (badge sidebar)
+    if (typeof Obelisk !== 'undefined' && Obelisk._startNotifPolling) {
+      Obelisk._startNotifPolling();
+    }
+
     // Bind sidebar
     document.querySelectorAll('[data-view]').forEach(btn => {
       btn.addEventListener('click', () => {

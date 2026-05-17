@@ -156,12 +156,14 @@ const Morning = {
 
     slot.innerHTML = `<div id="m-setup-slot"></div>`
                    + this._renderHero(digest)
+                   + `<div id="m-obelisk-slot"></div>`
                    + `<div id="m-modes-slot"></div>`
                    + this._renderKpiGrid(digest)
                    + this._renderAlert(digest)
                    + `<div id="m-linkedin-slot"></div>`;
 
     this._loadSetup();
+    this._loadObeliskNotifs();
     this._loadModes();
     this._loadLinkedinActions();
 
@@ -351,6 +353,55 @@ const Morning = {
     } else if (existingAlert) {
       existingAlert.remove();
     }
+  },
+
+  // -------- Bloc OBELISK — notifs de fin de recherche --------
+  async _loadObeliskNotifs() {
+    const slot = document.getElementById('m-obelisk-slot');
+    if (!slot) return;
+    if (typeof Obelisk === 'undefined' || !Obelisk.checkNotifs) return;
+    const data = await Obelisk.checkNotifs();
+    const count = data.count || 0;
+    if (count === 0) { slot.innerHTML = ''; return; }
+    const jobs = data.jobs || [];
+    const headline = count === 1
+      ? '1 nouvelle vague de prospection terminée'
+      : `${count} nouvelles vagues de prospection terminées`;
+    const itemsHtml = jobs.slice(0, 3).map(j => {
+      const stats = j.stats || {};
+      const found = (stats.found || 0) + (stats.phantom_inserted || 0);
+      const platforms = (j.platforms || []).join(' · ') || '—';
+      return `
+        <li class="cockpit-obnotif-item">
+          <div class="cockpit-obnotif-niche">${this._esc(j.niche || '(sans niche)')}</div>
+          <div class="cockpit-obnotif-meta">
+            <span>${found} profil${found > 1 ? 's' : ''}</span>
+            <span>·</span>
+            <span>${this._esc(platforms)}</span>
+          </div>
+        </li>
+      `;
+    }).join('');
+    slot.innerHTML = `
+      <div class="cockpit-obnotif">
+        <div class="cockpit-obnotif-head">
+          <div>
+            <div class="cockpit-obnotif-kicker">PROSPECTION TERMINÉE</div>
+            <h3 class="cockpit-obnotif-title">${headline}</h3>
+          </div>
+          <button class="btn btn-primary" onclick="App.show('obelisk')">
+            Voir les profils →
+          </button>
+        </div>
+        <ul class="cockpit-obnotif-list">${itemsHtml}</ul>
+      </div>
+    `;
+  },
+
+  _esc(s) {
+    if (s == null) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   },
 
   // -------- Bloc MODES — bascule envoi direct ↔ validation --------

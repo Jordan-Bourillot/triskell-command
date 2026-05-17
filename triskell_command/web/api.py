@@ -2835,6 +2835,39 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "jobs": []}
 
+    def obelisk_unseen_done_jobs(self, payload: dict | None = None) -> dict:
+        """Renvoie les jobs Obelisk terminés (status=done) après la date
+        "since" passée par le front. Le front stocke en localStorage la
+        date de la dernière visite Obelisk et passe cette date ici pour
+        savoir combien de recherches sont arrivées depuis.
+
+        payload = {since: "YYYY-MM-DDTHH:MM:SS"}
+        """
+        try:
+            from ..integrations.obelisk import repo as r
+            user_email = self._safe_user_email()
+            since = ((payload or {}).get("since") or "").strip()
+            # Récupère les 20 derniers jobs done et filtre côté Python
+            raw = r.list_recent_jobs(user_email, limit=20)
+            jobs = (raw or {}).get("jobs") or []
+            done = [j for j in jobs if (j.get("status") == "done")]
+            if since:
+                done = [j for j in done if (j.get("finished_at") or "") > since]
+            # Format compact pour la sidebar / cockpit
+            return {
+                "ok": True,
+                "count": len(done),
+                "jobs": [{
+                    "id":           j.get("id"),
+                    "niche":        j.get("niche") or "",
+                    "platforms":    j.get("platforms") or [],
+                    "finished_at":  j.get("finished_at") or "",
+                    "stats":        j.get("stats") or {},
+                } for j in done[:5]],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "count": 0, "jobs": []}
+
     def _safe_user_email(self) -> str:
         """Récupère l'email user de manière défensive (les méthodes
         existantes varient selon le mode pywebview/HTTP). Fallback sur
