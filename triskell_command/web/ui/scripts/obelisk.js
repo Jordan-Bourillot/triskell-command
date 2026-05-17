@@ -25,6 +25,9 @@ const Obelisk = {
   },
 
   PLATFORMS: [
+    { id: 'linkedin',  label: 'LinkedIn',  source: 'phantombuster' },
+    { id: 'instagram', label: 'Instagram', source: 'phantombuster' },
+    { id: 'tiktok',    label: 'TikTok',    source: 'phantombuster' },
     { id: 'youtube',   label: 'YouTube' },
     { id: 'twitch',    label: 'Twitch' },
     { id: 'reddit',    label: 'Reddit' },
@@ -553,7 +556,7 @@ const Obelisk = {
       <div class="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5">
         <div class="bg-card border border-border rounded-xl p-6">
           <h3 class="text-lg font-bold mb-1">Nouvelle recherche</h3>
-          <p class="text-sm text-text-muted mb-5">Décris ta cible. Obelisk balaie les 9 plateformes activées, enrichit les profils et stocke tout dans ton CRM.</p>
+          <p class="text-sm text-text-muted mb-5">Décris ta cible. Obelisk balaie les plateformes activées (12 dispos, dont LinkedIn / Instagram / TikTok via PhantomBuster), enrichit les profils et stocke tout dans ton CRM.</p>
 
           <label class="block mb-4">
             <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Niche / mot-clé</div>

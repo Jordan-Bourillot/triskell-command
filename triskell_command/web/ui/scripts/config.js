@@ -1140,6 +1140,47 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
             <div class="text-[11px] text-text-muted mt-1">Phantombuster espace les envois (~25/jour côté LinkedIn).</div>
           </div>
 
+          <hr class="border-border my-2" />
+
+          <div>
+            <div class="text-sm font-semibold mb-1">Phantoms de découverte (LinkedIn / Instagram / TikTok)</div>
+            <div class="text-[11px] text-text-muted mb-3">
+              Pour qu'Obelisk puisse chercher des profils sur ces 3 plateformes,
+              crée un Phantom de découverte côté Phantombuster (un par plateforme)
+              et colle ici son ID. Tu peux laisser vide les plateformes que tu ne
+              veux pas utiliser.
+            </div>
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs font-medium text-text-secondary mb-1.5">
+                  Phantom « LinkedIn Search Export »
+                </label>
+                <input type="text" data-pb-key="discovery_phantoms.linkedin"
+                       value="${this._esc((c.discovery_phantoms || {}).linkedin || '')}"
+                       placeholder="ID du Phantom LinkedIn Search"
+                       class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none font-mono" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-text-secondary mb-1.5">
+                  Phantom « Instagram Hashtag Collector »
+                </label>
+                <input type="text" data-pb-key="discovery_phantoms.instagram"
+                       value="${this._esc((c.discovery_phantoms || {}).instagram || '')}"
+                       placeholder="ID du Phantom Instagram Hashtag"
+                       class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none font-mono" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-text-secondary mb-1.5">
+                  Phantom « TikTok Hashtag Scraper »
+                </label>
+                <input type="text" data-pb-key="discovery_phantoms.tiktok"
+                       value="${this._esc((c.discovery_phantoms || {}).tiktok || '')}"
+                       placeholder="ID du Phantom TikTok Hashtag"
+                       class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none font-mono" />
+              </div>
+            </div>
+          </div>
+
           <div class="flex gap-3 pt-2">
             <button class="btn btn-primary" id="pb-save">Enregistrer</button>
             <button class="btn btn-secondary" id="pb-test">Vérifier la connexion</button>
@@ -1168,6 +1209,11 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
         api_key: v('api_key'),
         agent_id: v('agent_id'),
         max_per_launch: v('max_per_launch'),
+        discovery_phantoms: {
+          linkedin:  v('discovery_phantoms.linkedin')  || '',
+          instagram: v('discovery_phantoms.instagram') || '',
+          tiktok:    v('discovery_phantoms.tiktok')    || '',
+        },
       };
     };
     save.onclick = async () => {
