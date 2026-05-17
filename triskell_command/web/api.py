@@ -153,16 +153,28 @@ class Api:
     # Réponses entrantes
     # ------------------------------------------------------------------
     def get_replies(self, payload: dict | None = None) -> dict:
-        """Renvoie les réponses non traitées + le détail des prospects."""
-        category = (payload or {}).get("category") or "all"
+        """Renvoie les réponses + mails entrants non traités.
+
+        Inclut maintenant :
+        - les reply_received (reponses matchees a un prospect, classees IA)
+        - les inbox_received (mails entrants non matches : permet de ne plus
+          perdre les mails recus depuis une adresse inconnue)
+
+        Filtre optionnel par account_id (compte mail) : si fourni, ne montre
+        que les entrants de ce compte. Resoud le bug du multi-comptes ou
+        on melangeait les boites.
+        """
+        p = payload or {}
+        category = p.get("category") or "all"
+        account_id = (p.get("account_id") or "").strip()
         client = self._supabase()
         if client is None:
             return {"ok": False, "error": "not_connected"}
         try:
             sb = client.raw
             res = (sb.table("email_history").select("*")
-                   .eq("kind", "reply_received")
-                   .order("ts", desc=True).limit(200).execute())
+                   .in_("kind", ["reply_received", "inbox_received"])
+                   .order("ts", desc=True).limit(300).execute())
             rows = res.data or []
             out = []
             import json as _json
@@ -175,14 +187,20 @@ class Api:
                         extra = {}
                 if extra.get("handled"):
                     continue
-                if category != "all":
+                # Filtre compte mail (si demande explicitement)
+                if account_id and extra.get("account_id") != account_id:
+                    continue
+                # Filtre categorie : ne s'applique qu'aux reply_received
+                # (les inbox_received n'ont pas de classification IA)
+                if category != "all" and r.get("kind") == "reply_received":
                     cat = (extra.get("classification") or {}).get(
                         "category", "unknown")
                     if cat != category:
                         continue
                 r["extra"] = extra
                 out.append(r)
-            # Hydrate prospects
+            # Hydrate prospects (uniquement pour reply_received qui ont
+            # un prospect_id)
             ids = list({x.get("prospect_id") for x in out
                         if x.get("prospect_id")})
             prospects = {}
@@ -190,8 +208,8 @@ class Api:
                 pres = (sb.table("prospects").select(
                     "id,name,legal_name,emails,status")
                     .in_("id", ids).execute())
-                prospects = {p["id"]: p for p in (pres.data or [])
-                              if p.get("id")}
+                prospects = {p2["id"]: p2 for p2 in (pres.data or [])
+                              if p2.get("id")}
             return {"ok": True, "rows": out, "prospects": prospects}
         except Exception as exc:
             logger.warning("get_replies: %s", exc)
@@ -268,14 +286,68 @@ class Api:
 
     def mail_health(self) -> dict:
         """Renvoie l'etat de sante du systeme mail : status du poller IMAP,
-        comptes en alerte (erreurs consecutives), dernier poll reussi. UI :
-        afficher un toast rouge si alerts non vide."""
+        comptes en alerte (erreurs consecutives), dernier poll reussi,
+        drafts bloques 'needs_review' (variables non remplies). UI :
+        afficher un toast rouge si alerts non vide ou needs_review > 0."""
+        out: dict = {"ok": True}
         try:
             from ..integrations import replies_poller
-            st = replies_poller.get_status()
-            return {"ok": True, **st}
+            out.update(replies_poller.get_status())
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            out["poller_error"] = str(exc)
+        # Compte les drafts bloques (needs_review / skipped_duplicate) pour
+        # qu'ils ne soient pas oublies
+        try:
+            client = self._supabase()
+            needs_review = 0
+            skipped_dup = 0
+            bounced_count = 0
+            unsubscribed_count = 0
+            if client is not None:
+                sb = client.raw
+                # convoy_drafts avec status needs_review / skipped_duplicate
+                try:
+                    nr = (sb.table("convoy_drafts").select("id", count="exact")
+                           .eq("status", "needs_review").execute())
+                    needs_review = nr.count or 0
+                except Exception:
+                    pass
+                try:
+                    sd = (sb.table("convoy_drafts").select("id", count="exact")
+                           .eq("status", "skipped_duplicate").execute())
+                    skipped_dup = sd.count or 0
+                except Exception:
+                    pass
+                # Compteurs prospects bloques par statut (visibilite cockpit)
+                for st_name, ref in (("bounced", "bounced_count"),
+                                       ("unsubscribed", "unsubscribed_count")):
+                    try:
+                        rr = (sb.table("prospects").select("id", count="exact")
+                              .eq("status", st_name).execute())
+                        if ref == "bounced_count":
+                            bounced_count = rr.count or 0
+                        else:
+                            unsubscribed_count = rr.count or 0
+                    except Exception:
+                        pass
+            out["needs_review_count"] = needs_review
+            out["skipped_duplicate_count"] = skipped_dup
+            out["bounced_count"] = bounced_count
+            out["unsubscribed_count"] = unsubscribed_count
+            # Augmente alerts si needs_review : Jordan doit le voir
+            alerts = list(out.get("alerts") or [])
+            if needs_review > 0:
+                alerts.append({
+                    "account_id": "drafts",
+                    "kind": "needs_review",
+                    "count": needs_review,
+                    "message": (f"{needs_review} brouillon{'s' if needs_review > 1 else ''} "
+                                f"bloque{'s' if needs_review > 1 else ''} (variables non remplies)"),
+                })
+            out["alerts"] = alerts
+        except Exception as exc:
+            out["counters_error"] = str(exc)
+        return out
 
     # ------------------------------------------------------------------
     # Brouillons à valider

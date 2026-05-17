@@ -210,11 +210,18 @@ def compute_digest() -> dict[str, Any]:
         "queue": {
             "drafts_prospect_pending": 0,
             "drafts_convoy_pending": 0,
+            "drafts_convoy_needs_review": 0,
+            "drafts_convoy_skipped_duplicate": 0,
             "replies_unhandled_interested": 0,
             "replies_unhandled_total": 0,
         },
         "alerts": {"convoy_failed_yesterday": 0,
                     "convoy_failed_today": 0},
+        "blocklist": {
+            "prospects_unsubscribed": 0,
+            "prospects_bounced": 0,
+            "prospects_refused": 0,
+        },
         "totals": {"prospects": 0},
         "error": "",
     }
@@ -252,10 +259,36 @@ def compute_digest() -> dict[str, Any]:
         client, only_interested=True)
     out["queue"]["replies_unhandled_total"] = _count_unhandled_replies(client)
 
+    # Drafts bloques (variables non remplies, anti-doublon) — important pour
+    # que Jordan voit qu'il y a des mails a regarder manuellement
+    def _count_convoy_by_status(status: str) -> int:
+        try:
+            res = (client.raw.table("convoy_drafts")
+                    .select("id", count="exact")
+                    .eq("status", status).limit(1).execute())
+            return int(res.count or 0)
+        except Exception:
+            return 0
+    out["queue"]["drafts_convoy_needs_review"] = _count_convoy_by_status("needs_review")
+    out["queue"]["drafts_convoy_skipped_duplicate"] = _count_convoy_by_status("skipped_duplicate")
+
     out["alerts"]["convoy_failed_yesterday"] = _count_failed_convoy_drafts(
         client, y_start, y_end)
     out["alerts"]["convoy_failed_today"] = _count_failed_convoy_drafts(
         client, t_start, t_end)
+
+    # Compteurs prospects en blocklist (RGPD + reputation envoi)
+    def _count_prospects_status(status: str) -> int:
+        try:
+            res = (client.raw.table("prospects")
+                    .select("id", count="exact")
+                    .eq("status", status).limit(1).execute())
+            return int(res.count or 0)
+        except Exception:
+            return 0
+    out["blocklist"]["prospects_unsubscribed"] = _count_prospects_status("unsubscribed")
+    out["blocklist"]["prospects_bounced"] = _count_prospects_status("bounced")
+    out["blocklist"]["prospects_refused"] = _count_prospects_status("refused")
 
     out["totals"]["prospects"] = _count_total_prospects(client)
 
