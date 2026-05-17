@@ -546,7 +546,7 @@ const Catalogue = {
       } catch (e) { console.warn(e); }
     };
     const editBtn = document.getElementById('catalogue-detail-edit');
-    if (editBtn) editBtn.onclick = () => { this._closeDetail(); this._openProductEdit(it.id, it.category || ''); };
+    if (editBtn) editBtn.onclick = () => this._openProductEdit(it.id, it.category || '');
     const delBtn = document.getElementById('catalogue-detail-delete');
     if (delBtn) delBtn.onclick = async () => {
       if (!confirm(`Supprimer définitivement "${it.name}" du catalogue ?`)) return;
@@ -731,7 +731,7 @@ const Catalogue = {
     });
     ov.addEventListener('click', (e) => { if (e.target === ov) this._closeDetail(); });
     document.getElementById('cat-bundle-close').onclick = () => this._closeDetail();
-    document.getElementById('cat-bundle-edit').onclick = () => { this._closeDetail(); this._openBundleEdit(b.id); };
+    document.getElementById('cat-bundle-edit').onclick = () => this._openBundleEdit(b.id);
     document.getElementById('cat-bundle-delete').onclick = async () => {
       if (!confirm(`Supprimer le pack "${b.name}" ?`)) return;
       try {
