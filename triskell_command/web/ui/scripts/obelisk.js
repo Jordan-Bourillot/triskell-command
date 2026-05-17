@@ -69,7 +69,7 @@ const Obelisk = {
           <div>
             <div class="hero-kicker mb-2">OBELISK</div>
             <h1 class="hero-title mb-3" style="font-size: 36px;">Trouve les créateurs vierges de ta niche.</h1>
-            <p class="hero-subtitle">9 plateformes scannées, créateurs non monétisés détectés, emails enrichis, mails rédigés. Tu valides, tu envoies.</p>
+            <p class="hero-subtitle">12 plateformes scannées (dont LinkedIn / Instagram / TikTok via PhantomBuster), créateurs non monétisés détectés, emails enrichis, mails rédigés. Tu valides, tu envoies.</p>
           </div>
           <div class="flex gap-2">
             <button id="ob-refresh" class="btn btn-secondary">Rafraîchir</button>
