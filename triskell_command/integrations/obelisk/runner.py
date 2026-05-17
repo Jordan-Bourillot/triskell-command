@@ -166,11 +166,21 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
             cfg.platforms = native_platforms
             log(f"Démarrage recherche natives '{niche}' sur "
                 f"{', '.join(native_platforms)}…")
+            # Snapshot des match_keys connues AVANT le run pour détecter
+            # les nouveaux ensuite (le pipeline écrit dans un fichier local).
+            before_keys = _read_local_prospects_keys()
             stats = run_creators_pipeline(cfg, progress=log) or {}
             agg_stats["found"]    += int(stats.get("found", 0) or 0)
             agg_stats["enriched"] += int(stats.get("enriched", 0) or 0)
             agg_stats["drafts"]   += int(stats.get("drafts", 0) or 0)
             agg_stats["per_platform"]["_native"] = stats
+            # ⚡ Upload les nouveaux prospects (qui ont été écrits localement
+            # par le pipeline) vers Supabase, sinon l'UI Triskell ne les voit
+            # JAMAIS — le pipeline natif vient de l'app standalone et
+            # n'écrit pas dans Supabase de lui-même.
+            _upload_new_locals_to_supabase(
+                before_keys=before_keys, niche=niche, log=log,
+                agg_stats=agg_stats)
 
         # 2) Phantoms (LinkedIn / Instagram / TikTok)
         if phantom_platforms:
@@ -196,6 +206,173 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
                     finished_at=datetime.now(timezone.utc).isoformat())
     finally:
         _RUNNING.pop(job_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Upload des prospects locaux (écrits par le pipeline natif) vers Supabase
+# ---------------------------------------------------------------------------
+_LOCAL_PROSPECTS_FILE = ("triskell-prospect", "prospects.json")
+
+
+def _local_prospects_path():
+    from pathlib import Path
+    return Path.home() / f".{_LOCAL_PROSPECTS_FILE[0]}" / _LOCAL_PROSPECTS_FILE[1]
+
+
+def _read_local_prospects() -> list[dict]:
+    """Lit le fichier ~/.triskell-prospect/prospects.json (peut être absent
+    au premier run). Renvoie une liste de dicts."""
+    import json
+    p = _local_prospects_path()
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _read_local_prospects_keys() -> set[str]:
+    """Snapshot des match_keys actuellement connues dans le fichier local.
+    Sert à détecter les NOUVEAUX prospects après un run du pipeline natif."""
+    out: set[str] = set()
+    for p in _read_local_prospects():
+        for k in (p.get("match_keys") or []):
+            if isinstance(k, str) and k:
+                out.add(k)
+    return out
+
+
+def _local_prospect_to_supabase_row(p: dict, niche: str,
+                                      now_iso: str) -> dict:
+    """Convertit un dict Prospect (format local) en row Supabase prospects."""
+    emails = p.get("emails") or []
+    phones = p.get("phones") or []
+    sources_raw = p.get("sources") or []
+    # Normalise sources : format attendu côté Supabase
+    sources = []
+    for s in sources_raw:
+        if not isinstance(s, dict):
+            continue
+        sources.append({
+            "name":      s.get("name") or "",
+            "source_id": s.get("source_id") or "",
+            "url":       s.get("url") or "",
+            "found_at":  s.get("found_at") or now_iso,
+        })
+    name = p.get("name") or p.get("legal_name") or p.get("handle") or ""
+    # Le platform_url : on prend la 1ère source qui a une URL plausible
+    platform_url = ""
+    for s in sources:
+        if s.get("url"):
+            platform_url = s["url"]
+            break
+    return {
+        "name":          name,
+        "handle":        p.get("handle") or "",
+        "legal_name":    p.get("legal_name") or "",
+        "emails":        list(emails) if isinstance(emails, list) else [],
+        "phones":        list(phones) if isinstance(phones, list) else [],
+        "website":       p.get("website") or "",
+        "other_urls":    list(p.get("other_urls") or []),
+        "address":       p.get("address") or "",
+        "city":          p.get("city") or "",
+        "postal_code":   p.get("postal_code") or "",
+        "country":       p.get("country") or "",
+        "industry":      p.get("industry") or niche,
+        "description":   (p.get("description") or "")[:1000],
+        "language":      p.get("language") or "",
+        "monetized":     bool(p.get("monetized")),
+        "monetization_reasons": list(p.get("monetization_reasons") or []),
+        "has_legal_mentions":   bool(p.get("has_legal_mentions")),
+        "score":         int(p.get("score") or 0),
+        "score_label":   p.get("score_label") or "",
+        "subscribers":   p.get("subscribers"),
+        "platform_url":  platform_url,
+        "status":        p.get("status") or "new",
+        "tags":          list(p.get("tags") or []) + [niche],
+        "notes":         p.get("notes") or "",
+        "sources":       sources,
+        "match_keys":    list(p.get("match_keys") or []),
+    }
+
+
+def _upload_new_locals_to_supabase(*, before_keys: set[str], niche: str,
+                                     log, agg_stats: dict) -> None:
+    """Détecte les nouveaux prospects ajoutés par le pipeline natif dans le
+    fichier local et les uploade vers la table Supabase `prospects` avec
+    workspace_id (sinon les RLS rejettent silencieusement)."""
+    after = _read_local_prospects()
+    if not after:
+        log("⚠ Fichier prospects local introuvable ou vide — rien à uploader.")
+        return
+    # Filtre les nouveaux : ceux dont aucun match_key n'était dans le set avant
+    new_rows: list[dict] = []
+    for p in after:
+        keys = [k for k in (p.get("match_keys") or []) if isinstance(k, str)]
+        if not keys:
+            # Pas de match_key fiable → on prend si name non vide
+            if not (p.get("name") or p.get("handle")):
+                continue
+            new_rows.append(p)
+            continue
+        if any(k in before_keys for k in keys):
+            continue  # déjà connu avant ce run
+        new_rows.append(p)
+    if not new_rows:
+        log("ℹ Aucun nouveau prospect détecté dans le fichier local.")
+        return
+    log(f"📤 Upload de {len(new_rows)} nouveau(x) prospect(s) vers Supabase…")
+    sb = repo._sb()
+    if sb is None:
+        log("⚠ Supabase non joignable — les prospects restent locaux.")
+        return
+    # Workspace_id via le helper Triskell (le client wrapper)
+    triskell_client = None
+    try:
+        from triskell_core.db import get_client as _gc, SupabaseNotConfigured
+        try:
+            tc = _gc()
+            if tc.is_authenticated:
+                triskell_client = tc
+        except SupabaseNotConfigured:
+            pass
+    except Exception:
+        pass
+
+    try:
+        from .. import multi_tenant
+        with_workspace = multi_tenant.with_workspace
+    except Exception:
+        with_workspace = lambda _cli, row: row  # noqa: E731 (no-op fallback)
+
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    inserted = 0
+    skipped = 0
+    errors = 0
+    for raw in new_rows:
+        row = _local_prospect_to_supabase_row(raw, niche, now_iso)
+        if not row.get("name"):
+            skipped += 1; continue
+        purl = row.get("platform_url") or ""
+        # Dédup côté Supabase sur platform_url si dispo, sinon sur 1er email
+        try:
+            if purl:
+                existing = (sb.table("prospects").select("id")
+                            .eq("platform_url", purl).limit(1).execute())
+                if existing.data:
+                    skipped += 1; continue
+            row = with_workspace(triskell_client, row)
+            sb.table("prospects").insert(row).execute()
+            inserted += 1
+        except Exception as exc:
+            logger.warning("upload prospect failed: %s", exc)
+            errors += 1
+    agg_stats["uploaded_to_supabase"] = inserted
+    log(f"✅ {inserted} prospects uploadés (skip {skipped}, erreurs {errors})")
 
 
 # ---------------------------------------------------------------------------
