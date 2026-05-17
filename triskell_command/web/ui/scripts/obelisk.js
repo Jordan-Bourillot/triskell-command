@@ -933,7 +933,7 @@ const Obelisk = {
               <input id="ob-s-with-email" type="checkbox" ${cfg.only_with_email ? 'checked' : ''}>
               <div>
                 <div class="font-semibold text-sm">Uniquement ceux avec un email</div>
-                <div class="text-[11px] text-text-muted">Sinon, on enrichira après pour trouver l'email.</div>
+                <div class="text-[11px] text-text-muted">Si décoché, tu auras aussi les profils sans email (à enrichir à la main après).</div>
               </div>
             </label>
             <label class="ob-toggle-row">
