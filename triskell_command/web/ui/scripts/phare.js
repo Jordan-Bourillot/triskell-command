@@ -362,29 +362,33 @@ const Phare = {
   },
 
   _wireActionButtons(root) {
+    const approveHtml = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>OK, applique';
+    const rejectHtml = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>Poubelle';
     root.querySelectorAll('[data-approve]').forEach(b => {
       b.onclick = async () => {
         const id = b.dataset.approve;
         b.disabled = true; b.textContent = 'Application…';
+        const restore = () => { b.disabled = false; b.innerHTML = approveHtml; };
         try {
           const res = await App.api.phare_merge_action({ id, force: false });
           if (res && res.ok) {
-            this._toast('✓ Modification appliquée');
+            this._toast(res.kind === 'note_only' ? '✓ Marquée comme appliquée' : '✓ Modification publiée');
             this._renderSite(document.getElementById('content'));
-          } else {
-            // Si checks KO, propose "Publier quand même"
-            if (res && res.decision && res.decision !== 'merge') {
-              if (confirm("Les vérifications automatiques ne sont pas toutes vertes. Publier quand même ?")) {
-                const r2 = await App.api.phare_merge_action({ id, force: true });
-                if (r2 && r2.ok) { this._toast('✓ Publié (forcé)'); this._renderSite(document.getElementById('content')); }
-                else this._toast('Erreur : ' + (r2?.error || 'inconnue'), 'error');
-              } else { b.disabled = false; b.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>OK, applique'; }
-            } else {
-              this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
-              b.disabled = false;
-            }
+            return;
           }
-        } catch (e) { this._toast('Erreur : ' + e, 'error'); b.disabled = false; }
+          // Si checks KO, propose "Publier quand même"
+          if (res && res.decision && res.decision !== 'merge') {
+            if (confirm("Les vérifications automatiques ne sont pas toutes vertes. Publier quand même ?")) {
+              const r2 = await App.api.phare_merge_action({ id, force: true });
+              if (r2 && r2.ok) { this._toast('✓ Publié (forcé)'); this._renderSite(document.getElementById('content')); return; }
+              this._toast('Erreur : ' + (r2?.error || 'inconnue'), 'error');
+              restore();
+            } else { restore(); }
+          } else {
+            this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
+            restore();
+          }
+        } catch (e) { this._toast('Erreur : ' + e, 'error'); restore(); }
       };
     });
     root.querySelectorAll('[data-reject]').forEach(b => {
@@ -393,16 +397,17 @@ const Phare = {
         const reason = prompt("Pourquoi refuser cette proposition ?\n(Tu peux laisser vide.)", "");
         if (reason === null) return; // annulé
         b.disabled = true; b.textContent = 'Refus…';
+        const restore = () => { b.disabled = false; b.innerHTML = rejectHtml; };
         try {
           const res = await App.api.phare_reject_action({ id, reason: reason || '' });
           if (res && res.ok) {
             this._toast('Proposition mise à la poubelle');
             this._renderSite(document.getElementById('content'));
-          } else {
-            this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
-            b.disabled = false;
+            return;
           }
-        } catch (e) { this._toast('Erreur : ' + e, 'error'); b.disabled = false; }
+          this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
+          restore();
+        } catch (e) { this._toast('Erreur : ' + e, 'error'); restore(); }
       };
     });
   },

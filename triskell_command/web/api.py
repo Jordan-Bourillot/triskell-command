@@ -2798,13 +2798,26 @@ class Api:
 
     def obelisk_start_search(self, payload: dict) -> dict:
         """Lance une recherche dans un thread background. Retourne le job_id
-        à poller via obelisk_get_job."""
+        à poller via obelisk_get_job.
+
+        payload = {
+            niche, platforms, max_per_platform,
+            filters: {
+                monetized_mode:  "all"|"unmonetized"|"monetized",
+                min_subscribers: int,
+                max_subscribers: int,
+                country, language,
+                only_with_email, only_uncontacted,
+            }
+        }
+        """
         p = payload or {}
         niche = (p.get("niche") or "").strip()
         platforms = p.get("platforms") or []
         if not isinstance(platforms, list):
             platforms = []
         max_pp = int(p.get("max_per_platform") or 30)
+        filters = (p.get("filters") or {}) if isinstance(p.get("filters"), dict) else {}
         if not niche:
             return {"ok": False, "error": "niche requise"}
         if not platforms:
@@ -2812,7 +2825,8 @@ class Api:
         try:
             from ..integrations.obelisk import runner
             user_email = self._safe_user_email()
-            return runner.start_search(user_email, niche, platforms, max_pp)
+            return runner.start_search(user_email, niche, platforms, max_pp,
+                                        config_overrides=filters)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

@@ -481,6 +481,15 @@ def ecosystem_overview() -> dict:
 # Validation manuelle d'une PR en attente (depuis l'UI)
 # ---------------------------------------------------------------------------
 def merge_action(action_id: str, *, force: bool = False) -> dict:
+    """Valide une action.
+
+    Deux cas :
+    - Action liée à une PR GitHub (kind='pr_modif', github_pr_url renseignée) :
+      vérifie les checks et merge la PR pour de vrai.
+    - Action sans PR (recommandation textuelle, bulletin, cluster sémantique…) :
+      marque simplement comme 'merged' pour la sortir de la liste « à regarder ».
+      C'est l'utilisateur qui actionne le conseil hors du Phare.
+    """
     sb = repo._sb()
     if sb is None:
         return {"ok": False, "error": "Supabase non configuré"}
@@ -488,12 +497,17 @@ def merge_action(action_id: str, *, force: bool = False) -> dict:
     if not rows:
         return {"ok": False, "error": "action introuvable"}
     action = rows[0]
+    pr_url = action.get("github_pr_url") or ""
+    if not pr_url:
+        # Validation simple : pas de modif technique, on note juste « accepté »
+        repo.update_action(action_id, {
+            "status": "merged", "auto_merged": False,
+            "merged_at": datetime.now().isoformat(),
+        })
+        return {"ok": True, "kind": "note_only"}
     site = repo.get_site(action["site_id"])
     if not site:
         return {"ok": False, "error": "site introuvable"}
-    pr_url = action.get("github_pr_url") or ""
-    if not pr_url:
-        return {"ok": False, "error": "pas de PR liée à cette action"}
     pr_number = int(pr_url.rstrip("/").split("/")[-1])
     if not force:
         v = git_pipeline.verify_pr(site=site, pr_number=pr_number,

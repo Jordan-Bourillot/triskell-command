@@ -303,6 +303,7 @@ def discover_profiles(
     progress: Optional[Callable[[str], None]] = None,
     poll_timeout_sec: int = 30 * 60,
     client=None,                 # wrapper Supabase (pour workspace_id)
+    filters: Optional[dict] = None,  # filtres audience / monétisation / pays…
 ) -> dict:
     """Lance une recherche PhantomBuster et insère les profils trouvés.
 
@@ -373,6 +374,17 @@ def discover_profiles(
         if p is not None:
             prospects.append(p)
     log(f"✔ {len(prospects)} profils valides après mapping")
+
+    # Filtrage post-fetch (audience, monétisation, pays, etc.)
+    if filters:
+        try:
+            from .obelisk.runner import apply_filters as _apply
+            prospects, rejected = _apply(prospects, filters)
+            if rejected:
+                log(f"🔎 {rejected} profils rejetés par les filtres "
+                    f"(audience / monétisation / pays / langue / email)")
+        except Exception as exc:
+            log(f"⚠ application des filtres ignorée : {exc}")
 
     upsert = _upsert_prospects(sb, prospects, progress=log, client=client)
 

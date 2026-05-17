@@ -97,6 +97,12 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
 
     _update_job(job_id, status="running",
                 started_at=datetime.now(timezone.utc).isoformat())
+
+    # Construit un dict de filtres exploitable (séparé d'AutopilotConfig pour
+    # le pipeline natif). Ces filtres sont aussi appliqués en post-fetch côté
+    # PhantomBuster.
+    filters = _normalize_filters(overrides or {})
+
     try:
         # Charge la config user (fusionnée avec defaults) + applique overrides
         cfg_res = repo.get_user_config(user_email)
@@ -105,6 +111,12 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
         ucfg["niche"] = niche
         ucfg["platforms"] = platforms
         ucfg["max_per_platform"] = max_per_platform
+        # Aligne only_unmonetized avec le mode de monétisation choisi
+        if filters.get("monetized_mode") == "unmonetized":
+            ucfg["only_unmonetized"] = True
+        elif filters.get("monetized_mode") == "monetized":
+            ucfg["only_unmonetized"] = False
+        # mode "all" : on laisse la valeur user existante
 
         # Import paresseux pour ne pas alourdir le boot de Command
         try:
@@ -162,6 +174,7 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
                 max_per_platform=max_per_platform,
                 log=log,
                 agg_stats=agg_stats,
+                filters=filters,
             )
 
         log(f"Terminé : {agg_stats['found']} trouvés, "
@@ -180,12 +193,71 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
 
 
 # ---------------------------------------------------------------------------
+# Filtres avancés (audience, monétisation, pays, langue, etc.)
+# ---------------------------------------------------------------------------
+def _normalize_filters(raw: dict) -> dict:
+    """Extrait + normalise les filtres avancés depuis les overrides UI.
+    Tolère les clés manquantes ou aux mauvais types."""
+    def _i(v, default=0):
+        try: return int(v)
+        except Exception: return default
+    def _s(v):
+        return (str(v or "").strip())
+    mode = _s(raw.get("monetized_mode")).lower()
+    if mode not in ("all", "unmonetized", "monetized"):
+        mode = "all"
+    return {
+        "monetized_mode":   mode,
+        "min_subscribers":  max(0, _i(raw.get("min_subscribers"), 0)),
+        "max_subscribers":  max(0, _i(raw.get("max_subscribers"), 0)),
+        "country":          _s(raw.get("country")).upper(),
+        "language":         _s(raw.get("language")).lower(),
+        "only_with_email":  bool(raw.get("only_with_email")),
+        "only_uncontacted": bool(raw.get("only_uncontacted")),
+    }
+
+
+def apply_filters(rows: list[dict], filters: dict) -> tuple[list[dict], int]:
+    """Filtre une liste de Prospect-dicts selon les critères choisis.
+    Renvoie (rows_gardés, nb_rejetés)."""
+    if not filters:
+        return list(rows), 0
+    kept, rejected = [], 0
+    mn = filters.get("min_subscribers") or 0
+    mx = filters.get("max_subscribers") or 0
+    mode = filters.get("monetized_mode") or "all"
+    country = (filters.get("country") or "").upper()
+    language = (filters.get("language") or "").lower()
+    with_email = filters.get("only_with_email")
+    for r in rows:
+        subs = int(r.get("subscribers") or 0)
+        if mn and subs < mn:
+            rejected += 1; continue
+        if mx and subs > mx:
+            rejected += 1; continue
+        monetized = bool(r.get("monetized"))
+        if mode == "unmonetized" and monetized:
+            rejected += 1; continue
+        if mode == "monetized" and not monetized:
+            rejected += 1; continue
+        if country and (r.get("country") or "").upper() != country:
+            rejected += 1; continue
+        if language and (r.get("language") or "").lower() != language:
+            rejected += 1; continue
+        if with_email and not (r.get("emails") or []):
+            rejected += 1; continue
+        kept.append(r)
+    return kept, rejected
+
+
+# ---------------------------------------------------------------------------
 # Helpers PhantomBuster (discovery)
 # ---------------------------------------------------------------------------
 def _run_phantom_platforms(*, niche: str, platforms: list[str],
                             max_per_platform: int,
                             log,
-                            agg_stats: dict) -> None:
+                            agg_stats: dict,
+                            filters: dict | None = None) -> None:
     """Exécute la découverte PhantomBuster pour chaque plateforme demandée,
     en séquence. Met à jour agg_stats en place.
 
@@ -237,6 +309,7 @@ def _run_phantom_platforms(*, niche: str, platforms: list[str],
                 max_results=max_per_platform,
                 progress=log,
                 client=triskell_client,
+                filters=filters,
             )
         except Exception as exc:
             log(f"💥 {platform} : {exc}")

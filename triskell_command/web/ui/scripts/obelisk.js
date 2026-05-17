@@ -366,6 +366,36 @@ const Obelisk = {
         background: hsl(var(--accent) / .12); border-color: hsl(var(--accent));
         color: hsl(var(--accent)); font-weight: 600;
       }
+      .ob-radio-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 8px;
+      }
+      .ob-radio-chip {
+        display: flex; align-items: center; gap: 8px;
+        padding: 10px 12px; border-radius: 8px; font-size: 12.5px;
+        background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
+        cursor: pointer; user-select: none; transition: all 160ms ease;
+      }
+      .ob-radio-chip:hover { background: hsl(var(--surface-elevated)); }
+      .ob-radio-chip:has(input:checked) {
+        background: hsl(var(--accent) / .12); border-color: hsl(var(--accent));
+        color: hsl(var(--accent)); font-weight: 600;
+      }
+      .ob-radio-chip input[type="radio"] {
+        accent-color: hsl(var(--accent));
+        margin: 0;
+      }
+      .ob-toggle-row {
+        display: flex; align-items: flex-start; gap: 10px;
+        padding: 12px 14px; border-radius: 9px;
+        background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
+        cursor: pointer;
+      }
+      .ob-toggle-row input[type="checkbox"] {
+        margin-top: 2px;
+        width: 16px; height: 16px;
+        accent-color: hsl(var(--accent));
+      }
       .ob-progress {
         background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
         border-radius: 8px; padding: 12px; max-height: 360px; overflow-y: auto;
@@ -830,6 +860,7 @@ const Obelisk = {
     const cfg = this.state.config || {};
     const defaultPlatforms = new Set(cfg.platforms || ['youtube', 'reddit']);
 
+    const monetMode = cfg.monetized_mode || (cfg.only_unmonetized ? 'unmonetized' : 'all');
     c.innerHTML = `
       <div class="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5">
         <div class="bg-card border border-border rounded-xl p-6">
@@ -838,7 +869,7 @@ const Obelisk = {
 
           <label class="block mb-4">
             <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Niche / mot-clé</div>
-            <input id="ob-s-niche" placeholder="ex : électricien Bretagne, dev fullstack solo, podcast running…" value="${this._esc(cfg.niche || '')}" style="width:100%; padding:10px 14px; border-radius:8px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 14px;">
+            <input id="ob-s-niche" placeholder="ex : coaching business, dev fullstack solo, électricien Bretagne…" value="${this._esc(cfg.niche || '')}" style="width:100%; padding:10px 14px; border-radius:8px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 14px;">
           </label>
 
           <div class="block mb-4">
@@ -853,9 +884,70 @@ const Obelisk = {
             </div>
           </div>
 
+          <div class="block mb-4">
+            <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Cible — monétisation</div>
+            <div class="ob-radio-grid">
+              <label class="ob-radio-chip">
+                <input type="radio" name="ob-monet" value="all" ${monetMode === 'all' ? 'checked' : ''}>
+                Tous
+              </label>
+              <label class="ob-radio-chip">
+                <input type="radio" name="ob-monet" value="unmonetized" ${monetMode === 'unmonetized' ? 'checked' : ''}>
+                Pas encore monétisés
+              </label>
+              <label class="ob-radio-chip">
+                <input type="radio" name="ob-monet" value="monetized" ${monetMode === 'monetized' ? 'checked' : ''}>
+                Déjà monétisés (gros noms, vendeurs)
+              </label>
+            </div>
+            <div class="text-[11px] text-text-muted mt-2">
+              « Pas encore monétisés » = créateurs vierges à qui tu proposes d'aider à monétiser.<br/>
+              « Déjà monétisés » = coachs, formateurs, growth, influenceurs établis à qui tu proposes du partenariat.
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3 mb-4">
+            <label class="block">
+              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Audience minimum</div>
+              <input id="ob-s-min-subs" type="number" min="0" placeholder="0 = pas de plancher" value="${cfg.min_subscribers || ''}" style="width:100%; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px;">
+            </label>
+            <label class="block">
+              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Audience maximum</div>
+              <input id="ob-s-max-subs" type="number" min="0" placeholder="0 = pas de plafond" value="${cfg.max_subscribers || ''}" style="width:100%; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px;">
+            </label>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3 mb-4">
+            <label class="block">
+              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Pays (code ISO)</div>
+              <input id="ob-s-country" type="text" placeholder="ex : FR, US, EN" value="${this._esc(cfg.country || '')}" style="width:100%; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px;">
+            </label>
+            <label class="block">
+              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Langue (code ISO)</div>
+              <input id="ob-s-language" type="text" placeholder="ex : fr, en, es" value="${this._esc(cfg.language || '')}" style="width:100%; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px;">
+            </label>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+            <label class="ob-toggle-row">
+              <input id="ob-s-with-email" type="checkbox" ${cfg.only_with_email ? 'checked' : ''}>
+              <div>
+                <div class="font-semibold text-sm">Uniquement ceux avec un email</div>
+                <div class="text-[11px] text-text-muted">Sinon, on enrichira après pour trouver l'email.</div>
+              </div>
+            </label>
+            <label class="ob-toggle-row">
+              <input id="ob-s-uncontacted" type="checkbox" ${cfg.only_uncontacted !== false ? 'checked' : ''}>
+              <div>
+                <div class="font-semibold text-sm">Uniquement les pas encore contactés</div>
+                <div class="text-[11px] text-text-muted">Évite de retomber sur des prospects que tu as déjà sollicités.</div>
+              </div>
+            </label>
+          </div>
+
           <label class="block mb-5">
             <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Max par plateforme</div>
-            <input id="ob-s-max" type="number" min="5" max="100" value="${cfg.max_per_platform || 30}" style="width: 120px; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px;">
+            <input id="ob-s-max" type="number" min="5" max="500" value="${cfg.max_per_platform || 30}" style="width: 120px; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px;">
           </label>
 
           <button id="ob-s-launch" class="btn btn-primary w-full" style="padding: 12px;">Lancer la recherche</button>
@@ -906,9 +998,31 @@ const Obelisk = {
     if (!niche)             { alert('Renseigne une niche.'); return; }
     if (!platforms.length)  { alert('Coche au moins une plateforme.'); return; }
 
+    // Filtres avancés
+    const monetEl = document.querySelector('input[name="ob-monet"]:checked');
+    const monetMode = (monetEl && monetEl.value) || 'all';   // all | unmonetized | monetized
+    const minSubs = parseInt(document.getElementById('ob-s-min-subs').value, 10) || 0;
+    const maxSubs = parseInt(document.getElementById('ob-s-max-subs').value, 10) || 0;
+    const country = document.getElementById('ob-s-country').value.trim();
+    const language = document.getElementById('ob-s-language').value.trim();
+    const onlyWithEmail = document.getElementById('ob-s-with-email').checked;
+    const onlyUncontacted = document.getElementById('ob-s-uncontacted').checked;
+
+    const filters = {
+      monetized_mode:  monetMode,
+      min_subscribers: minSubs,
+      max_subscribers: maxSubs,
+      country,
+      language,
+      only_with_email:  onlyWithEmail,
+      only_uncontacted: onlyUncontacted,
+    };
+
     const btn = document.getElementById('ob-s-launch');
     btn.disabled = true; btn.textContent = 'Démarrage…';
-    const res = await this._api('start_search', { niche, platforms, max_per_platform: max });
+    const res = await this._api('start_search', {
+      niche, platforms, max_per_platform: max, filters,
+    });
     btn.disabled = false; btn.textContent = 'Lancer la recherche';
     if (!res || !res.ok) { alert('Échec : ' + (res && res.error || 'inconnu')); return; }
     this.state.jobId = res.job_id;
