@@ -182,7 +182,7 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
             # n'écrit pas dans Supabase de lui-même.
             _upload_new_locals_to_supabase(
                 before_keys=before_keys, niche=niche, log=log,
-                agg_stats=agg_stats)
+                agg_stats=agg_stats, filters=filters)
 
         # 2) Phantoms (LinkedIn / Instagram / TikTok)
         if phantom_platforms:
@@ -345,10 +345,16 @@ def _local_prospect_to_supabase_row(p: dict, niche: str,
 
 
 def _upload_new_locals_to_supabase(*, before_keys: set[str], niche: str,
-                                     log, agg_stats: dict) -> None:
+                                     log, agg_stats: dict,
+                                     filters: dict | None = None) -> None:
     """Détecte les nouveaux prospects ajoutés par le pipeline natif dans
     ~/.ledenicheur/prospects.json et les uploade vers la table Supabase
-    `prospects` avec workspace_id (sinon les RLS rejettent silencieusement)."""
+    `prospects` avec workspace_id (sinon les RLS rejettent silencieusement).
+
+    Applique aussi les filtres utilisateur (only_with_email, audience min/max,
+    monétisation, pays, langue) AVANT l'insert — pour que la case « uniquement
+    ceux avec un email » coche ne ramène pas les profils sans email.
+    """
     after = _read_local_prospects()
     if not after:
         log("⚠ Fichier prospects local introuvable ou vide — rien à uploader.")
@@ -366,6 +372,34 @@ def _upload_new_locals_to_supabase(*, before_keys: set[str], niche: str,
         log("ℹ Aucun nouveau prospect détecté dans le fichier local "
             f"(total local = {len(after)}).")
         return
+    # Applique les filtres user (only_with_email, audience, etc.) au format
+    # Prospect "local". Comme la structure des rows est différente du format
+    # Supabase, on construit un mini-row temporaire pour réutiliser
+    # apply_filters().
+    if filters:
+        before_count = len(new_rows)
+        kept: list[dict] = []
+        for raw in new_rows:
+            probe = {
+                "emails":     raw.get("emails") or [],
+                "subscribers": raw.get("subscribers") or raw.get("subscriberCount")
+                              or raw.get("followers") or 0,
+                "monetized":   bool(raw.get("monetized")),
+                "country":     raw.get("country") or "",
+                "language":    raw.get("language") or "",
+                "tags":        raw.get("monetization_reasons") or [],
+            }
+            kept_one, _ = apply_filters([probe], filters)
+            if kept_one:
+                kept.append(raw)
+        rejected = before_count - len(kept)
+        if rejected:
+            log(f"🔎 {rejected} profil(s) rejeté(s) par tes filtres "
+                f"(audience / monétisation / pays / langue / email)")
+        new_rows = kept
+        if not new_rows:
+            log("ℹ Aucun profil ne passe les filtres — rien à uploader.")
+            return
     log(f"📤 Upload de {len(new_rows)} nouveau(x) prospect(s) vers Supabase…")
     sb = repo._sb()
     if sb is None:
