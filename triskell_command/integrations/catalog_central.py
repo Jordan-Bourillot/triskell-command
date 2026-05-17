@@ -210,25 +210,23 @@ _DEFAULT_SITES = [
         "id": "wow",
         "name": "WoW Studio",
         "tagline": "Sites internet très haut de gamme.",
-        "description": "WoW Studio conçoit des sites premium pour grandes marques, groupes, "
-                       "agences et cabinets exigeants. Approche méthodique en 3 phases, "
-                       "livraison en 6 à 14 semaines. Équipe dédiée de 2 seniors et "
-                       "garantie 90 jours après mise en ligne.",
-        "sales_pitch": "Quand un site classique ne suffit pas à raconter qui tu es.",
+        "description": "WoW Studio est notre branche dédiée aux sites web de très "
+                       "haute qualité. Conception et réalisation sur-mesure pour "
+                       "grandes marques, agences et structures qui veulent un site "
+                       "à la hauteur de ce qu'elles représentent.",
+        "sales_pitch": "Le site qui pèse autant que la marque qu'il porte.",
         "motto": "Quand une marque pèse, son site doit peser au moins autant.",
         "category": "sites",
         "kind": "service",
-        "price_from": "à partir de 28 000 €",
+        "price_from": "sur devis",
         "buy_url": "https://studio-wow.fr",
         "logo": "",
         "color": "#C9A572",
         "initial": "W",
         "features": [
-            {"title": "Processus structuré", "detail": "Trois phases : cadrage, direction artistique, réalisation — sans surprise."},
-            {"title": "Accompagnement complet", "detail": "90 jours de suivi inclus après mise en ligne, ajustements et mesure de performance."},
-            {"title": "Conformité garantie", "detail": "RGPD, accessibilité AA, sécurité, tests multi-navigateurs et appareils."},
-            {"title": "Propriété intégrale", "detail": "Code livré en propre, sans dépendance ni abonnement caché."},
-            {"title": "Spécialisation premium", "detail": "Groupes, maisons de luxe, agences partenaires, cabinets."},
+            {"title": "Sur-mesure complet", "detail": "Conception et code uniques, pas de templates ni de page-builder."},
+            {"title": "Très haute qualité", "detail": "Niveau de finition, design et performance pensés pour les marques exigeantes."},
+            {"title": "Pour grandes marques et agences", "detail": "Branche dédiée aux structures qui veulent un site à la hauteur de leur image."},
         ],
         "is_builtin": True,
     },
