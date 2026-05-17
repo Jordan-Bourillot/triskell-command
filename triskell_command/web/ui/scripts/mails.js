@@ -28,7 +28,7 @@ const Mails = {
           <div class="min-w-0 flex-1">
             <div class="hero-kicker mb-2">MAILS</div>
             <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Tous tes mails, un seul endroit.</h1>
-            <p class="hero-subtitle">Réponses prospects, tous entrants, mails sortants — filtrables par adresse.</p>
+            <p class="hero-subtitle">Boîte de réception, réponses prospects, messages envoyés — filtrables par adresse.</p>
           </div>
           <div class="flex flex-wrap gap-2">
             <button id="m-new" class="btn btn-primary">
@@ -46,9 +46,9 @@ const Mails = {
         </div>
 
         <div class="flex gap-2 mb-4 border-b border-border">
+          <button data-mtab="inbound" class="m-tab">Boîte de réception</button>
           <button data-mtab="reply"   class="m-tab is-active">Réponses prospects</button>
-          <button data-mtab="inbound" class="m-tab">Tous entrants</button>
-          <button data-mtab="sent"    class="m-tab">Tous sortants</button>
+          <button data-mtab="sent"    class="m-tab">Messages envoyés</button>
         </div>
 
         <div class="flex items-center gap-3 mb-4 flex-wrap">
