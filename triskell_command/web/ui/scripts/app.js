@@ -152,6 +152,8 @@ const App = {
     if (this.api) {
       try { await this.api.boot(); } catch (e) { console.warn('boot:', e); }
     }
+    // Surveillance mail : toast rouge si IMAP en panne (Fix 3)
+    this.startMailHealthMonitor();
 
     // Onboarding au premier lancement (si needs_onboarding) + charge currentUser
     if (typeof Onboarding !== 'undefined') {
@@ -495,6 +497,34 @@ const App = {
     if (h < 12) return 'Bonjour';
     if (h < 18) return 'Bon après-midi';
     return 'Bonsoir';
+  },
+
+  // --- Mail health monitor : toast si le polling IMAP est en panne ---
+  // Tourne en background, ping /api/mail_health toutes les 5 min. Si un
+  // compte mail accumule >= 2 erreurs consécutives, on affiche un toast
+  // rouge persistant pour que Jordan vérifie le mot de passe / la config.
+  _mailHealthLastAlertCount: 0,
+  async _checkMailHealth() {
+    if (!this.api || typeof this.api.mail_health !== 'function') return;
+    try {
+      const r = await this.api.mail_health();
+      const alerts = (r && r.ok && Array.isArray(r.alerts)) ? r.alerts : [];
+      if (alerts.length > 0 && alerts.length !== this._mailHealthLastAlertCount) {
+        const a = alerts[0];
+        const txt = `Compte "${a.account_id}" : ${a.consecutive_errors} cycles d'échec consécutifs. `
+                  + `Vérifie le mot de passe IMAP et la connexion.`;
+        if (typeof HealthCheck !== 'undefined' && HealthCheck.toast) {
+          HealthCheck.toast('⚠ Réception mail en panne', txt, 'error');
+        }
+        console.warn('[mail_health] alert:', alerts);
+      }
+      this._mailHealthLastAlertCount = alerts.length;
+    } catch (e) { /* silent */ }
+  },
+  startMailHealthMonitor() {
+    if (this._mailHealthTimer) return;
+    this._checkMailHealth();
+    this._mailHealthTimer = setInterval(() => this._checkMailHealth(), 5 * 60 * 1000);
   },
 };
 

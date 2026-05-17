@@ -45,6 +45,12 @@ _POLLER_STOP = threading.Event()
 _POLLER_LOCK = threading.Lock()
 _LAST_RUN_AT: str = ""
 _LAST_RUN_RESULT: dict = {}
+# Fix 3 — compteur d'erreurs consecutives par compte pour declencher une
+# alerte si le polling echoue plusieurs cycles d'affilee
+_CONSECUTIVE_ERRORS: dict[str, int] = {}
+_LAST_SUCCESSFUL_POLL: dict[str, str] = {}
+_LAST_ERROR_PER_ACCOUNT: dict[str, str] = {}
+HEALTH_ALERT_THRESHOLD = 2  # >= N cycles consecutifs en erreur => alerte
 
 
 def start_poller(app_state) -> bool:
@@ -68,10 +74,29 @@ def stop_poller() -> None:
 
 
 def get_status() -> dict:
+    # Fix 3 : expose la sante du polling (erreurs consecutives par compte)
+    health: dict = {}
+    alerts: list = []
+    for aid, count in _CONSECUTIVE_ERRORS.items():
+        health[aid] = {
+            "consecutive_errors": count,
+            "last_success_at": _LAST_SUCCESSFUL_POLL.get(aid, ""),
+            "last_error": _LAST_ERROR_PER_ACCOUNT.get(aid, ""),
+            "alert": count >= HEALTH_ALERT_THRESHOLD,
+        }
+        if count >= HEALTH_ALERT_THRESHOLD:
+            alerts.append({
+                "account_id": aid,
+                "consecutive_errors": count,
+                "last_error": _LAST_ERROR_PER_ACCOUNT.get(aid, ""),
+                "last_success_at": _LAST_SUCCESSFUL_POLL.get(aid, ""),
+            })
     return {
         "running": _POLLER_THREAD is not None and _POLLER_THREAD.is_alive(),
         "last_run_at": _LAST_RUN_AT,
         "last_run_result": dict(_LAST_RUN_RESULT),
+        "health": health,
+        "alerts": alerts,
     }
 
 
@@ -156,15 +181,36 @@ def _do_one_poll(app_state) -> dict:
     ai_settings = _resolve_ai_settings(app_state, client)
 
     for acc in accounts:
+        aid = acc.get("id", "primary")
         try:
             sub = _poll_one_account(
                 client, app_state, acc, ai_settings,
                 msgid_to_prospect, from_to_prospect,
             )
         except Exception as exc:
-            logger.warning("poll account %s failed: %s", acc.get("id"), exc)
+            logger.warning("poll account %s failed: %s", aid, exc)
             sub = {"error": str(exc)}
-        counters["per_account"][acc.get("id", "?")] = sub
+        # --- Fix 3 : suivi sante par compte ---
+        sub_err = sub.get("error") if isinstance(sub, dict) else None
+        if sub_err:
+            _CONSECUTIVE_ERRORS[aid] = _CONSECUTIVE_ERRORS.get(aid, 0) + 1
+            _LAST_ERROR_PER_ACCOUNT[aid] = str(sub_err)[:300]
+            if _CONSECUTIVE_ERRORS[aid] == HEALTH_ALERT_THRESHOLD:
+                # Premiere fois qu'on franchit le seuil : pulse + persiste
+                try:
+                    from . import pulse_bus
+                    pulse_bus.report(
+                        "replies", "error",
+                        error=(f"IMAP {aid}: {_CONSECUTIVE_ERRORS[aid]} erreurs"
+                               f" consecutives. Verifier les identifiants."),
+                    )
+                except Exception:
+                    pass
+        else:
+            _CONSECUTIVE_ERRORS[aid] = 0
+            _LAST_SUCCESSFUL_POLL[aid] = datetime.now().isoformat(timespec="seconds")
+            _LAST_ERROR_PER_ACCOUNT.pop(aid, None)
+        counters["per_account"][aid] = sub
         counters["accounts_scanned"] += 1
         for k in ("scanned", "matched", "classified", "written", "errors", "skipped"):
             counters[k] = counters.get(k, 0) + sub.get(k, 0)
@@ -303,6 +349,36 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                     from_addr = _from_address(headers.get("From", ""))
                     subject = (headers.get("Subject") or "").strip()
 
+                    # --- Fix 2 : detection precoce des bounces (DSN) ---
+                    # Un avis de non-delivrance arrive depuis mailer-daemon,
+                    # postmaster, etc. avec un sujet typique. On extrait
+                    # l'adresse en bounce et on marque le prospect.
+                    from . import prospect_status as PS
+                    if PS.looks_like_bounce(from_addr, subject):
+                        bounced_addr = PS.extract_bounced_address(
+                            body, exclude=account["user"])
+                        target_pid = None
+                        if bounced_addr:
+                            target_pid = from_to_prospect.get(bounced_addr.lower())
+                        if target_pid:
+                            PS.mark_bounced(client, target_pid,
+                                            bounced_address=bounced_addr,
+                                            reason=f"DSN from {from_addr}")
+                            counters["matched"] += 1
+                            counters["written"] += 1
+                        else:
+                            # On loggue le bounce orphelin pour audit
+                            try:
+                                _log_inbox_mail(client, account_id,
+                                                 from_addr=from_addr,
+                                                 subject=f"[BOUNCE] {subject}",
+                                                 body=body,
+                                                 in_reply_to=in_reply_to)
+                            except Exception:
+                                pass
+                            counters["skipped"] += 1
+                        continue
+
                     # Match précis puis flou
                     prospect_id = None
                     for cand in [in_reply_to] + [
@@ -384,13 +460,29 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                         except Exception as exc:
                             logger.debug("ensure_suggested_reply: %s", exc)
 
+                    # --- Fix 1 : maj statut selon classification ---
+                    # unsubscribe -> 'unsubscribed' definitif (RGPD)
+                    # no          -> 'refused' definitif (cycle business clos)
+                    # autres      -> 'replied' soft (humain doit traiter)
+                    # On ne descend JAMAIS un statut deja "no_contact" vers
+                    # un statut plus permissif.
                     try:
-                        sb = client.raw
-                        cur = (sb.table("prospects").select("status")
-                               .eq("id", prospect_id).limit(1).execute())
-                        cur_status = ((cur.data or [{}])[0].get("status") or "").lower()
-                        if cur_status not in ("won", "lost", "refused", "replied"):
-                            sb.table("prospects").update({
+                        cat = (classification or {}).get("category", "").lower()
+                        cur_status = PS.get_status(client, prospect_id)
+                        if PS.is_no_contact(cur_status):
+                            # Deja en no-contact (won/lost/refused/unsubscribed/
+                            # bounced) -> ne rien changer
+                            pass
+                        elif cat == "unsubscribe":
+                            PS.mark_unsubscribed(
+                                client, prospect_id,
+                                reason=f"reply classified unsubscribe: {subject[:120]}")
+                        elif cat == "no":
+                            PS.mark_refused(
+                                client, prospect_id,
+                                reason=f"reply classified no: {subject[:120]}")
+                        elif cur_status != "replied":
+                            client.raw.table("prospects").update({
                                 "status": "replied",
                                 "last_contact_at": datetime.now().isoformat(timespec="seconds"),
                                 "updated_by": client.user_id,

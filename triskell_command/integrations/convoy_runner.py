@@ -362,13 +362,45 @@ def send_draft(
     *,
     smtp_cfg: dict[str, Any],
 ) -> ConvoyDraft:
-    """Envoie un draft via SMTP. Met à jour son statut (sent / failed)."""
+    """Envoie un draft via SMTP. Met à jour son statut (sent / failed).
+
+    Effet de bord : à chaque envoi réussi, le destinataire est upsert
+    automatiquement dans la fiche client master (`clients_master_repo.
+    ensure_client`). C'est ce qui garantit que tout contact démarché
+    devient un client trackable, sans saisie manuelle.
+    """
     from triskell_core.prospect.outreach.smtp_sender import send_email
+    from . import prospect_status as PS
     to = (draft.prospect or {}).get("email", "")
     if not to:
         draft.status = "failed"
         draft.error = "email manquant"
         return draft
+    # Fix 5 : refus si variables non remplacees (genre "Bonjour {name}")
+    safety = PS.mail_is_safe_to_send(draft.subject or "", draft.body or "")
+    if not safety.get("ok"):
+        draft.status = "needs_review"
+        draft.error = (
+            "variables non remplies dans le mail : "
+            + ", ".join(safety.get("unrendered") or [])
+        )
+        logger.warning("convoy send_draft blocked — %s (%s)", draft.error, to)
+        return draft
+    # Fix 4 : anti-doublon — pas 2 envois automatiques au meme destinataire
+    # dans les 48h, quel que soit le runner d'origine.
+    cli = _supabase_client()
+    if cli is not None:
+        try:
+            recent = PS.has_recent_send(cli, email=to, hours=48)
+            if recent.get("recent"):
+                draft.status = "skipped_duplicate"
+                draft.error = (
+                    f"deja mail dans les 48h vers {to} "
+                    f"(last: {recent.get('last_ts')})"
+                )
+                return draft
+        except Exception:
+            pass
     try:
         msg_id = send_email(
             smtp_cfg,
@@ -381,10 +413,47 @@ def send_draft(
         draft.message_id = msg_id
         draft.error = ""
         _bump_today_count(1)
+        # Best-effort : crée/met à jour la fiche client master.
+        # On NE bloque PAS l'envoi si ça échoue (Supabase down, etc.).
+        _upsert_client_from_draft(draft)
     except Exception as exc:
         draft.status = "failed"
         draft.error = str(exc)
     return draft
+
+
+def _upsert_client_from_draft(draft: ConvoyDraft) -> None:
+    """Crée ou met à jour la fiche client master à partir du prospect Convoi.
+
+    Mappe les champs du prospect Convoi vers la signature de
+    `clients_master_repo.ensure_client`. Marque la source comme "convoy".
+
+    Idempotent : si le client existe déjà (même email), seuls les champs
+    vides côté master seront remplis — aucune donnée existante n'est écrasée.
+    """
+    try:
+        from . import clients_master_repo
+    except ImportError as exc:
+        logger.debug("clients_master_repo indisponible : %s", exc)
+        return
+    p = draft.prospect or {}
+    email = (p.get("email") or "").strip()
+    if not email:
+        return
+    try:
+        clients_master_repo.ensure_client(
+            email,
+            first_name=p.get("prenom", "") or "",
+            last_name=p.get("nom", "") or "",
+            phone=p.get("telephone", "") or "",
+            company_name=p.get("raison_sociale", "") or "",
+            source="convoy",
+        )
+    except Exception as exc:
+        # Best-effort : on logge, on ne propage pas.
+        logger.warning(
+            "ensure_client depuis convoy a échoué pour %s : %s", email, exc,
+        )
 
 
 # ---------------------------------------------------------------------------

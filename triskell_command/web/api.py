@@ -266,6 +266,17 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def mail_health(self) -> dict:
+        """Renvoie l'etat de sante du systeme mail : status du poller IMAP,
+        comptes en alerte (erreurs consecutives), dernier poll reussi. UI :
+        afficher un toast rouge si alerts non vide."""
+        try:
+            from ..integrations import replies_poller
+            st = replies_poller.get_status()
+            return {"ok": True, **st}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ------------------------------------------------------------------
     # Brouillons à valider
     # ------------------------------------------------------------------
@@ -1343,6 +1354,22 @@ class Api:
         if body_html and not body:
             import re as _re
             body = _re.sub(r"<[^>]+>", "", body_html).strip()
+
+        # Fix 5 : refus si variables non remplacees dans subject/body
+        # (genre "Bonjour {name}" ou {{company}}). Bloque tout l'envoi.
+        try:
+            from ..integrations import prospect_status as PS
+            safety = PS.mail_is_safe_to_send(subject, body or body_html)
+            if not safety.get("ok"):
+                return {
+                    "ok": False,
+                    "error": "Le mail contient des variables non remplies : "
+                             + ", ".join(safety.get("unrendered") or [])
+                             + ". Remplis-les avant d'envoyer.",
+                    "unrendered": safety.get("unrendered") or [],
+                }
+        except Exception as exc:
+            logger.debug("mail safety check skipped: %s", exc)
 
         try:
             from ..integrations import shared_secrets

@@ -222,12 +222,20 @@ def _do_one_cycle(app_state) -> dict:
     from . import task_lock
     me_uid = client.user_id or ""
 
+    from . import prospect_status as PS
     for r in candidates:
         if quota <= 0:
             break
         pid = r.get("prospect_id")
         prospect = prospects.get(pid)
         if not prospect or not (prospect.get("emails") or []):
+            counters["skipped"] += 1
+            continue
+        # Garde-fou central : prospect en no-contact / replied / mail recent ?
+        first_email = (prospect.get("emails") or [""])[0]
+        guard = PS.should_contact(client, pid, email=first_email,
+                                   min_hours_between=48)
+        if not guard.get("ok"):
             counters["skipped"] += 1
             continue
         # Verrou doux sur l'email_history pour éviter double recyclage

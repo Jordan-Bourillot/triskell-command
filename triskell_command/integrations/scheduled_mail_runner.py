@@ -277,6 +277,23 @@ def _tick(get_account) -> int:
             sched = sched.replace(tzinfo=timezone.utc)
         if sched > now:
             continue
+        # Fix 5 : garde-fou variables non remplacees (subject/body avec
+        # placeholders type "{name}" jamais substitues)
+        try:
+            from . import prospect_status as PS
+            safety = PS.mail_is_safe_to_send(
+                it.get("subject", ""), it.get("body", "") or it.get("body_html", ""))
+            if not safety.get("ok"):
+                it["status"] = "needs_review"
+                it["error"] = (
+                    "variables non remplies : "
+                    + ", ".join(safety.get("unrendered") or [])
+                )
+                it["failed_at"] = now.isoformat(timespec="seconds")
+                changed = True
+                continue
+        except Exception as exc:
+            logger.debug("safety check skipped: %s", exc)
         ok, err = _send_now(it, get_account)
         if ok:
             it["status"] = "sent"

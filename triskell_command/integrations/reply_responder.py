@@ -482,6 +482,21 @@ def _do_one_cycle(app_state) -> dict:
             if in_reply_to:
                 headers["In-Reply-To"] = f"<{in_reply_to}>"
                 headers["References"] = f"<{in_reply_to}>"
+            # Fix 5 : refus si variables non remplacees
+            from . import prospect_status as PS
+            safety = PS.mail_is_safe_to_send(
+                sr.get("subject", ""), sr.get("body", ""))
+            if not safety.get("ok"):
+                sr["status"] = "needs_review"
+                sr["error"] = (
+                    "variables non remplies : "
+                    + ", ".join(safety.get("unrendered") or [])
+                )
+                extra["suggested_reply"] = sr
+                client.raw.table("email_history").update({"extra": extra}).eq(
+                    "id", row.get("id")).execute()
+                counters["skipped"] += 1
+                continue
             msg_id = send_email(
                 smtp_cfg, to=to,
                 subject=sr.get("subject", ""),

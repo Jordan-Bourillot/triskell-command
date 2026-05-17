@@ -223,8 +223,11 @@ def _should_skip(client, sent_row: dict, stage: str) -> bool:
     - le prospect a répondu (un reply_received existe pour ce prospect_id
       après ce sent)
     - le prospect a déjà reçu ce stage
-    - le prospect a un statut final (won/lost/refused/replied)
+    - le prospect a un statut "no contact" (won/lost/refused/replied/
+      unsubscribed/bounced) — voir prospect_status.NO_CONTACT_STATUSES
     - une autre relance manuelle est partie après ce sent
+    - un mail est deja parti vers ce prospect dans les 48h (anti-doublon
+      cross-runner)
     """
     prospect_id = sent_row.get("prospect_id")
     if not prospect_id:
@@ -232,12 +235,21 @@ def _should_skip(client, sent_row: dict, stage: str) -> bool:
     sb = client.raw
     sent_ts = sent_row.get("ts") or ""
 
-    # Status final ?
+    # Status final ? (PS.NO_CONTACT_STATUSES + 'replied' = pas de relance auto)
     try:
-        pres = (sb.table("prospects").select("status")
-                .eq("id", prospect_id).limit(1).execute())
-        st = ((pres.data or [{}])[0].get("status") or "").lower()
-        if st in ("won", "lost", "refused", "replied"):
+        from . import prospect_status as PS
+        st = PS.get_status(client, prospect_id)
+        if PS.is_no_contact(st) or st == "replied":
+            return True
+    except Exception:
+        pass
+
+    # Anti-doublon : un mail est deja parti vers ce prospect dans les 48h
+    # depuis un autre runner ? On evite la double relance le meme jour.
+    try:
+        from . import prospect_status as PS
+        recent = PS.has_recent_send(client, prospect_id=prospect_id, hours=48)
+        if recent.get("recent"):
             return True
     except Exception:
         pass
