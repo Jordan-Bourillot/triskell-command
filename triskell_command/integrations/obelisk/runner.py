@@ -278,6 +278,10 @@ def _local_prospect_to_supabase_row(p: dict, niche: str,
             or p.get("display_name") or p.get("username") or "")
     handle = (p.get("custom_url") or p.get("login") or p.get("username")
               or p.get("handle") or "")
+    # YouTube stocke souvent custom_url avec un @ initial (ex: @entrepreneurdz).
+    # On le strippe pour ne pas afficher @@xxx côté UI.
+    if isinstance(handle, str) and handle.startswith("@"):
+        handle = handle.lstrip("@")
     platform = (p.get("platform") or "").lower()
     pid = p.get("id") or ""
     platform_url = _platform_url_from_local(p)
@@ -394,14 +398,40 @@ def _upload_new_locals_to_supabase(*, before_keys: set[str], niche: str,
         row = _local_prospect_to_supabase_row(raw, niche, now_iso)
         if not row.get("name"):
             skipped += 1; continue
-        purl = row.get("platform_url") or ""
-        # Dédup côté Supabase sur platform_url si dispo, sinon sur 1er email
+        purl = (row.get("platform_url") or "").rstrip("/").lower()
+        handle = (row.get("handle") or "").strip().lower()
+        sources = row.get("sources") or []
+        src_name = (sources[0].get("name") if sources else "") or ""
+        # Dédup côté Supabase :
+        # 1) platform_url (normalisé : sans trailing slash, lowercase)
+        # 2) sinon (handle, source name) — pour les sources sans URL fiable
         try:
+            dup = False
             if purl:
-                existing = (sb.table("prospects").select("id")
-                            .eq("platform_url", purl).limit(1).execute())
-                if existing.data:
-                    skipped += 1; continue
+                # On normalise aussi côté DB en comparant ilike pour
+                # absorber http vs https et trailing slash.
+                existing = (sb.table("prospects").select("id, platform_url")
+                            .ilike("platform_url", f"%{purl[-40:]}%")
+                            .limit(5).execute())
+                for er in (existing.data or []):
+                    if (er.get("platform_url") or "").rstrip("/").lower() == purl:
+                        dup = True; break
+            if not dup and handle and src_name:
+                # Cherche un prospect existant avec le même handle ET la même
+                # source (ex: youtube). Utilise le filtre JSON contains.
+                try:
+                    res = (sb.table("prospects").select("id, handle, sources")
+                           .eq("handle", row["handle"]).limit(20).execute())
+                    for er in (res.data or []):
+                        for s in (er.get("sources") or []):
+                            if isinstance(s, dict) and s.get("name") == src_name:
+                                dup = True; break
+                        if dup:
+                            break
+                except Exception:
+                    pass
+            if dup:
+                skipped += 1; continue
             row = with_workspace(triskell_client, row)
             sb.table("prospects").insert(row).execute()
             inserted += 1
