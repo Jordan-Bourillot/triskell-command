@@ -60,6 +60,62 @@ def _linkedin_search_url(niche: str) -> str:
             f"keywords={quote_plus(niche)}")
 
 
+# Compagnons génériques utilisés quand l'utilisateur ne fournit qu'un seul
+# hashtag : on en ajoute un de la même famille pour satisfaire les Phantoms
+# qui exigent ≥ 2 termes. L'ordre est tenté dans l'ordre, on prend le 1er
+# qui n'est pas identique au hashtag user.
+_HASHTAG_COMPANIONS = (
+    "business", "entrepreneur", "marketing", "growth", "coaching",
+    "formation", "mindset", "success", "startup", "freelance",
+)
+
+
+def _ensure_two_hashtags(niche: str) -> list[str]:
+    """Renvoie une liste d'au moins 2 hashtags distincts depuis la niche.
+
+    Accepte une virgule comme séparateur explicite. Si l'utilisateur n'en
+    fournit qu'un, on tente d'abord de découper un mot composé en deux
+    parties (ex: "coachingbusiness" → ["coaching", "business"]), sinon on
+    appose un compagnon générique de la liste ci-dessus.
+    """
+    parts = [h.strip().lstrip("#").replace(" ", "").lower()
+             for h in (niche or "").split(",") if h.strip()]
+    parts = [p for p in parts if p]
+    if not parts:
+        parts = ["entrepreneur"]
+    if len(parts) >= 2:
+        # Déduplique tout en gardant l'ordre
+        seen, out = set(), []
+        for p in parts:
+            if p not in seen:
+                seen.add(p)
+                out.append(p)
+        if len(out) >= 2:
+            return out
+        parts = out
+
+    base = parts[0]
+    # Essai 1 : couper un mot composé long en deux moitiés sémantiques
+    # (heuristique très simple : sépare avant un mot connu).
+    for word in _HASHTAG_COMPANIONS + (
+        "pro", "tips", "life", "studio", "academy", "official", "fr", "world",
+    ):
+        if len(base) > len(word) + 3 and base.endswith(word):
+            head = base[: -len(word)]
+            if head != word:
+                return [head, word]
+        if len(base) > len(word) + 3 and base.startswith(word):
+            tail = base[len(word):]
+            if tail != word:
+                return [word, tail]
+    # Essai 2 : ajoute un compagnon générique différent du hashtag user
+    for comp in _HASHTAG_COMPANIONS:
+        if comp != base:
+            return [base, comp]
+    # Fallback ultime
+    return [base, "business"]
+
+
 def _build_args(platform: str, niche: str, max_results: int) -> dict[str, Any]:
     """Renvoie le dict d'arguments à passer au Phantom selon la plateforme.
 
@@ -76,14 +132,11 @@ def _build_args(platform: str, niche: str, max_results: int) -> dict[str, Any]:
             "csvName":           f"triskell_linkedin_{int(time.time())}",
         }
     if platform == "instagram":
-        # « Instagram Multiple Hashtag Collector » attend le format
-        # « #hashtag1 + #hashtag2 » (séparateur « + », chaque hashtag avec #).
-        # On envoie le même payload sous plusieurs clés possibles pour
-        # couvrir les variantes de Phantoms (PhantomBuster ignore les
-        # clés inconnues, donc c'est sans risque).
-        hashtags = [h.strip().lstrip("#") for h in niche.split(",") if h.strip()]
-        if not hashtags:
-            hashtags = [niche.replace(" ", "").lower()]
+        # « Instagram Multiple Hashtag Collector » exige AU MOINS DEUX
+        # termes différents, séparés par « + », chacun préfixé par #.
+        # Si l'utilisateur n'en fournit qu'un, on en génère un compagnon
+        # plausible pour satisfaire le phantom.
+        hashtags = _ensure_two_hashtags(niche)
         formatted = " + ".join(f"#{h}" for h in hashtags)
         return {
             "spreadsheetUrl":           formatted,
@@ -98,10 +151,10 @@ def _build_args(platform: str, niche: str, max_results: int) -> dict[str, Any]:
             "csvName":                  f"triskell_instagram_{int(time.time())}",
         }
     if platform == "tiktok":
-        # Format similaire côté TikTok Hashtag Scraper.
-        hashtags = [h.strip().lstrip("#") for h in niche.split(",") if h.strip()]
-        if not hashtags:
-            hashtags = [niche.replace(" ", "").lower()]
+        # Format similaire côté TikTok Hashtag Scraper — par sécurité on
+        # garantit aussi 2 termes au cas où le phantom TikTok ait la même
+        # contrainte.
+        hashtags = _ensure_two_hashtags(niche)
         formatted = " + ".join(f"#{h}" for h in hashtags)
         return {
             "spreadsheetUrl":            formatted,
