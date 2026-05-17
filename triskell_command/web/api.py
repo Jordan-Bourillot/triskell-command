@@ -1597,39 +1597,53 @@ class Api:
                     s.login(smtp_user, smtp_password)
                     s.send_message(msg)
 
-            # Log dans email_history (best-effort)
+            # Log dans email_history — CRITIQUE : alimente le compteur
+            # "Envoyés aujourd'hui" du cockpit. Sans cette ligne, les KPIs
+            # restent à 0. On loggue en warning si ça échoue (avant c'était
+            # debug → invisible) pour qu'un futur bug ressorte vite.
             if client:
                 try:
-                    sb = getattr(client, "client", None) or getattr(client, "_client", None)
-                    if sb is not None:
-                        extra_log = {
-                            "to": to,
-                            "from": from_email,
-                            "account_id": account_id,
-                            "in_reply_to": in_reply_to,
-                            "manual_reply": bool(in_reply_to),
-                            "has_html": bool(body_html),
-                            "attachments_count": len([a for a in attachments
-                                if isinstance(a, dict) and not a.get("inline")]),
-                            "inline_images_count": len([a for a in attachments
-                                if isinstance(a, dict) and a.get("inline") and a.get("cid")]),
-                        }
-                        # Si le tracking pixel a ete injecte, on stocke le
-                        # token pour relier les futures ouvertures (table
-                        # email_events) a ce mail precis.
-                        if tracking_id_for_log:
-                            extra_log["tracking_id"] = tracking_id_for_log
-                        sb.table("email_history").insert({
-                            "kind": "email_sent",
-                            "ts":   __import__("datetime").datetime.now().isoformat(timespec="seconds"),
-                            "subject": subject[:200],
-                            "body":    body[:5000],
-                            "message_id": msg_id,
-                            "extra": extra_log,
-                            "created_by": getattr(client, "user_id", None),
-                        }).execute()
+                    sb = client.raw
+                    extra_log = {
+                        "to": to,
+                        "from": from_email,
+                        "account_id": account_id,
+                        "in_reply_to": in_reply_to,
+                        "manual_reply": bool(in_reply_to),
+                        "has_html": bool(body_html),
+                        "attachments_count": len([a for a in attachments
+                            if isinstance(a, dict) and not a.get("inline")]),
+                        "inline_images_count": len([a for a in attachments
+                            if isinstance(a, dict) and a.get("inline") and a.get("cid")]),
+                    }
+                    # Si le tracking pixel a ete injecte, on stocke le
+                    # token pour relier les futures ouvertures (table
+                    # email_events) a ce mail precis.
+                    if tracking_id_for_log:
+                        extra_log["tracking_id"] = tracking_id_for_log
+                    row = {
+                        "kind": "email_sent",
+                        "ts":   __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+                        "subject": subject[:200],
+                        "body":    body[:5000],
+                        "message_id": msg_id,
+                        "extra": extra_log,
+                        "created_by": getattr(client, "user_id", None),
+                    }
+                    # Depuis la migration 20 (multi-tenant), email_history a
+                    # une colonne workspace_id NOT NULL + RLS qui exige
+                    # workspace_id = current_workspace_id(). Sans ce champ,
+                    # l'insert est rejeté silencieusement et le cockpit
+                    # affiche 0 toute la journée.
+                    try:
+                        ws_id = client._current_workspace_id()
+                        if ws_id:
+                            row["workspace_id"] = ws_id
+                    except Exception:
+                        pass
+                    sb.table("email_history").insert(row).execute()
                 except Exception as exc:
-                    logger.debug("log email_sent KO: %s", exc)
+                    logger.warning("log email_sent KO (compteur cockpit ne montera pas): %s", exc)
 
             return {"ok": True, "message_id": msg_id}
         except Exception as exc:
