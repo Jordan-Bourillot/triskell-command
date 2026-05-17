@@ -130,27 +130,79 @@ _DEFAULT_SITES = [
     },
     {
         "id": "rankus",
-        "name": "RankUs Studio",
-        "tagline": "On code ton site ET on le référence.",
-        "description": "Agence basée en Bretagne. RankUs code des sites sur-mesure avec "
-                       "l'optimisation SEO intégrée dès le code, sans templates. Première "
-                       "version en moins de 2 h, mise en ligne sous 24 h après paiement. "
-                       "Premiers mouvements de positions entre 30 et 60 jours.",
-        "sales_pitch": "Création + SEO par la même personne, sans engagement.",
+        "name": "RankUs SEO",
+        "tagline": "On référence ton site pour Google.",
+        "description": "Service de référencement naturel pour faire monter ton site dans "
+                       "Google. SEO tissé dans le code dès le départ, pas posé dessus. "
+                       "Premiers mouvements de positions entre 30 et 60 jours, "
+                       "suivi mensuel, sans engagement.",
+        "sales_pitch": "Le SEO sur-mesure, par la même personne qui code ton site.",
         "motto": "Le référencement tissé dans le code, pas posé dessus.",
         "category": "sites",
         "kind": "service",
-        "price_from": "création dès 490 € HT · SEO dès 290 €/mois HT",
+        "price_from": "à partir de 290 €/mois HT",
+        "buy_url": "https://rankus-studio.fr",
+        "logo": "",
+        "color": "#10b981",
+        "initial": "R",
+        "features": [
+            {"title": "SEO intégré au code", "detail": "Référencement tissé dans la structure du site, pas ajouté après coup."},
+            {"title": "Suivi mensuel", "detail": "Rapport de positions, contenu optimisé, ajustements techniques chaque mois."},
+            {"title": "Un seul interlocuteur", "detail": "La même personne code et suit le SEO, dispo 7j/7."},
+            {"title": "Sans engagement", "detail": "Tu pars quand tu veux avec tes données et tes analytics."},
+            {"title": "Résultats en 3 mois", "detail": "Premiers mouvements de positions entre 30 et 60 jours après mise en place."},
+        ],
+        "is_builtin": True,
+    },
+    {
+        "id": "rankus-sites",
+        "name": "RankUs Sites Web",
+        "tagline": "Sites pros sur-mesure, code propre.",
+        "description": "Création de sites web sur-mesure pour pros, agences et "
+                       "indépendants. Sans templates, sans page-builder. Première "
+                       "version en moins de 2 h, mise en ligne sous 24 h après "
+                       "paiement. Tu peux ajouter le SEO en option si besoin.",
+        "sales_pitch": "Un site pro codé à la main, livré en 24 h après paiement.",
+        "motto": "Sans templates, sans bullshit — juste du code propre.",
+        "category": "sites",
+        "kind": "service",
+        "price_from": "à partir de 490 € HT",
         "buy_url": "https://rankus-studio.fr",
         "logo": "",
         "color": "#10b981",
         "initial": "R",
         "features": [
             {"title": "Création rapide", "detail": "Première version en moins de 2 h, livraison sous 24 h après paiement."},
-            {"title": "SEO intégré au code", "detail": "Référencement tissé dans la structure dès la création, pas ajouté après."},
-            {"title": "Un seul interlocuteur", "detail": "La même personne code et suit le SEO, dispo 7j/7."},
-            {"title": "Sans engagement", "detail": "Tu pars quand tu veux avec tes données, ton contenu et tes analytics."},
-            {"title": "Résultats en 3 mois", "detail": "Premiers mouvements de positions entre 30 et 60 jours après mise en ligne."},
+            {"title": "Sans templates", "detail": "Code maison sur-mesure, pas de WordPress ni de page-builder."},
+            {"title": "Propriété du code", "detail": "Le code est à toi, pas de dépendance à un abonnement."},
+            {"title": "SEO en option", "detail": "Tu peux ajouter le service RankUs SEO si tu veux monter dans Google."},
+            {"title": "Sans engagement", "detail": "Tu pars quand tu veux avec tout ton contenu."},
+        ],
+        "is_builtin": True,
+    },
+    {
+        "id": "rankus-audit",
+        "name": "RankUs Audit",
+        "tagline": "Audit complet de ton site existant.",
+        "description": "Audit technique + SEO + UX de ton site web actuel. Tu reçois "
+                       "un rapport détaillé avec les problèmes trouvés et les "
+                       "recommandations actionnables, triées par impact. "
+                       "Idéal avant de décider d'une refonte ou d'un nouveau SEO.",
+        "sales_pitch": "Un état des lieux honnête de ton site, sans bullshit commercial.",
+        "motto": "Avant de refaire, on regarde ce qui ne va pas.",
+        "category": "sites",
+        "kind": "service",
+        "price_from": "à partir de 290 € HT",
+        "buy_url": "https://rankus-studio.fr",
+        "logo": "",
+        "color": "#10b981",
+        "initial": "R",
+        "features": [
+            {"title": "Audit technique", "detail": "Performance, accessibilité, sécurité, mobile, code — passage en revue complet."},
+            {"title": "Audit SEO", "detail": "Indexation, mots-clés, contenu, backlinks, position actuelle dans Google."},
+            {"title": "Audit UX", "detail": "Parcours utilisateur, points de friction, conversion."},
+            {"title": "Rapport PDF actionnable", "detail": "Problèmes triés par impact, avec recommandations claires — pas de jargon."},
+            {"title": "Appel debrief 30 min", "detail": "On passe le rapport ensemble pour répondre à tes questions."},
         ],
         "is_builtin": True,
     },
