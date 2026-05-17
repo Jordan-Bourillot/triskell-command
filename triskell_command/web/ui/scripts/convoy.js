@@ -1,0 +1,1000 @@
+/* Vue « Importer une liste » (Le Convoi) — version web Apple-clear.
+ *
+ * Flux à 5 étapes, exactement comme la version desktop :
+ *   1. Import   — drop / parcourir → extraction du texte
+ *   2. Vérifier — tableau éditable des prospects extraits
+ *   3. Composer — catalogue + brief IA → génération des mails
+ *   4. Envoyer  — mode auto/validation + cap + délai + lancement
+ *   5. Résultats— suivi des brouillons (approuver / rejeter / éditer)
+ *
+ * La persistance vit côté Python (convoy_runner — Supabase ou disque).
+ * Cette vue ne fait que dialoguer avec App.api.convoy_*().
+ */
+
+const Convoy = {
+  campaigns: [],          // résumé des campagnes (gauche)
+  selected:  null,        // campaign_id sélectionnée
+  detail:    null,        // campagne complète (drafts inclus)
+  raw:       null,        // dernier upload : {format, filename, text_preview, fast_path_prospects, ...}
+  genPoll:   null,
+  genSeen:   0,
+  sendPoll:  null,
+  sendSeen:  0,
+
+  // ------------------------------------------------------------------
+  async render(container) {
+    container.innerHTML = `
+      <section class="animate-slide-up">
+        <div class="mb-6 sm:mb-8">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <div class="hero-kicker mb-2">IMPORTER UNE LISTE</div>
+              <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Importer une liste.</h1>
+              <p class="hero-subtitle">
+                Glisse un PDF, Word, Excel ou image avec tes contacts.
+                L'app les extrait, adapte tes offres à chacun, et prépare les mails.
+              </p>
+            </div>
+            ${typeof Help !== 'undefined' ? Help.button('convoy') : ''}
+          </div>
+          <div class="flex flex-wrap gap-2 sm:gap-3 mt-5 sm:mt-6">
+            <button id="cv-refresh" class="btn btn-secondary">Rafraîchir</button>
+            <button id="cv-new" class="btn btn-primary">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Nouvelle campagne
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4 sm:gap-6">
+          <aside id="cv-left" class="card p-3 sm:p-4 lg:sticky lg:top-4 lg:self-start">
+            <div class="section-label mb-2">Campagnes</div>
+            <div id="cv-list" class="space-y-1.5"></div>
+          </aside>
+          <main id="cv-detail" class="space-y-6 min-w-0"></main>
+        </div>
+      </section>
+    `;
+
+    document.getElementById('cv-refresh').onclick = () => this.refreshAll();
+    document.getElementById('cv-new').onclick     = () => this.newCampaign();
+
+    if (!App.api) {
+      document.getElementById('cv-detail').innerHTML = this._previewBanner();
+      document.getElementById('cv-list').innerHTML   = `<div class="text-xs text-text-muted px-1.5 py-2">Mode aperçu.</div>`;
+      return;
+    }
+    await this.refreshAll();
+  },
+
+  async refreshAll() {
+    await this._loadList();
+    if (!this.selected && this.campaigns.length > 0) {
+      await this.select(this.campaigns[0].id);
+    } else if (this.selected) {
+      await this.select(this.selected, /*reuseDetail=*/false);
+    } else {
+      this._renderEmpty();
+    }
+  },
+
+  async _loadList() {
+    let r;
+    try { r = await App.api.convoy_list_campaigns(); }
+    catch (e) { r = { ok: false, error: String(e) }; }
+    this.campaigns = (r && r.ok && r.campaigns) ? r.campaigns : [];
+    this._renderList();
+  },
+
+  _renderList() {
+    const wrap = document.getElementById('cv-list');
+    if (!wrap) return;
+    if (this.campaigns.length === 0) {
+      wrap.innerHTML = `<div class="text-xs text-text-muted px-1.5 py-2">
+        Aucune campagne. Clique « Nouvelle campagne ».
+      </div>`;
+      return;
+    }
+    wrap.innerHTML = this.campaigns.map(c => {
+      const active = (c.id === this.selected);
+      const n = c.counts || {};
+      const total = n.total || 0;
+      const sent  = n.sent  || 0;
+      const dot = sent > 0 ? '🟢' : (total > 0 ? '🟡' : '⚪');
+      return `
+        <button data-cid="${this._esc(c.id)}"
+                class="w-full text-left px-3 py-2.5 rounded-xl text-sm transition
+                       ${active
+                         ? 'bg-accent/10 border border-accent/40 text-text'
+                         : 'hover:bg-bg border border-transparent text-text-secondary'}">
+          <div class="flex items-center gap-2">
+            <span class="text-xs">${dot}</span>
+            <div class="min-w-0 flex-1">
+              <div class="font-medium truncate">${this._esc(c.name)}</div>
+              <div class="text-[11px] text-text-muted mt-0.5">
+                ${total} contact${total > 1 ? 's' : ''} · ${sent} envoyé${sent > 1 ? 's' : ''}
+              </div>
+            </div>
+          </div>
+        </button>
+      `;
+    }).join('');
+    wrap.querySelectorAll('button[data-cid]').forEach(btn => {
+      btn.onclick = () => this.select(btn.dataset.cid);
+    });
+  },
+
+  async select(cid, reuseDetail = false) {
+    this.selected = cid;
+    this._stopPollers();
+    this._renderList();
+    if (!reuseDetail) {
+      this.raw = null;
+      this.genSeen = 0;
+      this.sendSeen = 0;
+    }
+    const target = document.getElementById('cv-detail');
+    target.innerHTML = `<div class="card p-6 text-text-muted text-sm">Chargement…</div>`;
+    let r;
+    try { r = await App.api.convoy_get_campaign({ campaign_id: cid }); }
+    catch (e) { r = { ok: false, error: String(e) }; }
+    if (!r || !r.ok) {
+      target.innerHTML = `<div class="card p-6 text-danger">${this._esc(r && r.error || 'Campagne introuvable')}</div>`;
+      return;
+    }
+    this.detail = r.campaign;
+    this._renderDetail();
+  },
+
+  async newCampaign() {
+    let r;
+    try { r = await App.api.convoy_new_campaign({}); }
+    catch (e) { r = { ok: false, error: String(e) }; }
+    if (!r || !r.ok) {
+      this._toast(r && r.error || 'Création impossible', 'danger');
+      return;
+    }
+    await this._loadList();
+    await this.select(r.campaign.id);
+  },
+
+  // ------------------------------------------------------------------
+  //  Rendu détail — 5 étapes empilées
+  // ------------------------------------------------------------------
+  _renderEmpty() {
+    document.getElementById('cv-detail').innerHTML = `
+      <div class="card-hero p-10 sm:p-12 text-center" data-accent="accent">
+        <div class="text-5xl mb-4 opacity-80">📂</div>
+        <div class="hero-kicker text-accent mb-2">PREMIÈRE LISTE</div>
+        <h2 class="text-2xl font-bold mb-3">Importe ton premier fichier.</h2>
+        <p class="text-text-secondary max-w-md mx-auto mb-6">
+          PDF, Word, Excel, image ou texte brut. L'app détecte les contacts,
+          adapte tes offres et prépare des mails personnalisés.
+        </p>
+        <button class="btn btn-primary" onclick="Convoy.newCampaign()">
+          Créer une campagne
+        </button>
+      </div>
+    `;
+  },
+
+  _renderDetail() {
+    const c = this.detail;
+    const target = document.getElementById('cv-detail');
+    const drafts = c.drafts || [];
+    target.innerHTML = `
+      ${this._headerCard(c)}
+      ${this._stepImport(c)}
+      ${(drafts.length > 0 || this.raw) ? this._stepTable(c) : ''}
+      ${(drafts.length > 0 || this.raw) ? this._stepCompose(c) : ''}
+      ${(drafts.length > 0) ? this._stepSend(c) : ''}
+      ${(drafts.length > 0) ? this._stepResults(c) : ''}
+    `;
+    this._bindHeader();
+    this._bindStepImport();
+    if (drafts.length > 0 || this.raw) this._bindStepTable();
+    if (drafts.length > 0 || this.raw) this._bindStepCompose();
+    if (drafts.length > 0) this._bindStepSend();
+    if (drafts.length > 0) this._bindStepResults();
+  },
+
+  // ---- Header ------------------------------------------------------
+  _headerCard(c) {
+    const fname = (c.source_file || '').split(/[\\/]/).pop() || '';
+    return `
+      <div class="card p-4 sm:p-6">
+        <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+          <input id="cv-name" type="text" value="${this._esc(c.name)}"
+                 class="flex-1 px-3 py-2 rounded-lg bg-bg border border-border
+                        focus:border-accent focus:outline-none text-base font-semibold" />
+          <div class="flex gap-2">
+            <button id="cv-delete" class="btn btn-secondary text-danger">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 01-2 2H9a2 2 0 01-2-2L5 6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              Supprimer
+            </button>
+          </div>
+        </div>
+        <div class="text-xs text-text-muted mt-2">
+          ${fname ? `📄 ${this._esc(fname)} · ` : ''}
+          créée le ${this._esc((c.created_at || '').slice(0, 16))}
+        </div>
+      </div>
+    `;
+  },
+
+  _bindHeader() {
+    const name = document.getElementById('cv-name');
+    if (name) {
+      const save = async () => {
+        const v = (name.value || '').trim();
+        if (!v || v === this.detail.name) return;
+        try { await App.api.convoy_rename_campaign({ campaign_id: this.detail.id, name: v }); }
+        catch (e) { /* silent */ }
+        this.detail.name = v;
+        await this._loadList();
+      };
+      name.addEventListener('blur', save);
+      name.addEventListener('keydown', e => { if (e.key === 'Enter') name.blur(); });
+    }
+    const del = document.getElementById('cv-delete');
+    if (del) del.onclick = async () => {
+      if (!confirm(`Supprimer la campagne « ${this.detail.name} » ?\nCette action est définitive.`)) return;
+      try { await App.api.convoy_delete_campaign({ campaign_id: this.detail.id }); }
+      catch (e) { /* silent */ }
+      this.selected = null;
+      this.detail = null;
+      this.raw = null;
+      await this._loadList();
+      if (this.campaigns.length > 0) await this.select(this.campaigns[0].id);
+      else this._renderEmpty();
+    };
+  },
+
+  // ---- Étape 1 : Import --------------------------------------------
+  _stepImport(c) {
+    const has = !!c.source_file;
+    const fname = (c.source_file || '').split(/[\\/]/).pop() || '';
+    const preview = this.raw && this.raw.text_preview;
+    const warnings = (this.raw && this.raw.warnings) || [];
+    return `
+      ${this._sectionOpen('1. Importer la liste',
+        'PDF, Word, Excel, CSV, image ou texte. L\'app détecte le format et extrait les contacts.')}
+        <div id="cv-drop"
+             class="cv-drop rounded-2xl border-2 border-dashed border-border-strong
+                    px-4 py-8 sm:py-10 text-center transition cursor-pointer
+                    bg-bg hover:bg-accent/5 hover:border-accent">
+          <div class="text-4xl mb-2 opacity-80">📂</div>
+          <div class="font-medium text-base">
+            ${has ? `📄 ${this._esc(fname)}` : 'Glisse un fichier ici'}
+          </div>
+          <div class="text-xs text-text-muted mt-1">
+            ou clique pour parcourir · formats : PDF, DOCX, XLSX, CSV, TXT, image
+          </div>
+          <input id="cv-file" type="file" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.tsv,.txt,.md,.png,.jpg,.jpeg,.bmp,.tif,.tiff,.webp"
+                 class="hidden" />
+        </div>
+
+        ${preview ? `
+          <div class="mt-4">
+            <div class="text-xs font-medium text-text-secondary mb-1.5">Aperçu du texte extrait</div>
+            <pre class="text-xs font-mono leading-relaxed p-3 rounded-lg bg-bg
+                        border border-border max-h-40 overflow-auto whitespace-pre-wrap break-words">${this._esc((preview || '').slice(0, 4000))}${this.raw && this.raw.text_truncated ? '\n…' : ''}</pre>
+          </div>
+        ` : ''}
+
+        ${warnings.length ? `
+          <div class="mt-3 text-xs text-warning">
+            ${warnings.map(w => `⚠ ${this._esc(w)}`).join('<br>')}
+          </div>` : ''}
+
+        <div class="flex flex-wrap gap-2 mt-4">
+          <button id="cv-browse" class="btn btn-secondary">Parcourir…</button>
+          ${has ? `<button id="cv-extract" class="btn btn-primary">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Extraire les contacts par IA
+          </button>` : ''}
+          ${this.raw && (this.raw.fast_path_prospects || []).length ? `
+            <button id="cv-fastpath" class="btn btn-primary">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+              Valider ${this.raw.fast_path_prospects.length} contact${this.raw.fast_path_prospects.length > 1 ? 's' : ''} détecté${this.raw.fast_path_prospects.length > 1 ? 's' : ''}
+            </button>` : ''}
+        </div>
+      ${this._sectionClose()}
+    `;
+  },
+
+  _bindStepImport() {
+    const drop  = document.getElementById('cv-drop');
+    const input = document.getElementById('cv-file');
+    if (drop && input) {
+      drop.onclick = () => input.click();
+      drop.ondragover = e => { e.preventDefault(); drop.classList.add('cv-drop--over'); };
+      drop.ondragleave = () => drop.classList.remove('cv-drop--over');
+      drop.ondrop = e => {
+        e.preventDefault();
+        drop.classList.remove('cv-drop--over');
+        const f = e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) this._uploadFile(f);
+      };
+      input.onchange = () => {
+        const f = input.files && input.files[0];
+        if (f) this._uploadFile(f);
+      };
+    }
+    const browse = document.getElementById('cv-browse');
+    if (browse) browse.onclick = () => input && input.click();
+    const ex = document.getElementById('cv-extract');
+    if (ex) ex.onclick = () => this._runExtractAi();
+    const fp = document.getElementById('cv-fastpath');
+    if (fp) fp.onclick = () => this._applyFastPath();
+  },
+
+  async _uploadFile(file) {
+    const drop = document.getElementById('cv-drop');
+    if (drop) drop.innerHTML = `<div class="text-sm text-text-secondary">Lecture du fichier…</div>`;
+    let content_b64;
+    try {
+      content_b64 = await this._readBase64(file);
+    } catch (e) {
+      this._toast('Lecture impossible : ' + e, 'danger');
+      this._renderDetail();
+      return;
+    }
+    let r;
+    try {
+      r = await App.api.convoy_upload_and_parse({
+        campaign_id: this.detail.id,
+        filename: file.name,
+        content_b64,
+      });
+    } catch (e) { r = { ok: false, error: String(e) }; }
+    if (!r || !r.ok) {
+      this._toast(r && r.error || 'Lecture impossible', 'danger');
+      this.raw = null;
+      this._renderDetail();
+      return;
+    }
+    this.raw = r;
+    // Recharge la campagne pour récupérer le source_file
+    try {
+      const c2 = await App.api.convoy_get_campaign({ campaign_id: this.detail.id });
+      if (c2 && c2.ok) this.detail = c2.campaign;
+    } catch (e) {}
+    this._renderDetail();
+    const n = (r.fast_path_prospects || []).length;
+    if (n > 0) this._toast(`${n} contact${n > 1 ? 's' : ''} détecté${n > 1 ? 's' : ''} automatiquement.`, 'success');
+    else       this._toast('Fichier lu. Clique « Extraire les contacts par IA ».', 'info');
+  },
+
+  _readBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject('lecture FileReader échouée');
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        // dataUrl = "data:<mime>;base64,<payload>"
+        const i = dataUrl.indexOf(',');
+        resolve(i >= 0 ? dataUrl.slice(i + 1) : dataUrl);
+      };
+      reader.readAsDataURL(file);
+    });
+  },
+
+  async _applyFastPath() {
+    const prospects = (this.raw && this.raw.fast_path_prospects) || [];
+    if (prospects.length === 0) return;
+    let r;
+    try { r = await App.api.convoy_apply_fast_path({ campaign_id: this.detail.id, prospects }); }
+    catch (e) { r = { ok: false, error: String(e) }; }
+    if (!r || !r.ok) {
+      this._toast(r && r.error || 'Application impossible', 'danger');
+      return;
+    }
+    this.detail = r.campaign;
+    this.raw = null;
+    this._renderDetail();
+    await this._loadList();
+  },
+
+  async _runExtractAi() {
+    const btn = document.getElementById('cv-extract');
+    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="inline-block w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin"></span> Extraction IA…`; }
+    let r;
+    try { r = await App.api.convoy_extract_prospects_ai({ campaign_id: this.detail.id }); }
+    catch (e) { r = { ok: false, error: String(e) }; }
+    if (!r || !r.ok) {
+      this._toast(r && r.error || 'Extraction IA impossible', 'danger');
+      if (btn) { btn.disabled = false; btn.textContent = 'Extraire les contacts par IA'; }
+      return;
+    }
+    this.detail = r.campaign;
+    this.raw = null;
+    this._renderDetail();
+    await this._loadList();
+    this._toast(`${(r.stats && r.stats.total) || 0} contact(s) extrait(s).`, 'success');
+  },
+
+  // ---- Étape 2 : Tableau -------------------------------------------
+  _stepTable(c) {
+    const drafts = c.drafts || [];
+    if (drafts.length === 0) {
+      return `${this._sectionOpen('2. Vérifier les contacts', 'Aucun contact pour l\'instant — extrais ou colle une liste à l\'étape 1.')}
+        <div class="text-sm text-text-muted">Importe un fichier puis clique « Extraire » pour faire apparaître le tableau.</div>
+      ${this._sectionClose()}`;
+    }
+    // Stats : ok / warning / error
+    let ok = 0, warn = 0, err = 0;
+    for (const d of drafts) {
+      const sev = this._severity(d.prospect || {});
+      if (sev === 'ok') ok++;
+      else if (sev === 'warning') warn++;
+      else err++;
+    }
+
+    const cols = [
+      { k: 'raison_sociale', label: 'Entreprise',  w: 'w-44' },
+      { k: 'prenom',         label: 'Prénom',      w: 'w-28' },
+      { k: 'email',          label: 'Email',       w: 'w-56' },
+      { k: 'telephone',      label: 'Téléphone',   w: 'w-32' },
+      { k: 'ville',          label: 'Ville',       w: 'w-32' },
+      { k: 'secteur',        label: 'Secteur',     w: 'w-40' },
+    ];
+
+    return `
+      ${this._sectionOpen('2. Vérifier les contacts',
+        'Édite ce qui doit l\'être. Les lignes en rouge n\'ont pas d\'email et seront ignorées. Les jaunes partiront avec moins de contexte.')}
+        <div class="grid grid-cols-3 gap-3 mb-4">
+          ${this._kpi('Complets', ok, ok > 0 ? 'success' : '')}
+          ${this._kpi('Incomplets', warn, warn > 0 ? 'warning' : '')}
+          ${this._kpi('Sans email', err, err > 0 ? 'danger' : '')}
+        </div>
+        <div class="overflow-x-auto rounded-xl border border-border">
+          <table class="w-full text-xs">
+            <thead class="bg-bg text-text-muted">
+              <tr>
+                ${cols.map(col => `<th class="px-3 py-2 text-left font-semibold ${col.w}">${col.label}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${drafts.map(d => this._tableRow(d, cols)).join('')}
+            </tbody>
+          </table>
+        </div>
+      ${this._sectionClose()}
+    `;
+  },
+
+  _tableRow(d, cols) {
+    const sev = this._severity(d.prospect || {});
+    const bg = sev === 'error' ? 'bg-danger/5' : (sev === 'warning' ? 'bg-warning/5' : '');
+    return `
+      <tr class="${bg} border-t border-border" data-draft-id="${this._esc(d.id)}">
+        ${cols.map(col => `
+          <td class="px-2 py-1">
+            <input type="text" data-field="${col.k}"
+                   value="${this._esc((d.prospect || {})[col.k] || '')}"
+                   class="w-full bg-transparent px-1.5 py-1 rounded
+                          border border-transparent hover:border-border
+                          focus:border-accent focus:outline-none text-xs" />
+          </td>
+        `).join('')}
+      </tr>
+    `;
+  },
+
+  _bindStepTable() {
+    document.querySelectorAll('tr[data-draft-id]').forEach(row => {
+      const did = row.dataset.draftId;
+      row.querySelectorAll('input[data-field]').forEach(inp => {
+        inp.addEventListener('blur', async () => {
+          const prospect = {};
+          row.querySelectorAll('input[data-field]').forEach(x => {
+            prospect[x.dataset.field] = x.value.trim();
+          });
+          try {
+            await App.api.convoy_update_prospect({
+              campaign_id: this.detail.id, draft_id: did, prospect,
+            });
+          } catch (e) { /* silent */ }
+          // Met à jour la couleur de la ligne selon la nouvelle sévérité
+          const sev = this._severity(prospect);
+          row.classList.remove('bg-danger/5', 'bg-warning/5');
+          if (sev === 'error') row.classList.add('bg-danger/5');
+          else if (sev === 'warning') row.classList.add('bg-warning/5');
+        });
+      });
+    });
+  },
+
+  _severity(p) {
+    const email = (p.email || '').trim();
+    if (!email || !email.includes('@') || !email.split('@')[1].includes('.')) return 'error';
+    if (!p.raison_sociale && !p.prenom && !p.nom) return 'warning';
+    if (!p.secteur) return 'warning';
+    return 'ok';
+  },
+
+  // ---- Étape 3 : Composer ------------------------------------------
+  _stepCompose(c) {
+    const catalogText = (c.catalog || []).map(o =>
+      `${o.name || ''} | ${o.pitch || ''} | ${o.keywords || ''} | ${o.url || ''}`
+    ).join('\n');
+    return `
+      ${this._sectionOpen('3. Catalogue + instructions',
+        'Le catalogue est CENTRAL — tu l\'édites ici, il s\'applique à toutes tes campagnes. Format par ligne : « Nom | Pitch | mots-clés | URL ».')}
+        <label class="block mb-3">
+          <div class="text-xs font-medium text-text-secondary mb-1.5">Catalogue d'offres (1 par ligne)</div>
+          <textarea id="cv-catalog" rows="5"
+                    class="w-full px-3 py-2 rounded-lg bg-bg border border-border
+                           focus:border-accent focus:outline-none text-xs font-mono leading-relaxed
+                           resize-y">${this._esc(catalogText)}</textarea>
+        </label>
+        <label class="block mb-3">
+          <div class="text-xs font-medium text-text-secondary mb-1.5">Tes instructions à l'IA (ton, contexte, contraintes)</div>
+          <textarea id="cv-brief" rows="5"
+                    class="w-full px-3 py-2 rounded-lg bg-bg border border-border
+                           focus:border-accent focus:outline-none text-sm leading-relaxed
+                           resize-y">${this._esc(c.user_brief || '')}</textarea>
+        </label>
+        <div class="flex flex-wrap gap-2">
+          <button id="cv-save-compose" class="btn btn-secondary">Enregistrer</button>
+          <button id="cv-gen-test"     class="btn btn-secondary">Tester (5)</button>
+          <button id="cv-gen-all"      class="btn btn-primary">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Générer tous les mails
+          </button>
+        </div>
+
+        <div id="cv-gen-log-wrap" class="mt-4 hidden">
+          <div class="text-xs font-medium text-text-secondary mb-1.5">Journal de génération</div>
+          <pre id="cv-gen-log"
+               class="text-xs font-mono leading-relaxed p-3 rounded-lg bg-bg
+                      border border-border max-h-48 overflow-auto whitespace-pre-wrap"></pre>
+        </div>
+      ${this._sectionClose()}
+    `;
+  },
+
+  _bindStepCompose() {
+    const save = document.getElementById('cv-save-compose');
+    if (save) save.onclick = () => this._saveCompose();
+    const gt = document.getElementById('cv-gen-test');
+    if (gt) gt.onclick = () => this._generate(5);
+    const ga = document.getElementById('cv-gen-all');
+    if (ga) ga.onclick = () => this._generate(null);
+  },
+
+  _gatherCompose() {
+    const brief = (document.getElementById('cv-brief') || {}).value || '';
+    const catText = (document.getElementById('cv-catalog') || {}).value || '';
+    const catalog = catText.split('\n').map(line => {
+      const parts = line.split('|').map(s => s.trim());
+      const name = parts[0] || '';
+      if (!name) return null;
+      return {
+        name,
+        pitch:    parts[1] || '',
+        keywords: parts[2] || '',
+        url:      parts[3] || '',
+      };
+    }).filter(Boolean);
+    return { user_brief: brief, catalog };
+  },
+
+  async _saveCompose() {
+    const btn = document.getElementById('cv-save-compose');
+    if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
+    const { user_brief, catalog } = this._gatherCompose();
+    try {
+      await App.api.convoy_save_compose({
+        campaign_id: this.detail.id, user_brief, catalog,
+      });
+      if (btn) { btn.textContent = 'Enregistré ✓'; setTimeout(() => { btn.disabled = false; btn.textContent = 'Enregistrer'; }, 1500); }
+      this.detail.user_brief = user_brief;
+      this.detail.catalog = catalog;
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Erreur'; }
+    }
+  },
+
+  async _generate(limit) {
+    // On sauvegarde d'abord brief + catalogue
+    await this._saveCompose();
+    const wrap = document.getElementById('cv-gen-log-wrap');
+    const box  = document.getElementById('cv-gen-log');
+    if (wrap) wrap.classList.remove('hidden');
+    if (box)  box.textContent = '';
+    this.genSeen = 0;
+
+    let r;
+    try {
+      r = await App.api.convoy_generate_messages({
+        campaign_id: this.detail.id,
+        limit: limit || null,
+      });
+    } catch (e) { r = { ok: false, error: String(e) }; }
+    if (!r || !r.ok) {
+      this._appendLog(box, r && r.error || 'Lancement impossible');
+      return;
+    }
+    this._startGenPoll();
+  },
+
+  _startGenPoll() {
+    if (this.genPoll) clearInterval(this.genPoll);
+    this.genPoll = setInterval(() => this._pollGen(), 1500);
+    this._pollGen();
+  },
+
+  async _pollGen() {
+    if (!App.api) return;
+    let r;
+    try {
+      r = await App.api.convoy_generation_status({
+        campaign_id: this.detail.id, since: this.genSeen,
+      });
+    } catch (e) { return; }
+    if (!r || !r.ok) return;
+    const box = document.getElementById('cv-gen-log');
+    (r.log || []).forEach(line => this._appendLog(box, line));
+    this.genSeen = r.log_len;
+    if (!r.running) {
+      clearInterval(this.genPoll); this.genPoll = null;
+      // Recharge la campagne pour rafraîchir les drafts (sujet/corps)
+      try {
+        const c2 = await App.api.convoy_get_campaign({ campaign_id: this.detail.id });
+        if (c2 && c2.ok) {
+          this.detail = c2.campaign;
+          this._renderDetail();
+          await this._loadList();
+        }
+      } catch (e) {}
+    }
+  },
+
+  // ---- Étape 4 : Envoi ---------------------------------------------
+  _stepSend(c) {
+    return `
+      ${this._sectionOpen('4. Mode d\'envoi',
+        'AUTO : tout part dès que tu lances. VALIDATION : tu approuves chaque mail un par un avant le départ.')}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label class="block">
+            <div class="text-xs font-medium text-text-secondary mb-1.5">Mode</div>
+            <select id="cv-mode"
+                    class="w-full px-3 py-2 rounded-lg bg-bg border border-border
+                           focus:border-accent focus:outline-none text-sm">
+              <option value="validation" ${c.mode === 'validation' ? 'selected' : ''}>Validation manuelle (recommandé)</option>
+              <option value="auto"       ${c.mode === 'auto'       ? 'selected' : ''}>Auto (envoi sans demander)</option>
+            </select>
+          </label>
+          <label class="block">
+            <div class="text-xs font-medium text-text-secondary mb-1.5">Plafond d'envois aujourd'hui</div>
+            <input id="cv-cap" type="number" min="1" value="${this._esc(c.daily_cap || 40)}"
+                   class="w-full px-3 py-2 rounded-lg bg-bg border border-border
+                          focus:border-accent focus:outline-none text-sm" />
+          </label>
+          <label class="block">
+            <div class="text-xs font-medium text-text-secondary mb-1.5">Délai entre 2 envois (secondes)</div>
+            <input id="cv-delay" type="number" min="5" value="${this._esc(c.delay_seconds || 60)}"
+                   class="w-full px-3 py-2 rounded-lg bg-bg border border-border
+                          focus:border-accent focus:outline-none text-sm" />
+          </label>
+          <label class="block">
+            <div class="text-xs font-medium text-text-secondary mb-1.5">Démarrer à (vide = maintenant)</div>
+            <input id="cv-sched" type="text" value="${this._esc(c.schedule_at || '')}"
+                   placeholder="ex : 2026-05-18 08:00"
+                   class="w-full px-3 py-2 rounded-lg bg-bg border border-border
+                          focus:border-accent focus:outline-none text-sm" />
+          </label>
+        </div>
+        <div class="flex flex-wrap gap-2 mt-4">
+          <button id="cv-save-send" class="btn btn-secondary">Enregistrer</button>
+          <button id="cv-start-send" class="btn btn-primary">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Lancer le convoi
+          </button>
+          <button id="cv-stop-send" class="btn btn-secondary text-danger hidden">
+            ⏹ Arrêter
+          </button>
+        </div>
+
+        <div id="cv-send-log-wrap" class="mt-4 hidden">
+          <div class="text-xs font-medium text-text-secondary mb-1.5">Journal d'envoi</div>
+          <pre id="cv-send-log"
+               class="text-xs font-mono leading-relaxed p-3 rounded-lg bg-bg
+                      border border-border max-h-48 overflow-auto whitespace-pre-wrap"></pre>
+        </div>
+      ${this._sectionClose()}
+    `;
+  },
+
+  _bindStepSend() {
+    const save = document.getElementById('cv-save-send');
+    if (save) save.onclick = () => this._saveSendSettings();
+    const start = document.getElementById('cv-start-send');
+    if (start) start.onclick = () => this._startSend();
+    const stop  = document.getElementById('cv-stop-send');
+    if (stop)  stop.onclick = () => this._stopSend();
+  },
+
+  _gatherSendSettings() {
+    return {
+      campaign_id: this.detail.id,
+      mode: (document.getElementById('cv-mode') || {}).value || 'validation',
+      daily_cap: parseInt((document.getElementById('cv-cap') || {}).value, 10) || 40,
+      delay_seconds: parseInt((document.getElementById('cv-delay') || {}).value, 10) || 60,
+      schedule_at: ((document.getElementById('cv-sched') || {}).value || '').trim(),
+    };
+  },
+
+  async _saveSendSettings() {
+    const btn = document.getElementById('cv-save-send');
+    if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
+    let r;
+    try { r = await App.api.convoy_save_send_settings(this._gatherSendSettings()); }
+    catch (e) { r = { ok: false, error: String(e) }; }
+    if (r && r.ok) {
+      if (r.campaign) this.detail = r.campaign;
+      if (btn) { btn.textContent = 'Enregistré ✓'; setTimeout(() => { btn.disabled = false; btn.textContent = 'Enregistrer'; }, 1500); }
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = 'Erreur'; }
+    }
+  },
+
+  async _startSend() {
+    await this._saveSendSettings();
+    const wrap = document.getElementById('cv-send-log-wrap');
+    const box  = document.getElementById('cv-send-log');
+    const stopBtn = document.getElementById('cv-stop-send');
+    if (wrap) wrap.classList.remove('hidden');
+    if (box)  box.textContent = '';
+    this.sendSeen = 0;
+    let r;
+    try { r = await App.api.convoy_start_send({ campaign_id: this.detail.id }); }
+    catch (e) { r = { ok: false, error: String(e) }; }
+    if (!r || !r.ok) {
+      this._appendLog(box, r && r.error || 'Démarrage impossible');
+      return;
+    }
+    if (stopBtn) stopBtn.classList.remove('hidden');
+    this._startSendPoll();
+  },
+
+  async _stopSend() {
+    try { await App.api.convoy_stop_send({ campaign_id: this.detail.id }); }
+    catch (e) {}
+  },
+
+  _startSendPoll() {
+    if (this.sendPoll) clearInterval(this.sendPoll);
+    this.sendPoll = setInterval(() => this._pollSend(), 1500);
+    this._pollSend();
+  },
+
+  async _pollSend() {
+    if (!App.api) return;
+    let r;
+    try {
+      r = await App.api.convoy_send_status({
+        campaign_id: this.detail.id, since: this.sendSeen,
+      });
+    } catch (e) { return; }
+    if (!r || !r.ok) return;
+    const box = document.getElementById('cv-send-log');
+    (r.log || []).forEach(line => this._appendLog(box, line));
+    this.sendSeen = r.log_len;
+    if (!r.running) {
+      clearInterval(this.sendPoll); this.sendPoll = null;
+      const stopBtn = document.getElementById('cv-stop-send');
+      if (stopBtn) stopBtn.classList.add('hidden');
+      try {
+        const c2 = await App.api.convoy_get_campaign({ campaign_id: this.detail.id });
+        if (c2 && c2.ok) {
+          this.detail = c2.campaign;
+          this._renderDetail();
+          await this._loadList();
+        }
+      } catch (e) {}
+    }
+  },
+
+  // ---- Étape 5 : Résultats / drafts --------------------------------
+  _stepResults(c) {
+    const drafts = c.drafts || [];
+    const counts = this._counts(drafts);
+    return `
+      ${this._sectionOpen('5. Brouillons & résultats',
+        'Édite, approuve ou rejette chaque mail. Les envoyés sont marqués ✓.')}
+        <div class="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-5">
+          ${this._kpi('Total',     counts.total)}
+          ${this._kpi('En attente',counts.pending, counts.pending > 0 ? 'warning' : '')}
+          ${this._kpi('Approuvés', counts.approved, counts.approved > 0 ? 'accent' : '')}
+          ${this._kpi('Envoyés',   counts.sent,    counts.sent > 0 ? 'success' : '')}
+          ${this._kpi('Échecs',    counts.failed,  counts.failed > 0 ? 'danger' : '')}
+          ${this._kpi('Rejetés',   counts.rejected)}
+        </div>
+        <div class="space-y-3">
+          ${drafts.map(d => this._draftCard(d)).join('')}
+        </div>
+      ${this._sectionClose()}
+    `;
+  },
+
+  _counts(drafts) {
+    const out = { total: drafts.length, pending: 0, approved: 0, sent: 0,
+                  failed: 0, rejected: 0 };
+    for (const d of drafts) if (out[d.status] !== undefined) out[d.status]++;
+    return out;
+  },
+
+  _draftCard(d) {
+    const p = d.prospect || {};
+    const recipient = p.raison_sociale || p.prenom || p.email || '(sans destinataire)';
+    const badge = this._statusBadge(d.status);
+    const empty = !d.subject && !d.body;
+    const locked = ['sent', 'failed', 'rejected'].includes(d.status);
+    return `
+      <article class="card p-4" data-draft-card="${this._esc(d.id)}">
+        <header class="flex items-start justify-between gap-3 mb-2">
+          <div class="min-w-0 flex-1">
+            <div class="font-semibold text-sm truncate">${this._esc(recipient)}</div>
+            <div class="text-xs text-text-muted break-all">${this._esc(p.email || '')}${p.ville ? ' · ' + this._esc(p.ville) : ''}${d.offer_name ? ` · 🎯 ${this._esc(d.offer_name)}` : ''}</div>
+          </div>
+          ${badge}
+        </header>
+        ${empty ? `
+          <div class="text-xs text-text-muted italic py-3">
+            (aucun message — clique « Générer tous les mails » à l'étape 3)
+          </div>
+        ` : `
+          <label class="block mb-2">
+            <div class="text-[11px] font-medium text-text-secondary mb-1">OBJET</div>
+            <input type="text" data-subject value="${this._esc(d.subject || '')}"
+                   ${locked ? 'disabled' : ''}
+                   class="w-full px-3 py-1.5 rounded-lg bg-bg border border-border
+                          focus:border-accent focus:outline-none text-sm font-semibold disabled:opacity-60" />
+          </label>
+          <label class="block mb-3">
+            <div class="text-[11px] font-medium text-text-secondary mb-1">CORPS</div>
+            <textarea data-body rows="6" ${locked ? 'disabled' : ''}
+                      class="w-full px-3 py-2 rounded-lg bg-bg border border-border
+                             focus:border-accent focus:outline-none text-sm leading-relaxed
+                             resize-y disabled:opacity-60">${this._esc(d.body || '')}</textarea>
+          </label>
+        `}
+        ${d.error ? `<div class="text-xs text-danger mb-2">⚠ ${this._esc(d.error)}</div>` : ''}
+        ${!locked && !empty ? `
+          <footer class="flex flex-wrap gap-2 justify-end pt-2 border-t border-border">
+            <button class="btn btn-secondary" data-act="save">Enregistrer</button>
+            <button class="btn btn-secondary text-danger" data-act="reject">Rejeter</button>
+            ${d.status === 'pending' ? `<button class="btn btn-primary" data-act="approve">Approuver</button>` :
+              `<span class="text-xs text-accent self-center">✓ approuvé — partira au prochain lancement</span>`}
+          </footer>
+        ` : ''}
+      </article>
+    `;
+  },
+
+  _bindStepResults() {
+    document.querySelectorAll('article[data-draft-card]').forEach(card => {
+      const did = card.dataset.draftCard;
+      const subj = card.querySelector('input[data-subject]');
+      const body = card.querySelector('textarea[data-body]');
+
+      const saveEdits = async () => {
+        if (!subj && !body) return;
+        try {
+          await App.api.convoy_update_draft({
+            campaign_id: this.detail.id, draft_id: did,
+            subject: subj ? subj.value : undefined,
+            body:    body ? body.value : undefined,
+          });
+        } catch (e) {}
+      };
+
+      const save = card.querySelector('[data-act="save"]');
+      if (save) save.onclick = async () => {
+        save.disabled = true; save.textContent = '…';
+        await saveEdits();
+        save.textContent = 'Enregistré ✓';
+        setTimeout(() => { save.disabled = false; save.textContent = 'Enregistrer'; }, 1500);
+      };
+
+      const reject = card.querySelector('[data-act="reject"]');
+      if (reject) reject.onclick = async () => {
+        try { await App.api.convoy_reject_draft({ campaign_id: this.detail.id, draft_id: did }); }
+        catch (e) {}
+        const c2 = await App.api.convoy_get_campaign({ campaign_id: this.detail.id });
+        if (c2 && c2.ok) { this.detail = c2.campaign; this._renderDetail(); }
+      };
+
+      const approve = card.querySelector('[data-act="approve"]');
+      if (approve) approve.onclick = async () => {
+        await saveEdits();
+        try { await App.api.convoy_approve_draft({ campaign_id: this.detail.id, draft_id: did }); }
+        catch (e) {}
+        const c2 = await App.api.convoy_get_campaign({ campaign_id: this.detail.id });
+        if (c2 && c2.ok) { this.detail = c2.campaign; this._renderDetail(); }
+      };
+    });
+  },
+
+  // ------------------------------------------------------------------
+  //  Helpers
+  // ------------------------------------------------------------------
+  _stopPollers() {
+    if (this.genPoll)  { clearInterval(this.genPoll);  this.genPoll  = null; }
+    if (this.sendPoll) { clearInterval(this.sendPoll); this.sendPoll = null; }
+  },
+
+  _statusBadge(status) {
+    const map = {
+      pending:  { label: 'À valider',   cls: 'bg-warning/15 text-warning' },
+      approved: { label: 'Approuvé',    cls: 'bg-accent/15 text-accent' },
+      sent:     { label: '✓ Envoyé',    cls: 'bg-success/15 text-success' },
+      failed:   { label: 'Échec',       cls: 'bg-danger/15 text-danger' },
+      rejected: { label: 'Rejeté',      cls: 'bg-text-muted/15 text-text-muted' },
+      needs_review:      { label: 'À revoir',   cls: 'bg-warning/15 text-warning' },
+      skipped_duplicate: { label: 'Doublon',    cls: 'bg-text-muted/15 text-text-muted' },
+    };
+    const m = map[status] || { label: status, cls: 'bg-text-muted/15 text-text-muted' };
+    return `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${m.cls}">${m.label}</span>`;
+  },
+
+  _kpi(label, value, accent) {
+    const cls = accent ? `accent-${accent}` : '';
+    return `
+      <div class="stat-card ${cls}">
+        <div class="label">${this._esc(label)}</div>
+        <div class="value">${this._esc(value)}</div>
+      </div>
+    `;
+  },
+
+  _sectionOpen(title, subtitle) {
+    return `
+      <section class="card p-5 sm:p-6">
+        <div class="mb-4">
+          <div class="font-semibold text-base">${this._esc(title)}</div>
+          ${subtitle ? `<div class="text-sm text-text-muted mt-1">${this._esc(subtitle)}</div>` : ''}
+        </div>
+    `;
+  },
+
+  _sectionClose() {
+    return `</section>`;
+  },
+
+  _appendLog(box, line) {
+    if (!box) return;
+    box.textContent += line + '\n';
+    box.scrollTop = box.scrollHeight;
+  },
+
+  _toast(msg, kind = 'info') {
+    if (typeof HealthCheck !== 'undefined' && HealthCheck.toast) {
+      HealthCheck.toast('Importer une liste', msg, kind === 'danger' ? 'error' : kind);
+      return;
+    }
+    // Fallback minimal
+    console.log(`[convoy:${kind}]`, msg);
+  },
+
+  _previewBanner() {
+    return `
+      <div class="card p-10 text-center">
+        <div class="text-4xl mb-3">📂</div>
+        <h2 class="text-xl font-semibold mb-2">Mode aperçu</h2>
+        <p class="text-text-secondary max-w-md mx-auto">
+          Connecte-toi pour importer et envoyer une liste.
+        </p>
+      </div>
+    `;
+  },
+
+  _esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  },
+};

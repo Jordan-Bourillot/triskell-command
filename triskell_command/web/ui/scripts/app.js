@@ -437,6 +437,7 @@ const App = {
       case 'config':    return Config.render(target);
       case 'tutorial':  return Tutorial.render(target);
       case 'autopilot': return Autopilot.render(target);
+      case 'convoy':    return Convoy.render(target);
       case 'delivery':  return Delivery.render(target);
       case 'health':    return Health.render(target);
       case 'abtest':    return ABTest.render(target);
@@ -449,7 +450,6 @@ const App = {
   _renderPlaceholder(target, viewId, _msg) {
     const labels = {
       'autopilot':  { title: 'Auto-pilote',         icon: '🚀', desc: 'Décris ta cible une fois (secteur, région, mots-clés). L\'app cherche, enrichit, rédige, envoie.' },
-      'convoy':     { title: 'Importer une liste',  icon: '📂', desc: 'Glisse un PDF, Word, Excel ou image avec ta liste de prospects. L\'app extrait les contacts et prépare les mails.' },
       'compose':    { title: 'Écrire avec l\'IA',   icon: '✍️', desc: 'Tape ta consigne, choisis ton assistant IA, l\'app rédige.' },
       'templates':  { title: 'Modèles d\'emails',   icon: '📄', desc: 'Tes modèles prêts à réutiliser. Duplique-les, édite-les, ou crée les tiens.' },
       'campaigns':  { title: 'Envoyer des emails',  icon: '✉️', desc: 'Lance une vague de mails à tes prospects qualifiés.' },
