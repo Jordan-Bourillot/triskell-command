@@ -1101,6 +1101,49 @@ const Mails = {
           content: 'Tape ton message ici…';
           color: hsl(var(--text-muted));
         }
+        /* Rétablit le rendu visuel des blocs créés par la toolbar
+           (Tailwind preflight remet ul/ol/h*/blockquote à zéro,
+           sinon les boutons paraissent ne rien faire). */
+        #cmp-body-html ul {
+          list-style: disc outside;
+          padding-left: 1.6em;
+          margin: 0.5em 0;
+        }
+        #cmp-body-html ol {
+          list-style: decimal outside;
+          padding-left: 1.8em;
+          margin: 0.5em 0;
+        }
+        #cmp-body-html ul ul { list-style: circle outside; }
+        #cmp-body-html ul ul ul { list-style: square outside; }
+        #cmp-body-html li {
+          margin: 0.15em 0;
+        }
+        #cmp-body-html h1,
+        #cmp-body-html h2,
+        #cmp-body-html h3 {
+          font-weight: 700;
+          line-height: 1.25;
+          margin: 0.6em 0 0.3em;
+          color: hsl(var(--text));
+        }
+        #cmp-body-html h1 { font-size: 1.6em; }
+        #cmp-body-html h2 { font-size: 1.35em; }
+        #cmp-body-html h3 { font-size: 1.15em; }
+        #cmp-body-html blockquote {
+          margin: 0.5em 0;
+          padding: 0.3em 0 0.3em 0.9em;
+          border-left: 3px solid hsl(var(--accent) / 0.6);
+          color: hsl(var(--text-muted));
+          font-style: italic;
+        }
+        #cmp-body-html p {
+          margin: 0.25em 0;
+        }
+        #cmp-body-html a {
+          color: hsl(var(--accent));
+          text-decoration: underline;
+        }
         /* Images insérées : highlight au survol, indicateur si déjà liée */
         #cmp-body-html img {
           cursor: pointer;
@@ -1645,6 +1688,154 @@ const Mails = {
       btn.addEventListener('mousedown', (e) => e.preventDefault());
     });
 
+    // -- Helpers DOM pour les commandes "bloc" (listes, titre, citation) --
+    // On n'utilise PAS document.execCommand('insertUnorderedList' / 'formatBlock')
+    // parce que ces commandes sont dépréciées et leur comportement est instable
+    // selon la version de Chromium (les boutons paraissent ne rien faire si
+    // le contenu n'est pas dans un bloc supporté).
+    const BLOCK_TAGS = new Set([
+      'P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'LI', 'PRE'
+    ]);
+    const findBlock = (node) => {
+      let n = node;
+      while (n && n !== htmlArea) {
+        if (n.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(n.tagName)) {
+          return n;
+        }
+        n = n.parentNode;
+      }
+      return null;
+    };
+    const placeCursorAtEnd = (el) => {
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      r.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    };
+    // Si la zone contient du texte brut ou des <br> hors paragraphe,
+    // on re-emballe tout en <p> pour avoir des blocs identifiables.
+    const normalizeBlocks = () => {
+      const sel = window.getSelection();
+      let caretText = '';
+      if (sel.rangeCount && htmlArea.contains(sel.anchorNode)) {
+        const pre = document.createRange();
+        pre.selectNodeContents(htmlArea);
+        pre.setEnd(sel.anchorNode, sel.anchorOffset);
+        caretText = pre.toString();
+      }
+      const hasRawChild = Array.from(htmlArea.childNodes).some(n =>
+        n.nodeType === Node.TEXT_NODE ||
+        (n.nodeType === Node.ELEMENT_NODE && n.tagName === 'BR')
+      );
+      if (!hasRawChild) return;
+      const html = htmlArea.innerHTML
+        .replace(/<div[^>]*>/gi, '\n')
+        .replace(/<\/div>/gi, '')
+        .replace(/<br\s*\/?>/gi, '\n');
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      const lines = (tmp.innerText || '').split('\n');
+      htmlArea.innerHTML = lines
+        .map(l => `<p>${this._escape(l) || '<br>'}</p>`).join('');
+      // Replace le curseur à la même position texte
+      try {
+        let remaining = caretText.length;
+        const walker = document.createTreeWalker(htmlArea, NodeFilter.SHOW_TEXT);
+        let node, placed = false;
+        while ((node = walker.nextNode())) {
+          if (remaining <= node.length) {
+            const r = document.createRange();
+            r.setStart(node, remaining);
+            r.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(r);
+            placed = true;
+            break;
+          }
+          remaining -= node.length;
+        }
+        if (!placed) {
+          const last = htmlArea.lastElementChild;
+          if (last) placeCursorAtEnd(last);
+        }
+      } catch (_) {}
+    };
+    // Applique / bascule une liste (UL ou OL) sur le bloc courant
+    const applyList = (listTag /* 'UL' ou 'OL' */) => {
+      normalizeBlocks();
+      const sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      let block = findBlock(sel.anchorNode);
+      if (!block) {
+        if (!htmlArea.firstElementChild) {
+          htmlArea.innerHTML = '<p><br></p>';
+        }
+        block = htmlArea.firstElementChild;
+      }
+      if (block.tagName === 'LI') {
+        const list = block.parentNode;
+        if (list && list.tagName === listTag) {
+          // Toggle off : LI → P
+          const p = document.createElement('p');
+          p.innerHTML = block.innerHTML || '<br>';
+          list.parentNode.insertBefore(p, list.nextSibling);
+          list.removeChild(block);
+          if (!list.children.length) list.parentNode.removeChild(list);
+          placeCursorAtEnd(p);
+        } else if (list) {
+          // Bascule entre UL et OL : on change le tag de la liste
+          const newList = document.createElement(listTag.toLowerCase());
+          while (list.firstChild) newList.appendChild(list.firstChild);
+          list.parentNode.replaceChild(newList, list);
+          const newLi = Array.from(newList.children).find(li => li.tagName === 'LI');
+          if (newLi) placeCursorAtEnd(newLi);
+        }
+        return;
+      }
+      // Wrap le bloc courant dans une nouvelle liste
+      const list = document.createElement(listTag.toLowerCase());
+      const li = document.createElement('li');
+      li.innerHTML = block.innerHTML || '<br>';
+      list.appendChild(li);
+      block.parentNode.replaceChild(list, block);
+      placeCursorAtEnd(li);
+    };
+    // Applique / bascule un tag de bloc (h2, blockquote, p…)
+    const applyBlockTag = (tag /* 'h2', 'blockquote', 'p'… */) => {
+      normalizeBlocks();
+      const sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      let block = findBlock(sel.anchorNode);
+      if (!block) {
+        if (!htmlArea.firstElementChild) {
+          htmlArea.innerHTML = '<p><br></p>';
+        }
+        block = htmlArea.firstElementChild;
+      }
+      // Toggle : si déjà du bon tag → repasse en <p>
+      if (block.tagName.toLowerCase() === tag.toLowerCase()) {
+        const p = document.createElement('p');
+        p.innerHTML = block.innerHTML || '<br>';
+        block.parentNode.replaceChild(p, block);
+        placeCursorAtEnd(p);
+        return;
+      }
+      const newBlock = document.createElement(tag);
+      newBlock.innerHTML = block.innerHTML || '<br>';
+      if (block.tagName === 'LI') {
+        // Sort l'item de la liste et le remplace par le nouveau bloc
+        const list = block.parentNode;
+        list.parentNode.insertBefore(newBlock, list.nextSibling);
+        list.removeChild(block);
+        if (!list.children.length) list.parentNode.removeChild(list);
+      } else {
+        block.parentNode.replaceChild(newBlock, block);
+      }
+      placeCursorAtEnd(newBlock);
+    };
+
     // Boutons toolbar HTML
     toolbar.querySelectorAll('[data-cmd]').forEach(btn => {
       btn.onclick = (e) => {
@@ -1662,70 +1853,6 @@ const Mails = {
           return;
         }
         htmlArea.focus();
-        // Pour les commandes "bloc" (listes, titre, citation), si l'aire
-        // contient des nœuds texte bruts ou des <br> hors paragraphe, on
-        // re-emballe tout en <p> d'abord — sinon Chrome ne sait pas quel
-        // bloc transformer et le bouton paraît ne rien faire.
-        const isBlockCmd = (
-          cmd === 'insertUnorderedList' ||
-          cmd === 'insertOrderedList' ||
-          cmd.startsWith('formatBlock-')
-        );
-        if (isBlockCmd) {
-          const hasRawChild = Array.from(htmlArea.childNodes).some(n =>
-            n.nodeType === Node.TEXT_NODE ||
-            (n.nodeType === Node.ELEMENT_NODE && n.tagName === 'BR')
-          );
-          if (hasRawChild) {
-            // Sauvegarde l'offset texte du curseur pour le replacer après wrap
-            const sel = window.getSelection();
-            let caretText = '';
-            if (sel.rangeCount && htmlArea.contains(sel.anchorNode)) {
-              const pre = document.createRange();
-              pre.selectNodeContents(htmlArea);
-              pre.setEnd(sel.anchorNode, sel.anchorOffset);
-              caretText = pre.toString();
-            }
-            // Découpe le contenu par <br>/<div>/<p> en lignes et réemballe en <p>
-            const html = htmlArea.innerHTML
-              .replace(/<div[^>]*>/gi, '\n')
-              .replace(/<\/div>/gi, '')
-              .replace(/<br\s*\/?>/gi, '\n');
-            const tmp = document.createElement('div');
-            tmp.innerHTML = html;
-            const lines = (tmp.innerText || '').split('\n');
-            htmlArea.innerHTML = lines
-              .map(l => `<p>${this._escape(l) || '<br>'}</p>`).join('');
-            // Replace le curseur à la même position texte
-            try {
-              let remaining = caretText.length;
-              const walker = document.createTreeWalker(htmlArea, NodeFilter.SHOW_TEXT);
-              let node, placed = false;
-              while ((node = walker.nextNode())) {
-                if (remaining <= node.length) {
-                  const r = document.createRange();
-                  r.setStart(node, remaining);
-                  r.collapse(true);
-                  sel.removeAllRanges();
-                  sel.addRange(r);
-                  placed = true;
-                  break;
-                }
-                remaining -= node.length;
-              }
-              if (!placed) {
-                const last = htmlArea.lastElementChild;
-                if (last) {
-                  const r = document.createRange();
-                  r.selectNodeContents(last);
-                  r.collapse(false);
-                  sel.removeAllRanges();
-                  sel.addRange(r);
-                }
-              }
-            } catch (_) {}
-          }
-        }
         if (cmd === 'createLink') {
           const url = prompt('URL du lien :', 'https://');
           if (url) document.execCommand('createLink', false, url);
@@ -1739,9 +1866,13 @@ const Mails = {
           const fromLabel = fromSel.options[fromSel.selectedIndex]?.text || '';
           const to = chipsTo.getValues().join(', ');
           this._openHtmlPreview(htmlArea.innerHTML, { subject: subj, from: fromLabel, to });
+        } else if (cmd === 'insertUnorderedList') {
+          applyList('UL');
+        } else if (cmd === 'insertOrderedList') {
+          applyList('OL');
         } else if (cmd.startsWith('formatBlock-')) {
           const tag = cmd.split('-')[1];
-          document.execCommand('formatBlock', false, `<${tag}>`);
+          applyBlockTag(tag);
         } else {
           document.execCommand(cmd, false, null);
         }
