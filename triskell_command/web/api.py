@@ -1443,6 +1443,34 @@ class Api:
         except Exception as exc:
             logger.debug("mail safety check skipped: %s", exc)
 
+        # Tracking d'ouvertures (pixel) — si l'utilisateur l'a active.
+        # On injecte un <img> invisible dans le HTML du mail ; quand le
+        # destinataire ouvre le mail, l'image hit la Netlify Function qui
+        # ecrit dans email_events. tracking_id_for_log permet de retrouver
+        # le mail au moment du hit.
+        tracking_id_for_log = ""
+        try:
+            from ..integrations import email_tracker
+            client_for_tracker = self._supabase()
+            tcfg = email_tracker.load_config(client=client_for_tracker)
+            if tcfg.get("enabled") and tcfg.get("pixel_endpoint"):
+                tid = email_tracker.generate_tracking_id()
+                tracking_id_for_log = tid
+                prospect_id_hint = (payload or {}).get("prospect_id") or ""
+                # Si pas de body_html, on en cree un (sinon impossible
+                # d'injecter le pixel proprement)
+                if not body_html and body:
+                    body_html = email_tracker.wrap_plain_in_html(body)
+                if body_html:
+                    body_html = email_tracker.inject_into_html(
+                        body_html,
+                        email_tracker.build_pixel_html(
+                            tid, tcfg.get("pixel_endpoint", ""),
+                            prospect_id=prospect_id_hint),
+                    )
+        except Exception as exc:
+            logger.debug("tracking pixel skipped: %s", exc)
+
         try:
             from ..integrations import shared_secrets
             client = self._supabase()
@@ -1574,24 +1602,30 @@ class Api:
                 try:
                     sb = getattr(client, "client", None) or getattr(client, "_client", None)
                     if sb is not None:
+                        extra_log = {
+                            "to": to,
+                            "from": from_email,
+                            "account_id": account_id,
+                            "in_reply_to": in_reply_to,
+                            "manual_reply": bool(in_reply_to),
+                            "has_html": bool(body_html),
+                            "attachments_count": len([a for a in attachments
+                                if isinstance(a, dict) and not a.get("inline")]),
+                            "inline_images_count": len([a for a in attachments
+                                if isinstance(a, dict) and a.get("inline") and a.get("cid")]),
+                        }
+                        # Si le tracking pixel a ete injecte, on stocke le
+                        # token pour relier les futures ouvertures (table
+                        # email_events) a ce mail precis.
+                        if tracking_id_for_log:
+                            extra_log["tracking_id"] = tracking_id_for_log
                         sb.table("email_history").insert({
                             "kind": "email_sent",
                             "ts":   __import__("datetime").datetime.now().isoformat(timespec="seconds"),
                             "subject": subject[:200],
                             "body":    body[:5000],
                             "message_id": msg_id,
-                            "extra": {
-                                "to": to,
-                                "from": from_email,
-                                "account_id": account_id,
-                                "in_reply_to": in_reply_to,
-                                "manual_reply": bool(in_reply_to),
-                                "has_html": bool(body_html),
-                                "attachments_count": len([a for a in attachments
-                                    if isinstance(a, dict) and not a.get("inline")]),
-                                "inline_images_count": len([a for a in attachments
-                                    if isinstance(a, dict) and a.get("inline") and a.get("cid")]),
-                            },
+                            "extra": extra_log,
                             "created_by": getattr(client, "user_id", None),
                         }).execute()
                 except Exception as exc:

@@ -65,16 +65,19 @@ async function logOpen(trackingId, prospectId) {
     console.warn('SUPABASE_URL or SUPABASE_SERVICE_KEY not set — skipping log');
     return;
   }
+  // Ecrit dans email_events (table dediee aux ouvertures/clics) plutot
+  // que email_history (qui sert pour les envois reels). Voir supabase/
+  // 05_email_events.sql.
   const payload = {
+    token: trackingId,
     prospect_id: prospectId || null,
-    kind: 'email_opened',
+    event_type: 'open',
     ts: new Date().toISOString(),
     extra: {
-      tracking_id: trackingId,
       // Pas d'IP/UA en clair pour rester RGPD-friendly
     },
   };
-  const r = await fetch(`${url}/rest/v1/email_history`, {
+  const r = await fetch(`${url}/rest/v1/email_events`, {
     method: 'POST',
     headers: {
       'apikey': key,

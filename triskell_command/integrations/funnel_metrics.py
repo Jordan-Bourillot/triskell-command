@@ -120,6 +120,18 @@ def compute_funnel(period: str = "30d", segment: str = "all") -> dict[str, Any]:
             status_counter[p.get("status") or "new"] += 1
     out["by_status"] = dict(status_counter)
     out["stages"]["won"] = status_counter.get("won", 0)
+    # Nouveaux statuts du systeme de protection mail — exposes pour les
+    # jauges de qualite (taux de bounce, taux de desinscription)
+    out["stages"]["lost"] = status_counter.get("lost", 0)
+    out["stages"]["refused"] = status_counter.get("refused", 0)
+    out["stages"]["unsubscribed"] = status_counter.get("unsubscribed", 0)
+    out["stages"]["bounced"] = status_counter.get("bounced", 0)
+    # Taux de delivrabilite (sain si tres bas)
+    total_with_attempt = (sent_targets := 0)  # placeholder, recalc plus bas
+    out["health"] = {
+        "bounced_rate": 0.0,        # rempli apres le comptage des sent
+        "unsubscribe_rate": 0.0,
+    }
 
     try:
         hist_res = (sb.table("email_history")
@@ -167,5 +179,12 @@ def compute_funnel(period: str = "30d", segment: str = "all") -> dict[str, Any]:
     out["stages"]["interested"] = interested_count
     out["by_product"] = dict(by_product.most_common(20))
     out["by_category"] = dict(by_category)
+    # Taux de delivrabilite : bounced / sent. Plus c'est haut, plus la
+    # reputation d'envoi se degrade. Same pour desinscriptions.
+    if sent_count > 0:
+        out["health"]["bounced_rate"] = round(
+            100.0 * status_counter.get("bounced", 0) / sent_count, 2)
+        out["health"]["unsubscribe_rate"] = round(
+            100.0 * status_counter.get("unsubscribed", 0) / sent_count, 2)
     out["ok"] = True
     return out

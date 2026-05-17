@@ -248,12 +248,17 @@ def get_client_360(client_id: str) -> Optional[dict]:
         return None
 
 
-def get_client_timeline(client_id: str, *, limit: int = 100) -> list[dict]:
+def get_client_timeline(client_id: str, *, limit: int = 100,
+                          account_id: str = "") -> list[dict]:
     """Timeline chronologique (récente → ancienne) des événements d'un client :
     intakes Lagriffe/RankUs/WoW, factures, emails envoyés, projets.
 
+    Si account_id est fourni, l'historique mail est filtre pour ne montrer
+    que les envois/receptions de ce compte mail (utile en multi-comptes
+    pour ne pas melanger les boites).
+
     Renvoie une liste de dicts uniformes :
-      { type, created_at, label, status, link?, raw }
+      { type, created_at, label, status, link?, raw, account_id? }
     """
     sb = _sb()
     if sb is None:
@@ -261,18 +266,30 @@ def get_client_timeline(client_id: str, *, limit: int = 100) -> list[dict]:
 
     events: list[dict] = []
 
-    def _safe_fetch(table: str, type_label: str, label_field: str = "status") -> None:
+    def _safe_fetch(table: str, type_label: str, label_field: str = "status",
+                     account_filter: bool = False) -> None:
         try:
-            rows = (sb.table(table).select("*")
-                    .eq("client_id", client_id)
-                    .order("created_at", desc=True).limit(50)
+            q = (sb.table(table).select("*")
+                 .eq("client_id", client_id))
+            # Filtre par compte mail (uniquement pour email_history qui stocke
+            # account_id dans extra). Supabase REST supporte le filtre sur
+            # une cle jsonb via extra->>account_id.
+            if account_filter and account_id:
+                q = q.eq("extra->>account_id", account_id)
+            rows = (q.order("created_at", desc=True).limit(50)
                     .execute().data) or []
             for r in rows:
+                acc = ""
+                if account_filter:
+                    extra = r.get("extra") or {}
+                    if isinstance(extra, dict):
+                        acc = extra.get("account_id", "") or ""
                 events.append({
                     "type": type_label,
-                    "created_at": r.get("created_at"),
+                    "created_at": r.get("created_at") or r.get("ts"),
                     "label": r.get(label_field) or "",
                     "status": r.get("status") or "",
+                    "account_id": acc,
                     "raw": r,
                 })
         except Exception as exc:
@@ -282,7 +299,8 @@ def get_client_timeline(client_id: str, *, limit: int = 100) -> list[dict]:
     _safe_fetch("rankus_intakes", "Demande RankUs")
     _safe_fetch("wow_intakes", "Demande Studio WoW")
     _safe_fetch("invoices", "Facture", label_field="invoice_number")
-    _safe_fetch("email_history", "Email envoyé", label_field="subject")
+    _safe_fetch("email_history", "Email", label_field="subject",
+                 account_filter=True)
     _safe_fetch("client_projects", "Projet livraison", label_field="title")
 
     # Trie chronologique inversé (plus récent en haut)

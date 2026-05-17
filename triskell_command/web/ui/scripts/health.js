@@ -61,9 +61,13 @@ const Health = {
         </div>`;
       return;
     }
-    let data;
-    try { data = await App.api.system_health(); }
-    catch (e) {
+    let data, mailHealth;
+    try {
+      [data, mailHealth] = await Promise.all([
+        App.api.system_health(),
+        (App.api.mail_health ? App.api.mail_health() : Promise.resolve(null)),
+      ]);
+    } catch (e) {
       document.getElementById('h-content').innerHTML =
         `<div class="card p-6 text-danger">Erreur : ${e}</div>`;
       return;
@@ -75,8 +79,48 @@ const Health = {
     }
     document.getElementById('h-content').innerHTML =
       this._renderSummary(data.summary || {}) +
+      this._renderMailSafety(mailHealth || {}) +
       this._renderDeliverability(data['delivrabilité'] || {}) +
       this._renderWorkers(data.workers || []);
+  },
+
+  _renderMailSafety(mh) {
+    // Section dediee aux garde-fous mail : drafts bloques, prospects exclus
+    // par le systeme de protection. Visible seulement si on a des chiffres
+    // ou des alertes.
+    const review = mh.needs_review_count || 0;
+    const dup    = mh.skipped_duplicate_count || 0;
+    const bounced = mh.bounced_count || 0;
+    const unsub  = mh.unsubscribed_count || 0;
+    const alerts = (mh.alerts || []).length;
+    if (!review && !dup && !bounced && !unsub && !alerts) return '';
+    const blockCard = (label, value, tone, action) => `
+      <div class="stat-card ${tone ? 'accent-' + tone : ''}" ${action ? `style="cursor:pointer;" onclick="${action}"` : ''}>
+        <div class="label">${label}</div>
+        <div class="value">${value}</div>
+      </div>`;
+    return `
+      <div class="mb-8">
+        <div class="section-label">Garde-fous mail</div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          ${blockCard('Mails bloqués (à vérifier)', review,
+                      review > 0 ? 'warning' : '',
+                      review > 0 ? "App.show('drafts')" : '')}
+          ${blockCard('Doublons évités (récents)', dup, dup > 0 ? '' : '')}
+          ${blockCard('Adresses mortes (bounced)', bounced,
+                      bounced > 0 ? 'warning' : '')}
+          ${blockCard('Désinscrits (STOP)', unsub, '')}
+        </div>
+        ${alerts ? `
+          <div class="card p-4 mt-4 border-l-4 border-l-danger">
+            <div class="text-sm font-semibold mb-1 text-danger">⚠ ${alerts} alerte${alerts>1?'s':''} mail</div>
+            <div class="text-xs text-text-muted">
+              ${(mh.alerts || []).map(a => this._esc(a.message ||
+                `${a.account_id} : ${a.consecutive_errors} cycles d'échec consécutifs`)).join(' · ')}
+            </div>
+          </div>` : ''}
+      </div>
+    `;
   },
 
   _renderSummary(s) {
