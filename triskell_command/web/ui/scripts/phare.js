@@ -525,14 +525,20 @@ const Phare = {
       <div class="phare-onboard-card">
         <div class="phare-onboard-emoji">💡</div>
         <h2>Bienvenue dans Le Phare</h2>
-        <p>Voici tes sites. Sur chacun, <strong>8 robots Claude</strong> préparent des améliorations SEO pendant que tu dors.</p>
-        <p>Tu as juste deux choses à faire :</p>
-        <ol class="phare-onboard-steps">
-          <li><strong>Cliquer sur un site</strong> pour voir ce qu'on te propose</li>
-          <li>Pour chaque proposition : <strong>OK, applique</strong> ou <strong>Poubelle</strong>. C'est tout.</li>
-        </ol>
-        <p class="phare-onboard-foot">Pas besoin de comprendre le code ou le SEO. Si une proposition te plaît, tu valides. Sinon, tu jettes.</p>
-        <button class="btn btn-primary" data-close>J'ai compris, montre-moi mes sites</button>
+        <p class="phare-onboard-lead">Voici tes sites. Sur chacun, <strong>8 robots Claude</strong> préparent des améliorations SEO pendant que tu dors.</p>
+        <div class="phare-onboard-steplabel">Tu as juste deux choses à faire :</div>
+        <div class="phare-onboard-steps">
+          <div class="phare-onboard-step">
+            <div class="phare-onboard-stepnum">1</div>
+            <div class="phare-onboard-steptext"><strong>Clique sur un site</strong> pour voir ce que les robots te proposent.</div>
+          </div>
+          <div class="phare-onboard-step">
+            <div class="phare-onboard-stepnum">2</div>
+            <div class="phare-onboard-steptext">Pour chaque proposition : <strong>OK, applique</strong> ou <strong>Poubelle</strong>. C'est tout.</div>
+          </div>
+        </div>
+        <p class="phare-onboard-foot">Pas besoin de comprendre le code ou le SEO — si ça te plaît, tu valides. Sinon, tu jettes.</p>
+        <button class="btn btn-primary phare-onboard-cta" data-close>J'ai compris, montre-moi mes sites</button>
       </div>
     `;
     document.body.appendChild(dlg);
