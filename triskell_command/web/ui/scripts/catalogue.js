@@ -594,8 +594,8 @@ const Catalogue = {
           </div>
           <form id="cat-edit-form" class="px-7 py-6 space-y-4">
             ${this._field('name', 'Nom du produit', it.name, { required: true, placeholder: 'Ex : Pack Électricien Pro' })}
-            ${this._field('tagline', 'Phrase d\\'accroche (1 ligne)', it.tagline, { placeholder: 'Ex : Site web + outils métier pour électriciens' })}
-            ${this._fieldArea('description', 'Description complète', it.description, { rows: 4, placeholder: 'Présente le produit, ses bénéfices, qui c\\'est pour…' })}
+            ${this._field('tagline', 'Phrase d’accroche (1 ligne)', it.tagline, { placeholder: 'Ex : Site web + outils métier pour électriciens' })}
+            ${this._fieldArea('description', 'Description complète', it.description, { rows: 4, placeholder: 'Présente le produit, ses bénéfices, qui c’est pour…' })}
             ${this._fieldArea('motto', 'Devise (en italique sur la fiche)', it.motto, { rows: 2, placeholder: 'Ex : Pour les pros qui veulent un vrai site…' })}
             <div class="grid grid-cols-2 gap-3">
               ${this._fieldSelect('category', 'Section du catalogue', it.category, cats.map(c => ({ value: c, label: this.CATEGORY_LABELS[c] || c })))}
@@ -608,7 +608,7 @@ const Catalogue = {
             </div>
             ${this._field('price_note', 'Note sur le tarif', it.price_note, { placeholder: 'Ex : par mois, paiement unique…' })}
             ${this._field('buy_url', 'Lien public du produit', it.buy_url, { placeholder: 'https://…' })}
-            ${this._field('logo', 'URL de l\\'image / logo', it.logo, { placeholder: 'https://…/logo.png — laisse vide pour un avatar lettre' })}
+            ${this._field('logo', 'URL de l’image / logo', it.logo, { placeholder: 'https://…/logo.png — laisse vide pour un avatar lettre' })}
             <div class="grid grid-cols-2 gap-3">
               ${this._field('color', 'Couleur fallback (si pas de logo)', it.color, { type: 'color' })}
               ${this._field('initial', 'Initiale fallback', it.initial, { maxlength: 2, placeholder: 'Ex : L' })}
@@ -616,7 +616,7 @@ const Catalogue = {
             <div class="border-t border-border pt-4 mt-2">
               <div class="text-[11px] tracking-widest font-bold text-text-muted mb-3">UTILISATION PAR L'IA EN PROSPECTION</div>
               ${this._field('keywords', 'Mots-clés (séparés par virgules)', it.keywords, { placeholder: 'Ex : électricien, artisan, BTP' })}
-              ${this._fieldArea('prospect_pitch', 'Pitch court pour les mails de prospection', it.prospect_pitch, { rows: 3, placeholder: 'En 1-2 phrases : à qui s\\'adresse ce produit et pourquoi.' })}
+              ${this._fieldArea('prospect_pitch', 'Pitch court pour les mails de prospection', it.prospect_pitch, { rows: 3, placeholder: 'En 1-2 phrases : à qui s’adresse ce produit et pourquoi.' })}
               <p class="text-[11px] text-text-muted mt-1">Ces deux champs guident l'IA quand elle écrit des mails — c'est ce qu'elle « connaît » sur ton produit.</p>
             </div>
           </form>
@@ -784,19 +784,19 @@ const Catalogue = {
           </div>
           <form id="cat-bedit-form" class="px-7 py-6 space-y-4">
             ${this._field('name', 'Nom du pack', b.name, { required: true, placeholder: 'Ex : Pack lancement artisan' })}
-            ${this._field('tagline', 'Phrase d\\'accroche', b.tagline, { placeholder: 'Ex : Site + SEO + outils métier' })}
+            ${this._field('tagline', 'Phrase d’accroche', b.tagline, { placeholder: 'Ex : Site + SEO + outils métier' })}
             ${this._fieldArea('description', 'Description', b.description, { rows: 3, placeholder: 'Ce que contient le pack et pour qui' })}
             <div class="grid grid-cols-2 gap-3">
               ${this._field('price', 'Prix du pack (€)', b.price, { type: 'number' })}
               ${this._field('price_note', 'Note tarif', b.price_note, { placeholder: 'Ex : -20% vs séparé' })}
             </div>
             ${this._field('buy_url', 'Lien public du pack', b.buy_url, { placeholder: 'https://…' })}
-            ${this._field('logo', 'URL de l\\'image', b.logo, { placeholder: 'https://…/pack.png — optionnel' })}
+            ${this._field('logo', 'URL de l’image', b.logo, { placeholder: 'https://…/pack.png — optionnel' })}
             ${this._field('color', 'Couleur fallback', b.color, { type: 'color' })}
             <div>
               <label class="block text-sm font-semibold mb-2">Produits inclus</label>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[260px] overflow-y-auto p-2 border border-border rounded-xl">
-                ${productOptions || '<p class="text-xs text-text-muted col-span-2 p-2">Aucun produit dans le catalogue. Crée d\\'abord des produits.</p>'}
+                ${productOptions || '<p class="text-xs text-text-muted col-span-2 p-2">Aucun produit dans le catalogue. Crée d’abord des produits.</p>'}
               </div>
             </div>
           </form>
