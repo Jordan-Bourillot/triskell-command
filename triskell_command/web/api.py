@@ -372,6 +372,67 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
+    # Fichier clients (table master `clients` — vue 360°)
+    # ------------------------------------------------------------------
+    def get_clients_master(self, payload: dict | None = None) -> dict:
+        """Liste tous les clients (table master) avec compteurs agrégés.
+        payload: { status?, search?, limit? }"""
+        p = payload or {}
+        try:
+            from ..integrations import clients_master_repo as cm
+            rows = cm.list_clients(
+                status=(p.get("status") or None),
+                search=(p.get("search") or ""),
+                limit=int(p.get("limit") or 500),
+            )
+            return {"ok": True, "clients": rows, "total": len(rows)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_client_master(self, payload: dict) -> dict:
+        """Fiche détaillée d'un client : ligne clients_360 + timeline."""
+        p = payload or {}
+        cid = (p.get("id") or "").strip()
+        if not cid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations import clients_master_repo as cm
+            client = cm.get_client_360(cid)
+            if not client:
+                return {"ok": False, "error": "client introuvable"}
+            timeline = cm.get_client_timeline(cid, limit=80)
+            return {"ok": True, "client": client, "timeline": timeline}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def client_master_update(self, payload: dict) -> dict:
+        """Met à jour les champs autorisés d'un client (whitelist côté repo)."""
+        p = payload or {}
+        cid = (p.get("id") or "").strip()
+        patch = p.get("patch") or {}
+        if not cid or not isinstance(patch, dict):
+            return {"ok": False, "error": "payload invalide"}
+        try:
+            from ..integrations import clients_master_repo as cm
+            ok = cm.update_client(cid, **patch)
+            return {"ok": ok}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def client_master_add_tag(self, payload: dict) -> dict:
+        p = payload or {}
+        cid = (p.get("id") or "").strip()
+        tag = (p.get("tag") or "").strip()
+        if not cid or not tag:
+            return {"ok": False, "error": "id et tag requis"}
+        try:
+            from ..integrations import clients_master_repo as cm
+            ok = cm.add_tag(cid, tag)
+            return {"ok": ok}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
     # Réglages
     # ------------------------------------------------------------------
     def get_settings(self) -> dict:
@@ -3463,6 +3524,109 @@ class Api:
         except Exception as exc:
             logger.exception("set_simple_mode")
             return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Setup status — bilan rapide des connexions nécessaires
+    # ------------------------------------------------------------------
+    def setup_status(self) -> dict:
+        """Renvoie une checklist de tout ce qui doit être branché pour que
+        le workflow tourne tout seul. Chaque item a un statut et une
+        destination dans les Réglages.
+
+        items[i] = {
+          key, label, status: "ok"|"warn"|"missing",
+          why, goto: {"view": "config", "tab": "..."}
+        }
+        """
+        from ..integrations import shared_secrets
+        client = self._supabase()
+        items: list[dict] = []
+
+        # 1. Base partagée
+        connected = bool(client)
+        items.append({
+            "key": "supabase",
+            "label": "Base partagée connectée",
+            "status": "ok" if connected else "missing",
+            "why": ("Tout passe par la base partagée Triskell : sans elle, "
+                    "rien n'est sauvegardé." if not connected else ""),
+            "goto": {"view": "config", "tab": "account"},
+        })
+
+        # 2. Adresse mail d'envoi (SMTP)
+        smtp = shared_secrets.get_smtp_config(
+            client=client, app_state=self._app_state) or {}
+        smtp_ok = bool(smtp.get("smtp_host") and smtp.get("smtp_user")
+                       and smtp.get("smtp_password") and smtp.get("from_email"))
+        items.append({
+            "key": "smtp",
+            "label": "Adresse mail d'envoi",
+            "status": "ok" if smtp_ok else "missing",
+            "why": ("Sans adresse mail configurée, aucun mail ne peut partir."
+                    if not smtp_ok else ""),
+            "goto": {"view": "config", "tab": "mails"},
+        })
+
+        # 3. Lecture de la boîte mail (IMAP) — nécessaire pour voir les réponses
+        imap_ok = bool(smtp.get("imap_host") and smtp.get("imap_user")
+                       and smtp.get("imap_password"))
+        items.append({
+            "key": "imap",
+            "label": "Lecture de la boîte mail",
+            "status": "ok" if imap_ok else "missing",
+            "why": ("Sans accès en lecture, l'app ne peut pas détecter les "
+                    "réponses des prospects." if not imap_ok else ""),
+            "goto": {"view": "config", "tab": "mails"},
+        })
+
+        # 4. Au moins une clé IA (pour rédiger les mails)
+        ai_keys = shared_secrets.get_ai_keys(
+            client=client, app_state=self._app_state) or {}
+        has_ai = any(bool(v) for v in ai_keys.values())
+        items.append({
+            "key": "ai",
+            "label": "Service d'intelligence artificielle",
+            "status": "ok" if has_ai else "missing",
+            "why": ("Sans IA, les mails ne peuvent pas être rédigés "
+                    "automatiquement." if not has_ai else ""),
+            "goto": {"view": "config", "tab": "ai"},
+        })
+
+        # 5. Stripe (clé secrète)
+        stripe_ok = False
+        stripe_has_mapping = False
+        try:
+            from ..integrations import stripe_poller
+            scfg = stripe_poller.load_config(client) if client else {}
+            stripe_ok = bool(scfg.get("secret_key") and scfg.get("enabled"))
+            stripe_has_mapping = bool(scfg.get("product_mapping") or {})
+        except Exception:
+            pass
+        items.append({
+            "key": "stripe",
+            "label": "Stripe — encaissement automatique",
+            "status": "ok" if stripe_ok else "missing",
+            "why": ("Sans clé Stripe, l'app ne voit pas les paiements et "
+                    "ne déclenche pas la livraison." if not stripe_ok else ""),
+            "goto": {"view": "config", "tab": "integrations"},
+        })
+
+        # 6. Mapping des produits Stripe (pas bloquant mais recommandé)
+        items.append({
+            "key": "stripe_mapping",
+            "label": "Lien Stripe ↔ kits de livraison",
+            "status": ("ok" if stripe_has_mapping
+                       else ("warn" if stripe_ok else "missing")),
+            "why": ("Sans ce lien, tous les paiements déclenchent le kit "
+                    "générique au lieu du bon kit produit."
+                    if not stripe_has_mapping else ""),
+            "goto": {"view": "config", "tab": "integrations"},
+        })
+
+        summary = {"ok": 0, "warn": 0, "missing": 0}
+        for it in items:
+            summary[it["status"]] = summary.get(it["status"], 0) + 1
+        return {"ok": True, "items": items, "summary": summary}
 
     def _sync_keys_to_core(self) -> None:
         """Recopie les clés API + SMTP/IMAP du state Triskell Command vers

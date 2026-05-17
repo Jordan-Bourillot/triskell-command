@@ -154,17 +154,132 @@ const Morning = {
       this._setSystemLed('ok', 'SYSTÈME · OPÉRATIONNEL');
     }
 
-    slot.innerHTML = this._renderHero(digest)
+    slot.innerHTML = `<div id="m-setup-slot"></div>`
+                   + this._renderHero(digest)
                    + `<div id="m-modes-slot"></div>`
                    + this._renderKpiGrid(digest)
                    + this._renderAlert(digest)
                    + `<div id="m-linkedin-slot"></div>`;
 
+    this._loadSetup();
     this._loadModes();
     this._loadLinkedinActions();
 
     // Démarre le rafraîchissement automatique des chiffres
     this._startAutoRefresh();
+  },
+
+  // -------- Bloc SETUP — bilan des connexions à brancher --------
+  async _loadSetup() {
+    if (!App.api) return;
+    const slot = document.getElementById('m-setup-slot');
+    if (!slot) return;
+    let data = null;
+    try { data = await App.api.setup_status(); } catch (e) {}
+    if (!data || !data.ok) return;
+    const items = data.items || [];
+    const sum = data.summary || {};
+    const missing = sum.missing || 0;
+    const warn = sum.warn || 0;
+    if (missing === 0 && warn === 0) {
+      slot.innerHTML = '';
+      return;
+    }
+    slot.innerHTML = this._renderSetup(items, sum);
+    this._bindSetup();
+  },
+
+  _renderSetup(items, sum) {
+    const total = items.length;
+    const ok = sum.ok || 0;
+    const missing = sum.missing || 0;
+    const warn = sum.warn || 0;
+    const tone = missing > 0 ? 'danger' : 'warning';
+    const headline = missing > 0
+      ? (missing === 1
+          ? '1 connexion à brancher pour que tout tourne tout seul'
+          : `${missing} connexions à brancher pour que tout tourne tout seul`)
+      : (warn === 1
+          ? '1 réglage recommandé manquant'
+          : `${warn} réglages recommandés manquants`);
+    return `
+      <div class="cockpit-setup" data-tone="${tone}">
+        <div class="cockpit-setup-head">
+          <div>
+            <div class="cockpit-setup-kicker">CONFIGURATION</div>
+            <h3 class="cockpit-setup-title">${headline}</h3>
+            <div class="cockpit-setup-sub">${ok} / ${total} branché${total > 1 ? 's' : ''}</div>
+          </div>
+          <button class="cockpit-setup-toggle" type="button"
+                  data-act="toggle"
+                  aria-expanded="false"
+                  title="Voir le détail">
+            Voir le détail
+          </button>
+        </div>
+        <ul class="cockpit-setup-list" hidden>
+          ${items.map(it => this._setupItem(it)).join('')}
+        </ul>
+      </div>
+    `;
+  },
+
+  _setupItem(it) {
+    const icon = it.status === 'ok'   ? '✓'
+               : it.status === 'warn' ? '!'
+               :                        '✗';
+    const statusLabel = it.status === 'ok'   ? 'OK'
+                      : it.status === 'warn' ? 'À ajuster'
+                      :                        'À brancher';
+    const goto = (it.goto && it.goto.view) || 'config';
+    const tab = (it.goto && it.goto.tab) || '';
+    return `
+      <li class="cockpit-setup-item" data-status="${it.status}">
+        <span class="cockpit-setup-icon">${icon}</span>
+        <div class="cockpit-setup-text">
+          <div class="cockpit-setup-label">${it.label}</div>
+          ${it.why ? `<div class="cockpit-setup-why">${it.why}</div>` : ''}
+        </div>
+        <span class="cockpit-setup-status">${statusLabel}</span>
+        ${it.status !== 'ok'
+          ? `<button class="btn btn-secondary cockpit-setup-cta"
+                     type="button"
+                     data-goto="${goto}"
+                     data-tab="${tab}">Configurer →</button>`
+          : ''}
+      </li>
+    `;
+  },
+
+  _bindSetup() {
+    const slot = document.getElementById('m-setup-slot');
+    if (!slot) return;
+    const toggle = slot.querySelector('[data-act="toggle"]');
+    const list = slot.querySelector('.cockpit-setup-list');
+    if (toggle && list) {
+      toggle.onclick = () => {
+        const opened = !list.hasAttribute('hidden');
+        if (opened) {
+          list.setAttribute('hidden', '');
+          toggle.setAttribute('aria-expanded', 'false');
+          toggle.textContent = 'Voir le détail';
+        } else {
+          list.removeAttribute('hidden');
+          toggle.setAttribute('aria-expanded', 'true');
+          toggle.textContent = 'Replier';
+        }
+      };
+    }
+    slot.querySelectorAll('[data-goto]').forEach(btn => {
+      btn.onclick = () => {
+        const view = btn.dataset.goto || 'config';
+        const tab = btn.dataset.tab || '';
+        if (tab) {
+          try { localStorage.setItem('cfg-active-tab', tab); } catch (e) {}
+        }
+        App.show(view);
+      };
+    });
   },
 
   // -------- Rafraîchissement automatique --------

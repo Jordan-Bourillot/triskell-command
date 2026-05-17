@@ -553,6 +553,29 @@ const DemoMode = {
       };
     },
 
+    // ============ Setup status (cockpit checklist) ============
+    setup_status() {
+      const items = [
+        { key: 'supabase', label: 'Base partagée connectée', status: 'ok',
+          why: '', goto: { view: 'config', tab: 'account' } },
+        { key: 'smtp', label: "Adresse mail d'envoi", status: 'ok',
+          why: '', goto: { view: 'config', tab: 'mails' } },
+        { key: 'imap', label: 'Lecture de la boîte mail', status: 'ok',
+          why: '', goto: { view: 'config', tab: 'mails' } },
+        { key: 'ai', label: "Service d'intelligence artificielle", status: 'ok',
+          why: '', goto: { view: 'config', tab: 'ai' } },
+        { key: 'stripe', label: 'Stripe — encaissement automatique', status: 'missing',
+          why: "Sans clé Stripe, l'app ne voit pas les paiements et ne déclenche pas la livraison.",
+          goto: { view: 'config', tab: 'integrations' } },
+        { key: 'stripe_mapping', label: 'Lien Stripe ↔ kits de livraison', status: 'warn',
+          why: "Sans ce lien, tous les paiements déclenchent le kit générique au lieu du bon kit produit.",
+          goto: { view: 'config', tab: 'integrations' } },
+      ];
+      const sum = { ok: 0, warn: 0, missing: 0 };
+      items.forEach(i => { sum[i.status]++; });
+      return { ok: true, items, summary: sum };
+    },
+
     // ============ Modes simples (cockpit) ============
     get_simple_modes() {
       const s = (this._demo_state ||= {});
