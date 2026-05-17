@@ -173,13 +173,20 @@ _DEFAULT_SITES = [
 
 
 def _load_apps_json() -> list[dict]:
-    """Charge la copie embarquee de apps.json (defauts apps Triskell)."""
+    """Charge la copie embarquee de apps.json (defauts apps Triskell).
+
+    __file__ = triskell_command/integrations/catalog_central.py
+    parents[0] = integrations/
+    parents[1] = triskell_command/  <- la copie embarquee est ici (data/apps.json)
+    parents[2] = triskell-command/  (racine du repo, et au-dessus le Lanceur en dev)
+    parents[3] = Triskell/          (cas desktop dev)
+    """
     here = Path(__file__).resolve()
     candidates = []
     for depth, sub in (
-        (2, ("data", "apps.json")),
+        (1, ("data", "apps.json")),
+        (3, ("Triskell 0 - Lanceur", "apps.json")),
         (4, ("Triskell 0 - Lanceur", "apps.json")),
-        (5, ("Triskell 0 - Lanceur", "apps.json")),
     ):
         try:
             candidates.append(here.parents[depth].joinpath(*sub))
