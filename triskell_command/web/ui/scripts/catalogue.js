@@ -614,6 +614,14 @@ const Catalogue = {
               ${this._field('initial', 'Initiale fallback', it.initial, { maxlength: 2, placeholder: 'Ex : L' })}
             </div>
             <div class="border-t border-border pt-4 mt-2">
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-[11px] tracking-widest font-bold text-text-muted">CE QUE ÇA FAIT (fonctionnalités)</div>
+                <button type="button" id="cat-feat-add" class="text-xs text-accent hover:underline">+ Ajouter une ligne</button>
+              </div>
+              <div id="cat-feat-list" class="space-y-2"></div>
+              <p class="text-[11px] text-text-muted mt-1">Affiché en liste à puces dans la fiche produit.</p>
+            </div>
+            <div class="border-t border-border pt-4 mt-2">
               <div class="text-[11px] tracking-widest font-bold text-text-muted mb-3">UTILISATION PAR L'IA EN PROSPECTION</div>
               ${this._field('keywords', 'Mots-clés (séparés par virgules)', it.keywords, { placeholder: 'Ex : électricien, artisan, BTP' })}
               ${this._fieldArea('prospect_pitch', 'Pitch court pour les mails de prospection', it.prospect_pitch, { rows: 3, placeholder: 'En 1-2 phrases : à qui s’adresse ce produit et pourquoi.' })}
@@ -639,10 +647,38 @@ const Catalogue = {
     document.getElementById('cat-edit-close').onclick = () => this._closeDetail();
     document.getElementById('cat-edit-cancel').onclick = () => this._closeDetail();
     ov.addEventListener('click', (e) => { if (e.target === ov) this._closeDetail(); });
+    // --- Editeur de liste de fonctionnalités ---
+    const featList = document.getElementById('cat-feat-list');
+    const escHtml = (s) => this._esc(s);
+    const addFeatureRow = (title, detail) => {
+      const row = document.createElement('div');
+      row.className = 'cat-feat-row flex gap-2 items-start';
+      row.innerHTML = `
+        <input type="text" placeholder="Titre (ex : SEO optimisé)" value="${escHtml(title || '')}"
+               class="cat-feat-title px-3 py-2 rounded-lg border border-border bg-bg text-sm focus:outline-none focus:border-accent"
+               style="flex:1 1 0; min-width:0;" />
+        <input type="text" placeholder="Détail (1 phrase courte)" value="${escHtml(detail || '')}"
+               class="cat-feat-detail px-3 py-2 rounded-lg border border-border bg-bg text-sm focus:outline-none focus:border-accent"
+               style="flex:2 1 0; min-width:0;" />
+        <button type="button" class="cat-feat-remove px-3 py-2 text-text-muted hover:text-red-500 text-lg leading-none" title="Retirer cette ligne">×</button>
+      `;
+      featList.appendChild(row);
+      row.querySelector('.cat-feat-remove').onclick = () => row.remove();
+    };
+    (it.features || []).forEach(f => {
+      if (typeof f === 'string') addFeatureRow(f, '');
+      else addFeatureRow(f.title || '', f.detail || '');
+    });
+    if (!(it.features || []).length) addFeatureRow('', '');
+    document.getElementById('cat-feat-add').onclick = () => addFeatureRow('', '');
     document.getElementById('cat-edit-save').onclick = async () => {
       const form = document.getElementById('cat-edit-form');
       const data = {};
-      form.querySelectorAll('[name]').forEach(el => { data[el.name] = el.value; });
+      form.querySelectorAll('input[name], textarea[name], select[name]').forEach(el => { data[el.name] = el.value; });
+      data.features = Array.from(form.querySelectorAll('.cat-feat-row')).map(r => ({
+        title:  r.querySelector('.cat-feat-title').value.trim(),
+        detail: r.querySelector('.cat-feat-detail').value.trim(),
+      })).filter(f => f.title || f.detail);
       if (!isNew) data.id = it.id;
       const saveBtn = document.getElementById('cat-edit-save');
       saveBtn.disabled = true; saveBtn.textContent = 'Enregistrement…';
