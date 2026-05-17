@@ -118,11 +118,22 @@ const Catalogue = {
   // ---- Chargement & fusion sites + apps.json ----
   async _load() {
     let apps = [];
+    this._apiDebug = null;
     if (App && App.api && typeof App.api.get_apps_catalog === 'function') {
       try {
         const data = await App.api.get_apps_catalog();
-        if (data && data.ok) apps = data.apps || [];
-      } catch (e) { console.warn('catalogue: get_apps_catalog failed', e); }
+        if (data && data.ok) {
+          apps = data.apps || [];
+          if (!apps.length) this._apiDebug = { kind: 'empty', raw: data };
+        } else {
+          this._apiDebug = { kind: 'not_ok', raw: data };
+        }
+      } catch (e) {
+        this._apiDebug = { kind: 'throw', raw: String(e && (e.message || e)) };
+        console.warn('catalogue: get_apps_catalog failed', e);
+      }
+    } else {
+      this._apiDebug = { kind: 'no_api', raw: null };
     }
     // Normalise les apps pour avoir les mêmes champs que les sites hardcodés
     apps = apps.map(a => ({
@@ -193,7 +204,21 @@ const Catalogue = {
       `;
     }).join('');
 
-    grid.innerHTML = sections;
+    let debugBanner = '';
+    if (this._apiDebug) {
+      const dbg = this._apiDebug;
+      const rawTxt = (() => {
+        try { return JSON.stringify(dbg.raw); } catch (e) { return String(dbg.raw); }
+      })();
+      debugBanner = `
+        <div style="margin-bottom:16px;padding:12px 14px;border:1px solid #f59e0b;background:#fff7ed;color:#7c2d12;border-radius:10px;font-size:13px;font-family:Inter,sans-serif;">
+          <div style="font-weight:700;margin-bottom:4px;">⚠ Debug — produits non chargés</div>
+          <div>Cause : <code>${this._esc(dbg.kind)}</code></div>
+          <div style="margin-top:4px;word-break:break-all;">Réponse serveur : <code>${this._esc(rawTxt || '(vide)')}</code></div>
+        </div>
+      `;
+    }
+    grid.innerHTML = debugBanner + sections;
 
     grid.querySelectorAll('[data-cat-id]').forEach(el => {
       el.onclick = () => this._openDetail(el.dataset.catId);
