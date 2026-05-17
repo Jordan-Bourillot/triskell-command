@@ -640,7 +640,7 @@ const Obelisk = {
         <table class="ob-table">
           <thead><tr>
             <th style="width:40px;"><input type="checkbox" id="ob-select-all" title="Tout sélectionner (page)"></th>
-            <th>Créateur</th><th>Plateforme</th><th>Email</th><th>Score</th><th>Ville</th><th>Statut</th>
+            <th>Créateur</th><th>Plateforme</th><th>Abonnés</th><th>Email</th><th>Score</th><th>Ville</th><th>Statut</th>
           </tr></thead>
           <tbody>
             ${this.state.rows.map(p => this._rowHtml(p)).join('')}
@@ -696,6 +696,7 @@ const Obelisk = {
           ${p.handle ? `<div style="font-size: 11.5px; color: hsl(var(--text-muted)); margin-top: 2px;">@${this._esc(p.handle)}</div>` : ''}
         </td>
         <td>${platform ? `<span class="ob-pill">${this._esc(platform)}</span>` : '<span style="color: hsl(var(--text-muted));">—</span>'}</td>
+        <td style="color: hsl(var(--text)); font-variant-numeric: tabular-nums; white-space: nowrap;">${this._fmtSubs(p.subscribers, p.subs_hidden)}</td>
         <td>${emails[0] ? `<a href="mailto:${this._esc(emails[0])}" style="color: hsl(var(--info));" onclick="event.stopPropagation()">${this._esc(emails[0])}</a>${emails.length > 1 ? ` <span style="color: hsl(var(--text-muted)); font-size: 11.5px;">+${emails.length - 1}</span>` : ''}` : '<span style="color: hsl(var(--text-muted));">—</span>'}</td>
         <td>
           <span class="ob-score" style="color: hsl(var(${scoreVar}));">
@@ -852,6 +853,16 @@ const Obelisk = {
       }
       return;
     }
+  },
+
+  _fmtSubs(n, hidden) {
+    if (hidden) return '<span style="color: hsl(var(--text-muted));" title="Non public">?</span>';
+    if (n === null || n === undefined || n === '') return '<span style="color: hsl(var(--text-muted));">—</span>';
+    const v = Number(n);
+    if (!Number.isFinite(v) || v < 0) return '<span style="color: hsl(var(--text-muted));">—</span>';
+    if (v >= 1_000_000) return (v / 1_000_000).toFixed(v >= 10_000_000 ? 0 : 1).replace('.', ',') + ' M';
+    if (v >= 1_000)     return (v / 1_000).toFixed(v >= 10_000 ? 0 : 1).replace('.', ',') + ' k';
+    return String(v);
   },
 
   _inferPlatform(p) {
