@@ -2432,15 +2432,21 @@ class Api:
         # Cherche apps.json :
         # 1) copie embarquee dans le package (deployable Docker/serveur)
         # 2) sibling Triskell 0 - Lanceur sur la machine du dev (cas desktop)
-        candidates = [
-            Path(__file__).resolve().parents[1] / "data" / "apps.json",
-            Path(__file__).resolve().parents[3]
-                / "Triskell 0 - Lanceur" / "apps.json",
-            Path(__file__).resolve().parents[4]
-                / "Triskell 0 - Lanceur" / "apps.json",
-        ]
+        # On evalue chaque candidat dans un try : sur le serveur Docker
+        # `__file__` est /app/triskell_command/web/api.py et parents[4]
+        # leve un IndexError, ce qui faisait tout planter avant meme de
+        # tester parents[1] (le bon chemin embarque).
+        here = Path(__file__).resolve()
         apps_json = None
-        for p in candidates:
+        for depth, subpath in (
+            (1, ("data", "apps.json")),
+            (3, ("Triskell 0 - Lanceur", "apps.json")),
+            (4, ("Triskell 0 - Lanceur", "apps.json")),
+        ):
+            try:
+                p = here.parents[depth].joinpath(*subpath)
+            except IndexError:
+                continue
             if p.exists():
                 apps_json = p
                 break
