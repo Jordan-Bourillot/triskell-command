@@ -116,7 +116,9 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
         # fichier local ~/.ledenicheur/config.json que le pipeline natif
         # va lire. Sans ça, ce pipeline ne trouve aucune clé et toutes
         # les sources sont skippées avec "clé API manquante".
-        _sync_keys_to_ledenicheur(ucfg, log)
+        # Inutile si le run ne contient QUE des plateformes PhantomBuster.
+        if any(p not in PHANTOM_PLATFORMS for p in platforms):
+            _sync_keys_to_ledenicheur(ucfg, log)
         # Aligne only_unmonetized avec le mode de monétisation choisi
         if filters.get("monetized_mode") == "unmonetized":
             ucfg["only_unmonetized"] = True
