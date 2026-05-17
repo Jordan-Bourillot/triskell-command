@@ -78,12 +78,23 @@ def _build_args(platform: str, niche: str, max_results: int) -> dict[str, Any]:
     if platform == "instagram":
         # « Instagram Multiple Hashtag Collector » attend le format
         # « #hashtag1 + #hashtag2 » (séparateur « + », chaque hashtag avec #).
+        # On envoie le même payload sous plusieurs clés possibles pour
+        # couvrir les variantes de Phantoms (PhantomBuster ignore les
+        # clés inconnues, donc c'est sans risque).
         hashtags = [h.strip().lstrip("#") for h in niche.split(",") if h.strip()]
         if not hashtags:
             hashtags = [niche.replace(" ", "").lower()]
+        formatted = " + ".join(f"#{h}" for h in hashtags)
         return {
-            "spreadsheetUrl":           " + ".join(f"#{h}" for h in hashtags),
+            "spreadsheetUrl":           formatted,
+            "hashtags":                 formatted,
+            "searchTerms":              formatted,
+            "keywords":                 formatted,
+            "queries":                  hashtags,
             "numberOfPostsPerHashtag":  n,
+            "numberOfPostsPerLaunch":   n,
+            "numberOfProfilesPerLaunch": n,
+            "numberOfLinesPerLaunch":   n,
             "csvName":                  f"triskell_instagram_{int(time.time())}",
         }
     if platform == "tiktok":
@@ -91,9 +102,16 @@ def _build_args(platform: str, niche: str, max_results: int) -> dict[str, Any]:
         hashtags = [h.strip().lstrip("#") for h in niche.split(",") if h.strip()]
         if not hashtags:
             hashtags = [niche.replace(" ", "").lower()]
+        formatted = " + ".join(f"#{h}" for h in hashtags)
         return {
-            "spreadsheetUrl":            " + ".join(f"#{h}" for h in hashtags),
+            "spreadsheetUrl":            formatted,
+            "hashtags":                  formatted,
+            "searchTerms":               formatted,
+            "keywords":                  formatted,
+            "queries":                   hashtags,
             "numberOfVideosPerHashtag":  n,
+            "numberOfVideosPerLaunch":   n,
+            "numberOfLinesPerLaunch":    n,
             "csvName":                   f"triskell_tiktok_{int(time.time())}",
         }
     raise ValueError(f"Plateforme non supportée : {platform}")
