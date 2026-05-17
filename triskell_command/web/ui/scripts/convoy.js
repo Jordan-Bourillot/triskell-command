@@ -287,18 +287,27 @@ const Convoy = {
             ${warnings.map(w => `⚠ ${this._esc(w)}`).join('<br>')}
           </div>` : ''}
 
-        <div class="flex flex-wrap gap-2 mt-4">
-          <button id="cv-browse" class="btn btn-secondary">Parcourir…</button>
-          ${has ? `<button id="cv-extract" class="btn btn-primary">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Extraire les contacts par IA
-          </button>` : ''}
-          ${this.raw && (this.raw.fast_path_prospects || []).length ? `
+        ${this.raw && (this.raw.fast_path_prospects || []).length ? `
+          <div class="flex flex-wrap gap-2 mt-4 items-center">
+            <button id="cv-browse" class="btn btn-secondary">Parcourir…</button>
             <button id="cv-fastpath" class="btn btn-primary">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
               Valider ${this.raw.fast_path_prospects.length} contact${this.raw.fast_path_prospects.length > 1 ? 's' : ''} détecté${this.raw.fast_path_prospects.length > 1 ? 's' : ''}
+            </button>
+            ${has ? `<button id="cv-extract" class="text-xs text-text-muted hover:text-text underline underline-offset-2 ml-1"
+              title="Lance l'IA pour relire le fichier (plus lent, à n'utiliser que si la détection automatique a manqué des contacts).">
+              ou plutôt essayer l'IA
             </button>` : ''}
-        </div>
+          </div>
+        ` : `
+          <div class="flex flex-wrap gap-2 mt-4">
+            <button id="cv-browse" class="btn btn-secondary">Parcourir…</button>
+            ${has ? `<button id="cv-extract" class="btn btn-primary">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Extraire les contacts par IA
+            </button>` : ''}
+          </div>
+        `}
       ${this._sectionClose()}
     `;
   },
@@ -398,13 +407,26 @@ const Convoy = {
 
   async _runExtractAi() {
     const btn = document.getElementById('cv-extract');
+    const originalLabel = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = `<span class="inline-block w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin"></span> Extraction IA…`; }
     let r;
     try { r = await App.api.convoy_extract_prospects_ai({ campaign_id: this.detail.id }); }
     catch (e) { r = { ok: false, error: String(e) }; }
     if (!r || !r.ok) {
-      this._toast(r && r.error || 'Extraction IA impossible', 'danger');
-      if (btn) { btn.disabled = false; btn.textContent = 'Extraire les contacts par IA'; }
+      const raw = (r && r.error) || 'Extraction IA impossible';
+      // Détection timeout/proxy : 502/504/timeout/Failed to fetch
+      const isTimeout = /\b(502|504|timeout|timed out|Failed to fetch|aborted)\b/i.test(raw);
+      const fastN = (this.raw && (this.raw.fast_path_prospects || []).length) || 0;
+      let msg;
+      if (isTimeout && fastN > 0) {
+        msg = `L'IA a mis trop de temps. Utilise plutôt le bouton « Valider ${fastN} contacts détectés » — c'est plus rapide et ton fichier est déjà bien structuré.`;
+      } else if (isTimeout) {
+        msg = `L'IA a mis trop de temps à répondre. Réessaie, ou découpe ton fichier en morceaux plus petits.`;
+      } else {
+        msg = raw;
+      }
+      this._toast(msg, 'danger');
+      if (btn) { btn.disabled = false; btn.innerHTML = originalLabel || 'Extraire les contacts par IA'; }
       return;
     }
     this.detail = r.campaign;
