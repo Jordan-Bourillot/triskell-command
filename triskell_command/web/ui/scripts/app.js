@@ -314,7 +314,7 @@ const App = {
             <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 22a2 2 0 002-2h-4a2 2 0 002 2zM18 16v-5a6 6 0 10-12 0v5l-2 2v1h16v-1l-2-2z"/>
             </svg>
-            <span>Notifications activées</span>
+            <span>Notifs ON</span>
           </button>
           <button id="push-test"
                   class="text-[11px] px-2.5 py-2 rounded-lg bg-bg text-text-muted border border-border hover:border-success hover:text-success"
@@ -429,6 +429,7 @@ const App = {
       case 'lagriffe':  return Lagriffe.render(target);
       case 'mail_templates': return MailTemplates.render(target);
       case 'obelisk':   return Obelisk.render(target);
+      case 'catalogue': return Catalogue.render(target);
       case 'config':    return Config.render(target);
       case 'tutorial':  return Tutorial.render(target);
       case 'autopilot': return Autopilot.render(target);
