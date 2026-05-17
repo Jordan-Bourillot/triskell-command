@@ -1101,23 +1101,23 @@ const Mails = {
           content: 'Tape ton message ici…';
           color: hsl(var(--text-muted));
         }
-        /* Rétablit le rendu visuel des blocs créés par la toolbar
-           (Tailwind preflight remet ul/ol/h*/blockquote à zéro,
-           sinon les boutons paraissent ne rien faire). */
-        #cmp-body-html ul {
-          list-style: disc outside;
-          padding-left: 1.6em;
-          margin: 0.5em 0;
-        }
+        /* Rétablit le rendu visuel des blocs créés par la toolbar.
+           !important : Tailwind preflight (ol, ul, menu { list-style:none })
+           a tendance à reprendre la main selon l'ordre de chargement des
+           feuilles de style — les puces disparaissaient et le bouton "•"
+           semblait inerte alors que la <ul> était bien créée. */
+        #cmp-body-html ul,
         #cmp-body-html ol {
-          list-style: decimal outside;
-          padding-left: 1.8em;
-          margin: 0.5em 0;
+          padding-left: 1.6em !important;
+          margin: 0.5em 0 !important;
         }
-        #cmp-body-html ul ul { list-style: circle outside; }
-        #cmp-body-html ul ul ul { list-style: square outside; }
+        #cmp-body-html ul { list-style: disc outside !important; }
+        #cmp-body-html ol { list-style: decimal outside !important; }
+        #cmp-body-html ul ul { list-style: circle outside !important; }
+        #cmp-body-html ul ul ul { list-style: square outside !important; }
         #cmp-body-html li {
-          margin: 0.15em 0;
+          display: list-item !important;
+          margin: 0.15em 0 !important;
         }
         #cmp-body-html h1,
         #cmp-body-html h2,
@@ -1762,17 +1762,43 @@ const Mails = {
         }
       } catch (_) {}
     };
+    // Garantit qu'on a une sélection placée dans un bloc de htmlArea.
+    // Si l'utilisateur a cliqué le bouton sans avoir posé le curseur dans
+    // l'éditeur (ex : il vient de basculer en HTML enrichi puis clique
+    // directement sur "•"), on place le curseur à la fin du dernier bloc
+    // utile (en évitant la signature, qui est dans <div data-signature-block>).
+    const ensureCaretInEditor = () => {
+      htmlArea.focus();
+      const sel = window.getSelection();
+      const inEditor = sel.rangeCount && htmlArea.contains(sel.anchorNode)
+                       && sel.anchorNode !== htmlArea;
+      if (inEditor) return;
+      // Aucune sélection utilisable : on cherche un bloc cible
+      if (!htmlArea.firstElementChild) {
+        htmlArea.innerHTML = '<p><br></p>';
+      }
+      // Préfère un bloc HORS de la signature
+      const candidates = Array.from(
+        htmlArea.querySelectorAll('p, div, h1, h2, h3, h4, blockquote, li')
+      ).filter(el => !el.closest('[data-signature-block]'));
+      const target = candidates[candidates.length - 1]
+                  || htmlArea.querySelector('p, div, h1, h2, h3, h4, blockquote, li')
+                  || htmlArea.firstElementChild;
+      placeCursorAtEnd(target);
+    };
     // Applique / bascule une liste (UL ou OL) sur le bloc courant
     const applyList = (listTag /* 'UL' ou 'OL' */) => {
+      ensureCaretInEditor();
       normalizeBlocks();
       const sel = window.getSelection();
-      if (!sel.rangeCount) return;
+      if (!sel.rangeCount) { ensureCaretInEditor(); }
       let block = findBlock(sel.anchorNode);
       if (!block) {
         if (!htmlArea.firstElementChild) {
           htmlArea.innerHTML = '<p><br></p>';
         }
-        block = htmlArea.firstElementChild;
+        block = htmlArea.querySelector('p, div, h1, h2, h3, h4, blockquote, li')
+             || htmlArea.firstElementChild;
       }
       if (block.tagName === 'LI') {
         const list = block.parentNode;
