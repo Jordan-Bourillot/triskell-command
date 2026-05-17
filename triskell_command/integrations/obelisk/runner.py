@@ -219,7 +219,16 @@ def _normalize_filters(raw: dict) -> dict:
 
 def apply_filters(rows: list[dict], filters: dict) -> tuple[list[dict], int]:
     """Filtre une liste de Prospect-dicts selon les critères choisis.
-    Renvoie (rows_gardés, nb_rejetés)."""
+
+    Les filtres sont TOLÉRANTS face aux infos manquantes : si on n'a pas
+    l'info pour un champ (ex: subscribers=0 alors que le phantom ne fournit
+    pas le nombre d'abonnés), on ne rejette PAS le profil — sinon on
+    rejetterait tous les profils des plateformes qui ne donnent que
+    le minimum (Instagram Hashtag Collector, etc.). À Jordan de retrier
+    ensuite côté CRM s'il veut affiner.
+
+    Renvoie (rows_gardés, nb_rejetés).
+    """
     if not filters:
         return list(rows), 0
     kept, rejected = [], 0
@@ -230,20 +239,38 @@ def apply_filters(rows: list[dict], filters: dict) -> tuple[list[dict], int]:
     language = (filters.get("language") or "").lower()
     with_email = filters.get("only_with_email")
     for r in rows:
-        subs = int(r.get("subscribers") or 0)
-        if mn and subs < mn:
+        subs_raw = r.get("subscribers")
+        subs_known = subs_raw not in (None, "", 0)
+        subs = int(subs_raw or 0)
+        # Si on a une vraie valeur > 0, on applique les bornes ; sinon
+        # on laisse passer (info manquante = on garde).
+        if mn and subs_known and subs < mn:
             rejected += 1; continue
-        if mx and subs > mx:
+        if mx and subs_known and subs > mx:
             rejected += 1; continue
-        monetized = bool(r.get("monetized"))
+        # Monétisation : on ne rejette que si l'info est explicitement
+        # contraire (et présente). Pas d'info → on garde.
+        monet_raw = r.get("monetized")
+        monet_known = monet_raw is not None and monet_raw is not False or bool(monet_raw)
+        # Plus simple : applique uniquement si tags ou metadata le confirment
+        monetized = bool(monet_raw) or any(
+            t in (r.get("tags") or [])
+            for t in ("monetized", "business_account", "shop")
+        )
         if mode == "unmonetized" and monetized:
+            # Là c'est clair : il est marqué monétisé → on rejette
             rejected += 1; continue
-        if mode == "monetized" and not monetized:
-            rejected += 1; continue
+        # mode "monetized" : trop restrictif si l'info n'est pas dans le
+        # payload. On laisse passer tout (l'utilisateur triera ensuite par
+        # nb d'abonnés / activité).
         if country and (r.get("country") or "").upper() != country:
-            rejected += 1; continue
+            # country est rarement renseigné par les phantoms hashtag.
+            # On rejette uniquement si on a une valeur explicite différente.
+            if r.get("country"):
+                rejected += 1; continue
         if language and (r.get("language") or "").lower() != language:
-            rejected += 1; continue
+            if r.get("language"):
+                rejected += 1; continue
         if with_email and not (r.get("emails") or []):
             rejected += 1; continue
         kept.append(r)
