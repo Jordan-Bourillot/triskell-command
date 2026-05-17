@@ -131,23 +131,26 @@ _DEFAULT_SITES = [
     {
         "id": "rankus",
         "name": "RankUs Studio",
-        "tagline": "Agence SEO — on fait monter ton site dans Google.",
-        "description": "RankUs Studio est l'agence SEO de l'écosystème Triskell. On audite "
-                       "ton site, on corrige les blocages techniques, on rédige du contenu "
-                       "qui répond aux vraies recherches de tes clients, et on suit les "
-                       "positions mois après mois.",
-        "sales_pitch": "Tu veux apparaître quand tes clients cherchent — on t'y emmène.",
-        "motto": "Pour qui en a marre de payer Google Ads pour exister.",
+        "tagline": "On code ton site ET on le référence.",
+        "description": "Agence basée en Bretagne. RankUs code des sites sur-mesure avec "
+                       "l'optimisation SEO intégrée dès le code, sans templates. Première "
+                       "version en moins de 2 h, mise en ligne sous 24 h après paiement. "
+                       "Premiers mouvements de positions entre 30 et 60 jours.",
+        "sales_pitch": "Création + SEO par la même personne, sans engagement.",
+        "motto": "Le référencement tissé dans le code, pas posé dessus.",
         "category": "sites",
         "kind": "service",
-        "buy_url": "https://rankus.fr",
+        "price_from": "création dès 490 € HT · SEO dès 290 €/mois HT",
+        "buy_url": "https://rankus-studio.fr",
         "logo": "",
         "color": "#10b981",
         "initial": "R",
         "features": [
-            {"title": "Audit technique", "detail": "On scanne ton site, on repère ce qui bloque (vitesse, balises, structure, mobile)."},
-            {"title": "Contenu ciblé",   "detail": "On rédige les pages qui correspondent aux requêtes que tes clients tapent vraiment."},
-            {"title": "Suivi mensuel",   "detail": "Tableau de bord clair des positions, du trafic et des conversions. Rien de magique, juste du résultat."},
+            {"title": "Création rapide", "detail": "Première version en moins de 2 h, livraison sous 24 h après paiement."},
+            {"title": "SEO intégré au code", "detail": "Référencement tissé dans la structure dès la création, pas ajouté après."},
+            {"title": "Un seul interlocuteur", "detail": "La même personne code et suit le SEO, dispo 7j/7."},
+            {"title": "Sans engagement", "detail": "Tu pars quand tu veux avec tes données, ton contenu et tes analytics."},
+            {"title": "Résultats en 3 mois", "detail": "Premiers mouvements de positions entre 30 et 60 jours après mise en ligne."},
         ],
         "is_builtin": True,
     },
