@@ -964,6 +964,13 @@ const Mails = {
                     ).join('')}
                   </select>
                 </div>
+                <!-- Bouton "Insérer un produit du catalogue" -->
+                <button id="cmp-product-trigger" type="button"
+                        title="Insérer un produit du Catalogue Triskell"
+                        class="px-2.5 py-1 rounded-lg font-semibold text-text-muted hover:bg-bg flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                  Produit
+                </button>
                 <!-- Dropdown templates -->
                 <div class="relative">
                   <button id="cmp-tpl-trigger" class="px-2.5 py-1 rounded-lg font-semibold text-text-muted hover:bg-bg flex items-center gap-1">
@@ -1669,6 +1676,50 @@ const Mails = {
     const tplMenu    = overlay.querySelector('#cmp-tpl-menu');
     const tplList    = overlay.querySelector('#cmp-tpl-list');
     const subjectInput = overlay.querySelector('#cmp-subject');
+
+    // ---- Bouton "Produit" : insère un bloc Catalogue dans le mail ----
+    const productBtn = overlay.querySelector('#cmp-product-trigger');
+    if (productBtn && typeof Catalogue !== 'undefined') {
+      productBtn.onclick = (e) => {
+        e.preventDefault();
+        Catalogue.pickProduct((product) => {
+          if (!product) return;
+          if (mode === 'html') {
+            // Insère le bloc HTML à la position du curseur dans le contenteditable
+            const html = Catalogue.snippetHtml(product);
+            htmlArea.focus();
+            try {
+              const sel = window.getSelection();
+              if (sel && sel.rangeCount && htmlArea.contains(sel.anchorNode)) {
+                const range = sel.getRangeAt(0);
+                range.deleteContents();
+                const frag = range.createContextualFragment(html + '<p><br></p>');
+                range.insertNode(frag);
+                range.collapse(false);
+              } else {
+                htmlArea.insertAdjacentHTML('beforeend', html + '<p><br></p>');
+              }
+            } catch (err) {
+              htmlArea.insertAdjacentHTML('beforeend', html);
+            }
+          } else {
+            // Mode texte : injecte le snippet texte à la position du curseur
+            const block = Catalogue.snippetText(product);
+            const ta = textArea;
+            const start = ta.selectionStart || 0;
+            const end   = ta.selectionEnd || start;
+            const before = ta.value.substring(0, start);
+            const after  = ta.value.substring(end);
+            const sep = (before && !before.endsWith('\n')) ? '\n\n' : '';
+            const tail = (after && !after.startsWith('\n')) ? '\n\n' : '';
+            ta.value = before + sep + block + tail + after;
+            const pos = (before + sep + block + tail).length;
+            ta.focus();
+            ta.setSelectionRange(pos, pos);
+          }
+        });
+      };
+    }
 
     const loadTemplates = async () => {
       tplList.innerHTML = '<div class="px-4 py-3 text-xs text-text-muted">Chargement…</div>';
