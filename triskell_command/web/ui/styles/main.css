@@ -975,6 +975,85 @@ html, body {
   color: hsl(var(--danger));
 }
 
+/* ===========================================================
+   Liste des mails — style boîte mail classique (une ligne par mail)
+   =========================================================== */
+.mail-list {
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  background: hsl(var(--surface));
+  overflow: hidden;
+}
+.mail-row {
+  display: grid;
+  grid-template-columns: 6px 220px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid hsl(var(--border));
+  cursor: pointer;
+  transition: background 120ms;
+}
+.mail-row:last-child { border-bottom: none; }
+.mail-row:hover { background: hsl(var(--surface-elevated)); }
+.mail-row-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: -2px;
+}
+.mail-row-from {
+  font-size: 13px;
+  font-weight: 600;
+  color: hsl(var(--text));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mail-row-main {
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mail-row-subject {
+  color: hsl(var(--text));
+  font-weight: 500;
+}
+.mail-row-snippet {
+  color: hsl(var(--text-muted));
+  font-weight: 400;
+}
+.mail-row-date {
+  font-size: 12px;
+  color: hsl(var(--text-muted));
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Responsive : sur mobile, on empile expéditeur sur une ligne, sujet sur l'autre */
+@media (max-width: 720px) {
+  .mail-row {
+    grid-template-columns: 6px 1fr auto;
+    grid-template-areas:
+      "dot from date"
+      "dot main main";
+    gap: 4px 12px;
+    padding: 12px 14px;
+  }
+  .mail-row-dot { grid-area: dot; align-self: center; }
+  .mail-row-from { grid-area: from; }
+  .mail-row-date { grid-area: date; }
+  .mail-row-main { grid-area: main; white-space: normal; }
+  .mail-row-snippet {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
 /* Inputs des formulaires Phare */
 .phare-input {
   display: block;

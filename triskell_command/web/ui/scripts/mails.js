@@ -187,7 +187,7 @@ const Mails = {
       this._applySearch();
       return;
     }
-    root.innerHTML = limitedBanner + `<div class="space-y-2">${this.state.mails.map(m => this._mailRow(m)).join('')}</div>`;
+    root.innerHTML = limitedBanner + `<div class="mail-list">${this.state.mails.map(m => this._mailRow(m)).join('')}</div>`;
     // Bind clic = ouvre modale détail
     root.querySelectorAll('[data-mail-open]').forEach(el => {
       el.addEventListener('click', () => {
@@ -203,13 +203,13 @@ const Mails = {
     const isReply  = kind === 'reply_received';
     const isInbox  = kind === 'inbox_received';
     const isSent   = kind === 'email_sent';
-    const tagColor = isReply ? 'success'
+    const dotColor = isReply ? 'success'
                   : isSent  ? 'accent'
                   : isInbox ? 'gold'
                   : 'text-muted';
-    const tagLabel = isReply ? 'Réponse prospect'
-                  : isSent  ? 'Envoyé'
-                  : isInbox ? 'Entrant'
+    const dotTitle = isReply ? 'Réponse prospect'
+                  : isSent  ? 'Mail envoyé'
+                  : isInbox ? 'Mail entrant'
                   : kind;
     const fromAddr = (m.extra && m.extra.from) || '';
     const accountId = (m.extra && m.extra.account_id) || '';
@@ -217,24 +217,23 @@ const Mails = {
     const subject = m.subject || '(sans objet)';
     const body = (m.body || '').slice(0, 200);
     const bodyExcerpt = body || (m.extra && m.extra.body_excerpt) || '';
+    // Affichage compact : expéditeur (ou destinataire si envoyé), sujet, snippet, date.
+    const senderRaw = isSent
+      ? ((m.extra && m.extra.to) || accountId || '')
+      : (fromAddr || accountId || '');
+    // Si format "Nom <email>", on prend le nom ; sinon on garde l'adresse.
+    const senderMatch = senderRaw.match(/^([^<]+?)\s*<.+>$/);
+    const senderName = senderMatch ? senderMatch[1].trim() : senderRaw;
+    const snippet = (bodyExcerpt || '').replace(/\s+/g, ' ').trim();
     return `
-      <div class="card p-4 cursor-pointer transition-all hover:border-accent" data-mail-open="${this._escape(m.id)}">
-        <div class="flex items-start justify-between gap-3 mb-1">
-          <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold truncate">${this._escape(subject)}</div>
-            ${(fromAddr || accountId) ? `<div class="text-[11px] text-text-muted truncate mt-0.5">
-              ${fromAddr ? this._escape(fromAddr) : ''}${fromAddr && accountId ? ' · ' : ''}${accountId ? `boîte : ${this._escape(accountId)}` : ''}
-            </div>` : ''}
-          </div>
-          <div class="flex items-center gap-2 shrink-0">
-            <span class="text-[10px] font-bold uppercase px-2 py-1 rounded"
-                  style="background: hsl(var(--${tagColor}) / 0.15); color: hsl(var(--${tagColor}));">
-              ${tagLabel}
-            </span>
-            <span class="text-[11px] text-text-muted">${ts}</span>
-          </div>
+      <div class="mail-row" data-mail-open="${this._escape(m.id)}">
+        <span class="mail-row-dot" style="background: hsl(var(--${dotColor}))" title="${dotTitle}"></span>
+        <div class="mail-row-from" title="${this._escape(senderRaw)}">${this._escape(senderName || '—')}</div>
+        <div class="mail-row-main">
+          <span class="mail-row-subject">${this._escape(subject)}</span>
+          ${snippet ? `<span class="mail-row-snippet"> — ${this._escape(snippet.slice(0, 160))}</span>` : ''}
         </div>
-        ${bodyExcerpt ? `<div class="text-xs text-text-secondary whitespace-pre-wrap line-clamp-3 mt-1">${this._escape(bodyExcerpt)}</div>` : ''}
+        <span class="mail-row-date">${ts}</span>
       </div>
     `;
   },
@@ -508,7 +507,7 @@ const Mails = {
       root.innerHTML = `<div class="card p-10 text-center"><div class="text-3xl mb-3 opacity-60">∅</div><p class="text-text-muted">Aucun résultat pour "${this._escape(q)}".</p></div>`;
       return;
     }
-    root.innerHTML = `<div class="space-y-2">${visible.map(m => this._mailRow(m)).join('')}</div>`;
+    root.innerHTML = `<div class="mail-list">${visible.map(m => this._mailRow(m)).join('')}</div>`;
     // Re-bind clic
     root.querySelectorAll('[data-mail-open]').forEach(el => {
       el.addEventListener('click', () => {
