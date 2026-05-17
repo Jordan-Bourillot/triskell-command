@@ -553,6 +553,44 @@ const DemoMode = {
       };
     },
 
+    // ============ Timeline d'un prospect ============
+    prospect_timeline(payload) {
+      const id = (payload && payload.id) || 'demo';
+      const now = Date.now();
+      const t = (delta) => new Date(now - delta).toISOString();
+      return {
+        ok: true,
+        prospect: {
+          id, name: 'Boulangerie Lefèvre', email: 'contact@boulangerie-lefevre.fr',
+          city: 'Plérin', country: 'France', industry: 'Boulangerie',
+          website: 'https://boulangerie-lefevre.fr', status: 'replied',
+          created_at: t(7 * 86400_000), source_name: 'Sirene',
+        },
+        events: [
+          { ts: t(7*86400_000), type: 'prospect_added', icon: '🔍',
+            title: 'Ajouté à ta base', subtitle: 'Source : Sirene' },
+          { ts: t(6*86400_000), type: 'email_sent', icon: '✉',
+            title: 'Mail envoyé', subject: 'Votre site, on en parle ?',
+            body_excerpt: 'Bonjour, j\'ai vu que votre boulangerie n\'avait pas encore de site moderne…' },
+          { ts: t(5*86400_000), type: 'email_opened', icon: '👁',
+            title: 'Mail ouvert par le prospect',
+            subject: 'Votre site, on en parle ?' },
+          { ts: t(3*86400_000), type: 'reply_received', icon: '📨',
+            title: 'Réponse reçue — Intéressé', category: 'interested',
+            subject: 'Re: Votre site, on en parle ?',
+            body_excerpt: 'Effectivement on y pense depuis un moment, vous proposez quoi exactement et à quel prix ?' },
+          { ts: t(2.5*86400_000), type: 'lead_converted', icon: '🎯',
+            title: 'Devenu projet client', subtitle: 'Lagriffe Studio',
+            project_id: 'demo-proj-1' },
+          { ts: t(1*86400_000), type: 'payment', icon: '💳',
+            title: 'Paiement reçu', subtitle: '490.00 EUR' },
+          { ts: t(0.9*86400_000), type: 'delivered', icon: '🎁',
+            title: 'Kit de livraison envoyé', subtitle: 'Lagriffe Studio' },
+        ],
+        has_project: true,
+      };
+    },
+
     // ============ Setup status (cockpit checklist) ============
     setup_status() {
       const items = [

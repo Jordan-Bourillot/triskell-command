@@ -160,6 +160,13 @@ const Replies = {
         ${body ? `<p class="text-sm text-text-secondary leading-relaxed mb-4 whitespace-pre-line">${this._esc(body)}</p>` : ''}
         ${sug && (sug.status === 'pending' || sug.status === 'sent') ? this._suggested(row, sug) : ''}
         <footer class="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-border">
+          ${row.prospect_id ? `
+            <button class="text-xs px-2.5 py-1.5 rounded-lg bg-bg text-text-secondary
+                          border border-border hover:bg-surface-elevated transition-colors font-medium"
+                    data-act="timeline" data-pid="${row.prospect_id}"
+                    title="Voir tout son parcours sur une seule ligne du temps">
+              📋 Voir tout son parcours
+            </button>` : ''}
           ${cat === 'interested' && !extra.lead_converted_at ? `
             <button class="text-xs px-2.5 py-1.5 rounded-lg bg-success/10 text-success
                           border border-success/30 hover:bg-success/20 transition-colors font-medium"
@@ -221,6 +228,11 @@ const Replies = {
       btn.onclick = async () => {
         const id = btn.dataset.id;
         const act = btn.dataset.act;
+        if (act === 'timeline') {
+          const pid = btn.dataset.pid;
+          if (pid) App.show('prospect_timeline', { id: pid });
+          return;
+        }
         if (!App.api) return;
         try {
           if (act === 'handle')  await App.api.reply_mark_handled({ id });

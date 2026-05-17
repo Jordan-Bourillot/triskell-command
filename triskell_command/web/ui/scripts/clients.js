@@ -94,6 +94,11 @@ const Clients = {
               title="Envoie le mail de bienvenue + livrables (kit du produit)">
         Livrer
       </button>` : '';
+    const timelineBtn = p.prospect_id ? `
+      <button class="text-[11px] text-text-muted hover:text-accent" data-timeline="${p.prospect_id}"
+              title="Voir tout son parcours">
+        📋 Parcours
+      </button>` : '';
     return `
       <article class="card p-3.5 cursor-pointer transition-all hover:translate-y-[-1px] hover:shadow-soft"
                data-id="${p.id}">
@@ -106,6 +111,7 @@ const Clients = {
           <div class="flex-1 flex items-center justify-center gap-3">
             <button class="text-[11px] text-accent hover:underline" data-edit>Édit</button>
             ${deliverBtn}
+            ${timelineBtn}
           </div>
           ${next ? `<button class="text-white bg-accent hover:bg-accent-hover text-sm w-6 h-6 rounded" data-mv="${next}">›</button>` : `<span class="w-6"></span>`}
         </div>
@@ -128,6 +134,12 @@ const Clients = {
       if (editBtn) editBtn.onclick = (e) => { e.stopPropagation(); this._openEdit(id); };
       const deliverBtn = card.querySelector('[data-deliver]');
       if (deliverBtn) deliverBtn.onclick = (e) => { e.stopPropagation(); this._deliverNow(id, deliverBtn); };
+      const timelineBtn = card.querySelector('[data-timeline]');
+      if (timelineBtn) timelineBtn.onclick = (e) => {
+        e.stopPropagation();
+        const pid = timelineBtn.dataset.timeline;
+        if (pid) App.show('prospect_timeline', { id: pid });
+      };
     });
   },
 

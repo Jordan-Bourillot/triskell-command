@@ -619,6 +619,109 @@ html, body {
   font-weight: 700;
 }
 
+/* Timeline « la vie de ce prospect » */
+.pt-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+.pt-timeline::before {
+  content: '';
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: 19px;
+  width: 2px;
+  background: hsl(var(--border));
+}
+.pt-event {
+  position: relative;
+  padding-left: 56px;
+  padding-bottom: 22px;
+}
+.pt-event:last-child {
+  padding-bottom: 0;
+}
+.pt-event-dot {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: hsl(var(--surface-elevated));
+  border: 2px solid hsl(var(--border-strong));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  z-index: 1;
+}
+.pt-event[data-tone="success"] .pt-event-dot {
+  background: hsl(var(--success) / 0.12);
+  border-color: hsl(var(--success));
+  color: hsl(var(--success));
+}
+.pt-event[data-tone="warning"] .pt-event-dot {
+  background: hsl(var(--warning) / 0.12);
+  border-color: hsl(var(--warning));
+  color: hsl(var(--warning));
+}
+.pt-event[data-tone="danger"] .pt-event-dot {
+  background: hsl(var(--danger) / 0.12);
+  border-color: hsl(var(--danger));
+  color: hsl(var(--danger));
+}
+.pt-event[data-tone="accent"] .pt-event-dot {
+  background: hsl(var(--accent) / 0.12);
+  border-color: hsl(var(--accent));
+  color: hsl(var(--accent));
+}
+.pt-event-content {
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  padding: 12px 16px;
+}
+.pt-event-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.pt-event-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: hsl(var(--text));
+}
+.pt-event-ts {
+  font-size: 11.5px;
+  color: hsl(var(--text-muted));
+  font-family: 'JetBrains Mono', monospace;
+}
+.pt-event-subtitle {
+  font-size: 12.5px;
+  color: hsl(var(--text-muted));
+  margin-bottom: 4px;
+}
+.pt-event-subject {
+  font-size: 13px;
+  font-weight: 600;
+  color: hsl(var(--accent));
+  margin: 6px 0 4px;
+  word-break: break-word;
+}
+.pt-event-body {
+  font-size: 12.5px;
+  color: hsl(var(--text-secondary));
+  white-space: pre-line;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 /* Bloc SETUP — checklist des connexions à brancher */
 .cockpit-setup {
   margin-bottom: 22px;
