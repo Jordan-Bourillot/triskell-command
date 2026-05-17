@@ -3222,6 +3222,7 @@ class Api:
             ("dormant_recycler",      "Recyclage dormants"),
             ("stripe_poller",         "Polling paiements Stripe"),
             ("claude_proactive",      "Veille proactive Claude"),
+            ("autopilot_runner",      "Prospection nocturne (3h Paris)"),
         ]
         for mod_name, label in worker_modules:
             try:
@@ -3949,6 +3950,7 @@ class Api:
             ("claude_proactive",       "start_worker", "claude_proactive"),
             ("scheduled_mail_runner",  "start_worker", "scheduled_mails"),
             ("backup_runner",          "start_worker", "backup_runner"),
+            ("autopilot_runner",       "start_worker", "autopilot_nightly"),
         ]:
             try:
                 mod = __import__(
