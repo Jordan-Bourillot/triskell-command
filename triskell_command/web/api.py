@@ -2429,8 +2429,11 @@ class Api:
             "pack-electricien-pro": ("pack-electricien-pro", "png"),
             "teddy-mail":           ("teddy-mail", "png"),
         }
-        # Cherche apps.json depuis quelques emplacements possibles
+        # Cherche apps.json :
+        # 1) copie embarquee dans le package (deployable Docker/serveur)
+        # 2) sibling Triskell 0 - Lanceur sur la machine du dev (cas desktop)
         candidates = [
+            Path(__file__).resolve().parents[1] / "data" / "apps.json",
             Path(__file__).resolve().parents[3]
                 / "Triskell 0 - Lanceur" / "apps.json",
             Path(__file__).resolve().parents[4]
