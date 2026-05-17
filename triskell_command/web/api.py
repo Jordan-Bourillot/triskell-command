@@ -3526,6 +3526,202 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
+    # Timeline d'un prospect — agrégation de tout son parcours
+    # ------------------------------------------------------------------
+    def prospect_timeline(self, payload: dict) -> dict:
+        """Reconstitue le parcours complet d'un prospect en une seule liste
+        chronologique d'événements (ajout en base, mails envoyés, ouvertures,
+        réponses classées, bascule client, paiement, livraisons, post-vente).
+
+        payload = {id: <prospect_id>}
+        """
+        pid = ((payload or {}).get("id") or "").strip()
+        if not pid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            client = self._supabase()
+            if not client:
+                return {"ok": False, "error": "Base partagée non connectée"}
+            sb = client.raw
+
+            pres = (sb.table("prospects").select("*")
+                    .eq("id", pid).limit(1).execute())
+            prows = pres.data or []
+            if not prows:
+                return {"ok": False, "error": "prospect introuvable"}
+            prospect = prows[0]
+
+            hres = (sb.table("email_history").select("*")
+                    .eq("prospect_id", pid).order("ts", desc=False)
+                    .limit(500).execute())
+            history = hres.data or []
+
+            try:
+                cpres = (sb.table("client_projects").select("*")
+                         .eq("prospect_id", pid).order("created_at", desc=False)
+                         .limit(5).execute())
+                projects = cpres.data or []
+            except Exception:
+                projects = []
+
+            import json as _json
+            events: list[dict] = []
+
+            sources = prospect.get("sources") or []
+            if isinstance(sources, str):
+                try: sources = _json.loads(sources)
+                except Exception: sources = []
+            src_name = ""
+            if isinstance(sources, list) and sources:
+                first = sources[0] or {}
+                src_name = (first.get("name") or "").strip()
+            events.append({
+                "ts":       prospect.get("created_at") or "",
+                "type":     "prospect_added",
+                "icon":     "🔍",
+                "title":    "Ajouté à ta base",
+                "subtitle": (f"Source : {src_name}" if src_name else ""),
+            })
+
+            for row in history:
+                extra = row.get("extra") or {}
+                if isinstance(extra, str):
+                    try: extra = _json.loads(extra)
+                    except Exception: extra = {}
+                kind = row.get("kind") or ""
+                ts = row.get("ts") or ""
+                subj = (row.get("subject") or "").strip()
+                body = (row.get("body") or "").strip()
+                body_excerpt = body[:280] + ("…" if len(body) > 280 else "")
+
+                if kind == "email_sent":
+                    events.append({
+                        "ts": ts, "type": "email_sent", "icon": "✉",
+                        "title": "Mail envoyé",
+                        "subject": subj, "body_excerpt": body_excerpt,
+                    })
+                elif kind == "reply_received":
+                    classif = extra.get("classification") or {}
+                    cat = (classif.get("category") or "").strip()
+                    cat_labels = {
+                        "interested":  "Intéressé",
+                        "not_now":     "Pas maintenant",
+                        "no":          "Refus",
+                        "unsubscribe": "Désinscription",
+                        "unknown":     "À trier",
+                    }
+                    cat_label = cat_labels.get(cat, cat or "à trier")
+                    events.append({
+                        "ts": ts, "type": "reply_received", "icon": "📨",
+                        "title": f"Réponse reçue — {cat_label}",
+                        "subject": subj,
+                        "body_excerpt": body_excerpt,
+                        "category": cat,
+                    })
+                elif kind == "inbox_received":
+                    events.append({
+                        "ts": ts, "type": "inbox_received", "icon": "📥",
+                        "title": "Mail reçu (non classé)",
+                        "subject": subj, "body_excerpt": body_excerpt,
+                    })
+                elif kind == "dormant_recycle":
+                    events.append({
+                        "ts": ts, "type": "dormant_recycle", "icon": "♻️",
+                        "title": "Réveil d'un dormant",
+                        "body_excerpt": body_excerpt,
+                    })
+                else:
+                    events.append({
+                        "ts": ts, "type": kind or "event", "icon": "•",
+                        "title": kind or "Événement",
+                        "subject": subj, "body_excerpt": body_excerpt,
+                    })
+
+                opened_at = extra.get("opened_at") or extra.get("first_opened_at")
+                if opened_at and kind == "email_sent":
+                    events.append({
+                        "ts": opened_at, "type": "email_opened", "icon": "👁",
+                        "title": "Mail ouvert par le prospect",
+                        "subject": subj,
+                    })
+
+            for proj in projects:
+                created = proj.get("created_at") or ""
+                product = (proj.get("product_name") or
+                           proj.get("title") or "Projet").strip()
+                if created:
+                    events.append({
+                        "ts": created, "type": "lead_converted", "icon": "🎯",
+                        "title": "Devenu projet client",
+                        "subtitle": product,
+                        "project_id": proj.get("id"),
+                    })
+                paid_at = proj.get("paid_at")
+                if paid_at:
+                    cents = proj.get("amount_cents") or 0
+                    currency = proj.get("currency") or "EUR"
+                    amount_str = ""
+                    if cents:
+                        amount_str = f"{cents / 100:.2f} {currency}"
+                    events.append({
+                        "ts": paid_at, "type": "payment", "icon": "💳",
+                        "title": "Paiement reçu",
+                        "subtitle": amount_str or product,
+                    })
+                status = (proj.get("status") or "").lower()
+                if status == "delivered":
+                    events.append({
+                        "ts": proj.get("updated_at") or paid_at or created,
+                        "type": "delivered", "icon": "🎁",
+                        "title": "Kit de livraison envoyé",
+                        "subtitle": product,
+                    })
+                if proj.get("cross_sell_sent_at"):
+                    events.append({
+                        "ts": proj["cross_sell_sent_at"],
+                        "type": "cross_sell", "icon": "🔁",
+                        "title": "Mail cross-sell envoyé",
+                    })
+                if proj.get("nps_sent_at"):
+                    events.append({
+                        "ts": proj["nps_sent_at"],
+                        "type": "nps", "icon": "⭐",
+                        "title": "Demande d'avis NPS envoyée",
+                    })
+
+            events.sort(key=lambda e: (e.get("ts") or ""))
+
+            emails = prospect.get("emails") or []
+            if isinstance(emails, str):
+                try: emails = _json.loads(emails)
+                except Exception: emails = []
+            primary_email = (emails[0] if isinstance(emails, list) and emails
+                             else "")
+            summary = {
+                "id":          prospect.get("id"),
+                "name":        (prospect.get("name")
+                                or prospect.get("legal_name") or ""),
+                "email":       primary_email,
+                "city":        prospect.get("city") or "",
+                "country":     prospect.get("country") or "",
+                "industry":    prospect.get("industry") or "",
+                "website":     prospect.get("website") or "",
+                "status":      prospect.get("status") or "",
+                "created_at":  prospect.get("created_at") or "",
+                "source_name": src_name,
+            }
+
+            return {
+                "ok": True,
+                "prospect": summary,
+                "events":   events,
+                "has_project": bool(projects),
+            }
+        except Exception as exc:
+            logger.exception("prospect_timeline")
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
     # Setup status — bilan rapide des connexions nécessaires
     # ------------------------------------------------------------------
     def setup_status(self) -> dict:

@@ -402,8 +402,9 @@ const App = {
   },
 
   // ---- Routing entre vues ----
-  show(viewId) {
+  show(viewId, params) {
     this.currentView = viewId;
+    this.currentParams = params || null;
     // Active state sidebar
     document.querySelectorAll('[data-view]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.view === viewId);
@@ -423,6 +424,7 @@ const App = {
       case 'funnel':    return Funnel.render(target);
       case 'revenue':   return Revenue.render(target);
       case 'clients':   return Clients.render(target);
+      case 'clients_master': return ClientsMaster.render(target);
       case 'phare':     return Phare.render(target);
       case 'wow':       return Wow.render(target);
       case 'rankus':    return Rankus.render(target);
@@ -436,6 +438,8 @@ const App = {
       case 'delivery':  return Delivery.render(target);
       case 'health':    return Health.render(target);
       case 'abtest':    return ABTest.render(target);
+      case 'prospect_timeline':
+        return ProspectTimeline.render(target, params || {});
       default: return this._renderPlaceholder(target, viewId, "Cette vue arrive bientôt.");
     }
   },
