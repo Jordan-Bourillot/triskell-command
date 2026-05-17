@@ -1,29 +1,50 @@
 /* Catalogue — vue Triskell Command
  *
- * Une page sobre avec :
- *   - un titre + sous-titre
- *   - un menu déroulant qui liste TOUS les produits de l'écosystème Triskell
- *     (lus depuis le même catalogue que le launcher Ctrl+K : apps.json)
- *   - une fiche produit qui s'affiche en dessous quand on choisit un élément
- *     (logo, tagline, catégorie, prix/statut, bouton "Ouvrir le produit")
+ * Page sobre avec un menu déroulant qui liste les 4 sites/offres
+ * actuellement visibles dans le catalogue : Lagriffe, RankUs, WoW, Eliks.
  *
- * Si l'API n'est pas dispo (preview), on retombe sur le même mini-catalogue
- * que Launcher._previewCatalog().
+ * Quand on choisit un produit, sa fiche apparaît en dessous avec un
+ * bouton "Ouvrir le site" qui pointe vers l'URL publique.
  */
 
 const Catalogue = {
-  apps: null,
   selectedId: '',
 
-  CATEGORY_LABELS: {
-    quotidien: 'Quotidien',
-    pro:       'Atelier des pros',
-  },
-
-  PREVIEW: [
-    { id:'obelisk',   name:'Obelisk',       tagline:'Trouve les créateurs vierges de ta niche.',  category:'pro',       logo:'assets/apps/obelisk.png',         price:129 },
-    { id:'eliks',     name:'Eliks Studio',  tagline:'Service growth operator multi-réseaux.',     category:'pro',       logo:'assets/apps/eliks-studio.svg' },
-    { id:'alphacast', name:'AlphaCast',     tagline:'Publie une fois, atteins toutes tes audiences.', category:'pro',   logo:'assets/apps/alphacast.png',       coming_soon:true },
+  // Liste fixe — on n'affiche QUE ces 4 entrées pour le moment.
+  ITEMS: [
+    {
+      id: 'lagriffe',
+      name: 'Lagriffe Studio',
+      tagline: 'Création de sites premium pour artisans et indépendants.',
+      url: 'https://lagriffe-studio.fr',
+      color: '#d4af37',
+      initial: 'L',
+    },
+    {
+      id: 'rankus',
+      name: 'RankUs Studio',
+      tagline: 'Agence SEO — on fait monter ton site dans Google.',
+      url: 'https://rankus.fr',
+      color: '#10b981',
+      initial: 'R',
+    },
+    {
+      id: 'wow',
+      name: 'Studio WoW',
+      tagline: 'Sites web haut de gamme avec effets immersifs.',
+      url: 'https://studio-wow.fr',
+      color: '#C9A572',
+      initial: 'W',
+    },
+    {
+      id: 'eliks',
+      name: 'Eliks Studio',
+      tagline: 'Growth Operator — on transforme tes réseaux en machine à ventes.',
+      url: 'https://eliks.triskell-studio.fr',
+      color: '#6366F1',
+      initial: 'E',
+      logo: 'assets/apps/eliks-studio.svg',
+    },
   ],
 
   async render(container) {
@@ -32,8 +53,8 @@ const Catalogue = {
       <section class="animate-slide-up max-w-3xl">
         <div class="mb-8">
           <div class="hero-kicker mb-2">CATALOGUE</div>
-          <h1 class="hero-title mb-3" style="font-size: 36px;">Tous les outils de l'écosystème Triskell.</h1>
-          <p class="hero-subtitle">Choisis un produit dans la liste pour voir sa fiche et l'ouvrir.</p>
+          <h1 class="hero-title mb-3" style="font-size: 36px;">Les sites de l'écosystème Triskell.</h1>
+          <p class="hero-subtitle">Choisis une marque dans la liste pour voir sa fiche et ouvrir son site.</p>
         </div>
 
         <div class="card p-6 mb-6">
@@ -48,15 +69,15 @@ const Catalogue = {
                          focus:border-accent focus:outline-none
                          transition-colors cursor-pointer">
             <option value="">— Choisis un produit —</option>
+            ${this.ITEMS.map(it => `
+              <option value="${this._esc(it.id)}">${this._esc(it.name)}</option>
+            `).join('')}
           </select>
         </div>
 
         <div id="catalogue-detail"></div>
       </section>
     `;
-
-    await this._loadApps();
-    this._populateSelect();
 
     const sel = document.getElementById('catalogue-select');
     if (sel) {
@@ -67,89 +88,34 @@ const Catalogue = {
     }
   },
 
-  async _loadApps() {
-    if (App && App.api && typeof App.api.get_apps_catalog === 'function') {
-      try {
-        const data = await App.api.get_apps_catalog();
-        this.apps = (data && data.ok) ? (data.apps || []) : [];
-        return;
-      } catch (e) {
-        console.warn('catalogue: get_apps_catalog failed', e);
-      }
-    }
-    this.apps = this.PREVIEW;
-  },
-
-  _populateSelect() {
-    const sel = document.getElementById('catalogue-select');
-    if (!sel) return;
-    const apps = (this.apps || []).slice().sort((a, b) => {
-      return (a.name || '').localeCompare(b.name || '', 'fr');
-    });
-    const groups = {};
-    apps.forEach(a => {
-      const cat = a.category || 'autre';
-      (groups[cat] = groups[cat] || []).push(a);
-    });
-    const order = ['quotidien', 'pro', 'autre'];
-    let html = `<option value="">— Choisis un produit —</option>`;
-    order.forEach(cat => {
-      const list = groups[cat];
-      if (!list || !list.length) return;
-      const label = this.CATEGORY_LABELS[cat] || 'Autres';
-      html += `<optgroup label="${this._esc(label)}">`;
-      list.forEach(a => {
-        const suffix = a.coming_soon ? ' (bientôt)' : '';
-        html += `<option value="${this._esc(a.id)}">${this._esc(a.name)}${suffix}</option>`;
-      });
-      html += `</optgroup>`;
-    });
-    sel.innerHTML = html;
-  },
-
   _renderDetail() {
     const box = document.getElementById('catalogue-detail');
     if (!box) return;
     if (!this.selectedId) { box.innerHTML = ''; return; }
-    const app = (this.apps || []).find(a => a.id === this.selectedId);
-    if (!app) { box.innerHTML = ''; return; }
+    const it = this.ITEMS.find(x => x.id === this.selectedId);
+    if (!it) { box.innerHTML = ''; return; }
 
-    const badge = app.coming_soon
-      ? `<span class="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-text-muted/15 text-text-muted">Bientôt</span>`
-      : app.installed
-        ? `<span class="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-success/15 text-success">Installé</span>`
-        : (app.price != null
-            ? `<span class="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-accent/15 text-accent">${app.price} €</span>`
-            : '');
-
-    const catLabel = this.CATEGORY_LABELS[app.category] || '';
-    const canOpen  = !app.coming_soon && (app.exe_path || app.buy_url);
+    const visual = it.logo
+      ? `<img src="${this._esc(it.logo)}" alt="" class="w-16 h-16 rounded-2xl shrink-0" style="object-fit: contain;" />`
+      : `<div class="w-16 h-16 rounded-2xl shrink-0 flex items-center justify-center text-white font-bold text-2xl"
+              style="background: ${this._esc(it.color)};">${this._esc(it.initial)}</div>`;
 
     box.innerHTML = `
       <div class="card p-6 animate-fade-in">
         <div class="flex items-start gap-5 mb-5">
-          <img src="${this._esc(app.logo)}" alt=""
-               class="w-16 h-16 rounded-2xl shrink-0"
-               style="object-fit: contain;" />
+          ${visual}
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-3 flex-wrap mb-1">
-              <h2 class="text-xl font-bold leading-tight">${this._esc(app.name)}</h2>
-              ${badge}
-            </div>
-            ${catLabel ? `<div class="text-[11px] tracking-widest font-bold text-text-muted">${this._esc(catLabel.toUpperCase())}</div>` : ''}
+            <h2 class="text-xl font-bold leading-tight mb-1">${this._esc(it.name)}</h2>
+            <div class="text-[11px] tracking-widest font-bold text-text-muted">${this._esc(it.url.replace(/^https?:\/\//, ''))}</div>
           </div>
         </div>
 
         <p class="text-text-secondary leading-relaxed mb-5">
-          ${this._esc(app.tagline || '')}
+          ${this._esc(it.tagline)}
         </p>
 
         <div class="flex flex-wrap gap-2">
-          ${canOpen ? `
-            <button id="catalogue-open" class="btn btn-primary">
-              ${app.installed ? 'Ouvrir' : 'Découvrir'}
-            </button>
-          ` : ''}
+          <button id="catalogue-open" class="btn btn-primary">Ouvrir le site</button>
         </div>
       </div>
     `;
@@ -157,16 +123,13 @@ const Catalogue = {
     const openBtn = document.getElementById('catalogue-open');
     if (openBtn) {
       openBtn.addEventListener('click', async () => {
-        if (App && App.api && typeof App.api.launch_app === 'function') {
+        if (App && App.api && typeof App.api.open_url === 'function') {
           try {
-            await App.api.launch_app({
-              exe_path: app.exe_path || '',
-              url:      app.buy_url  || '',
-            });
+            await App.api.open_url({ url: it.url });
             return;
-          } catch (e) { console.warn('catalogue: launch_app failed', e); }
+          } catch (e) { console.warn('catalogue: open_url failed', e); }
         }
-        if (app.buy_url) window.open(app.buy_url, '_blank', 'noopener,noreferrer');
+        window.open(it.url, '_blank', 'noopener,noreferrer');
       });
     }
   },
