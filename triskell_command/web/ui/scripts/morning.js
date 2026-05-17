@@ -412,7 +412,7 @@ const Morning = {
                   class="cockpit-mode-opt ${!isDirect ? 'active' : ''}"
                   data-mode="validation"
                   title="L'app te montre les mails, tu valides avant envoi">
-            <span class="cockpit-mode-opt-icon">✋</span>
+            <span class="cockpit-mode-opt-icon">✅</span>
             <span class="cockpit-mode-opt-label">Je valide</span>
           </button>
         </div>
