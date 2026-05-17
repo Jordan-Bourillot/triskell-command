@@ -14,6 +14,8 @@
 
 const Morning = {
   _clockTimer: null,
+  _refreshTimer: null,
+  _refreshIntervalMs: 30000,
 
   async render(container) {
     // 1. Shell instantané (avant API)
@@ -153,11 +155,190 @@ const Morning = {
     }
 
     slot.innerHTML = this._renderHero(digest)
+                   + `<div id="m-modes-slot"></div>`
                    + this._renderKpiGrid(digest)
                    + this._renderAlert(digest)
                    + `<div id="m-linkedin-slot"></div>`;
 
+    this._loadModes();
     this._loadLinkedinActions();
+
+    // Démarre le rafraîchissement automatique des chiffres
+    this._startAutoRefresh();
+  },
+
+  // -------- Rafraîchissement automatique --------
+  _startAutoRefresh() {
+    if (this._refreshTimer) clearInterval(this._refreshTimer);
+    this._refreshTimer = setInterval(() => this._softRefresh(), this._refreshIntervalMs);
+    if (!this._visibilityBound) {
+      this._visibilityBound = true;
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && document.getElementById('m-content')) {
+          this._softRefresh();
+        }
+      });
+    }
+  },
+
+  async _softRefresh() {
+    const slot = document.getElementById('m-content');
+    if (!slot) {
+      // Vue détruite — on coupe le timer
+      if (this._refreshTimer) { clearInterval(this._refreshTimer); this._refreshTimer = null; }
+      return;
+    }
+    if (document.hidden) return; // onglet pas visible → on saute
+    if (!App.api) return;
+
+    let digest = null;
+    try { digest = await App.api.get_morning_digest(); } catch (e) {}
+    if (!digest || !digest.ok) return;
+
+    // Voyant système
+    const alerts = (digest.alerts && (digest.alerts.convoy_failed_today + digest.alerts.convoy_failed_yesterday)) || 0;
+    if (alerts > 0) {
+      this._setSystemLed('alert', `SYSTÈME · ${alerts} ALERTE${alerts > 1 ? 'S' : ''}`);
+    } else {
+      this._setSystemLed('ok', 'SYSTÈME · OPÉRATIONNEL');
+    }
+
+    // Reconstitue uniquement les blocs d'affichage (hero, KPI, alerte).
+    // On ne touche pas aux modes ni au bloc LinkedIn (ils s'auto-rafraîchissent).
+    const heroEl = slot.querySelector('.cockpit-hero');
+    if (heroEl) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = this._renderHero(digest);
+      const fresh = tmp.firstElementChild;
+      if (fresh) heroEl.replaceWith(fresh);
+    }
+    const gridEl = slot.querySelector('.cockpit-grid');
+    if (gridEl) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = this._renderKpiGrid(digest);
+      const fresh = tmp.firstElementChild;
+      if (fresh) gridEl.replaceWith(fresh);
+    }
+
+    // Alerte : peut apparaître / disparaître entre deux refresh.
+    // On la place toujours juste avant le slot LinkedIn pour préserver l'ordre.
+    const linkedinSlot = document.getElementById('m-linkedin-slot');
+    const existingAlert = slot.querySelector('.cockpit-alert');
+    const newAlertHTML = this._renderAlert(digest);
+    if (newAlertHTML && newAlertHTML.trim()) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = newAlertHTML;
+      const fresh = tmp.firstElementChild;
+      if (fresh) {
+        if (existingAlert) existingAlert.replaceWith(fresh);
+        else if (linkedinSlot) linkedinSlot.parentNode.insertBefore(fresh, linkedinSlot);
+      }
+    } else if (existingAlert) {
+      existingAlert.remove();
+    }
+  },
+
+  // -------- Bloc MODES — bascule envoi direct ↔ validation --------
+  async _loadModes() {
+    if (!App.api) return;
+    const slot = document.getElementById('m-modes-slot');
+    if (!slot) return;
+    let modes = { prospection: 'validation', reponses: 'validation' };
+    try {
+      const r = await App.api.get_simple_modes();
+      if (r && r.ok) modes = { prospection: r.prospection, reponses: r.reponses };
+    } catch (e) {}
+    slot.innerHTML = this._renderModes(modes);
+    this._bindModes();
+  },
+
+  _renderModes(m) {
+    return `
+      <div class="cockpit-modes">
+        <div class="cockpit-modes-head">
+          <span class="cockpit-modes-title">TES 2 MODES</span>
+          <span class="cockpit-modes-sub">Bascule en 1 clic — l'app applique tout de suite</span>
+        </div>
+        <div class="cockpit-modes-grid">
+          ${this._modeCard({
+            kind: 'prospection',
+            title: 'Prospection',
+            sub: 'Les mails que l’IA prépare pour les nouveaux contacts',
+            current: m.prospection,
+          })}
+          ${this._modeCard({
+            kind: 'reponses',
+            title: 'Réponses',
+            sub: 'Les réponses que l’IA prépare aux gens qui t’ont écrit',
+            current: m.reponses,
+          })}
+        </div>
+      </div>
+    `;
+  },
+
+  _modeCard({ kind, title, sub, current }) {
+    const isDirect = current === 'direct';
+    return `
+      <div class="cockpit-mode-card" data-kind="${kind}" data-current="${current}">
+        <div class="cockpit-mode-card-head">
+          <span class="cockpit-mode-card-title">${title}</span>
+          <span class="cockpit-mode-card-sub">${sub}</span>
+        </div>
+        <div class="cockpit-mode-switch" role="group" aria-label="Choisir un mode">
+          <button type="button"
+                  class="cockpit-mode-opt ${isDirect ? 'active danger' : ''}"
+                  data-mode="direct"
+                  title="L'IA envoie tout de suite, sans demander">
+            <span class="cockpit-mode-opt-icon">🚀</span>
+            <span class="cockpit-mode-opt-label">Envoi direct</span>
+          </button>
+          <button type="button"
+                  class="cockpit-mode-opt ${!isDirect ? 'active' : ''}"
+                  data-mode="validation"
+                  title="L'app te montre les mails, tu valides avant envoi">
+            <span class="cockpit-mode-opt-icon">✋</span>
+            <span class="cockpit-mode-opt-label">Je valide</span>
+          </button>
+        </div>
+      </div>
+    `;
+  },
+
+  _bindModes() {
+    const slot = document.getElementById('m-modes-slot');
+    if (!slot) return;
+    slot.querySelectorAll('.cockpit-mode-card').forEach(card => {
+      const kind = card.dataset.kind;
+      card.querySelectorAll('.cockpit-mode-opt').forEach(btn => {
+        btn.onclick = async () => {
+          const target = btn.dataset.mode;
+          if (card.dataset.current === target) return;
+          if (target === 'direct') {
+            const confirmMsg = kind === 'prospection'
+              ? "Passer en envoi DIRECT pour la prospection ?\n\nL'IA enverra chaque mail sans te demander. Tu peux revenir à « Je valide » à tout moment."
+              : "Passer en envoi DIRECT pour les réponses ?\n\nL'IA répondra toute seule aux mails reçus. Tu peux revenir à « Je valide » à tout moment.";
+            if (!confirm(confirmMsg)) return;
+          }
+          card.querySelectorAll('.cockpit-mode-opt').forEach(b => {
+            b.classList.remove('active', 'danger');
+          });
+          btn.classList.add('active');
+          if (target === 'direct') btn.classList.add('danger');
+          card.dataset.current = target;
+          try {
+            const r = await App.api.set_simple_mode({ kind, mode: target });
+            if (!r || !r.ok) {
+              alert("Bascule impossible : " + ((r && r.error) || 'erreur'));
+              this._loadModes();
+            }
+          } catch (e) {
+            alert("Bascule impossible : " + e);
+            this._loadModes();
+          }
+        };
+      });
+    });
   },
 
   // -------- Horloge live (mise à jour seconde par seconde) --------

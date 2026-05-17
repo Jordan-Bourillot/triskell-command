@@ -295,7 +295,7 @@ const DemoMode = {
             suggested_reply: cat === 'interested' ? {
               status: 'pending',
               subject: 'Re: ' + m.subject,
-              body: 'Bonjour, ravi de votre retour. Voici un créneau Calendly...',
+              body: 'Bonjour, ravi de votre retour. Voici le lien direct pour récupérer le produit…',
             } : null,
           },
         };
@@ -553,6 +553,29 @@ const DemoMode = {
       };
     },
 
+    // ============ Modes simples (cockpit) ============
+    get_simple_modes() {
+      const s = (this._demo_state ||= {});
+      return {
+        ok: true,
+        prospection: s.prospection || 'validation',
+        reponses:    s.reponses    || 'validation',
+      };
+    },
+    set_simple_mode(payload) {
+      const s = (this._demo_state ||= {});
+      const kind = (payload && payload.kind) || '';
+      const mode = (payload && payload.mode) || '';
+      if (!['prospection', 'reponses'].includes(kind)) {
+        return { ok: false, error: 'kind invalide' };
+      }
+      if (!['direct', 'validation'].includes(mode)) {
+        return { ok: false, error: 'mode invalide' };
+      }
+      s[kind] = mode;
+      return { ok: true };
+    },
+
     // ============ Messages internes Jordan/Thomas ============
     messages_count_unread() { return { ok: true, count: 2 }; },
     messages_list() {
@@ -616,15 +639,6 @@ const DemoMode = {
     },
     stripe_get_config() {
       return { ok: true, config: { enabled: true, secret_key_set: true, last_run_at: new Date(Date.now() - 300_000).toISOString(), payments_count_30d: 14 } };
-    },
-    calendly_get_config() {
-      return { ok: true, config: { enabled: true, pat_set: true, event_type_uri: 'https://calendly.com/jordan-triskell/15min' } };
-    },
-    calendly_list_event_types() {
-      return { ok: true, event_types: [
-        { uri: 'https://calendly.com/jordan-triskell/15min', name: 'RDV 15 min — Découverte' },
-        { uri: 'https://calendly.com/jordan-triskell/30min', name: 'RDV 30 min — Brief projet' },
-      ] };
     },
     phantombuster_get_config() {
       return { ok: true, config: { enabled: false, api_key_set: false } };

@@ -47,7 +47,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "unknown":     "manual",
     },
     "templates": {
-        "interested_product": (
+        "interested": (
             "Bonjour {name},\n\n"
             "Merci pour votre retour, ravi que ça vous parle.\n\n"
             "Voici le lien direct pour récupérer {product_name} :\n"
@@ -55,14 +55,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "Le téléchargement est immédiat après paiement, et vous "
             "récupérez la licence à vie sur cette adresse mail.\n\n"
             "Si une question avant : répondez-moi simplement à ce mail.\n\n"
-            "{signature}"
-        ),
-        "interested_service": (
-            "Bonjour {name},\n\n"
-            "Merci pour votre retour. Le plus simple pour caler 15 min : "
-            "{calendly_link}\n\n"
-            "Sinon dites-moi 2 ou 3 créneaux qui vous arrangent et "
-            "je m'aligne dessus.\n\n"
             "{signature}"
         ),
         "not_now": (
@@ -97,7 +89,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             #      "pack-elec": "https://pack-elec.triskell-studio.fr"}
         },
         "default_product_key": "",  # produit choisi quand on ne sait pas désambiguïser
-        "calendly_default":  "",
     },
     "subject_prefix": "Re: ",
     "signature": "",  # vide = on tente smtp_cfg.from_name
@@ -265,16 +256,7 @@ def _build_reply_text(*, config: dict, category: str, prospect: dict,
         "outreach", "from_name", default="") or ""
 
     # Sélection du template
-    if category == "interested":
-        # Heuristique : si le brief / la dernière offre touche à un service,
-        # template service ; sinon template product. Ici on tape simple :
-        # si calendly_default existe, on penche service ; sinon product.
-        if config.get("links", {}).get("calendly_default"):
-            template_key = "interested_service"
-        else:
-            template_key = "interested_product"
-    else:
-        template_key = category if category in templates else "unknown"
+    template_key = category if category in templates else "unknown"
 
     tmpl = templates.get(template_key) or templates.get("unknown") or ""
 
@@ -283,13 +265,11 @@ def _build_reply_text(*, config: dict, category: str, prospect: dict,
     default_pk = (config.get("links") or {}).get("default_product_key") or ""
     product_link = products.get(default_pk, "") if default_pk else ""
     product_name = default_pk.replace("-", " ").title() if default_pk else "le produit"
-    calendly_link = (config.get("links") or {}).get("calendly_default") or ""
 
     body = tmpl.format(
         name=name,
         product_link=product_link or "(lien à configurer)",
         product_name=product_name,
-        calendly_link=calendly_link or "(lien Calendly à configurer)",
         signature=signature,
     )
 

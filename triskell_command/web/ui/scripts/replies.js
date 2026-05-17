@@ -167,15 +167,6 @@ const Replies = {
                     title="Crée une carte projet client (statut Briefing) à partir de cette réponse">
               + Créer projet client
             </button>` : ''}
-          ${cat === 'interested' && !extra.calendly_invite_sent_at ? `
-            <button class="text-xs px-2.5 py-1.5 rounded-lg bg-accent/10 text-accent
-                          border border-accent/30 hover:bg-accent/20 transition-colors font-medium"
-                    data-act="calendly" data-id="${row.id}"
-                    title="Envoie un mail au prospect avec un lien Calendly">
-              📅 Proposer créneau
-            </button>` : ''}
-          ${extra.calendly_invite_sent_at ? `
-            <span class="text-[11px] text-accent px-2 py-1">📅 créneau proposé</span>` : ''}
           ${extra.lead_converted_at ? `
             <span class="text-[11px] text-success px-2 py-1">✓ projet créé</span>` : ''}
           <div class="flex-1"></div>
@@ -244,21 +235,6 @@ const Replies = {
               btn.textContent = '✓ projet créé';
             } else {
               alert('Création projet impossible : ' + ((r && r.error) || 'erreur'));
-              btn.textContent = original;
-              btn.disabled = false;
-              return;
-            }
-          }
-          if (act === 'calendly') {
-            const original = btn.textContent;
-            btn.textContent = 'Envoi…';
-            btn.disabled = true;
-            const r = await App.api.calendly_propose_to_reply({ id });
-            if (r && r.ok) {
-              btn.textContent = '📅 envoyé';
-            } else {
-              alert('Calendly impossible : ' + ((r && r.error) || 'erreur') +
-                    '\n\nVérifie ta config Calendly dans Réglages.');
               btn.textContent = original;
               btn.disabled = false;
               return;

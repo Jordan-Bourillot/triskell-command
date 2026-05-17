@@ -5,8 +5,8 @@ Permet à Jordan de choisir, par catégorie de réponse :
   - delay_30m  → envoi auto 30 min après génération
   - instant    → envoi auto immédiat dès détection
 
-Plus l'édition des templates par catégorie et des liens (Stripe par produit,
-Calendly). Tout est stocké dans shared_settings 'reply_responder' Supabase
+Plus l'édition des templates par catégorie et des liens (Stripe par produit).
+Tout est stocké dans shared_settings 'reply_responder' Supabase
 → synchro automatique entre Jordan et Thomas.
 """
 
@@ -98,20 +98,13 @@ class ReplySettingsDialog(ctk.CTkToplevel):
             outer,
             "MODÈLES DE MAILS  (tu peux utiliser : {name} = nom du prospect, "
             "{product_link} = lien produit, {product_name} = nom produit, "
-            "{calendly_link} = lien Calendly, {signature} = ta signature)"
+            "{signature} = ta signature)"
         )
         for cat in CATEGORY_ORDER:
             self._template_block(outer, cat)
-        # Modèles spéciaux pour les réponses « Intéressé »
-        self._template_block(outer, "interested_product",
-                              label="Intéressé — vente d'un produit (avec lien d'achat)")
-        self._template_block(outer, "interested_service",
-                              label="Intéressé — vente d'un service (avec lien Calendly)")
 
         # Section : liens
         self._section(outer, "LIENS À INSÉRER DANS LES MAILS")
-        self._link_field(outer, "calendly_default", "Lien Calendly par défaut",
-                          placeholder="https://calendly.com/jordan/15min")
         self._link_field(outer, "default_product_key",
                           "Produit mis en avant par défaut",
                           placeholder="ex: obelisk")

@@ -109,12 +109,6 @@ const Help = {
              "activée dans Réglages, ça se fait tout seul."
         },
         {
-          h: '📅 Proposer créneau',
-          p: "Bouton bleu : envoie un mail au prospect avec un lien Calendly " +
-             "à usage unique. Demande Calendly configuré dans Réglages (PAT + " +
-             "type de RDV par défaut)."
-        },
-        {
           h: '✉ Répondre directement',
           p: "Bouton « Répondre » sur chaque carte : ouvre le composer mail " +
              "intégré, déjà pré-rempli avec le destinataire et l'objet. " +
@@ -335,10 +329,9 @@ const Help = {
              "Netlify Function fournie (cf. netlify_functions/README.md)."
         },
         {
-          h: '📅 Calendly + 🔗 Phantombuster',
-          p: "Calendly : PAT + type de RDV par défaut. Phantombuster (DM " +
-             "LinkedIn auto, ~70€/mois) : clé API + ID du Phantom « LinkedIn " +
-             "Message Sender »."
+          h: '🔗 Phantombuster',
+          p: "DM LinkedIn auto (~70€/mois) : clé API + ID du Phantom " +
+             "« LinkedIn Message Sender »."
         },
         {
           h: '👁 Tracking d\'ouvertures',

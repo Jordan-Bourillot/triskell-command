@@ -25,7 +25,6 @@ const Config = {
     let s = null;
     let l2c = null;
     let stripeCfg = null;
-    let calendlyCfg = null;
     let phantomCfg = null;
     let trackerCfg = null;
     let authStatus = null;
@@ -39,10 +38,6 @@ const Config = {
       try {
         const r = await App.api.stripe_get_config();
         if (r && r.ok) stripeCfg = r.config;
-      } catch (e) {}
-      try {
-        const r = await App.api.calendly_get_config();
-        if (r && r.ok) calendlyCfg = r.config;
       } catch (e) {}
       try {
         const r = await App.api.phantombuster_get_config();
@@ -61,7 +56,7 @@ const Config = {
       { key: 'appearance',   label: 'Apparence',      html: this._renderAppearance(s) },
       { key: 'mails',        label: 'Mails',          html: this._renderOutreach(s) + this._renderMailAccounts() + this._renderSignature() },
       { key: 'ai',           label: 'Intelligence Artificielle', html: this._renderAi(s) },
-      { key: 'integrations', label: 'Intégrations',   html: this._renderStripe(stripeCfg) + this._renderCalendly(calendlyCfg) + this._renderPhantombuster(phantomCfg) + this._renderTracker(trackerCfg) },
+      { key: 'integrations', label: 'Intégrations',   html: this._renderStripe(stripeCfg) + this._renderPhantombuster(phantomCfg) + this._renderTracker(trackerCfg) },
       { key: 'automations',  label: 'Automatisations', html: this._renderLeadToClient(l2c) + this._renderDelivery() },
       { key: 'system',       label: 'Système',        html: this._renderBackups() + this._renderDemoMode() + this._renderTutorial() },
     ];
@@ -101,7 +96,6 @@ const Config = {
     this._bindSignature();
     this._bindLeadToClient();
     this._bindStripe();
-    this._bindCalendly();
     this._bindPhantombuster();
     this._bindTracker();
     this._bindDemoMode();
@@ -1092,120 +1086,6 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
         if (row) row.remove();
       };
     });
-  },
-
-  _renderCalendly(cfg) {
-    const c = cfg || { enabled: false, personal_access_token: '',
-                       default_event_type_uri: '', default_event_type_name: '',
-                       _has_token: false };
-    return `
-      <section>
-        <div class="section-label">Calendly — propose un créneau en 1 clic</div>
-        <p class="text-sm text-text-muted mb-4">
-          Quand un prospect dit « ok, on en parle ? », tu cliques « Proposer créneau »
-          dans la vue Réponses et l'app envoie un mail avec un lien Calendly à usage unique.
-        </p>
-        <div class="card p-6 space-y-4">
-          <div>
-            <label class="block text-xs font-medium text-text-secondary mb-1.5">
-              Personal Access Token Calendly
-              ${c._has_token ? '<span class="text-success">(✓ enregistré)</span>' : ''}
-            </label>
-            <input type="password" data-cal-key="personal_access_token"
-                   placeholder="${c._has_token ? '(token enregistré — tape pour remplacer)' : 'eyJ…'}"
-                   class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none font-mono" />
-            <div class="text-[11px] text-text-muted mt-1">
-              Génère-le dans Calendly → Integrations → API & Webhooks → Personal Access Tokens.
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-xs font-medium text-text-secondary mb-1.5">Type de RDV par défaut</label>
-            <div class="flex gap-2">
-              <select id="cal-event-select" data-cal-key="default_event_type_uri"
-                      class="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none">
-                ${c.default_event_type_uri
-                  ? `<option value="${this._esc(c.default_event_type_uri)}" selected>${this._esc(c.default_event_type_name || '(actuel)')}</option>`
-                  : `<option value="">— Charge la liste ↓ —</option>`}
-              </select>
-              <button class="btn btn-secondary text-xs" id="cal-refresh-events">Charger mes types de RDV</button>
-            </div>
-          </div>
-
-          <div class="flex gap-3 pt-2">
-            <button class="btn btn-primary" id="cal-save">Enregistrer</button>
-            <button class="btn btn-secondary" id="cal-test">Vérifier la connexion</button>
-            <span id="cal-feedback" class="text-xs text-text-muted self-center"></span>
-          </div>
-        </div>
-      </section>
-    `;
-  },
-
-  _bindCalendly() {
-    const save = document.getElementById('cal-save');
-    const test = document.getElementById('cal-test');
-    const refresh = document.getElementById('cal-refresh-events');
-    const fb = document.getElementById('cal-feedback');
-    const select = document.getElementById('cal-event-select');
-    if (!save) return;
-
-    const gather = () => {
-      const tk = (document.querySelector('[data-cal-key="personal_access_token"]') || {}).value || '';
-      const sel = document.querySelector('[data-cal-key="default_event_type_uri"]');
-      const evtUri = sel ? sel.value : '';
-      const evtName = sel && sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : '';
-      return {
-        enabled: !!tk,
-        personal_access_token: tk,
-        default_event_type_uri: evtUri,
-        default_event_type_name: evtName,
-      };
-    };
-
-    save.onclick = async () => {
-      if (!App.api) return;
-      save.disabled = true; save.textContent = 'Enregistrement…';
-      try {
-        const r = await App.api.calendly_save_config({ config: gather() });
-        save.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
-      } catch (e) { save.textContent = 'Erreur'; }
-      setTimeout(() => { save.disabled = false; save.textContent = 'Enregistrer'; }, 1600);
-    };
-
-    test.onclick = async () => {
-      if (!App.api) return;
-      test.disabled = true; test.textContent = '…';
-      fb.textContent = '';
-      try {
-        await App.api.calendly_save_config({ config: gather() });
-        const r = await App.api.calendly_test();
-        if (r && r.ok) {
-          fb.innerHTML = `<span class="text-success">✓ Connecté en tant que ${this._esc(r.user_name || r.user_email || '?')}</span>`;
-        } else {
-          fb.innerHTML = `<span class="text-danger">✗ ${this._esc(r && r.error || 'erreur')}</span>`;
-        }
-      } catch (e) { fb.textContent = 'Erreur : ' + e; }
-      test.disabled = false; test.textContent = 'Vérifier la connexion';
-    };
-
-    if (refresh) refresh.onclick = async () => {
-      if (!App.api) return;
-      refresh.disabled = true; refresh.textContent = 'Chargement…';
-      try {
-        await App.api.calendly_save_config({ config: gather() });
-        const r = await App.api.calendly_list_event_types();
-        if (r && r.ok && r.event_types) {
-          select.innerHTML = r.event_types.map(e =>
-            `<option value="${this._esc(e.uri)}">${this._esc(e.name)} (${e.duration} min)</option>`
-          ).join('');
-          fb.innerHTML = `<span class="text-success">${r.event_types.length} type(s) de RDV chargé(s)</span>`;
-        } else {
-          fb.innerHTML = `<span class="text-danger">${this._esc(r && r.error || 'erreur')}</span>`;
-        }
-      } catch (e) { fb.textContent = 'Erreur : ' + e; }
-      refresh.disabled = false; refresh.textContent = 'Charger mes types de RDV';
-    };
   },
 
   _renderPhantombuster(cfg) {

@@ -3085,177 +3085,6 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
-    # Calendly — propose un créneau quand un prospect dit "intéressé"
-    # ------------------------------------------------------------------
-    def calendly_get_config(self) -> dict:
-        try:
-            from ..integrations import calendly_client
-            client = self._supabase()
-            cfg = calendly_client.load_config(client)
-            safe = dict(cfg)
-            tk = safe.get("personal_access_token", "")
-            safe["_has_token"] = bool(tk)
-            if tk:
-                safe["personal_access_token"] = tk[:6] + "•" * 8 + tk[-4:]
-            return {"ok": True, "config": safe}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-    def calendly_save_config(self, payload: dict) -> dict:
-        try:
-            from ..integrations import calendly_client
-            client = self._supabase()
-            if not client:
-                return {"ok": False, "error": "Base partagée non connectée"}
-            cfg_in = (payload or {}).get("config") or {}
-            tk = (cfg_in.get("personal_access_token") or "").strip()
-            if not tk or "•" in tk:
-                existing = calendly_client.load_config(client)
-                cfg_in["personal_access_token"] = existing.get("personal_access_token", "")
-            calendly_client.save_config(cfg_in, client)
-            return {"ok": True}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-    def calendly_test(self) -> dict:
-        """Vérifie que le PAT marche en appelant /users/me."""
-        try:
-            from ..integrations import calendly_client
-            client = self._supabase()
-            cfg = calendly_client.load_config(client)
-            tk = cfg.get("personal_access_token") or ""
-            if not tk:
-                return {"ok": False, "error": "PAT manquant"}
-            return calendly_client.health_check(tk)
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-    def calendly_list_event_types(self) -> dict:
-        try:
-            from ..integrations import calendly_client
-            client = self._supabase()
-            cfg = calendly_client.load_config(client)
-            tk = cfg.get("personal_access_token") or ""
-            if not tk:
-                return {"ok": False, "error": "PAT manquant"}
-            user_uri = cfg.get("user_uri") or ""
-            if not user_uri:
-                u = calendly_client.get_current_user(tk)
-                user_uri = u.get("uri", "")
-                if user_uri:
-                    cfg["user_uri"] = user_uri
-                    calendly_client.save_config(cfg, client)
-            evts = calendly_client.list_event_types(tk, user_uri)
-            return {"ok": True, "event_types": [
-                {"uri": e.get("uri"), "name": e.get("name"),
-                 "duration": e.get("duration"),
-                 "scheduling_url": e.get("scheduling_url")}
-                for e in evts
-            ]}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-    def calendly_propose_to_reply(self, payload: dict) -> dict:
-        """Pour une réponse interested : génère un lien Calendly à usage
-        unique et envoie un mail au prospect avec ce lien.
-
-        payload = {id: <email_history.id>}
-        """
-        rid = (payload or {}).get("id") or ""
-        if not rid:
-            return {"ok": False, "error": "id manquant"}
-        try:
-            from ..integrations import calendly_client
-            client = self._supabase()
-            if not client:
-                return {"ok": False, "error": "Base partagée non connectée"}
-            cfg = calendly_client.load_config(client)
-            tk = cfg.get("personal_access_token") or ""
-            evt_uri = cfg.get("default_event_type_uri") or ""
-            if not tk or not evt_uri:
-                return {"ok": False, "error": "Calendly non configuré dans Réglages"}
-
-            sb = client.raw
-            # Récupère la réponse
-            res = (sb.table("email_history").select("*")
-                   .eq("id", rid).limit(1).execute())
-            rows = res.data or []
-            if not rows:
-                return {"ok": False, "error": "réponse introuvable"}
-            row = rows[0]
-            extra = row.get("extra") or {}
-            if isinstance(extra, str):
-                try: extra = json.loads(extra)
-                except Exception: extra = {}
-            to_email = (extra.get("from") or "").strip()
-            pid = row.get("prospect_id")
-            client_name = ""
-            if pid:
-                try:
-                    pres = (sb.table("prospects").select("name,legal_name,emails")
-                            .eq("id", pid).limit(1).execute())
-                    p = (pres.data or [{}])[0]
-                    client_name = p.get("name") or p.get("legal_name") or ""
-                    if not to_email and p.get("emails"):
-                        to_email = p["emails"][0]
-                except Exception:
-                    pass
-            if not to_email:
-                return {"ok": False, "error": "email destinataire manquant"}
-
-            # Crée le lien à usage unique
-            booking_url = calendly_client.create_single_use_link(tk, evt_uri)
-            if not booking_url:
-                return {"ok": False, "error": "Impossible de créer le lien Calendly"}
-
-            # Compose et envoie le mail
-            subject = f"Re: {row.get('subject') or 'Notre échange'}"
-            from_name = (self._app_state.get("outreach", "from_name", default="") or "").strip()
-            body = (
-                f"Bonjour {client_name or ''},\n\n"
-                f"Top, on cale un créneau ? Voici un lien direct vers mon "
-                f"agenda — choisis l'horaire qui t'arrange :\n\n"
-                f"{booking_url}\n\n"
-                f"À très vite,\n{from_name}".strip()
-            )
-
-            # Envoi via SMTP existant
-            from ..integrations import post_sale_runner as _psr
-            smtp_cfg = _psr._resolve_smtp_config(self._app_state, client)
-            if not smtp_cfg:
-                return {"ok": False, "error": "SMTP non configuré"}
-            from triskell_core.prospect.outreach.smtp_sender import send_email
-            msg_id = send_email(smtp_cfg, to=to_email,
-                                 subject=subject, body=body)
-
-            # Trace dans email_history
-            from datetime import datetime as _dt
-            sb.table("email_history").insert({
-                "prospect_id": pid,
-                "kind": "email_sent",
-                "ts": _dt.now().isoformat(timespec="seconds"),
-                "subject": subject[:200],
-                "body": body[:2000],
-                "message_id": msg_id,
-                "extra": {"calendly_invite_sent": True,
-                          "calendly_booking_url": booking_url,
-                          "in_reply_to": rid},
-                "created_by": client.user_id,
-            }).execute()
-
-            # Marque la réponse comme traitée
-            extra["calendly_invite_sent_at"] = _dt.now().isoformat(timespec="seconds")
-            extra["calendly_booking_url"] = booking_url
-            extra["handled"] = True
-            sb.table("email_history").update({"extra": extra}).eq(
-                "id", rid).execute()
-
-            return {"ok": True, "booking_url": booking_url}
-        except Exception as exc:
-            logger.exception("calendly_propose_to_reply")
-            return {"ok": False, "error": str(exc)}
-
-    # ------------------------------------------------------------------
     # Tests A/B des sujets de mail
     # ------------------------------------------------------------------
     def ab_get_results(self) -> dict:
@@ -3569,6 +3398,71 @@ class Api:
                 "stats":       self._autopilot_state["stats"],
                 "error":       self._autopilot_state["error"],
             }
+
+    # ------------------------------------------------------------------
+    # Modes simples — bouton "envoi direct" vs "validation manuelle"
+    # exposés dans le cockpit pour bascule en 1 clic
+    # ------------------------------------------------------------------
+    def get_simple_modes(self) -> dict:
+        """Renvoie l'état des 2 modes principaux : prospection + réponses.
+
+        Chacun vaut "direct" (envoi auto, sans demander) ou "validation"
+        (l'humain valide chaque mail).
+        """
+        out = {"ok": True, "prospection": "validation", "reponses": "validation"}
+        try:
+            from triskell_core.prospect.pipeline import PipelineConfig
+            cfg = PipelineConfig.load()
+            out["prospection"] = "direct" if cfg.mode == "auto" else "validation"
+        except Exception as exc:
+            logger.debug("get_simple_modes prospection: %s", exc)
+        try:
+            from ..integrations import reply_responder
+            client = self._supabase()
+            if client:
+                cfg = reply_responder.load_config(client)
+                gm = cfg.get("global_mode") or "manual"
+                per = cfg.get("per_category") or {}
+                all_instant = bool(per) and all(v == "instant" for v in per.values())
+                out["reponses"] = "direct" if (gm == "instant" or all_instant) else "validation"
+        except Exception as exc:
+            logger.debug("get_simple_modes reponses: %s", exc)
+        return out
+
+    def set_simple_mode(self, payload: dict) -> dict:
+        """Bascule un mode global.
+
+        payload = {kind: "prospection"|"reponses", mode: "direct"|"validation"}
+        """
+        kind = (payload or {}).get("kind") or ""
+        mode = (payload or {}).get("mode") or ""
+        if kind not in ("prospection", "reponses"):
+            return {"ok": False, "error": "kind invalide"}
+        if mode not in ("direct", "validation"):
+            return {"ok": False, "error": "mode invalide"}
+        try:
+            if kind == "prospection":
+                from triskell_core.prospect.pipeline import PipelineConfig
+                cfg = PipelineConfig.load()
+                cfg.mode = "auto" if mode == "direct" else "validation"
+                cfg.save()
+            else:
+                from ..integrations import reply_responder
+                client = self._supabase()
+                if not client:
+                    return {"ok": False, "error": "Base partagée non connectée"}
+                cfg = reply_responder.load_config(client)
+                target = "instant" if mode == "direct" else "manual"
+                cfg["global_mode"] = target
+                per = dict(cfg.get("per_category") or {})
+                for k in list(per.keys()):
+                    per[k] = target
+                cfg["per_category"] = per
+                reply_responder.save_config(client, cfg)
+            return {"ok": True}
+        except Exception as exc:
+            logger.exception("set_simple_mode")
+            return {"ok": False, "error": str(exc)}
 
     def _sync_keys_to_core(self) -> None:
         """Recopie les clés API + SMTP/IMAP du state Triskell Command vers

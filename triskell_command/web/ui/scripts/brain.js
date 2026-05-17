@@ -600,7 +600,7 @@ const Brain = {
         </div>
         <div class="px-6 py-5">
           <textarea id="bn-content" rows="6" autofocus
-                    placeholder="Ex: Demander à Thomas si on garde Calendly. Lui répondre lundi.&#10;Ex: Idée produit : extension Chrome qui résume les vidéos YouTube."
+                    placeholder="Ex: Demander à Thomas son retour sur la nouvelle landing. Lui répondre lundi.&#10;Ex: Idée produit : extension Chrome qui résume les vidéos YouTube."
                     class="w-full px-3 py-3 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed resize-y transition"></textarea>
           ${this._attachmentsComposerHTML('bn')}
           <div id="bn-status" class="mt-2 text-xs text-text-muted">⌘+Entrée pour envoyer</div>

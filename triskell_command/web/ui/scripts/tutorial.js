@@ -127,16 +127,7 @@ const Tutorial = {
             "« prix », « devis », « j'achète », etc. (recommandé).\n" +
             "• Tous les intéressés : ratisse large, à toi de filtrer après." },
 
-    // ---- 7. Calendly ----
-    { icon: '📅', title: '7. Calendly — propose un créneau en 1 clic',
-      lead: 'Quand un prospect dit « ok on en parle ? ».',
-      body: "Sur chaque carte de réponse intéressée : bouton « 📅 Proposer " +
-            "créneau ». L'app crée un lien Calendly à usage unique et envoie " +
-            "le mail au prospect avec ce lien.\n\n" +
-            "Configure ton PAT Calendly + ton type de RDV par défaut dans " +
-            "Réglages → Calendly." },
-
-    // ---- 8. Clients (kanban) ----
+    // ---- 7. Clients (kanban) ----
     { icon: '📋', title: '8. Clients — kanban des projets en cours',
       lead: 'Briefing → En cours → Livré → Clôturé.', goto: 'clients',
       body: "Toutes les ventes (manuelles, Stripe, AppSumo, basculées des " +
@@ -242,9 +233,8 @@ const Tutorial = {
             "2. Renseigner ton compte mail (SMTP + IMAP).\n" +
             "3. Mettre tes clés API IA (Anthropic, Google, OpenAI…).\n" +
             "4. Activer Stripe (pour les paiements auto).\n" +
-            "5. Configurer Calendly (PAT + type de RDV).\n" +
-            "6. (Optionnel) Phantombuster + tracking d'ouvertures.\n" +
-            "7. Personnaliser tes kits de livraison par produit." },
+            "5. (Optionnel) Phantombuster + tracking d'ouvertures.\n" +
+            "6. Personnaliser tes kits de livraison par produit." },
 
     // ---- 18 bis. Mon profil personnel ----
     { icon: '👤', title: 'Ton profil personnel',

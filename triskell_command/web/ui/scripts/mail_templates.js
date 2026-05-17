@@ -92,14 +92,9 @@ const MailTemplates = {
       runtime: 'pipeline' },
 
     // ============ contact@triskell-studio.fr — Réponses IA aux prospects ============
-    { product: 'reply', key: 'interested_product', label: 'Réponse IA — intéressé (produit)',
+    { product: 'reply', key: 'interested', label: 'Réponse IA — intéressé',
       description: 'Réponse auto envoyée quand un prospect dit être intéressé par un produit du catalogue.',
       placeholders: ['name', 'product_name', 'product_link', 'signature'],
-      from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
-      runtime: 'pipeline' },
-    { product: 'reply', key: 'interested_service', label: 'Réponse IA — intéressé (service)',
-      description: 'Réponse auto envoyée quand un prospect veut un rendez-vous / appel.',
-      placeholders: ['name', 'calendly_link', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
       runtime: 'pipeline' },
     { product: 'reply', key: 'not_now', label: 'Réponse IA — pas maintenant',
