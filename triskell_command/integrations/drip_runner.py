@@ -27,6 +27,8 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from .multi_tenant import with_workspace
+
 logger = logging.getLogger(__name__)
 
 
@@ -338,14 +340,14 @@ def _create_drip_draft(client, app_state, sent_row: dict,
     # Crée le draft dans prospect_drafts pour qu'il apparaisse dans
     # la vue "Drafts à valider".
     try:
-        sb.table("prospect_drafts").insert({
+        sb.table("prospect_drafts").insert(with_workspace(client, {
             "prospect_id": prospect_id,
             "subject": subject[:200],
             "body": body[:8000],
             "kind": stage,
             "status": "pending",
             "created_by": client.user_id,
-        }).execute()
+        })).execute()
         out["created"] = True
     except Exception as exc:
         out["error"] = f"insert_draft: {exc}"
@@ -371,7 +373,7 @@ def _create_drip_draft(client, app_state, sent_row: dict,
                 custom_headers=headers,
             )
             now = datetime.now().isoformat(timespec="seconds")
-            sb.table("email_history").insert({
+            sb.table("email_history").insert(with_workspace(client, {
                 "prospect_id": prospect_id,
                 "kind": "email_sent",
                 "ts": now,
@@ -380,7 +382,7 @@ def _create_drip_draft(client, app_state, sent_row: dict,
                 "message_id": msg_id,
                 "extra": {"drip_stage": stage, "auto_drip": True},
                 "created_by": client.user_id,
-            }).execute()
+            })).execute()
             sb.table("prospects").update({
                 "last_contact_at": now,
                 "updated_by": client.user_id,

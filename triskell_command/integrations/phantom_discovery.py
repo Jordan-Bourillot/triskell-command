@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from . import phantombuster_client as pb
+from .multi_tenant import with_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -75,23 +76,25 @@ def _build_args(platform: str, niche: str, max_results: int) -> dict[str, Any]:
             "csvName":           f"triskell_linkedin_{int(time.time())}",
         }
     if platform == "instagram":
-        # Le hashtag peut être multiple, séparé par virgules.
+        # « Instagram Multiple Hashtag Collector » attend le format
+        # « #hashtag1 + #hashtag2 » (séparateur « + », chaque hashtag avec #).
         hashtags = [h.strip().lstrip("#") for h in niche.split(",") if h.strip()]
         if not hashtags:
             hashtags = [niche.replace(" ", "").lower()]
         return {
-            "hashtags":                 ",".join(hashtags),
+            "spreadsheetUrl":           " + ".join(f"#{h}" for h in hashtags),
             "numberOfPostsPerHashtag":  n,
             "csvName":                  f"triskell_instagram_{int(time.time())}",
         }
     if platform == "tiktok":
+        # Format similaire côté TikTok Hashtag Scraper.
         hashtags = [h.strip().lstrip("#") for h in niche.split(",") if h.strip()]
         if not hashtags:
             hashtags = [niche.replace(" ", "").lower()]
         return {
-            "hashtags":             ",".join(hashtags),
-            "numberOfVideosPerHashtag": n,
-            "csvName":              f"triskell_tiktok_{int(time.time())}",
+            "spreadsheetUrl":            " + ".join(f"#{h}" for h in hashtags),
+            "numberOfVideosPerHashtag":  n,
+            "csvName":                   f"triskell_tiktok_{int(time.time())}",
         }
     raise ValueError(f"Plateforme non supportée : {platform}")
 
@@ -255,9 +258,13 @@ def _wait_for_completion(
 # Insertion dans la base prospects
 # ---------------------------------------------------------------------------
 def _upsert_prospects(sb, rows: list[dict],
-                       progress: Optional[Callable[[str], None]] = None) -> dict:
+                       progress: Optional[Callable[[str], None]] = None,
+                       client=None) -> dict:
     """Insère les prospects en évitant les doublons sur platform_url.
-    Renvoie {inserted, skipped, errors}."""
+    Renvoie {inserted, skipped, errors}.
+
+    Si `client` (wrapper Supabase) est fourni, on injecte automatiquement
+    workspace_id dans chaque insert (requis depuis migration 20)."""
     inserted = 0
     skipped = 0
     errors = 0
@@ -272,7 +279,7 @@ def _upsert_prospects(sb, rows: list[dict],
             if existing.data:
                 skipped += 1
                 continue
-            sb.table("prospects").insert(row).execute()
+            sb.table("prospects").insert(with_workspace(client, row)).execute()
             inserted += 1
         except Exception as exc:
             logger.warning("upsert prospect failed: %s", exc)
@@ -295,6 +302,7 @@ def discover_profiles(
     max_results: int = 50,
     progress: Optional[Callable[[str], None]] = None,
     poll_timeout_sec: int = 30 * 60,
+    client=None,                 # wrapper Supabase (pour workspace_id)
 ) -> dict:
     """Lance une recherche PhantomBuster et insère les profils trouvés.
 
@@ -366,7 +374,7 @@ def discover_profiles(
             prospects.append(p)
     log(f"✔ {len(prospects)} profils valides après mapping")
 
-    upsert = _upsert_prospects(sb, prospects, progress=log)
+    upsert = _upsert_prospects(sb, prospects, progress=log, client=client)
 
     return {
         "ok":             True,

@@ -23,6 +23,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .multi_tenant import with_workspace
+
 logger = logging.getLogger(__name__)
 
 
@@ -152,7 +154,7 @@ def mark_bounced(client, prospect_id: str, bounced_address: str = "",
 def _audit(kind: str, client, prospect_id: str, reason: str) -> None:
     """Trace l'evenement dans email_history (best-effort)."""
     try:
-        client.raw.table("email_history").insert({
+        client.raw.table("email_history").insert(with_workspace(client, {
             "prospect_id": prospect_id,
             "kind": f"status_{kind}",
             "ts": datetime.now().isoformat(timespec="seconds"),
@@ -160,9 +162,9 @@ def _audit(kind: str, client, prospect_id: str, reason: str) -> None:
             "body": "",
             "extra": {"reason": (reason or "")[:500], "auto": True},
             "created_by": client.user_id,
-        }).execute()
+        })).execute()
     except Exception as exc:
-        logger.debug("audit %s KO: %s", kind, exc)
+        logger.warning("audit %s KO: %s", kind, exc)
 
 
 # =============================================================================

@@ -20,6 +20,8 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from .multi_tenant import with_workspace
+
 logger = logging.getLogger(__name__)
 
 
@@ -421,14 +423,14 @@ def _create_post_sale_draft(client, app_state, proj: dict,
 
     if prospect_id:
         try:
-            sb.table("prospect_drafts").insert({
+            sb.table("prospect_drafts").insert(with_workspace(client, {
                 "prospect_id": prospect_id,
                 "subject": subject[:200],
                 "body": body[:8000],
                 "kind": stage,
                 "status": "pending",
                 "created_by": client.user_id,
-            }).execute()
+            })).execute()
             out["created"] = True
         except Exception as exc:
             out["error"] = f"insert_draft: {exc}"
@@ -463,7 +465,7 @@ def _create_post_sale_draft(client, app_state, proj: dict,
                     pass  # colonne legacy peut ne plus exister
             # Log envoi
             try:
-                sb.table("email_history").insert({
+                sb.table("email_history").insert(with_workspace(client, {
                     "prospect_id": prospect_id,
                     "kind": "email_sent",
                     "ts": now_iso,
@@ -473,7 +475,7 @@ def _create_post_sale_draft(client, app_state, proj: dict,
                     "extra": {"post_sale_stage": stage,
                                 "client_project_id": proj.get("id")},
                     "created_by": client.user_id,
-                }).execute()
+                })).execute()
             except Exception:
                 pass
             out["auto_sent"] = True

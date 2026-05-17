@@ -236,6 +236,7 @@ def _run_phantom_platforms(*, niche: str, platforms: list[str],
                 niche=niche,
                 max_results=max_per_platform,
                 progress=log,
+                client=triskell_client,
             )
         except Exception as exc:
             log(f"💥 {platform} : {exc}")

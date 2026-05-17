@@ -30,6 +30,8 @@ import time
 from datetime import datetime
 from typing import Any, Optional
 
+from .multi_tenant import with_workspace
+
 logger = logging.getLogger(__name__)
 
 
@@ -254,9 +256,9 @@ def _log_inbox_mail(client, account_id: str, *, from_addr: str, subject: str,
         "created_by": client.user_id,
     }
     try:
-        sb.table("email_history").insert(row).execute()
+        sb.table("email_history").insert(with_workspace(client, row)).execute()
     except Exception as exc:
-        logger.debug("log inbox mail insert: %s", exc)
+        logger.warning("log inbox mail insert KO: %s", exc)
 
 
 def _list_imap_accounts_to_scan(app_state, client) -> list[dict]:
@@ -433,7 +435,9 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                         "created_by": client.user_id,
                     }
                     try:
-                        ins = client.raw.table("email_history").insert(row).execute()
+                        ins = client.raw.table("email_history").insert(
+                            with_workspace(client, row)
+                        ).execute()
                         counters["written"] += 1
                         history_row_id = (ins.data or [{}])[0].get("id", "")
                     except Exception as exc:

@@ -26,6 +26,8 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from .multi_tenant import with_workspace
+
 logger = logging.getLogger(__name__)
 
 
@@ -515,7 +517,7 @@ def _do_one_cycle(app_state) -> dict:
             # Log de l'envoi en email_history (kind=email_sent) — boucle de
             # traçabilité côté CRM.
             try:
-                client.raw.table("email_history").insert({
+                client.raw.table("email_history").insert(with_workspace(client, {
                     "prospect_id": row.get("prospect_id"),
                     "kind": "email_sent",
                     "ts": sr["sent_at"],
@@ -528,9 +530,9 @@ def _do_one_cycle(app_state) -> dict:
                         "mode": sr.get("mode", ""),
                     },
                     "created_by": client.user_id,
-                }).execute()
+                })).execute()
             except Exception as exc:
-                logger.debug("log auto-sent: %s", exc)
+                logger.warning("log auto-sent KO: %s", exc)
 
             counters["sent"] += 1
         except SmtpConfigError as exc:
@@ -600,7 +602,7 @@ def send_now(client, app_state, history_row_id: str) -> dict:
             "id", history_row_id).execute()
         # Log envoi
         try:
-            client.raw.table("email_history").insert({
+            client.raw.table("email_history").insert(with_workspace(client, {
                 "prospect_id": row.get("prospect_id"),
                 "kind": "email_sent",
                 "ts": now,
@@ -611,7 +613,7 @@ def send_now(client, app_state, history_row_id: str) -> dict:
                             "category": sr.get("category", ""),
                             "mode": "manual_send"},
                 "created_by": client.user_id,
-            }).execute()
+            })).execute()
         except Exception:
             pass
         return {"success": True, "message_id": msg_id}

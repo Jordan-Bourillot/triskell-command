@@ -87,11 +87,32 @@ def _user_sb():
         return None
     if not c.is_authenticated:
         return None
-    return getattr(c, "client", None) or getattr(c, "_client", None)
+    # On utilise client.raw (qui appelle _ensure_sdk) plutot que le getattr
+    # quirk getattr(c, "client") or getattr(c, "_client") qui retourne None
+    # tant que _ensure_sdk n'a pas ete declenche par un autre code path.
+    try:
+        return c.raw
+    except Exception:
+        return None
 
 
 def _sb():
     return _service_sb() or _user_sb()
+
+
+def _resolve_workspace_id() -> Optional[str]:
+    """Recupere le workspace_id du user authentifie pour injection dans
+    les inserts (requis depuis migration 20 multi-tenant). Renvoie None
+    si pas de session user (ex: appels purement service-role).
+    """
+    try:
+        from triskell_core.db import get_client
+        c = get_client()
+        if c.is_authenticated:
+            return c._current_workspace_id()
+    except Exception as exc:
+        logger.debug("workspace_id resolve: %s", exc)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +184,10 @@ def ensure_client(
             "first_contact_at": datetime.utcnow().isoformat() + "Z",
             "last_contact_at": datetime.utcnow().isoformat() + "Z",
         }
+        # multi-tenant : workspace_id NOT NULL depuis migration 20
+        ws_id = _resolve_workspace_id()
+        if ws_id:
+            row["workspace_id"] = ws_id
         ins = sb.table("clients").insert(row).execute()
         if ins.data:
             return str(ins.data[0]["id"])

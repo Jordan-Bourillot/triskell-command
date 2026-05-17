@@ -16,6 +16,8 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
+from .multi_tenant import with_workspace
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,7 +85,9 @@ def create_project(payload: dict) -> Optional[dict]:
     p["created_by"] = c.user_id
     p["updated_by"] = c.user_id
     try:
-        res = c.raw.table("client_projects").insert(p).execute()
+        res = c.raw.table("client_projects").insert(
+            with_workspace(c, p)
+        ).execute()
         return (res.data or [None])[0]
     except Exception as exc:
         logger.warning("create_project: %s", exc)

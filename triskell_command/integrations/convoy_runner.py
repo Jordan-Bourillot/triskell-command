@@ -37,6 +37,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from .multi_tenant import with_workspace
+
 logger = logging.getLogger(__name__)
 
 
@@ -315,10 +317,14 @@ def _save_to_supabase(camp: ConvoyCampaign, client) -> None:
     try:
         camp_row = _campaign_to_row(camp)
         camp_row["created_by"] = client.user_id
-        client.raw.table("convoy_campaigns").upsert(camp_row).execute()
+        client.raw.table("convoy_campaigns").upsert(
+            with_workspace(client, camp_row)
+        ).execute()
         if camp.drafts:
             drafts_rows = [_draft_to_row(d, camp.id) for d in camp.drafts]
-            client.raw.table("convoy_drafts").upsert(drafts_rows).execute()
+            client.raw.table("convoy_drafts").upsert(
+                with_workspace(client, drafts_rows)
+            ).execute()
     except Exception as exc:
         logger.warning("Supabase save_campaign : %s — fallback local", exc)
         camp._save_local()
@@ -416,6 +422,31 @@ def send_draft(
         # Best-effort : crée/met à jour la fiche client master.
         # On NE bloque PAS l'envoi si ça échoue (Supabase down, etc.).
         _upsert_client_from_draft(draft)
+        # Log dans email_history pour que les envois Convoi remontent dans
+        # le compteur "Envoyés aujourd'hui" du cockpit (avant ce fix, les
+        # mails partaient mais étaient invisibles côté KPI).
+        if cli is not None:
+            try:
+                row = {
+                    "kind": "email_sent",
+                    "ts": draft.sent_at,
+                    "subject": (draft.subject or "")[:200],
+                    "body": (draft.body or "")[:5000],
+                    "message_id": msg_id,
+                    "extra": {
+                        "convoy_campaign_id": getattr(draft, "campaign_id", "")
+                                              or "",
+                        "convoy_draft_id": draft.id,
+                        "offer_name": draft.offer_name,
+                        "to": to,
+                    },
+                    "created_by": cli.user_id,
+                }
+                cli.raw.table("email_history").insert(
+                    with_workspace(cli, row)
+                ).execute()
+            except Exception as exc:
+                logger.warning("convoy log email_sent KO: %s", exc)
     except Exception as exc:
         draft.status = "failed"
         draft.error = str(exc)

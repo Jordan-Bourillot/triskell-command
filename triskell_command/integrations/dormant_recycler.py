@@ -25,6 +25,8 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from .multi_tenant import with_workspace
+
 logger = logging.getLogger(__name__)
 
 
@@ -331,14 +333,14 @@ def _dispatch(client, sb, app_state, prospect: dict,
     """Envoie ou crée un draft selon le mode. Renvoie 'auto'|'draft'|'error'."""
     # Toujours créer un draft sur le prospect_drafts pour la traçabilité
     try:
-        sb.table("prospect_drafts").insert({
+        sb.table("prospect_drafts").insert(with_workspace(client, {
             "prospect_id": prospect["id"],
             "subject": subject[:200],
             "body": body[:8000],
             "kind": "dormant_recycle",
             "status": "pending",
             "created_by": client.user_id,
-        }).execute()
+        })).execute()
     except Exception as exc:
         logger.warning("draft insert: %s", exc)
         return "error"
@@ -356,7 +358,7 @@ def _dispatch(client, sb, app_state, prospect: dict,
     try:
         from triskell_core.prospect.outreach.smtp_sender import send_email
         msg_id = send_email(smtp_cfg, to=to, subject=subject, body=body)
-        sb.table("email_history").insert({
+        sb.table("email_history").insert(with_workspace(client, {
             "prospect_id": prospect["id"],
             "kind": "email_sent",
             "ts": datetime.now().isoformat(timespec="seconds"),
@@ -365,7 +367,7 @@ def _dispatch(client, sb, app_state, prospect: dict,
             "message_id": msg_id,
             "extra": {"dormant_recycle": True},
             "created_by": client.user_id,
-        }).execute()
+        })).execute()
         return "auto"
     except Exception as exc:
         logger.warning("dormant smtp: %s", exc)
