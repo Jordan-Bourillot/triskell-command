@@ -46,6 +46,7 @@ const Replies = {
 
   _renderFilters() {
     const wrap = document.getElementById('r-filters');
+    if (!wrap) return;
     wrap.innerHTML = Object.entries(this.CATEGORIES).map(([key, info]) => `
       <button data-cat="${key}"
               class="chip ${this.filter === key ? 'active' : ''}"

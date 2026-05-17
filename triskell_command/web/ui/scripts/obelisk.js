@@ -608,6 +608,7 @@ const Obelisk = {
   async _loadCreators() {
     this._renderActiveFilters();
     const wrap = document.getElementById('ob-table-wrap');
+    if (!wrap) return;
     wrap.innerHTML = '<div style="padding: 36px; text-align: center; font-size: 13px; color: hsl(var(--text-muted));">Chargement…</div>';
     const offset = this.state.page * this.state.pageSize;
     const res = await this._api('list_creators', {
@@ -1167,6 +1168,7 @@ const Obelisk = {
 
   async _loadRecentJobs() {
     const wrap = document.getElementById('ob-s-jobs');
+    if (!wrap) return;
     const res = await this._api('list_jobs', { limit: 8 });
     const jobs = (res && res.jobs) || [];
     if (jobs.length === 0) { wrap.innerHTML = '<div class="text-[12px] text-text-muted">Aucune recherche pour l\'instant.</div>'; return; }

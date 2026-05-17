@@ -37,6 +37,7 @@ const Funnel = {
 
   _renderFilters() {
     const wrap = document.getElementById('f-filters');
+    if (!wrap) return;
     wrap.innerHTML = `
       <div>
         <div class="text-[10px] font-bold tracking-widest text-text-muted mb-2">PÉRIODE</div>

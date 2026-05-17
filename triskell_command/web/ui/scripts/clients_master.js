@@ -99,6 +99,7 @@ const ClientsMaster = {
   // ────────────────────────────────────────────────────────────────
   _renderStatusChips() {
     const wrap = document.getElementById('cm-status-chips');
+    if (!wrap) return;
     wrap.innerHTML = '';
     Object.entries(this.STATUSES).forEach(([key, meta]) => {
       const active = key === this._status;
