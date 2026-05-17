@@ -47,7 +47,7 @@
     {
       "id": "suite-des-heros",
       "name": "La Suite des Héros",
-      "tagline": "11 outils desktop pour ranger, renommer, compresser et sécuriser tes fichiers",
+      "tagline": "11 outils desktop pour reprendre le contrôle de ton PC.",
       "category": "quotidien",
       "tier": "premium",
       "icon": "assets/apps/suite-des-heros.png",
@@ -55,33 +55,33 @@
       "featuredLabel": "Populaire",
       "price": 27,
       "priceOriginal": 39,
-      "priceNote": "Paiement unique · pas d'abonnement",
+      "priceNote": "paiement unique, pas d'abonnement",
       "installed": false,
       "exePath": null,
       "buyUrl": "https://productivite.triskell-studio.fr",
-      "salesPitch": "11 micro-outils desktop. Chacun fait UNE chose, et la fait bien.",
-      "motto": "Pour qui en a marre des freewares pleins de pubs.",
-      "description": "La Suite des Héros, c'est une boîte à outils desktop pour Windows qui regroupe 11 petits logiciels spécialisés, chacun pensé pour faire UNE chose et la faire bien. La philosophie : pas un méga-logiciel qui fait 200 trucs mal, mais 11 micro-outils que tu lances quand tu en as besoin et que tu fermes ensuite.\n\nRanger un dossier qui a explosé. Renommer 200 fichiers d'un coup. Traquer les doublons qui prennent 4 Go pour rien. Compresser une vidéo trop lourde pour Gmail. Fusionner des PDF de procédures. Extraire une archive bizarre. Créer un coffre-fort chiffré pour tes mots de passe. Convertir des HEIC en JPG. Tu peux tout faire avec des freewares pleins de pubs ou des sites web qui uploadent tes données — ou tu peux tout faire avec la Suite des Héros.\n\nTout fonctionne 100 % en local, sans compte, sans abonnement, sans tracker. Aucun fichier ne quitte ton PC. Aucune télémétrie. Et un seul achat à 27 €, mises à jour incluses à vie.",
+      "salesPitch": "Tes fichiers, ta machine, ton ordre — sans cloud ni abonnement.",
+      "motto": "Une suite de héros pour ton PC en bordel.",
+      "description": "Suite de 11 applications Windows 10/11 qui rangent, renomment, désinstallent, compressent et convertissent tes fichiers. Aucune installation système, aucun compte, 100 % hors ligne — rien ne sort de ton PC.",
       "features": [
         {
-          "title": "11 outils indépendants",
-          "detail": "Chaque outil est un .exe autonome. Tu peux n'en utiliser qu'un, ou tous. Pas de menu géant à apprendre, juste l'outil dont tu as besoin au moment où tu en as besoin."
+          "title": "11 outils spécialisés",
+          "detail": "Tri, renommage, déduplication, compression vidéo, fusion PDF, conversion d'images."
         },
         {
           "title": "100 % hors ligne",
-          "detail": "Aucun fichier n'est envoyé sur Internet. Aucune télémétrie. Tu peux couper ton wifi, tout marche pareil. Idéal pour les fichiers sensibles (compta, contrats, photos perso)."
+          "detail": "Aucune donnée envoyée, pas de compte, pas de cloud."
         },
         {
-          "title": "Paiement unique, mises à jour à vie",
-          "detail": "27 €. Une fois. Pas d'abonnement, pas de récurrence, pas d'upgrade payante. Toutes les versions futures (nouveaux outils inclus) sont offertes."
+          "title": "Annulation 1 clic",
+          "detail": "Tous les outils permettent de revenir en arrière sans risque."
         },
         {
-          "title": "Garantie satisfait ou remboursé 14 jours",
-          "detail": "Tu télécharges, tu testes, tu utilises. Si ça ne te convient pas dans les 14 jours, tu réponds à un email et tu es remboursé sans question."
+          "title": "Mises à jour 1 an",
+          "detail": "Accès à tous les nouveaux outils et corrections pendant 12 mois."
         },
         {
-          "title": "Compatible Windows 10 et 11",
-          "detail": "Aucune dépendance compliquée à installer. Tu décompresses, tu double-cliques, ça marche. Le Distillateur (compression vidéo) demande FFmpeg en plus mais le guide explique tout."
+          "title": "Garantie 14 jours",
+          "detail": "Satisfait ou remboursé, sans questions."
         }
       ],
       "personas": [
@@ -242,47 +242,44 @@
           "exe": "LAlchimiste.exe",
           "tagline": "Convertit tes images"
         }
-      ]
+      ],
+      "kind": "app"
     },
     {
       "id": "delinote",
       "name": "DéliNote",
-      "tagline": "Notes synchronisées, markdown natif, recherche instantanée",
+      "tagline": "L'app de notes rapide, belle, et vraiment à toi.",
       "category": "quotidien",
       "tier": "premium",
       "icon": "assets/apps/delinote.png",
       "price": 79,
-      "priceNote": "Paiement unique · à vie",
-      "salesPitch": "Tes notes, tes dossiers, ta machine. Aucun cloud, aucun compte, aucun tracker.",
-      "motto": "Pour qui aime ses notes, et pas l'abonnement qui va avec.",
+      "priceNote": "paiement unique, à vie",
+      "salesPitch": "Une vraie app de notes : pas d'abonnement, chiffrée, à toi pour toujours.",
+      "motto": "Paie 79 € une seule fois. Profite à vie.",
       "installed": false,
       "exePath": null,
       "buyUrl": "https://delinote.triskell-studio.fr",
-      "description": "DéliNote, c'est l'app de notes pensée pour les gens qui détestent les apps de notes. Pas d'inscription obligatoire, pas de cloud forcé, pas d'éditeur capricieux qui te change ta mise en page quand tu colles du texte. Tu ouvres, tu écris, point.\n\nLes notes sont des fichiers Markdown stockés sur ton disque — exactement là où tu les mets. Tu peux les synchroniser via iCloud, Dropbox ou OneDrive si tu veux, ou pas du tout. Aucun format propriétaire : si DéliNote disparaît demain, tes notes restent lisibles partout (bloc-notes, VS Code, Obsidian…).\n\nLa recherche est l'autre obsession : tape n'importe quel mot, le résultat tombe en moins de 100 ms même sur 10 000 notes. Pas de spinner, pas de chargement, juste la liste qui se filtre en live.",
+      "description": "DéliNote est une app de prise de notes pensée en France, qui met l'écriture au centre. Paiement unique à vie (pas d'abonnement), chiffrement bout-en-bout, mises à jour perpétuelles.",
       "features": [
         {
-          "title": "Markdown natif avec aperçu en direct",
-          "detail": "Écris à gauche, vois le rendu à droite (ou plein écran). Raccourcis clavier pour gras, italique, titres, listes. Export en HTML ou PDF en un clic, sans mise en page bizarre."
+          "title": "Paiement unique",
+          "detail": "79 € à vie, pas de mensualité, pas de renouvellement."
         },
         {
-          "title": "Recherche instantanée Ctrl+K",
-          "detail": "Tape un mot, retrouve-le partout en moins de 100 ms même sur 10 000 notes. Recherche pleine, accents-insensitive, par tag, par dossier ou par contenu."
+          "title": "Mises à jour à vie",
+          "detail": "Toutes les versions futures incluses, indéfiniment."
         },
         {
-          "title": "Tes fichiers restent à toi",
-          "detail": "Les notes sont des .md classiques sur ton disque. Mets-les dans iCloud, Dropbox ou OneDrive si tu veux la sync — ou pas. Aucun cloud propriétaire, aucun format verrouillé."
+          "title": "Chiffrement bout-en-bout",
+          "detail": "Tes notes restent privées, même nous ne pouvons pas les lire."
         },
         {
-          "title": "Coffre-fort pour tes notes sensibles",
-          "detail": "Marque une note comme privée : elle est chiffrée AES-256 en local et demande ton mot de passe pour s'ouvrir. Idéal pour les mots de passe, IBAN, codes."
+          "title": "Éditeur riche",
+          "detail": "Titres, listes à puces, checklists, mise en forme propre."
         },
         {
-          "title": "Calme et silence",
-          "detail": "Aucune télémétrie, aucun tracker, aucune suggestion IA, aucune notif. DéliNote ouvre, tu écris, tu fermes. C'est tout ce qu'on lui demande."
-        },
-        {
-          "title": "Confort visuel",
-          "detail": "Thème clair / sombre / auto suit ton OS. Raccourcis clavier complets. Police monospace ou serif au choix. Mode focus pour cacher tout sauf le texte."
+          "title": "Garantie 30 jours",
+          "detail": "Tu testes, et si ça ne te va pas, tu es remboursé."
         }
       ],
       "personas": [
@@ -330,47 +327,40 @@
           "src": "assets/screenshots/delinote/03-command-bar.png",
           "caption": "Recherche instantanée Ctrl+K"
         }
-      ]
+      ],
+      "kind": "app"
     },
     {
       "id": "studio-pdf",
       "name": "Le Studio PDF",
-      "tagline": "Fusion, split, OCR, signature — tout pour tes PDF",
+      "tagline": "Fusion, split, OCR, signature — tout pour tes PDF.",
       "category": "quotidien",
       "tier": "premium",
       "icon": "assets/apps/studio-pdf.png",
       "price": 39,
-      "priceNote": "Paiement unique · à vie",
+      "priceNote": "paiement unique, à vie",
       "installed": false,
       "exePath": null,
       "buyUrl": "https://studio-pdf.triskell-studio.fr",
-      "salesPitch": "Tes PDF, ton bureau, ton contrôle. Aucun upload, aucun filigrane.",
-      "motto": "Pour qui n'a pas envie d'envoyer ses contrats sur \"smallpdf\".",
-      "description": "Le Studio PDF, c'est ton couteau suisse pour tout ce qui touche au PDF. Pas un viewer de plus, pas un éditeur géant à apprendre — juste les opérations dont tu as vraiment besoin, faites bien, sans filigrane et sans limite de pages.\n\nFusionner 50 documents en un seul. Découper un rapport de 200 pages en chapitres. Lancer un OCR sur un scan pour rendre le texte sélectionnable et cherchable. Ajouter une signature manuscrite ou électronique (.p12). Compresser un PDF trop lourd pour passer en pièce jointe Gmail. Réorganiser ou supprimer des pages. Protéger un PDF avec un mot de passe.\n\nLa différence avec les sites web type \"smallpdf\" ou \"ilovepdf\" : tes documents ne quittent jamais ton PC. C'est crucial pour les contrats, factures, dossiers clients, données médicales — bref, tout ce qui n'a rien à faire sur le serveur d'un inconnu.",
+      "salesPitch": "Arrête de jongler entre 5 sites en ligne — un seul outil, à vie.",
+      "motto": "Tout ce qu'il faut faire à un PDF, dans une seule app.",
+      "description": "Le Studio PDF regroupe les manipulations PDF essentielles : fusion, découpe, OCR (reconnaissance de texte sur les scans) et signature numérique. Une app, paiement unique, sans abonnement.",
       "features": [
         {
-          "title": "Fusion & découpage par glisser-déposer",
-          "detail": "Tu glisses tes PDF, tu réorganises les pages comme des cartes, tu cliques exporter. Insertion à un endroit précis, extraction d'un range de pages, suppression d'une page : tout en visuel."
+          "title": "Fusion",
+          "detail": "Combine plusieurs PDF en un seul document, ordre libre."
         },
         {
-          "title": "OCR multilingue sur tes scans",
-          "detail": "Tu scannes un cours, un contrat, un livre — le Studio PDF reconnaît le texte (français, anglais, allemand, espagnol…) et le rend cherchable et copiable. Idéal pour archiver et retrouver."
+          "title": "Découpe",
+          "detail": "Divise un PDF en plusieurs fichiers selon les pages."
         },
         {
-          "title": "Compression intelligente",
-          "detail": "Réduit la taille d'un PDF jusqu'à 80 % sans perte visible (compresse les images, optimise les polices). Parfait pour passer sous la limite d'email ou archiver moins lourd."
+          "title": "OCR",
+          "detail": "Convertit un scan en texte sélectionnable et cherchable."
         },
         {
-          "title": "Signature manuscrite ou électronique",
-          "detail": "Trace ta signature à la souris/tablette ou utilise un certificat .p12 pour signer électroniquement (valeur juridique en Europe). Tampon de date, initiales, paraphes."
-        },
-        {
-          "title": "Protection par mot de passe",
-          "detail": "Chiffre un PDF (AES-256) avec un mot de passe pour l'ouvrir ou pour le modifier. Idéal pour envoyer un contrat sensible ou archiver un document confidentiel."
-        },
-        {
-          "title": "100 % local, sans filigrane",
-          "detail": "Aucun upload sur Internet, aucun watermark sur tes exports, aucune limite de pages ou de taille. Ce qui sort est un PDF propre, comme s'il avait été créé directement."
+          "title": "Signature numérique",
+          "detail": "Ajoute une signature image ou tracée à la souris."
         }
       ],
       "personas": [
@@ -410,48 +400,37 @@
           "src": "assets/screenshots/studio-pdf/main-view.png",
           "caption": "Écran d'accueil — Bertrand t'attend pour bosser tes PDF"
         }
-      ]
+      ],
+      "kind": "app"
     },
     {
       "id": "bobeez",
       "name": "Bobeez",
-      "tagline": "Gestionnaire d'images moderne — calendrier, carte, tri rapide",
+      "tagline": "Gestionnaire d'images moderne — calendrier, carte, tri rapide.",
       "category": "quotidien",
       "tier": "premium",
       "icon": "assets/apps/bobeez.png",
       "price": 27,
       "priceOriginal": 39,
-      "priceNote": "Paiement unique · à vie",
+      "priceNote": "paiement unique, à vie",
       "installed": false,
       "exePath": null,
       "buyUrl": "https://bobeez.triskell-studio.fr",
-      "salesPitch": "Tes photos rangées sans jamais y toucher.",
-      "motto": "Pour qui veut un visualiseur intelligent, pas un Lightroom de plus.",
-      "description": "Bobeez, c'est l'idée simple : ranger tes photos sans jamais y toucher. Glisse un dossier dans la fenêtre, et Bobeez te montre tes images sous des angles que les explorateurs Windows ne savent pas faire — vue calendrier mois par mois, vue carte avec les coordonnées GPS, mode tri plein écran style \"j'aime / j'aime pas\".\n\nL'édition est entièrement non destructive : recadre, ajuste lumière/couleurs, applique un filtre, exporte — l'original reste intact dans son dossier d'origine, octet pour octet. Tu peux désinstaller Bobeez demain : tes photos sont toujours là, exactement comme tu les as importées.\n\nPensé pour les vrais usages : trier 2 000 photos de vacances en 20 minutes, retrouver \"cette photo à Lisbonne en 2023\" en 3 clics sur la carte, exporter par lot pour le blog ou Insta. Pas un Lightroom à apprendre — juste un visualiseur intelligent.",
+      "salesPitch": "Pour qui en a marre de chercher la photo de l'anniversaire de 2019.",
+      "motto": "Tes photos, enfin retrouvables.",
+      "description": "Bobeez organise et gère ta photothèque autrement : vue calendrier, carte des lieux pris en photo, tri rapide pour faire le ménage. Paiement unique, accès à vie.",
       "features": [
         {
-          "title": "Vue calendrier — voyage dans le temps",
-          "detail": "Tes photos rangées par mois et par jour automatiquement. Tu cliques sur \"juillet 2024\", tu retrouves ton anniversaire. Plus efficace qu'un dossier \"vacances_finales_FINAL_v2\"."
+          "title": "Vue calendrier",
+          "detail": "Visualise tes photos jour par jour, mois par mois."
         },
         {
-          "title": "Vue carte — voyage dans l'espace",
-          "detail": "Toutes tes photos avec coordonnées GPS sont posées sur une mappemonde interactive. Tu zoomes sur Lisbonne, tu vois toutes les photos prises là-bas. Magique pour les voyageurs."
+          "title": "Vue carte",
+          "detail": "Retrouve les photos par leur lieu de prise de vue."
         },
         {
-          "title": "Mode tri \"swipe\" plein écran",
-          "detail": "Une photo en grand, deux flèches : ← refuser / → garder. Tu liquides 500 photos en 5 minutes au clavier. Idéal après un voyage ou un mariage où tu as 2 000 doublons."
-        },
-        {
-          "title": "Édition non destructive",
-          "detail": "Recadre, ajuste lumière/contraste/saturation, applique un filtre — tout est stocké à part. L'original reste intact dans son dossier. Tu peux toujours revenir en arrière."
-        },
-        {
-          "title": "Export par lot intelligent",
-          "detail": "Sélectionne 200 photos, exporte-les en JPG 1080 px pour Insta, en WebP optimisé pour ton blog, ou en AVIF moderne. Renommage en lot, watermark optionnel, output organisé."
-        },
-        {
-          "title": "Palette de commandes Ctrl+K",
-          "detail": "Tout est accessible au clavier : changer de vue, filtrer par date, tag, lieu, exporter, supprimer. Pas besoin de chercher dans 12 menus."
+          "title": "Tri rapide",
+          "detail": "Élimine les doublons et photos floues en deux clics."
         }
       ],
       "personas": [
@@ -495,7 +474,8 @@
           "src": "assets/screenshots/bobeez/02-empty.png",
           "caption": "Bobeez — état initial"
         }
-      ]
+      ],
+      "kind": "app"
     },
     {
       "id": "teddy-mail",
@@ -564,27 +544,41 @@
     },
     {
       "id": "le-denicheur",
-      "name": "Le Dénicheur",
-      "tagline": "Trouve sur 9 plateformes les créateurs qui n'ont pas encore monétisé leur audience",
+      "name": "Obelisk",
+      "tagline": "Trouve les créateurs non-monétisés dans ta niche, avant tout le monde.",
       "category": "pro",
       "proSection": "generaliste",
       "tier": "premium",
       "icon": "assets/apps/le-denicheur.png",
       "price": 129,
-      "priceNote": "Paiement unique · à vie",
+      "priceNote": "paiement unique",
       "installed": false,
       "exePath": null,
       "buyUrl": "https://denicheur.triskell-studio.fr",
-      "salesPitch": "Trouve les créateurs prêts à être abordés, là où personne ne pense à chercher.",
-      "motto": "Pour qui veut prospecter sans cold-mailer 500 gens au pif.",
-      "description": "Le Dénicheur est un outil de prospection multi-plateforme. Tu lui donnes une niche (\"café spécialité\", \"poterie artisanale\", \"randonnée alpine\"…), il va parcourir 9 plateformes (YouTube, Twitch, Reddit, Bluesky, Mastodon, Apple Podcasts, Dailymotion, Kick, GitHub), lit chaque profil, et détecte automatiquement ceux qui n'ont pas encore monétisé leur communauté — pas de boutique, pas de code promo, pas de Linktree. Score de pertinence par profil, dédoublonnage cross-plateforme. Tu repères en quelques minutes les créateurs prêts à être abordés, tu les ranges dans ton CRM intégré, et tu exportes tes prospects en CSV.",
+      "salesPitch": "Trouve les créateurs qui n'ont encore signé avec personne — avant tes concurrents.",
+      "motto": "La prospection à l'aveugle, c'est une perte de temps.",
+      "description": "Obelisk (anciennement Le Dénicheur) scanne 9 plateformes — YouTube, Twitch, Reddit, Bluesky, Mastodon, Apple Podcasts, Dailymotion, Kick, GitHub — pour identifier les créateurs sans monétisation déjà en place. Il sort 30 prospects qualifiés en 5 minutes, avec emails extraits et premier message rédigé par IA.",
       "features": [
-        "Recherche multi-plateformes (9) : YouTube, Twitch, Reddit, Bluesky, Mastodon, Apple Podcasts, Dailymotion, Kick, GitHub en simultané",
-        "Détection auto de monétisation (Amazon, Linktree, Patreon, Shopify, Gumroad, Ko-Fi, et 20+ autres patterns)",
-        "Filtrage par niche + seuil d'abonnés max — tu cibles les créateurs sous-exploités",
-        "CRM intégré : statuts (à contacter, contacté, a répondu, refus), notes, export CSV",
-        "100 % local — tes prospects et tes clés API restent sur ta machine",
-        "APIs officielles uniquement — aucun risque de bannissement"
+        {
+          "title": "Recherche multi-plateforme",
+          "detail": "9 sources scannées en parallèle avec filtres mots-clés, abonnés, langue."
+        },
+        {
+          "title": "Détection de monétisation",
+          "detail": "Exclut automatiquement créateurs sponsorisés, shop ou Linktree (25+ patterns)."
+        },
+        {
+          "title": "Auto-pilote IA",
+          "detail": "Rédige et envoie les mails personnalisés via SMTP, 5 providers IA supportés."
+        },
+        {
+          "title": "CRM intégré",
+          "detail": "Statuts, notes, historique, export CSV — sans abonnement."
+        },
+        {
+          "title": "100 % local",
+          "detail": "Tout reste sur ta machine. Aucune télémétrie, RGPD-friendly."
+        }
       ],
       "links": [
         {
@@ -595,12 +589,13 @@
       "installer": {
         "kind": "exe-installer",
         "productKey": "le-denicheur"
-      }
+      },
+      "kind": "app"
     },
     {
       "id": "artisia-studio",
       "name": "Artisia Studio",
-      "tagline": "Outils numériques sur-mesure pour professionnels — desktop, web, hybride. L'IA quand elle sert, jamais avant",
+      "tagline": "Outils numériques sur-mesure pour pros qui refusent les logiciels génériques.",
       "category": "pro",
       "proSection": "generaliste",
       "tier": "service",
@@ -614,18 +609,30 @@
         "ctaPrimaryLabel": "Voir Artisia Studio",
         "ctaSecondaryLabel": "Réserver un diagnostic"
       },
-      "salesPitch": "On forge des outils sur-mesure, ajustés à votre métier — pas à un cahier des charges générique.",
-      "motto": "Pour qui en a marre de plier son métier au logiciel des autres.",
-      "description": "Artisia Studio est l'atelier sur-mesure de Triskell. On conçoit des applications desktop, web ou hybrides taillées pour un métier précis — pas un SaaS générique de plus. La phase de diagnostic est offerte : on passe une journée à comprendre votre activité, et on vous remet une note écrite avec périmètre, prix forfaitaire et délai. Pas de tarif horaire, pas de régie, pas de dépendance : à la livraison, le code source et l'infrastructure tournent à votre nom.\n\nCe qui nous distingue, et qu'on assume contre la mode : on ne déploie de l'IA que là où elle produit un gain mesurable. Si une règle métier de dix lignes suffit, c'est dix lignes qu'on écrit. Si un LLM change la donne, on l'intègre proprement — avec garde-fous, supervision et coût par usage explicité. Aucune décision technique ne devrait reposer sur un buzzword.\n\nTrois modèles commerciaux selon votre besoin : forfait classique (l'outil reste interne), marque blanche (vous le distribuez sous votre nom), royalties partagées (modèle de commission si vous le revendez). Tarification toujours sur devis, prix fixé en fin de diagnostic.",
+      "salesPitch": "Quand ton métier mérite mieux qu'un SaaS plié au plus grand dénominateur commun.",
+      "motto": "Des outils faits pour vos mains. Pas pour le marché.",
+      "description": "Artisia Studio conçoit des logiciels métier sur-mesure pour pros qui refusent de plier leur métier aux outils existants. On part de ton vocabulaire et de tes process réels, on intègre l'IA uniquement quand ça apporte un gain mesurable, et tu es propriétaire du résultat — pas dépendant d'un abonnement.",
       "features": [
-        "Diagnostic offert — une journée sur place ou en visio, note écrite remise",
-        "Desktop, web, hybride — selon ce que le métier exige réellement",
-        "Prix forfaitaire fixé en fin de diagnostic — pas de régie, pas de dérive",
-        "Code source, données et infrastructure à votre nom à la livraison",
-        "L'IA déployée seulement quand elle apporte un gain mesurable",
-        "Marque blanche disponible — on s'efface derrière votre nom",
-        "Modèle de royalties possible si vous revendez l'outil",
-        "Un seul interlocuteur du diagnostic à la livraison"
+        {
+          "title": "Sur-mesure vraiment",
+          "detail": "Le logiciel s'adapte à ton métier, pas l'inverse."
+        },
+        {
+          "title": "L'IA quand elle sert",
+          "detail": "Déploiement ML uniquement là où il y a un gain mesurable."
+        },
+        {
+          "title": "L'outil t'appartient",
+          "detail": "Code, données et infra à ton nom, sans dépendance perpétuelle."
+        },
+        {
+          "title": "4 formats de livraison",
+          "detail": "Desktop, Web, Hybride ou Clé en main selon le besoin."
+        },
+        {
+          "title": "Diagnostic offert",
+          "detail": "Première journée gratuite pour comprendre le métier et proposer une solution."
+        }
       ],
       "links": [
         {
@@ -641,7 +648,7 @@
     {
       "id": "triskell-studio-sites",
       "name": "Triskell Studio",
-      "tagline": "Ton site web déjà prêt — création + hébergement + maintenance, tout compris",
+      "tagline": "Nouvelle version arrive bientôt.",
       "category": "pro",
       "proSection": "generaliste",
       "tier": "service",
@@ -655,18 +662,10 @@
         "ctaPrimaryLabel": "Voir l'offre",
         "ctaSecondaryLabel": "Nous écrire"
       },
-      "salesPitch": "Ton site web livré en 48 h, sans création à payer ni engagement.",
-      "motto": "Pour qui veut un site qui marche, pas un dashboard à apprendre.",
-      "description": "Une agence bretonne qui te livre 3 versions de ton site web, prêtes à activer en 48 heures. Tu choisis celle que tu préfères (rétro 80s, classique, futuriste — ou un univers sur mesure), et on s'occupe de tout : design, hébergement européen, maintenance technique, optimisation SEO local, certificat HTTPS, formulaires, Google Maps, avis Google… Pas de création à payer en amont, pas d'engagement, et tes données restent les tiennes.",
-      "features": [
-        "3 versions de site personnalisées à ton activité, livrées en 48 h",
-        "Hébergement européen + maintenance technique inclus, sans surprise",
-        "SEO local optimisé (balises structurées, vitesse, mobile, HTTPS)",
-        "Options à la carte : formulaire avancé, galerie, WhatsApp, réservations, avis Google… (5 €/mois chacune)",
-        "Support humain par email avec réponse sous 24 h ouvrées",
-        "Promo lancement Mai 2026 : création offerte (490 € HT), 0 € d'engagement",
-        "Export complet de tes données si tu pars — aucune captivité"
-      ],
+      "salesPitch": "Le portail central Triskell — refonte en cours.",
+      "motto": "",
+      "description": "Le site Triskell Studio est en refonte. Une nouvelle version regroupant l'ensemble de l'écosystème arrive prochainement.",
+      "features": [],
       "links": [
         {
           "label": "Voir le site de l'agence",
@@ -681,31 +680,44 @@
     {
       "id": "eliks-studio",
       "name": "Eliks Studio",
-      "tagline": "Growth Operator — on transforme tes réseaux sociaux en machine à ventes, payés uniquement à la commission",
+      "tagline": "Growth Operator — commission pure, zéro mensualité.",
       "category": "pro",
       "proSection": "generaliste",
       "tier": "service",
       "kind": "service",
       "icon": "assets/apps/eliks-studio.svg",
-      "priceFrom": "Commission pure",
-      "priceNote": "Zéro fixe · pas de setup · pas d'engagement",
+      "priceFrom": "10 à 25 % du CA additionnel",
+      "priceNote": "commission variable selon marge et ticket moyen",
       "service": {
         "url": "https://eliks.triskell-studio.fr",
         "contactEmail": "contact@triskell-studio.fr",
         "ctaPrimaryLabel": "Voir Eliks Studio",
         "ctaSecondaryLabel": "Réserver un appel"
       },
-      "salesPitch": "On transforme tes réseaux en machine à ventes — payés uniquement quand ça vend.",
-      "motto": "Pour qui en a marre des agences qui facturent, peu importe le résultat.",
-      "description": "Eliks Studio est un service de Growth Operator pour Instagram, TikTok, LinkedIn, YouTube et X. Pas community manager, pas tournage de vidéos : on conçoit, on analyse et on optimise la machine qui transforme ton audience en chiffre d'affaires. Stratégie de contenu, lecture des analytics, tunnel de conversion, automatisation. Et surtout : on n'est payés que sur les ventes qu'on génère. Si tu ne gagnes rien, on ne gagne rien. 6 marques en simultané maximum.",
+      "salesPitch": "On opère tes réseaux sociaux pour générer des ventes — on est payés sur le résultat.",
+      "motto": "Vos réseaux sociaux en machine à ventes.",
+      "description": "Eliks Studio transforme tes réseaux sociaux en machine à ventes : stratégie, analyse, optimisation sur Instagram, TikTok, LinkedIn, YouTube ou X — sans toucher à la production de contenu. Modèle commission pure : tu ne paies que sur les ventes générées.",
       "features": [
-        "Stratégie de contenu : positionnement, angles éditoriaux, hooks qui performent dans ta niche",
-        "Analyse de performance : watch time, retention, CTR profil, conversions attribuées — chaque métrique devient une décision",
-        "Tunnel de conversion repensé : bio, lien, capture, nurturing — pour que ton trafic se transforme",
-        "Système répétable : process clairs, automatisations, dashboards hebdo — pas du bricolage",
-        "Modèle commission pure : 0 € de mensualité, 0 € de setup, 0 engagement",
-        "Tracking transparent — tu vois chaque vente attribuée",
-        "Premier appel offert sous 48 h"
+        {
+          "title": "Stratégie de contenu",
+          "detail": "Positionnement, hooks, angles éditoriaux et calendrier data-driven."
+        },
+        {
+          "title": "Analyse de performance",
+          "detail": "Watch time, retention, CTR, dashboard hebdo, tests A/B."
+        },
+        {
+          "title": "Systèmes & automatisation",
+          "detail": "Workflows DM, capture email, nurturing — n8n, Make, ManyChat."
+        },
+        {
+          "title": "Monétisation",
+          "detail": "Offer design, landing pages haute conversion, tunnels de vente."
+        },
+        {
+          "title": "Limite à 6 clients",
+          "detail": "Sélection stricte pour garantir accompagnement sur-mesure."
+        }
       ],
       "links": [
         {
@@ -721,55 +733,43 @@
     {
       "id": "le-heraut",
       "name": "AlphaCast",
-      "tagline": "De 2 h/jour à 10 min/jour pour tes réseaux — sans avoir l'air d'une IA",
+      "tagline": "De 2 h/jour à 10 min/jour, sans sonner comme une IA.",
       "category": "pro",
       "proSection": "generaliste",
       "tier": "webapp",
-      "kind": "webapp",
+      "kind": "app",
       "icon": "assets/apps/alphacast.png",
-      "priceFrom": "Gratuit · Pro à 29 €/mois",
-      "priceNote": "SaaS web + mobile · essai gratuit · annulable à tout moment",
+      "priceFrom": "à partir de 0 €",
+      "priceNote": "par mois",
       "service": {
         "url": "https://reseaux.triskell-studio.fr",
         "contactEmail": "contact@triskell-studio.fr",
         "ctaPrimaryLabel": "Ouvrir AlphaCast",
         "ctaSecondaryLabel": "Voir les tarifs"
       },
-      "salesPitch": "Une source. Tous les réseaux. Ta voix — calibrée par ton corpus, pas par un LLM générique.",
-      "motto": "Pour qui veut publier partout sans publier comme tout le monde.",
-      "description": "AlphaCast est un SaaS de gestion et publication multi-réseaux pensé pour les créateurs solo et les petites équipes. Tu colles une source (article, notes brutes, vidéo, URL), AlphaCast génère plusieurs angles dans ta voix — capturée à partir de tes posts passés via voice profiling + RAG — formatés pour chaque plateforme avec ses contraintes propres (limite de caractères, découpe en thread sur X, conventions hashtags). Validation au swipe sur mobile, publication immédiate ou planifiée, suivi des performances automatique.\n\nLa différence : un détecteur d'AI-slop régénère le draft tant qu'il sonne LLM, et une boucle d'apprentissage tourne chaque nuit (z-score performance par compte × plateforme) pour extraire 3 patterns actionnables par semaine et te proposer le recyclage de tes top performers sous un nouvel angle. Côté vidéo, le pipeline transcrit (Whisper), score les meilleurs moments, recadre en 9:16 et brûle des sous-titres karaoke avant de pousser sur YouTube Shorts.\n\nLinkedIn / X / Bluesky / YouTube Shorts en publication directe. Instagram / Threads / TikTok / Facebook en génération uniquement (publication ouverte une fois les approbations Meta/TikTok obtenues — copie manuelle dispo entre-temps).",
+      "salesPitch": "Multi-plateforme dans TA voix, sans le ton plat des IA classiques.",
+      "motto": "One source. Every network. Your voice.",
+      "description": "AlphaCast publie ton contenu sur LinkedIn, X, Bluesky et YouTube Shorts à partir d'une seule source — en gardant ton style. Il apprend ta voix depuis tes anciens posts, analyse les performances chaque nuit, et te livre 3 axes d'amélioration concrets.",
       "features": [
         {
           "title": "Multi-plateforme natif",
-          "detail": "LinkedIn, X (avec auto-split en thread), Bluesky, YouTube Shorts en publication directe. Chaque réseau traité avec ses règles : longueur, hashtags, ton, format média."
+          "detail": "LinkedIn, X, Bluesky, YouTube Shorts — chaque format adapté."
         },
         {
-          "title": "Voice profiling + RAG sur ton corpus",
-          "detail": "Importe 20 à 50 de tes posts passés. AlphaCast indexe ton style, ton ton, tes tics d'écriture, et s'en sert à chaque génération via embeddings + retrieval."
+          "title": "Une voix qui n'a pas l'air IA",
+          "detail": "Importe tes anciens posts pour apprendre ton style."
         },
         {
-          "title": "Détecteur d'AI-slop avec régénération",
-          "detail": "Un classifieur scanne chaque draft pour les tics LLM (mots interdits, formules génériques, jargon corporate). Si le score dérape, le pipeline régénère automatiquement (max 2 retries)."
+          "title": "Apprentissage continu",
+          "detail": "Tes posts sont notés chaque nuit, 3 patterns concrets extraits."
         },
         {
-          "title": "Boucle d'apprentissage hebdo",
-          "detail": "Cron nightly à 03 h 30 (Europe/Paris) : z-score par (workspace × plateforme), top decile flaggé. Haiku extrait 3 patterns actionnables top vs weak. Bouton recycler en 1 clic."
+          "title": "Multi-angles",
+          "detail": "Génère plusieurs angles à partir d'une seule source, dans ta voix."
         },
         {
-          "title": "Pipeline vidéo → Shorts",
-          "detail": "Probe FFmpeg → extraction audio → Whisper → score-moments Haiku → cut → reframe 9:16 → sous-titres ASS karaoke (3-5 mots, ≤2,5 s) → upload YouTube Shorts."
-        },
-        {
-          "title": "Mobile Expo + streaming",
-          "detail": "App mobile (iOS/Android) avec swipe-approve, push notifications Expo. Génération en streaming SSE côté web — tu vois le draft s'écrire en direct."
-        },
-        {
-          "title": "Content series multi-angles",
-          "detail": "Une source → N angles × M plateformes en fan-out, avec auto_schedule et daily_cap (défaut 1 post/jour) pour étaler la diffusion."
-        },
-        {
-          "title": "100 % EU + RLS Postgres",
-          "detail": "Hébergement européen (Railway + Vercel + Cloudflare R2). Row-Level Security activée sur toute la base : ton workspace est isolé techniquement, pas juste par filtre app."
+          "title": "Publication en 1 swipe",
+          "detail": "Valide et publie tout de suite, ou planifie sur tous les réseaux."
         }
       ],
       "personas": [
@@ -796,10 +796,26 @@
       ],
       "pricing": {
         "tiers": [
-          { "name": "Gratuit", "price": "0 €", "summary": "1 espace · 2 comptes sociaux · 20 posts/mois" },
-          { "name": "Pro", "price": "29 €/mois", "summary": "10 comptes sociaux · 300 posts/mois · import de voix" },
-          { "name": "Équipe", "price": "79 €/mois", "summary": "3 espaces · 1 500 posts/mois · planification de séries" },
-          { "name": "Agence", "price": "199 €/mois", "summary": "Illimité · marque blanche · support prioritaire" }
+          {
+            "name": "Gratuit",
+            "price": "0 €",
+            "summary": "1 espace · 2 comptes sociaux · 20 posts/mois"
+          },
+          {
+            "name": "Pro",
+            "price": "29 €/mois",
+            "summary": "10 comptes sociaux · 300 posts/mois · import de voix"
+          },
+          {
+            "name": "Équipe",
+            "price": "79 €/mois",
+            "summary": "3 espaces · 1 500 posts/mois · planification de séries"
+          },
+          {
+            "name": "Agence",
+            "price": "199 €/mois",
+            "summary": "Illimité · marque blanche · support prioritaire"
+          }
         ]
       },
       "links": [
@@ -816,43 +832,39 @@
     {
       "id": "ultimate-prompt-builder",
       "name": "AlphaBeast",
-      "tagline": "Combine ton prompt avec 16 Mega Prompts brandés et envoie a Claude, GPT, Gemini, Mistral ou Grok",
+      "tagline": "Sortir tes IA du mode validation par défaut.",
       "category": "pro",
       "proSection": "generaliste",
       "tier": "premium",
       "icon": "assets/apps/alphabeast.png",
       "price": 19,
-      "priceNote": "Paiement unique · à vie · 100 % local",
+      "priceNote": "paiement unique, à vie",
       "installed": false,
       "exePath": null,
       "buyUrl": "https://prompt-builder.triskell-studio.fr",
-      "salesPitch": "Tes prompts ultimes, en local, vers l'IA de ton choix.",
+      "salesPitch": "Quand tu veux que l'IA te dise la vérité, pas juste te flatter.",
       "motto": "Pour qui veut sortir des LLM mode validation par défaut.",
-      "description": "AlphaBeast est une app desktop qui combine ton prompt de base avec une bibliothèque de 16 Mega Prompts puissants — Honnêteté brutale, Anti-slop, Pre-mortem, Sparring partner contradicteur, Coach socratique, Mode produit, Détection de biais, et plus — pour produire un \"Prompt Ultime\" prêt à envoyer à Claude, GPT, Gemini, Mistral ou Grok depuis l'app.\n\nLes 16 Mega Prompts sont issus de la Bibliothèque de prompts auto-adressés : chacun cible un mode de fonctionnement précis et produit des résultats mesurablement différents de ceux qu'on obtient sans prompt explicite. Tu les combines via 6 presets recommandés (Build d'app, Décision stratégique, Recherche & veille, Apprentissage profond, Diagnostic complexe, Production de sites) ou tu en assembles ton propre cocktail.\n\nLa bibliothèque est entièrement éditable : tu modifies les 16 prompts existants, tu ajoutes les tiens, tu sauvegardes, tu exportes. Tes clés API restent en local dans un fichier settings.json — elles ne sont transmises qu'au provider d'IA que tu choisis explicitement.",
+      "description": "AlphaBeast combine ton prompt avec une bibliothèque de 16 Mega Prompts puissants et l'envoie à Claude, GPT, Gemini, Mistral ou Grok en un clic. Il désactive les biais de validation des modèles pour obtenir des réponses plus honnêtes et exploitables.",
       "features": [
         {
-          "title": "16 Mega Prompts brandés, prêts à combiner",
-          "detail": "Honnêteté brutale, Anti-slop, Pre-mortem, Steelman avant critique, Coach socratique, Sparring partner, Premiers principes, Mode produit, Détection de biais, Investigateur, Densité d'information, Compression maximale, et plus. Combinables en presets ou un par un."
+          "title": "16 Mega Prompts brandés",
+          "detail": "Honnêteté brutale, Anti-slop, Pre-mortem, Coach socratique — combinables."
         },
         {
-          "title": "5 providers IA supportés",
-          "detail": "Anthropic (Claude), OpenAI (GPT), Google (Gemini), Mistral, xAI (Grok). Configure tes clés API en local, choisis ton provider et ton modèle dans l'app, envoie le Prompt Ultime en un clic."
+          "title": "5 providers IA natifs",
+          "detail": "Anthropic, OpenAI, Google, Mistral, xAI avec config locale."
         },
         {
-          "title": "Bibliothèque éditable + CRUD complet",
-          "detail": "Modifie les 16 prompts existants, crée tes propres Mega Prompts, supprime ce qui ne te sert pas. Recherche par nom/catégorie/contenu. Tout sauvegardé dans mega_prompts.json local."
+          "title": "7 presets prêts à l'emploi",
+          "detail": "Build d'app, Décision stratégique, Recherche, Diagnostic, Production."
         },
         {
-          "title": "Historique + sauvegarde + export",
-          "detail": "Les 20 derniers prompts générés sont conservés. Sauvegarde manuelle des Prompts Ultimes que tu veux garder. Export en .txt ou .md pour partager."
+          "title": "100 % local, zéro tracker",
+          "detail": "Tes clés API et tes prompts restent sur ta machine."
         },
         {
-          "title": "100 % local · zéro tracker",
-          "detail": "Tes prompts, ton historique, tes clés API restent sur ta machine. Aucune télémétrie. Les seuls appels réseau sont vers le provider IA que tu choisis explicitement."
-        },
-        {
-          "title": "Mises à jour automatiques",
-          "detail": "L'app vérifie en arrière-plan si une nouvelle version est disponible sur GitHub Releases, télécharge silencieusement et te propose d'installer en un clic."
+          "title": "Mises à jour à vie",
+          "detail": "Vérification et installation silencieuses via GitHub Releases."
         }
       ],
       "personas": [
@@ -894,52 +906,45 @@
       "installer": {
         "kind": "exe-installer",
         "productKey": "ultimate-prompt-builder"
-      }
+      },
+      "kind": "app"
     },
     {
       "id": "alphapitch",
       "name": "AlphaPitch",
       "proSection": "generaliste",
-      "tagline": "Génère le bon message de prospection en 4 clics — par produit, par cible, par canal",
+      "tagline": "Génère ton message de prospection en 4 clics.",
       "category": "pro",
       "tier": "free",
       "icon": "assets/apps/alphapitch.png",
       "price": 0,
-      "priceNote": "Gratuit · 100 % local · mises à jour à vie",
+      "priceNote": "gratuit (reformulation IA via clés perso)",
       "installed": false,
       "exePath": null,
       "buyUrl": "https://prospect.triskell-studio.fr",
-      "salesPitch": "Le bon message, au bon moment, pour le bon client. 4 clics, c'est plié.",
-      "motto": "Pour qui en a marre de réécrire 50 fois le même DM.",
-      "description": "AlphaPitch est une app desktop de prospection écrite. Tu choisis le produit que tu veux pousser, ta cible, la situation du prospect (par exemple : a déjà un site / pas encore de site, déjà du paid / aucun paid…) et le canal (Email, LinkedIn, Instagram DM, WhatsApp, Facebook Messenger, Twitter/X DM). L'app te génère un template rédigé à la main, en français correct (accents préservés, ton breton chaleureux), avec des placeholders révélables `[Prénom]`, `[Nom entreprise]`, `[Lien site]` que tu remplis directement dans l'app.\n\nLe catalogue couvre les 6 produits Triskell (Triskell Studio sites web, Eliks Studio Growth Operator, Le Dénicheur, AlphaCast, Triskell Suite B2C, Bundles mixtes), 31 cibles priorisées par produit, et plus de 50 templates rédigés à la main. Pour chaque produit, des sous-cas adaptent l'accroche au contexte du prospect — pas le même message si la boîte a déjà un site moisi ou pas de site du tout.\n\nLa reformulation IA optionnelle (Claude ou OpenAI, ta clé) permet d'adapter le ton à la cible. Export en .txt, .pdf et .docx brandés Triskell. Copie en 1 clic, historique des messages générés, persistance des champs courants (ton prénom, ton lien site) entre sessions. Tout est local — aucune donnée ne sort de ta machine sauf si tu actives explicitement la reformulation IA.",
+      "salesPitch": "Des messages humains, pas du contenu généré au kilomètre.",
+      "motto": "Le bon message, au bon moment, pour le bon client.",
+      "description": "AlphaPitch (anciennement Triskell Sales Tunnel) génère des templates de prospection en 4 clics à partir d'environ 50 messages rédigés à la main — pas du LLM. 100 % local, sans compte. Reformulation IA optionnelle via tes propres clés Claude/GPT/Gemini.",
       "features": [
         {
-          "title": "Parcours à 4 étapes : Produit → Cible → Canal → Message",
-          "detail": "Wizard fluide avec indicateur de progression. À chaque étape, tu choisis dans une grille visuelle. Les cibles sont priorisées (Priorité haute / moyenne / standard) selon leur potentiel pour le produit choisi."
+          "title": "4 étapes simples",
+          "detail": "Produit → Cible → Canal → Personnalisation, et c'est prêt."
         },
         {
-          "title": "6 produits × 31 cibles × 6 canaux × ~50 templates",
-          "detail": "Triskell Studio (sites), Eliks Studio (growth), SaaS Dénicheur, SaaS Publication, Triskell Suite B2C, Bundles mixtes. Email, LinkedIn, Instagram DM, WhatsApp, Facebook Messenger, Twitter/X DM. Templates rédigés un par un, ton chaleureux, accents préservés."
+          "title": "Templates manuels",
+          "detail": "~50 messages rédigés à la main, pas de génération LLM."
         },
         {
-          "title": "Sous-cas par produit (situation du prospect)",
-          "detail": "Pour chaque produit, des contextes spécifiques adaptent le message : a déjà un site / pas (encore) de site / site obsolète, déjà du paid actif / aucun paid, programme UGC en place / démarre l'UGC, etc. L'accroche change, les arguments aussi."
+          "title": "Reformulation IA optionnelle",
+          "detail": "Anthropic, OpenAI ou Google avec tes propres clés API."
         },
         {
-          "title": "Placeholders révélables et éditables",
-          "detail": "Affichés `[Prénom]`, `[Nom entreprise]`, `[Lien site]` pour la lisibilité, mais tu cliques sur \"Révéler les champs\" pour les remplir dans l'app. La régénération applique tes valeurs à tout le template."
+          "title": "Export multi-formats",
+          "detail": "Copie 1 clic, .txt, .pdf brandé, .docx Word."
         },
         {
-          "title": "Reformulation IA optionnelle (Claude ou OpenAI)",
-          "detail": "Ajoute ta clé Anthropic ou OpenAI dans Paramètres pour reformuler en 1 clic. Le ton est calibré sur le style Triskell. Les placeholders restent à l'identique. Variables d'env supportées (ANTHROPIC_API_KEY / OPENAI_API_KEY)."
-        },
-        {
-          "title": "Export multi-format brandé",
-          "detail": "Export en .txt (raw), .pdf (PDF brandé Triskell avec bandeau navy + filet turquoise) ou .docx (Word formaté). Copie en 1 clic dans le presse-papier. Historique des 50 derniers messages générés."
-        },
-        {
-          "title": "100 % local · mises à jour à vie",
-          "detail": "Aucune donnée envoyée à Triskell. Tes valeurs courantes (prénom, lien site, etc.) sont mémorisées en local pour la prochaine session. Mises à jour automatiques via GitHub Releases (vérification silencieuse, installation au clic)."
+          "title": "100 % offline",
+          "detail": "Aucune télémétrie, stockage local uniquement."
         }
       ],
       "personas": [
@@ -981,19 +986,20 @@
       "installer": {
         "kind": "exe-installer",
         "productKey": "alphapitch"
-      }
+      },
+      "kind": "app"
     },
     {
       "id": "outils-batiment",
       "name": "Triskell Outils Pro",
       "proSection": "batiment",
-      "tagline": "Calculateurs chantier pour artisans — carrelage, placo, peinture, béton",
+      "tagline": "L'outil chantier de l'artisan.",
       "category": "pro",
       "tier": "webapp",
-      "kind": "webapp",
+      "kind": "app",
       "icon": "assets/apps/outils-batiment.png",
       "price": 9,
-      "priceNote": "Paiement unique · à vie · web app PWA accessible navigateur + mobile",
+      "priceNote": "par mois",
       "buyUrl": "",
       "buyUrlPlaceholder": true,
       "service": {
@@ -1002,15 +1008,30 @@
         "ctaPrimaryLabel": "Ouvrir l'app",
         "ctaSecondaryLabel": "Voir les détails"
       },
-      "salesPitch": "Tes calculs chantier en 10 secondes, depuis le téléphone, sur le terrain.",
-      "motto": "Pour qui en a marre de recalculer 3 fois le m² de carrelage à chaque devis.",
-      "description": "Triskell Outils Pro est une web app PWA pensée pour les artisans du bâtiment qui veulent chiffrer un chantier vite et juste. Carreleur, plaquiste, peintre, maçon : chaque métier a ses calculateurs dédiés (surfaces, quantités matériaux, mortier, peinture par m², plaques de placo) plus des outils universels (surface nette avec déductions, TVA travaux 5,5/10/20 %, conversions m²/m³/L/kg).\n\nL'app s'installe comme une app native sur ton téléphone (Add to Home Screen iOS/Android) et fonctionne hors ligne. Tu sors d'un chantier, tu prends tes côtes, tu chiffres en 30 secondes, tu envoies le devis le soir même.",
+      "salesPitch": "Le métré, sans la calculette, sans le carnet, sans la galère.",
+      "motto": "Quantités, chutes, conditionnements — pensé pour le terrain.",
+      "description": "App mobile de calcul pour artisans du bâtiment. Calcule les quantités de matériaux, les chutes et les conditionnements directement sur le chantier. Fonctionne hors-ligne, s'installe sur l'écran d'accueil.",
       "features": [
-        "4 métiers : Carreleur, Plaquiste, Peintre, Maçon — calculateurs spécifiques",
-        "Outils universels : surface nette (avec déductions), TVA travaux, conversions",
-        "PWA installable sur mobile (iOS/Android) — fonctionne hors ligne",
-        "Pas de compte obligatoire — calculs locaux dans le navigateur",
-        "Mise à jour des prix matériaux à venir (régions / fournisseurs)"
+        {
+          "title": "Surface nette",
+          "detail": "Pièce avec ouvertures déduites en un calcul."
+        },
+        {
+          "title": "TVA travaux",
+          "detail": "5,5 % / 10 % / 20 % toujours sous la main."
+        },
+        {
+          "title": "Conversions",
+          "detail": "m² · m³ · ml · sacs — sans réflexion."
+        },
+        {
+          "title": "Modes métier",
+          "detail": "Carreleur, Plaquiste, Peintre, Maçon."
+        },
+        {
+          "title": "Hors-ligne",
+          "detail": "Pas besoin de réseau sur le chantier."
+        }
       ],
       "links": [
         {
@@ -1027,25 +1048,38 @@
       "id": "pack-electricien-pro",
       "name": "Pack Électricien Pro",
       "proSection": "batiment",
-      "tagline": "33 modèles devis/factures + outil chantier offert — pour électriciens",
+      "tagline": "Devis, factures et CGV prêts à l'emploi pour électriciens indépendants.",
       "category": "pro",
       "tier": "premium",
-      "kind": "pack",
+      "kind": "product",
       "icon": "assets/apps/pack-electricien-pro.png",
       "price": 27,
-      "priceNote": "Paiement unique · Word/Excel + bundle PWA Triskell Outils Pro offert à vie",
+      "priceNote": "TTC (TVA non applicable)",
       "buyUrl": "https://pack-elec.triskell-studio.fr",
-      "salesPitch": "Tes devis envoyés en 10 minutes au lieu d'une heure.",
-      "motto": "Pour qui en a marre de mettre des prix au pif et de relancer ses clients à la main.",
-      "description": "Pack Électricien Pro, c'est un kit complet de 33 modèles Word et Excel rédigés à la main pour les électriciens : devis détaillés (16 articles : objet, prix, paiement, garanties, indemnité forfaitaire 40 €), factures, CGV conformes 2026, relances automatiques, suivi de chantiers, checklists, emails de prospection.\n\nEn bonus inclus à vie : Triskell Outils Pro (la web app calculateurs chantier — normalement 9 €, offerte ici). Téléchargement immédiat après paiement, accès au pack pendant 30 jours via lien signé HMAC.\n\nPaiement unique 27 €, garantie satisfait ou remboursé 14 jours.",
+      "salesPitch": "Envoie tes devis en 10 minutes au lieu d'une heure — et fais-toi payer plus vite.",
+      "motto": "Tu remplis, tu envoies, tu signes.",
+      "description": "Pack tout-en-un : 6 modèles de devis et 7 de factures pré-remplis (Word + Excel avec TVA auto), CGV type électricien conformes 2026 (16 articles + relances impayés), tableau Excel de suivi avec 12 KPI, guide chiffrage 18 pages. Triskell Outils Pro offert.",
       "features": [
-        "33 modèles Word & Excel : devis, factures, CGV, relances, suivi, checklists",
-        "Devis détaillés avec 16 articles type (clauses paiement, garanties, indemnités)",
-        "CGV électricien conformes 2026 — prêtes à signer",
-        "Bundle inclus : Triskell Outils Pro à vie (9 € offerts)",
-        "Téléchargement immédiat post-paiement, lien signé HMAC valable 30 jours",
-        "Garantie satisfait ou remboursé 14 jours",
-        "Paiement unique 27 € · pas d'abonnement"
+        {
+          "title": "Devis et factures prêts",
+          "detail": "6 devis et 7 factures pré-remplis (Word + Excel avec calculs TVA auto)."
+        },
+        {
+          "title": "CGV type électricien",
+          "detail": "16 articles conformes 2026, avec 3 niveaux de relance impayés."
+        },
+        {
+          "title": "Tableau de suivi Excel",
+          "detail": "Dashboard auto avec 12 KPI : CA, impayés, alertes retard."
+        },
+        {
+          "title": "Guide chiffrage 18 pages",
+          "detail": "Méthode de facturation, temps de pose, cas pratiques."
+        },
+        {
+          "title": "Bundle Outils Pro",
+          "detail": "11 calculateurs chantier offerts à vie (valeur 108 €/an)."
+        }
       ],
       "links": [
         {

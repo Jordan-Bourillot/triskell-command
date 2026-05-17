@@ -105,22 +105,26 @@ _DEFAULT_SITES = [
     {
         "id": "lagriffe",
         "name": "Lagriffe Studio",
-        "tagline": "Sites web premium pour artisans et indépendants.",
-        "description": "Lagriffe Studio crée des sites vitrines élégants pour artisans, "
-                       "indépendants et petites entreprises. Design soigné, performance, "
-                       "SEO de base, hébergement géré. Tarif unique sans abonnement.",
-        "sales_pitch": "Un site qui ressemble à ton métier, pas à un template Wix.",
-        "motto": "Pour les pros qui veulent un vrai site, pas un site bricolé.",
+        "tagline": "Ton site offert, 49 €/mois quand tu l'aimes.",
+        "description": "Lagriffe Studio crée ton site web sur-mesure. Tu le découvres avant "
+                       "de payer quoi que ce soit. Si tu valides, c'est 49 €/mois — hébergement, "
+                       "modifications et support inclus. Sans engagement.",
+        "sales_pitch": "Un site qu'on conçoit pour toi, que tu ne paies que si tu l'aimes.",
+        "motto": "Création offerte · 49 €/mois après validation · Sans engagement.",
         "category": "sites",
         "kind": "service",
+        "price": 49,
+        "price_note": "HT/mois",
         "buy_url": "https://lagriffe-studio.fr",
         "logo": "",
         "color": "#d4af37",
         "initial": "L",
         "features": [
-            {"title": "Design sur-mesure", "detail": "Pas de template figé. Chaque site est dessiné à partir de ton métier et de ton univers."},
-            {"title": "SEO de base inclus", "detail": "Structure propre, balises optimisées, pages locales — tu apparais dans Google sans surcoût."},
-            {"title": "Hébergement géré",   "detail": "On s'occupe du domaine, du HTTPS, des sauvegardes. Tu n'as rien à toucher."},
+            {"title": "Création offerte", "detail": "Tu valides le site avant de payer."},
+            {"title": "4 pages incluses", "detail": "Accueil, Services, À propos, Contact."},
+            {"title": "5 fonctionnalités au choix", "detail": "Google Maps, WhatsApp, horaires, avis Google, mode sombre…"},
+            {"title": "Mise en ligne sous 24 h", "detail": "Après validation, ton site est en ligne le lendemain."},
+            {"title": "SEO optimisé d'origine", "detail": "Code propre, balises bien faites — Google te lit dès le départ."},
         ],
         "is_builtin": True,
     },
@@ -149,23 +153,27 @@ _DEFAULT_SITES = [
     },
     {
         "id": "wow",
-        "name": "Studio WoW",
-        "tagline": "Sites haut de gamme avec effets immersifs.",
-        "description": "Studio WoW conçoit des sites premium pour marques et marques "
-                       "personnelles qui veulent un effet « waouh » à l'arrivée. Animations, "
-                       "scroll cinématique, typographie travaillée, performance maintenue.",
+        "name": "WoW Studio",
+        "tagline": "Sites internet très haut de gamme.",
+        "description": "WoW Studio conçoit des sites premium pour grandes marques, groupes, "
+                       "agences et cabinets exigeants. Approche méthodique en 3 phases, "
+                       "livraison en 6 à 14 semaines. Équipe dédiée de 2 seniors et "
+                       "garantie 90 jours après mise en ligne.",
         "sales_pitch": "Quand un site classique ne suffit pas à raconter qui tu es.",
-        "motto": "Pour les marques qui veulent marquer.",
+        "motto": "Quand une marque pèse, son site doit peser au moins autant.",
         "category": "sites",
         "kind": "service",
+        "price_from": "à partir de 28 000 €",
         "buy_url": "https://studio-wow.fr",
         "logo": "",
         "color": "#C9A572",
         "initial": "W",
         "features": [
-            {"title": "Direction artistique", "detail": "Univers visuel sur-mesure : typo, couleurs, photos, ambiance — tout est pensé pour ta marque."},
-            {"title": "Effets immersifs",     "detail": "Animations subtiles, scroll cinématique, transitions soignées. Sans plomber la vitesse."},
-            {"title": "Optimisé Apple-style", "detail": "Performance, accessibilité, mobile parfait. On vise le niveau des sites des grandes marques."},
+            {"title": "Processus structuré", "detail": "Trois phases : cadrage, direction artistique, réalisation — sans surprise."},
+            {"title": "Accompagnement complet", "detail": "90 jours de suivi inclus après mise en ligne, ajustements et mesure de performance."},
+            {"title": "Conformité garantie", "detail": "RGPD, accessibilité AA, sécurité, tests multi-navigateurs et appareils."},
+            {"title": "Propriété intégrale", "detail": "Code livré en propre, sans dépendance ni abonnement caché."},
+            {"title": "Spécialisation premium", "detail": "Groupes, maisons de luxe, agences partenaires, cabinets."},
         ],
         "is_builtin": True,
     },
