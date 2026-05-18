@@ -135,6 +135,79 @@ def extract_prospects(
 # ---------------------------------------------------------------------------
 # Catalogue d'offres + matching secteur → offre
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Détection produit "à vendre" vs démo métier "à montrer comme exemple"
+# ---------------------------------------------------------------------------
+def _is_demo(offer: dict) -> bool:
+    """Renvoie True si l'entrée est une DÉMO métier (exemple à montrer)
+    plutôt qu'un produit vendable.
+
+    Conventions reconnues (l'utilisateur peut en utiliser une) :
+    - kind == "demo" ou "démo" ou "example" ou "exemple"
+    - name commence par « Démo », « Demo », « Exemple », « Template »,
+      « Site exemple »
+    """
+    kind = (offer.get("kind") or "").strip().lower()
+    if kind in ("demo", "démo", "example", "exemple"):
+        return True
+    name_lc = (offer.get("name") or "").strip().lower()
+    for prefix in ("démo ", "demo ", "exemple ", "template ",
+                    "site exemple ", "exemple de site "):
+        if name_lc.startswith(prefix):
+            return True
+    return False
+
+
+def _score_sector_match(sector_lc: str, keywords_str: str) -> int:
+    """Score de match entre un secteur prospect et une chaîne de keywords.
+    Utilisé à la fois pour le matching produit ET démo. Voir
+    pick_offer_for_sector pour les règles."""
+    if not sector_lc or not keywords_str:
+        return 0
+    kws = keywords_str.lower()
+    score = 0
+    for kw in re.split(r"[,\n;]+", kws):
+        kw = kw.strip()
+        if not kw:
+            continue
+        if kw in sector_lc:
+            score += 3
+            continue
+        root = re.sub(r"(?:s|es|ier|iere|iste|ique|isme|age|aire)$", "", kw)
+        if len(root) >= 4 and root in sector_lc:
+            score += 2
+            continue
+        for tok in re.split(r"\s+", sector_lc):
+            if len(tok) >= 4 and tok in kw:
+                score += 1
+                break
+    return score
+
+
+def pick_demo_for_sector(sector: str,
+                          catalog: list[dict[str, str]]) -> dict[str, str]:
+    """Sélectionne la démo métier la plus pertinente pour le secteur du
+    prospect. Renvoie {} si aucune démo métier n'est dans le catalogue
+    OU si aucune ne matche le secteur (= on n'inclut pas de démo dans
+    le mail, plutôt qu'en mettre une hors-sujet)."""
+    demos = [o for o in (catalog or []) if isinstance(o, dict) and _is_demo(o)]
+    if not demos:
+        return {}
+    sector_lc = (sector or "").lower().strip()
+    if not sector_lc:
+        return {}
+    best: dict[str, str] = {}
+    best_score = 0
+    for demo in demos:
+        s = _score_sector_match(sector_lc, demo.get("keywords") or "")
+        if s > best_score:
+            best_score = s
+            best = demo
+    if best_score == 0:
+        return {}
+    return best
+
+
 def pick_offer_for_sector(sector: str, catalog: list[dict[str, str]]) -> dict[str, str]:
     """Sélectionne dans le catalogue l'offre dont les mots-clés matchent
     le mieux le secteur du prospect.
@@ -158,7 +231,11 @@ def pick_offer_for_sector(sector: str, catalog: list[dict[str, str]]) -> dict[st
             "url": "https://pack-elec.triskell-studio.fr",
         }
     """
-    if not catalog:
+    # On exclut les démos métier — elles ne sont pas vendables, on les
+    # gère séparément via pick_demo_for_sector().
+    sellable = [o for o in (catalog or [])
+                if isinstance(o, dict) and not _is_demo(o)]
+    if not sellable:
         return {}
     sector_lc = (sector or "").lower().strip()
 
@@ -166,10 +243,8 @@ def pick_offer_for_sector(sector: str, catalog: list[dict[str, str]]) -> dict[st
     # (= le plus "couvrant"). Si plusieurs ex-aequo, on prend le 1er.
     def _generic_fallback() -> dict[str, str]:
         best_count = -1
-        chosen = catalog[0]
-        for offer in catalog:
-            if not isinstance(offer, dict):
-                continue
+        chosen = sellable[0]
+        for offer in sellable:
             kws = offer.get("keywords") or ""
             count = len([k for k in re.split(r"[,\n;]+", kws) if k.strip()])
             if count > best_count:
@@ -182,36 +257,10 @@ def pick_offer_for_sector(sector: str, catalog: list[dict[str, str]]) -> dict[st
 
     best: dict[str, str] = {}
     best_score = 0
-    for offer in catalog:
-        if not isinstance(offer, dict):
-            continue
-        kws = (offer.get("keywords") or "").lower()
-        if not kws:
-            continue
-        score = 0
-        for kw in re.split(r"[,\n;]+", kws):
-            kw = kw.strip()
-            if not kw:
-                continue
-            # 1. Match parfait : keyword tel quel dans le secteur
-            if kw in sector_lc:
-                score += 3
-                continue
-            # 2. Match partiel : racine du keyword (sans suffixes courants)
-            #    si ≥ 4 lettres pour éviter les faux positifs ("le", "un"...)
-            root = re.sub(r"(?:s|es|ier|iere|iste|ique|isme|age|aire)$",
-                           "", kw)
-            if len(root) >= 4 and root in sector_lc:
-                score += 2
-                continue
-            # 3. Match inverse : le secteur (ou un mot du secteur) apparaît
-            #    dans le keyword
-            for tok in re.split(r"\s+", sector_lc):
-                if len(tok) >= 4 and tok in kw:
-                    score += 1
-                    break
-        if score > best_score:
-            best_score = score
+    for offer in sellable:
+        s = _score_sector_match(sector_lc, offer.get("keywords") or "")
+        if s > best_score:
+            best_score = s
             best = offer
     if not best or best_score == 0:
         return _generic_fallback()
@@ -236,7 +285,7 @@ OFFRE QUE TU PROPOSES (adaptée à son secteur) :
 - Pitch : {offer_pitch}
 - Lien : {offer_url}
 
-CONSIGNES STRICTES :
+{demo_block}CONSIGNES STRICTES :
 - Ton : direct, chaleureux, pro, jamais commercial agressif.
 - Longueur : 5 à 10 lignes max.
 - Pas de "J'espère que vous allez bien" ni autre formule creuse.
@@ -266,6 +315,20 @@ def generate_message(
 ) -> dict[str, str]:
     """Renvoie {'subject': '...', 'body': '...', 'offer_name': '...'}."""
     offer = pick_offer_for_sector(prospect.get("secteur", ""), catalog)
+    demo = pick_demo_for_sector(prospect.get("secteur", ""), catalog)
+    demo_block = ""
+    if demo:
+        demo_block = (
+            "EXEMPLE CONCRET À INCLURE DANS LE MAIL "
+            "(démo métier qui correspond pile au prospect) :\n"
+            f"- Nom de la démo : {demo.get('name', '')}\n"
+            f"- Lien à inclure dans le corps du mail : {demo.get('url', '')}\n"
+            "INSTRUCTION : insère ce lien comme PREUVE VISUELLE dans ton mail "
+            "(« Voici un exemple de ce que je peux faire pour ton métier : <lien> »). "
+            "Ça n'est PAS le produit principal — l'offre à vendre reste celle "
+            "indiquée plus haut. La démo sert juste à donner un exemple concret "
+            "qui parle directement au prospect.\n\n"
+        )
     prompt = GENERATION_PROMPT.format(
         raison_sociale=prospect.get("raison_sociale", "") or "(non précisé)",
         prenom=prospect.get("prenom", ""),
@@ -278,6 +341,7 @@ def generate_message(
         offer_name=offer.get("name", "") or "(catalogue vide)",
         offer_pitch=offer.get("pitch", ""),
         offer_url=offer.get("url", ""),
+        demo_block=demo_block,
         sender_name=sender_name or "L'équipe",
         user_brief=user_brief.strip() or "(aucune instruction supplémentaire)",
     )

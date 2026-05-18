@@ -599,8 +599,18 @@ const Catalogue = {
             ${this._fieldArea('motto', 'Devise (en italique sur la fiche)', it.motto, { rows: 2, placeholder: 'Ex : Pour les pros qui veulent un vrai site…' })}
             <div class="grid grid-cols-2 gap-3">
               ${this._fieldSelect('category', 'Section du catalogue', it.category, cats.map(c => ({ value: c, label: this.CATEGORY_LABELS[c] || c })))}
-              ${this._field('kind', 'Type', it.kind, { placeholder: 'service / product / app' })}
+              ${this._fieldSelect('kind', 'Type', it.kind || 'service', [
+                { value: 'service', label: 'Service (à vendre)' },
+                { value: 'product', label: 'Produit (à vendre)' },
+                { value: 'app',     label: 'Application (à vendre)' },
+                { value: 'demo',    label: 'Démo métier (exemple à montrer dans les mails)' },
+              ])}
             </div>
+            <p class="text-[11px] text-text-muted -mt-2 mb-2">
+              <strong>Démo métier</strong> = un exemple de site (ou autre) que tu présentes au prospect
+              pour qu'il visualise ce que tu peux lui faire. L'IA inclut le lien dans le mail comme
+              preuve visuelle adaptée à son métier, mais ne le vend pas comme produit.
+            </p>
             <div class="grid grid-cols-3 gap-3">
               ${this._field('price', 'Prix (€)', it.price, { type: 'number', placeholder: '0' })}
               ${this._field('price_original', 'Prix barré (€)', it.price_original, { type: 'number', placeholder: 'optionnel' })}
