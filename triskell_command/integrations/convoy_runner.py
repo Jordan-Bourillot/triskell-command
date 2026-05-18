@@ -397,7 +397,8 @@ def send_draft(
     cli = _supabase_client()
     if cli is not None:
         try:
-            recent = PS.has_recent_send(cli, email=to, hours=48)
+            # hours=None → lit le cooldown depuis shared_settings (72h par défaut)
+            recent = PS.has_recent_send(cli, email=to, hours=None)
             if recent.get("recent"):
                 draft.status = "skipped_duplicate"
                 draft.error = (

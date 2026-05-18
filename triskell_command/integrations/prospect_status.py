@@ -73,6 +73,101 @@ BOUNCE_SUBJECTS = (
 # Regex emails dans le body d'un DSN — on extrait l'adresse de la victime
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
+
+# =============================================================================
+# Detection des mails automatiques (newsletters, notifications, no-reply)
+# =============================================================================
+# Pourquoi : la vue "Reponses" doit afficher UNIQUEMENT les vraies reponses
+# humaines de prospects. Les newsletters, notifications de plateformes
+# (Instagram, Google, Meta, banque, etc.), confirmations automatiques et
+# accuses de reception polluent la vue et bruitent la classification IA.
+# On filtre AVANT le match prospect : un mail auto va dans inbox_received
+# pour audit, mais jamais dans reply_received.
+
+# Patterns de senders typiques d'envois automatiques.
+# Match : exact local-part au debut (noreply@x), ou contient le pattern.
+AUTOMATED_SENDER_PREFIXES = (
+    "noreply@", "no-reply@", "no_reply@", "donotreply@", "do-not-reply@",
+    "notification@", "notifications@", "notify@",
+    "newsletter@", "news@", "newsletters@",
+    "security@", "alerts@", "alert@", "alerting@",
+    "info@meta.com", "info@facebookmail.com",
+    "automated@", "auto@", "robot@", "bot@",
+    "support-noreply@", "noreply-",
+    "system@", "sys@",
+    "billing@", "invoice@", "invoices@", "facturation@",
+    "newsletter-", "noreply.",
+)
+# Patterns de domaines reconnus comme envoyeurs auto
+AUTOMATED_SENDER_DOMAINS = (
+    "@mail.instagram.com", "@facebookmail.com", "@mail.notion.so",
+    "@notify.bsky.social", "@reply.github.com", "@noreply.github.com",
+    "@accounts.google.com", "@e.linkedin.com", "@linkedin.com",
+    "@mail.tiktok.com", "@bnc.lt", "@stripe.com",
+)
+# Mots-cles dans le sujet typiques de notifications
+AUTOMATED_SUBJECT_HINTS = (
+    "new login", "nouvelle connexion", "security alert", "alerte de securite",
+    "verify your email", "confirm your email", "verifiez votre",
+    "confirm your account", "your verification code", "code de verification",
+    "your receipt", "votre recu", "your invoice", "votre facture",
+    "newsletter", "bulletin",
+)
+
+
+def looks_like_automated(headers: dict, from_addr: str,
+                          subject: str = "") -> bool:
+    """Heuristique : ce mail entrant est-il un envoi automatique ?
+
+    Retourne True si :
+    - headers indiquent envoi auto (List-Unsubscribe, Auto-Submitted,
+      Precedence: bulk/list/auto_reply)
+    - sender matche un pattern noreply/notification/newsletter/security/etc
+    - sender appartient a un domaine connu d'envois auto
+    - sujet contient un mot-cle typique de notification
+
+    Conservatif : en cas de doute, retourne False (mieux vaut un faux negatif
+    qu'un faux positif qui ferait disparaitre une vraie reponse prospect).
+    """
+    h = {k.lower(): (v or "") for k, v in (headers or {}).items()}
+
+    # 1. Headers techniques : signature universelle des envois bulk/auto
+    # List-Unsubscribe present = newsletter ou liste de diffusion
+    if h.get("list-unsubscribe"):
+        return True
+    # Auto-Submitted != "no" signale un envoi auto (RFC 3834)
+    auto_sub = h.get("auto-submitted", "").lower().strip()
+    if auto_sub and auto_sub != "no":
+        return True
+    # Precedence: bulk / list / auto_reply / junk
+    prec = h.get("precedence", "").lower().strip()
+    if prec in ("bulk", "list", "auto_reply", "junk"):
+        return True
+    # X-Auto-Response-Suppress = signe d'auto-responder
+    if h.get("x-auto-response-suppress"):
+        return True
+    # Feedback-ID = utilise par Google/Gmail pour le tracking d'envois bulk
+    if h.get("feedback-id"):
+        return True
+
+    # 2. Patterns d'expediteurs
+    f = (from_addr or "").lower().strip()
+    if f:
+        for p in AUTOMATED_SENDER_PREFIXES:
+            if f.startswith(p) or f"<{p}" in f:
+                return True
+        for d in AUTOMATED_SENDER_DOMAINS:
+            if d in f:
+                return True
+
+    # 3. Sujets typiques de notifs (dernier recours, plus risque)
+    s = (subject or "").lower()
+    for hint in AUTOMATED_SUBJECT_HINTS:
+        if hint in s:
+            return True
+
+    return False
+
 # Regex variables non remplacees a refuser dans un mail final
 # - {name} ou {{name}} : python format / mustache
 # - %name% : encore d'autres systemes
@@ -201,8 +296,25 @@ def extract_bounced_address(body: str, exclude: str = "") -> str:
 # =============================================================================
 # Anti-doublon : a-t-on deja mail ce prospect recemment ?
 # =============================================================================
+# Cooldown par défaut entre 2 envois automatiques au même prospect.
+# 72h = 3 jours, valeur saine pour éviter de paraître insistant tout en
+# laissant la place aux relances drip planifiées (qui ont leurs propres
+# delais J+7 / J+30). Lecture optionnelle depuis shared_settings.
+DEFAULT_COOLDOWN_HOURS = 72
+
+
+def _read_cooldown_hours(client) -> int:
+    """Renvoie le cooldown configuré (Réglages) ou DEFAULT_COOLDOWN_HOURS."""
+    try:
+        v = client.get_shared_setting("email_cooldown_hours", None)
+        n = int(v) if v not in (None, "", 0) else DEFAULT_COOLDOWN_HOURS
+        return max(1, min(n, 30 * 24))   # borne [1h, 30 jours]
+    except Exception:
+        return DEFAULT_COOLDOWN_HOURS
+
+
 def has_recent_send(client, *, prospect_id: str = "", email: str = "",
-                     hours: int = 48) -> dict:
+                     hours: int | None = None) -> dict:
     """Renvoie {"recent": bool, "last_ts": str, "last_kind": str}.
 
     Considere TOUS les envois (campagnes, drip, dormant, manuels, reponses
@@ -211,6 +323,8 @@ def has_recent_send(client, *, prospect_id: str = "", email: str = "",
     """
     if not (prospect_id or email):
         return {"recent": False, "last_ts": "", "last_kind": ""}
+    if hours is None:
+        hours = _read_cooldown_hours(client)
     sb = client.raw
     threshold = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     try:
@@ -254,7 +368,7 @@ def has_recent_send(client, *, prospect_id: str = "", email: str = "",
 # Decision globale : peut-on contacter ce prospect maintenant ?
 # =============================================================================
 def should_contact(client, prospect_id: str, *, email: str = "",
-                    min_hours_between: int = 48,
+                    min_hours_between: int | None = None,
                     allow_replied: bool = False) -> dict:
     """Decision centrale : OK ou KO pour envoyer un mail ?
 
@@ -271,6 +385,8 @@ def should_contact(client, prospect_id: str, *, email: str = "",
         return {"ok": False, "reason": f"status:{status}"}
     if status in SOFT_PAUSE_STATUSES and not allow_replied:
         return {"ok": False, "reason": f"status:{status}"}
+    if min_hours_between is None:
+        min_hours_between = _read_cooldown_hours(client)
     recent = has_recent_send(client, prospect_id=prospect_id, email=email,
                               hours=min_hours_between)
     if recent.get("recent"):
