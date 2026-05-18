@@ -285,15 +285,24 @@ OFFRE QUE TU PROPOSES (adaptée à son secteur) :
 - Pitch : {offer_pitch}
 - Lien : {offer_url}
 
-{demo_block}CONSIGNES STRICTES :
-- Ton : direct, chaleureux, pro, jamais commercial agressif.
+{demo_block}CONSIGNES STRICTES (à respecter SANS exception) :
+- VOUVOIEMENT OBLIGATOIRE : tu vouvoies TOUJOURS le prospect, même si tu
+  connais son prénom. JAMAIS de tutoiement, même pour les métiers
+  « cools » (coiffeur, tatoueur, restaurateur…). C'est une prospection
+  professionnelle, le respect du vouvoiement est non négociable.
+- Adresse : si tu as un prénom + nom → « Bonjour <Prénom> » ou
+  « Bonjour Monsieur/Madame <Nom> ». Si tu n'as que la raison sociale
+  → « Bonjour, » ou « Bonjour l'équipe de <raison sociale>, ».
+- Ton : direct, chaleureux mais pro, jamais commercial agressif.
 - Longueur : 5 à 10 lignes max.
-- Pas de "J'espère que vous allez bien" ni autre formule creuse.
-- Si tu connais le prénom : tu tutoies ou vouvoies selon ce qui est plus naturel pour le secteur.
-- Si tu ne connais que la raison sociale : adresse-toi à l'entreprise.
-- Mentionne UNE raison spécifique pour laquelle ton offre colle à leur métier.
+- Pas de « J'espère que vous allez bien » ni autre formule creuse.
+- Mentionne UNE raison spécifique pour laquelle votre offre colle à
+  leur métier (tirée du Secteur d'activité ci-dessus).
+- Cohérence : reste sur UN seul secteur, UN seul produit, UN seul ton.
+  Pas de phrases qui partent dans tous les sens. Pas d'invention de
+  fonctionnalités absentes du pitch officiel ci-dessus.
 - Termine par un CTA simple (réponse à ce mail, ou lien à cliquer).
-- Signature : "{sender_name}" sur la dernière ligne, rien après.
+- Signature : « {sender_name} » sur la dernière ligne, rien après.
 
 INSTRUCTIONS LIBRES DE L'UTILISATEUR (à respecter en priorité si elles entrent en conflit) :
 {user_brief}
@@ -319,15 +328,23 @@ def generate_message(
     demo_block = ""
     if demo:
         demo_block = (
-            "EXEMPLE CONCRET À INCLURE DANS LE MAIL "
+            "EXEMPLE CONCRET À INCLURE OBLIGATOIREMENT DANS LE MAIL "
             "(démo métier qui correspond pile au prospect) :\n"
             f"- Nom de la démo : {demo.get('name', '')}\n"
-            f"- Lien à inclure dans le corps du mail : {demo.get('url', '')}\n"
-            "INSTRUCTION : insère ce lien comme PREUVE VISUELLE dans ton mail "
-            "(« Voici un exemple de ce que je peux faire pour ton métier : <lien> »). "
-            "Ça n'est PAS le produit principal — l'offre à vendre reste celle "
-            "indiquée plus haut. La démo sert juste à donner un exemple concret "
-            "qui parle directement au prospect.\n\n"
+            f"- URL exacte à coller dans le corps du mail : {demo.get('url', '')}\n"
+            "\n"
+            "INSTRUCTION OBLIGATOIRE — tu DOIS inclure cette URL DANS LE "
+            "CORPS DU MAIL (pas dans la signature, pas en P.S., mais dans "
+            "le texte). Phrase modèle (à adapter au ton mais avec vouvoiement) :\n"
+            "  « Pour vous faire une idée concrète, voici un exemple de "
+            "site que nous avons préparé pour votre métier : <URL> ».\n"
+            "Tu peux varier la formulation, mais l'URL DOIT apparaître "
+            "telle quelle dans le mail (pas raccourcie, pas masquée).\n"
+            "\n"
+            "Cette démo n'est PAS le produit à vendre — l'offre à pitcher "
+            "reste celle indiquée plus haut. La démo sert juste de PREUVE "
+            "VISUELLE adaptée à leur métier. Mentionne les 2 dans le mail : "
+            "l'offre (pour la vente) + la démo (pour la preuve).\n\n"
         )
     prompt = GENERATION_PROMPT.format(
         raison_sociale=prospect.get("raison_sociale", "") or "(non précisé)",
