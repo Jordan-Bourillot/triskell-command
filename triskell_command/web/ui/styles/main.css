@@ -1015,6 +1015,36 @@ html, body {
   color: hsl(var(--text-secondary));
   opacity: 0.85;
 }
+
+/* Bandeau de progression bien visible pendant la génération IA.
+   Sans ça l'utilisateur clique « Tester (5) » et a l'impression que
+   rien ne se passe (le journal détaillé est facile à manquer). */
+.cv-gen-progress {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px;
+  background: hsl(var(--accent) / 0.08);
+  border: 1px solid hsl(var(--accent) / 0.30);
+  border-radius: 14px;
+}
+.cv-gen-progress-spinner {
+  width: 22px; height: 22px;
+  border: 3px solid hsl(var(--accent) / 0.25);
+  border-top-color: hsl(var(--accent));
+  border-radius: 50%;
+  animation: cv-spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes cv-spin { to { transform: rotate(360deg); } }
+.cv-gen-progress-text { flex: 1; min-width: 0; }
+.cv-gen-progress-title {
+  font-size: 14px; font-weight: 600;
+  color: hsl(var(--text-primary));
+}
+.cv-gen-progress-sub {
+  font-size: 12px;
+  color: hsl(var(--text-secondary));
+  margin-top: 2px;
+}
 @keyframes cv-wizard-fade-in {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }

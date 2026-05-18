@@ -827,8 +827,23 @@ const Convoy = {
           </button>
         </div>
 
+        <!-- Bandeau de progression visible pendant la génération.
+             Sans ça, après un clic sur « Tester (5) » on a l'impression
+             que rien ne se passe (les boutons restent identiques et le
+             journal en bas est facile à manquer). -->
+        <div id="cv-gen-progress" class="cv-gen-progress hidden mt-4">
+          <div class="cv-gen-progress-spinner"></div>
+          <div class="cv-gen-progress-text">
+            <div class="cv-gen-progress-title">Génération en cours…</div>
+            <div class="cv-gen-progress-sub" id="cv-gen-progress-sub">
+              L'IA rédige tes mails un par un. Tu seras redirigé vers
+              l'aperçu dès que c'est fini.
+            </div>
+          </div>
+        </div>
+
         <div id="cv-gen-log-wrap" class="mt-4 hidden">
-          <div class="text-xs font-medium text-text-secondary mb-1.5">Journal de génération</div>
+          <div class="text-xs font-medium text-text-secondary mb-1.5">Journal de génération (détail)</div>
           <pre id="cv-gen-log"
                class="text-xs font-mono leading-relaxed p-3 rounded-lg bg-bg
                       border border-border max-h-48 overflow-auto whitespace-pre-wrap"></pre>
@@ -1001,8 +1016,32 @@ const Convoy = {
   },
 
   async _generate(limit) {
+    const isTest = !!(limit && limit > 0);
+    this._genIsTest = isTest;
     // On sauvegarde d'abord brief + catalogue
     await this._saveCompose();
+
+    // Désactive les boutons pour éviter double-clic
+    const btTest = document.getElementById('cv-gen-test');
+    const btAll  = document.getElementById('cv-gen-all');
+    const restoreBtTest = btTest ? btTest.textContent : '';
+    const restoreBtAll  = btAll  ? btAll.textContent  : '';
+    if (btTest) { btTest.disabled = true; btTest.textContent = isTest ? 'Génération…' : 'Tester (5)'; }
+    if (btAll)  { btAll.disabled  = true; if (!isTest) btAll.textContent = 'Génération…'; }
+    this._genRestoreBtns = () => {
+      if (btTest) { btTest.disabled = false; btTest.textContent = restoreBtTest || 'Tester (5)'; }
+      if (btAll)  { btAll.disabled  = false; btAll.textContent  = restoreBtAll  || 'Générer tous les mails'; }
+    };
+
+    // Affiche le bandeau de progression et masque le journal détaillé
+    // (il reste accessible plus bas si on veut voir les détails).
+    const prog = document.getElementById('cv-gen-progress');
+    const sub  = document.getElementById('cv-gen-progress-sub');
+    if (prog) prog.classList.remove('hidden');
+    if (sub)  sub.textContent = isTest
+      ? 'L\'IA rédige 5 mails test. Tu seras emmené sur l\'aperçu dès que c\'est prêt.'
+      : 'L\'IA rédige tous tes mails un par un. Ça peut prendre quelques minutes.';
+
     const wrap = document.getElementById('cv-gen-log-wrap');
     const box  = document.getElementById('cv-gen-log');
     if (wrap) wrap.classList.remove('hidden');
@@ -1014,11 +1053,13 @@ const Convoy = {
       r = await App.api.convoy_generate_messages({
         campaign_id: this.detail.id,
         limit: limit || null,
-        test_mode: !!(limit && limit > 0),  // batch limité = test
+        test_mode: isTest,
       });
     } catch (e) { r = { ok: false, error: String(e) }; }
     if (!r || !r.ok) {
       this._appendLog(box, r && r.error || 'Lancement impossible');
+      if (prog) prog.classList.add('hidden');
+      if (this._genRestoreBtns) this._genRestoreBtns();
       return;
     }
     this._startGenPoll();
@@ -1042,15 +1083,36 @@ const Convoy = {
     const box = document.getElementById('cv-gen-log');
     (r.log || []).forEach(line => this._appendLog(box, line));
     this.genSeen = r.log_len;
+
+    // Met à jour le sous-titre du bandeau de progression avec la
+    // dernière ligne du journal (compteur du type "(3/5) OK").
+    const sub = document.getElementById('cv-gen-progress-sub');
+    if (sub && r.log && r.log.length) {
+      const lastLine = r.log[r.log.length - 1] || '';
+      // garde uniquement le message utile (après le timestamp)
+      const m = lastLine.match(/\]\s*(.+)$/);
+      if (m) sub.textContent = m[1];
+    }
+
     if (!r.running) {
       clearInterval(this.genPoll); this.genPoll = null;
+      const prog = document.getElementById('cv-gen-progress');
+      if (prog) prog.classList.add('hidden');
+      if (this._genRestoreBtns) this._genRestoreBtns();
       // Recharge la campagne pour rafraîchir les drafts (sujet/corps)
       try {
         const c2 = await App.api.convoy_get_campaign({ campaign_id: this.detail.id });
         if (c2 && c2.ok) {
           this.detail = c2.campaign;
-          this._renderDetail();
           await this._loadList();
+          // À la fin d'un TEST, on emmène directement Jordan voir ses
+          // mails — sinon il ne sait pas où ils sont apparus.
+          if (this._genIsTest) {
+            this.wizardStep = 4;
+          }
+          this._renderDetail();
+          // Scroll en haut pour qu'il voie les TEST en première ligne
+          try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) {}
         }
       } catch (e) {}
     }
