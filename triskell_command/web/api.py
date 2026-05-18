@@ -1532,7 +1532,11 @@ class Api:
     # ------------------------------------------------------------------
     # Stockage : shared_settings.mail_templates = {"templates": [...]}
     # Chaque template : { id, name, subject_default, body_html, updated_at }
-    def mail_templates_list(self) -> dict:
+    #
+    # Préfixés `user_` pour éviter la collision de nom Python avec les
+    # méthodes `mail_templates_*` plus bas (modèles système Lagriffe lus
+    # depuis la table `triskell_email_templates`).
+    def user_mail_templates_list(self) -> dict:
         try:
             client = self._supabase()
             if not client:
@@ -1549,7 +1553,7 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    def mail_template_save(self, payload: dict) -> dict:
+    def user_mail_template_save(self, payload: dict) -> dict:
         """Crée ou met à jour un template par id. Si id absent, génère un nouveau."""
         import uuid
         from datetime import datetime
@@ -1566,7 +1570,7 @@ class Api:
             client = self._supabase()
             if not client:
                 return {"ok": False, "error": "Base partagée non connectée"}
-            cur = self.mail_templates_list()
+            cur = self.user_mail_templates_list()
             templates = cur.get("templates", []) if cur.get("ok") else []
             templates = [t for t in templates if t.get("id") != tid]
             templates.append({
@@ -1581,7 +1585,7 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    def mail_template_remove(self, payload: dict) -> dict:
+    def user_mail_template_remove(self, payload: dict) -> dict:
         tid = ((payload or {}).get("id") or "").strip()
         if not tid:
             return {"ok": False, "error": "id manquant"}
@@ -1589,7 +1593,7 @@ class Api:
             client = self._supabase()
             if not client:
                 return {"ok": False, "error": "Base partagée non connectée"}
-            cur = self.mail_templates_list()
+            cur = self.user_mail_templates_list()
             templates = cur.get("templates", []) if cur.get("ok") else []
             templates = [t for t in templates if t.get("id") != tid]
             client.set_shared_setting("mail_templates", {"templates": templates})
@@ -1864,6 +1868,22 @@ class Api:
                     except Exception:
                         pass
 
+                    # On stocke le HTML et la liste légère des pièces jointes
+                    # (sans le binaire base64) dans `extra` pour pouvoir afficher
+                    # mise en forme + liste des PJ quand on rouvre un mail envoyé.
+                    # Plafond HTML à ~80 Ko pour ne pas faire exploser la ligne.
+                    _BODY_HTML_MAX = 80_000
+                    body_html_log = body_html[:_BODY_HTML_MAX] if body_html else ""
+                    attachments_meta = [
+                        {
+                            "filename": a.get("filename") or "",
+                            "size": int(a.get("size") or 0),
+                            "content_type": a.get("content_type") or "",
+                            "inline": bool(a.get("inline")),
+                            "cid": a.get("cid") or "",
+                        }
+                        for a in attachments if isinstance(a, dict)
+                    ]
                     rows = []
                     for recipient in all_recipients:
                         extra_log = {
@@ -1875,10 +1895,12 @@ class Api:
                             "in_reply_to": in_reply_to,
                             "manual_reply": bool(in_reply_to),
                             "has_html": bool(body_html),
-                            "attachments_count": len([a for a in attachments
-                                if isinstance(a, dict) and not a.get("inline")]),
-                            "inline_images_count": len([a for a in attachments
-                                if isinstance(a, dict) and a.get("inline") and a.get("cid")]),
+                            "body_html": body_html_log,
+                            "attachments_meta": attachments_meta,
+                            "attachments_count": len([a for a in attachments_meta
+                                if not a.get("inline")]),
+                            "inline_images_count": len([a for a in attachments_meta
+                                if a.get("inline") and a.get("cid")]),
                         }
                         if tracking_id_for_log:
                             extra_log["tracking_id"] = tracking_id_for_log
@@ -2002,7 +2024,7 @@ class Api:
         # Récupère les modèles (best-effort)
         templates = []
         try:
-            r = self.mail_templates_list()
+            r = self.user_mail_templates_list()
             if r and r.get("ok"):
                 templates = r.get("templates") or []
         except Exception as exc:
@@ -2297,6 +2319,22 @@ class Api:
             return {"ok": True, "filename": path.name, "screenshot": screenshot_filename}
         except Exception as exc:
             logger.exception("bug_report")
+            return {"ok": False, "error": str(exc)}
+
+    def mail_delete(self, payload: dict) -> dict:
+        """Supprime une entrée d'email_history (mail envoyé / reçu).
+        Ne supprime que la trace locale — n'agit pas sur la boîte mail distante.
+        """
+        mid = ((payload or {}).get("id") or "").strip()
+        if not mid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            client = self._supabase()
+            if not client:
+                return {"ok": False, "error": "Base partagée non connectée"}
+            client.raw.table("email_history").delete().eq("id", mid).execute()
+            return {"ok": True}
+        except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
     def mails_list(self, payload: dict | None = None) -> dict:

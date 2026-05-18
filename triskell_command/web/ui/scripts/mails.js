@@ -250,7 +250,15 @@ const Mails = {
     const accountLabel = (this.state.accounts.find(a => a.id === accountId) || {}).label || accountId;
     const accountEmail = (this.state.accounts.find(a => a.id === accountId) || {}).from_email || '';
     const ts = this._fmtDateLong(m.ts);
-    const body = extra.body_excerpt || m.body || '(corps vide)';
+    const isSent = m.kind === 'email_sent';
+    // Pour les mails envoyés, on préfère le HTML complet stocké dans extra
+    // (gras / couleurs / liens) — fallback sur le texte si absent (anciens logs).
+    const body = (isSent && extra.body_html)
+      ? extra.body_html
+      : (extra.body_excerpt || m.body || '(corps vide)');
+    const attachmentsMeta = Array.isArray(extra.attachments_meta)
+      ? extra.attachments_meta.filter(a => a && !a.inline)
+      : [];
     const classification = extra.classification || null;
     const inReplyTo = extra.in_reply_to || '';
     const replySubject = subject.toLowerCase().startsWith('re:') ? subject : 'Re: ' + subject;
@@ -310,6 +318,23 @@ const Mails = {
             <div class="text-xs uppercase tracking-widest text-text-muted font-bold mb-2">CONTENU DU MAIL</div>
             ${this._renderMailBody(body)}
           </div>
+
+          ${attachmentsMeta.length ? `
+          <!-- Pièces jointes (mails envoyés) -->
+          <div class="px-6 pb-6">
+            <div class="text-xs uppercase tracking-widest text-text-muted font-bold mb-2">PIÈCES JOINTES (${attachmentsMeta.length})</div>
+            <div class="space-y-1.5">
+              ${attachmentsMeta.map(a => `
+                <div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-bg border border-border text-xs">
+                  <span class="shrink-0">📎</span>
+                  <span class="truncate font-medium text-text flex-1">${this._escape(a.filename || '(sans nom)')}</span>
+                  <span class="text-text-muted shrink-0">${this._fmtSize(a.size)}</span>
+                </div>
+              `).join('')}
+            </div>
+            <div class="text-[10px] text-text-muted mt-2 italic">Le contenu binaire n'est pas archivé — seul le nom et la taille sont conservés.</div>
+          </div>
+          ` : ''}
 
           <!-- Séparateur visuel -->
           <div class="px-6"><div class="border-t border-border"></div></div>
@@ -373,12 +398,17 @@ const Mails = {
         </div>
 
         <!-- ========== Footer sticky : actions ========== -->
-        <div id="md-footer" class="px-6 py-4 border-t border-border bg-surface-elevated flex items-center justify-end gap-2 shrink-0">
-          <button id="md-ok" class="btn btn-secondary">Fermer</button>
-          <button id="md-send" class="btn btn-primary hidden">
-            <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>
-            Envoyer la réponse
+        <div id="md-footer" class="px-6 py-4 border-t border-border bg-surface-elevated flex items-center justify-between gap-2 shrink-0">
+          <button id="md-delete" class="text-xs text-text-muted hover:text-danger transition-colors ${isSent ? '' : 'invisible'}" title="Supprimer ce mail de l'historique local">
+            🗑 Supprimer de l'historique
           </button>
+          <div class="flex items-center gap-2">
+            <button id="md-ok" class="btn btn-secondary">Fermer</button>
+            <button id="md-send" class="btn btn-primary hidden">
+              <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>
+              Envoyer la réponse
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -396,6 +426,27 @@ const Mails = {
     overlay.querySelector('#md-close').onclick = close;
     okBtn.onclick = close;
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    // Bouton Supprimer (mails envoyés uniquement) — purge la trace locale
+    // dans email_history. N'agit pas sur le serveur SMTP / la boîte mail
+    // du destinataire (le message est déjà parti).
+    const deleteBtn = overlay.querySelector('#md-delete');
+    if (deleteBtn && isSent) {
+      deleteBtn.onclick = async () => {
+        if (!confirm('Supprimer ce mail de l’historique local ? (Le destinataire l’a déjà reçu, on ne supprime que la trace côté Triskell.)')) return;
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = 'Suppression…';
+        const r = await App.api.mail_delete({ id: m.id });
+        if (r && r.ok) {
+          close();
+          await this._load();
+        } else {
+          deleteBtn.disabled = false;
+          deleteBtn.textContent = '🗑 Supprimer de l’historique';
+          alert('Échec suppression : ' + ((r && r.error) || 'erreur inconnue'));
+        }
+      };
+    }
 
     const escListener = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escListener); } };
     document.addEventListener('keydown', escListener);
@@ -769,7 +820,7 @@ const Mails = {
     const listEl = overlay.querySelector('#tm-list');
     const reload = async () => {
       listEl.innerHTML = '<div class="text-sm text-text-muted">Chargement…</div>';
-      const r = await App.api.mail_templates_list();
+      const r = await App.api.user_mail_templates_list();
       const tpls = (r && r.ok) ? (r.templates || []) : [];
       if (!tpls.length) {
         listEl.innerHTML = `
@@ -804,7 +855,7 @@ const Mails = {
           const tid = btn.dataset.tmRemove;
           const tpl = tpls.find(x => x.id === tid);
           if (!confirm(`Supprimer le modèle "${tpl && tpl.name}" ?`)) return;
-          const r = await App.api.mail_template_remove({ id: tid });
+          const r = await App.api.user_mail_template_remove({ id: tid });
           if (r && r.ok) reload();
           else alert('Échec : ' + (r && r.error || 'inconnu'));
         };
@@ -815,7 +866,7 @@ const Mails = {
           const tpl = tpls.find(x => x.id === tid);
           const newName = prompt('Nouveau nom :', (tpl && tpl.name) || '');
           if (!newName || newName === (tpl && tpl.name)) return;
-          const r = await App.api.mail_template_save({
+          const r = await App.api.user_mail_template_save({
             template: { ...tpl, name: newName }
           });
           if (r && r.ok) reload();
@@ -992,6 +1043,10 @@ const Mails = {
                 <button id="cmp-mode-html" class="px-2.5 py-1 rounded-lg font-semibold transition-colors text-text-muted hover:bg-bg">HTML enrichi</button>
                 <!-- Bouton Aperçu (visible uniquement en mode HTML enrichi via JS) -->
                 <button id="cmp-preview-top" type="button" class="hidden px-2.5 py-1 rounded-lg font-semibold transition-colors text-text-muted hover:bg-bg" title="Aperçu (rendu réel du mail)">👁 Aperçu</button>
+                <!-- Toggle fond clair / sombre de la zone d'écriture (style Outlook) -->
+                <button id="cmp-bg-toggle" type="button" class="px-2.5 py-1 rounded-lg font-semibold transition-colors text-text-muted hover:bg-bg flex items-center gap-1" title="Basculer le fond de la zone d'écriture (clair / sombre)">
+                  <span id="cmp-bg-toggle-icon">☀</span>
+                </button>
               </div>
             </div>
 
@@ -1024,11 +1079,11 @@ const Mails = {
 
             <!-- Editor texte simple -->
             <textarea id="cmp-body-text" rows="14" placeholder="Tape ton message ici…&#10;&#10;Astuce : Ctrl+Entrée pour envoyer."
-                      class="w-full px-3 py-3 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed resize-y"></textarea>
+                      class="cmp-editor-surface w-full px-3 py-3 text-sm rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed resize-y"></textarea>
 
             <!-- Editor HTML (contenteditable) -->
             <div id="cmp-body-html" contenteditable="true"
-                 class="hidden w-full min-h-[300px] px-4 py-3 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed"
+                 class="cmp-editor-surface hidden w-full min-h-[300px] px-4 py-3 text-sm rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed"
                  style="white-space: pre-wrap;"></div>
           </div>
 
@@ -1087,6 +1142,29 @@ const Mails = {
       const s = document.createElement('style');
       s.id = 'cmp-toolbar-styles';
       s.textContent = `
+        /* Zone d'écriture du mail : fond blanc par défaut (toujours, peu importe
+           le thème de l'app) — basculable en sombre via le bouton ☀ / ☾.
+           Le choix est mémorisé dans localStorage. */
+        .cmp-editor-surface {
+          background: #ffffff !important;
+          color: #1f1f1f !important;
+        }
+        .cmp-editor-surface::placeholder {
+          color: #9aa0a6 !important;
+        }
+        .cmp-editor-surface.cmp-editor-dark {
+          background: #1e1e1e !important;
+          color: #e8e8e8 !important;
+        }
+        .cmp-editor-surface.cmp-editor-dark::placeholder {
+          color: #8a8a8a !important;
+        }
+        #cmp-body-html.cmp-editor-surface:empty:before {
+          color: #9aa0a6 !important;
+        }
+        #cmp-body-html.cmp-editor-surface.cmp-editor-dark:empty:before {
+          color: #8a8a8a !important;
+        }
         .cmp-tb-btn { padding: 4px 9px; border-radius: 6px; font-size: 13px;
                       color: hsl(var(--text)); transition: background 120ms; }
         .cmp-tb-btn:hover { background: hsl(var(--accent) / 0.12);
@@ -1412,6 +1490,28 @@ const Mails = {
     };
     textBtn.onclick = () => setMode('text');
     htmlBtn.onclick = () => setMode('html');
+
+    // Toggle fond clair / sombre de la zone d'écriture (préférence persistée).
+    // Inspiré d'Outlook : on lit toujours sur fond clair par défaut, mais on
+    // peut basculer pour soulager les yeux la nuit. Indépendant du thème global.
+    const bgToggleBtn  = overlay.querySelector('#cmp-bg-toggle');
+    const bgToggleIcon = overlay.querySelector('#cmp-bg-toggle-icon');
+    const BG_PREF_KEY  = 'triskell.composer.bgDark';
+    const applyEditorBg = (dark) => {
+      [textArea, htmlArea].forEach(el => el.classList.toggle('cmp-editor-dark', dark));
+      bgToggleIcon.textContent = dark ? '☾' : '☀';
+      bgToggleBtn.title = dark
+        ? 'Fond actuel : sombre — cliquer pour passer en fond clair'
+        : 'Fond actuel : clair — cliquer pour passer en fond sombre';
+    };
+    let bgDark = false;
+    try { bgDark = localStorage.getItem(BG_PREF_KEY) === '1'; } catch (_) {}
+    applyEditorBg(bgDark);
+    bgToggleBtn.onclick = () => {
+      bgDark = !bgDark;
+      applyEditorBg(bgDark);
+      try { localStorage.setItem(BG_PREF_KEY, bgDark ? '1' : '0'); } catch (_) {}
+    };
 
     // ----------------------------------------------------------------------
     // Pièces jointes + images inline (CID)
@@ -1965,7 +2065,7 @@ const Mails = {
 
     const loadTemplates = async () => {
       tplList.innerHTML = '<div class="px-4 py-3 text-xs text-text-muted">Chargement…</div>';
-      const r = await App.api.mail_templates_list();
+      const r = await App.api.user_mail_templates_list();
       const tpls = (r && r.ok) ? (r.templates || []) : [];
       if (!tpls.length) {
         tplList.innerHTML = '<div class="px-4 py-3 text-xs text-text-muted">Aucun modèle encore. Sauvegarde ton contenu actuel ci-dessous.</div>';
@@ -2026,7 +2126,7 @@ const Mails = {
       if (!name) return;
       const useSubject = subjectInput.value.trim();
       const wantSubj = useSubject && confirm(`Sauvegarder aussi l'objet "${useSubject}" comme objet par défaut du modèle ?`);
-      const r = await App.api.mail_template_save({
+      const r = await App.api.user_mail_template_save({
         template: { name, body_html: htmlContent, subject_default: wantSubj ? useSubject : '' }
       });
       if (r && r.ok) {
@@ -2838,5 +2938,13 @@ const Mails = {
       const d = new Date(iso);
       return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     } catch { return iso.slice(0, 16); }
+  },
+
+  _fmtSize(n) {
+    const v = Number(n) || 0;
+    if (!v) return '';
+    if (v < 1024) return `${v} o`;
+    if (v < 1024 * 1024) return `${Math.round(v / 1024)} Ko`;
+    return `${(v / 1024 / 1024).toFixed(1)} Mo`;
   },
 };

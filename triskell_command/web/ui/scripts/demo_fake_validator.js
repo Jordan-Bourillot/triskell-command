@@ -72,7 +72,7 @@ const DemoFakeValidator = {
       required: ['ok', 'accounts'],
       arrays:   { 'accounts': ['id', 'from_email'] },
     },
-    mail_templates_list: {
+    user_mail_templates_list: {
       required: ['ok', 'templates'],
       arrays:   { 'templates': ['id', 'name'] },
     },

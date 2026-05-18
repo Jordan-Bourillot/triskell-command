@@ -205,7 +205,7 @@ const DemoMode = {
     },
 
     // ============ Modèles d'emails (6 templates) ============
-    mail_templates_list() {
+    user_mail_templates_list() {
       return {
         ok: true,
         templates: [

@@ -139,7 +139,7 @@ const GlobalSearch = {
 
     // 6. Modèles d'emails
     try {
-      const r = await App.api.mail_templates_list();
+      const r = await App.api.user_mail_templates_list();
       if (r && r.ok && r.templates) {
         (r.templates || []).forEach(t => {
           items.push({

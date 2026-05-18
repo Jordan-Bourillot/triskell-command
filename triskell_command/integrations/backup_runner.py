@@ -126,7 +126,7 @@ def collect_snapshot(app_state) -> dict:
         if client is not None:
             # Templates mail
             try:
-                r = api.mail_templates_list()
+                r = api.user_mail_templates_list()
                 if r and r.get("ok"):
                     snap["mail_templates"] = r.get("templates") or []
             except Exception:
