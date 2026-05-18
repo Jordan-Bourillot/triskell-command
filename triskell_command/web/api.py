@@ -5060,7 +5060,7 @@ class Api:
             # — sinon Jordan perdrait la trace de ce qui est parti. Idem pour
             # ceux dont l'email a été contacté ailleurs récemment (anti-doublon
             # cross-campagne / cross-runner).
-            from . import prospect_status as PS
+            from ..integrations import prospect_status as PS
             cli = self._supabase()
             already_contacted_emails: set[str] = set()
             already_skipped = 0
