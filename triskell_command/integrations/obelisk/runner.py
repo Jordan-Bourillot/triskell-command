@@ -112,6 +112,21 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
         ucfg["platforms"] = platforms
         ucfg["max_per_platform"] = max_per_platform
 
+        # ⚡ Auto-alimente ucfg["catalog"] depuis le catalogue principal
+        # Triskell si l'utilisateur ne l'a pas explicitement rempli dans
+        # Obelisk → Réglages. Comme ça, ajouter un produit dans la vue
+        # Catalogue suffit pour qu'Obelisk le propose dans ses mails.
+        if not (ucfg.get("catalog") or "").strip():
+            try:
+                from .. import catalog_repo
+                items = catalog_repo.get_catalog() or []
+                if items:
+                    ucfg["catalog"] = _format_catalog_for_ai(items)
+                    log(f"📚 Catalogue principal injecté dans le pipeline "
+                        f"({len(items)} produit(s)).")
+            except Exception as exc:
+                log(f"⚠ Impossible de charger le catalogue principal : {exc}")
+
         # ⚡ CRITIQUE : sync les clés API stockées en Supabase vers le
         # fichier local ~/.ledenicheur/config.json que le pipeline natif
         # va lire. Sans ça, ce pipeline ne trouve aucune clé et toutes
@@ -231,6 +246,37 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
                     finished_at=datetime.now(timezone.utc).isoformat())
     finally:
         _RUNNING.pop(job_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Catalogue → format texte injecté dans le prompt IA
+# ---------------------------------------------------------------------------
+def _format_catalog_for_ai(items: list[dict]) -> str:
+    """Transforme la liste plate du catalogue en texte structuré lisible
+    par l'IA. Inclut les mots-clés et l'URL pour que l'IA sache à quel
+    profil chaque produit s'adresse.
+
+    Format produit par ligne :
+        - <Nom> | pitch: <pitch> | pour: <keywords> | url: <url>
+    """
+    if not items:
+        return ""
+    lines: list[str] = []
+    for it in items:
+        name = (it.get("name") or "").strip()
+        if not name:
+            continue
+        pitch = (it.get("pitch") or "").strip() or "(pas de pitch)"
+        keywords = (it.get("keywords") or "").strip()
+        url = (it.get("url") or "").strip()
+        parts = [f"- {name}"]
+        parts.append(f"pitch: {pitch}")
+        if keywords:
+            parts.append(f"pour: {keywords}")
+        if url:
+            parts.append(f"url: {url}")
+        lines.append(" | ".join(parts))
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
