@@ -939,6 +939,26 @@ html, body {
   .cv-step-label { display: none; }
 }
 
+.cv-step-hint {
+  display: flex; align-items: center; gap: 10px;
+  margin: -6px 0 18px;
+  padding: 10px 16px;
+  background: hsl(var(--accent) / 0.08);
+  border-left: 3px solid hsl(var(--accent));
+  border-radius: 0 10px 10px 0;
+  color: hsl(var(--text));
+  font-size: 13px;
+  line-height: 1.45;
+}
+.cv-step-hint-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.cv-step-hint strong {
+  font-weight: 700;
+  color: hsl(var(--accent));
+}
+
 .cv-wizard-step {
   animation: cv-wizard-fade-in 220ms ease-out;
 }

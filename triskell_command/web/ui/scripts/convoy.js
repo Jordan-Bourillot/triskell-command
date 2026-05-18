@@ -37,20 +37,20 @@ const Convoy = {
     const hasBodies     = drafts.some(d => (d.body || '').trim().length > 0);
     const hasSent       = drafts.some(d => d.status === 'sent');
     if (hasSent && drafts.every(d => d.status === 'sent' || d.status === 'failed' || d.status === 'rejected')) {
-      return 5;  // tout est envoyé → on est sur l'étape finale
+      return 5;  // tout est envoyé → on est sur l'étape finale (Lancer)
     }
-    if (hasBodies) return 4;       // drafts prêts à envoyer
+    if (hasBodies) return 4;       // mails générés → aperçu pour valider
     if (hasProspects) return 3;    // prospects extraits, manque le pitch
     if (hasSourceText) return 2;   // fichier uploadé, prospects à vérifier
     return 1;                      // rien encore : importer
   },
 
   WIZARD_STEPS: [
-    { num: 1, key: 'import',  label: 'Importer',      icon: '📂' },
-    { num: 2, key: 'verify',  label: 'Vérifier',      icon: '✓' },
-    { num: 3, key: 'pitch',   label: 'Pitch',         icon: '🎯' },
-    { num: 4, key: 'generate', label: 'Générer',      icon: '✍️' },
-    { num: 5, key: 'send',    label: 'Envoyer',       icon: '🚀' },
+    { num: 1, key: 'import',  label: '1. Importer',       sub: 'Ta liste de prospects',     icon: '📂' },
+    { num: 2, key: 'verify',  label: '2. Vérifier',       sub: 'Les contacts détectés',     icon: '✓' },
+    { num: 3, key: 'pitch',   label: '3. Pitch & génération', sub: 'L\'offre et le brief IA',   icon: '🎯' },
+    { num: 4, key: 'preview', label: '4. Aperçu des mails', sub: 'Voir avant d\'envoyer',     icon: '📧' },
+    { num: 5, key: 'launch',  label: '5. Lancer l\'envoi', sub: 'Plafond, délai, GO',        icon: '🚀' },
   ],
 
   // Va à une étape du wizard (avec garde-fous logiques)
@@ -60,22 +60,31 @@ const Convoy = {
     this._renderDetail();
   },
 
-  // Rendu de la barre de progression visuelle (1 ▸ 2 ▸ 3 ▸ 4 ▸ 5)
+  // Rendu de la barre de progression visuelle + sous-titre clair sous
+  // l'étape courante pour expliquer ce qui s'y passe (lever les doutes).
   _renderStepper() {
+    const active = this.WIZARD_STEPS.find(s => s.num === this.wizardStep);
     return `
       <div class="cv-stepper">
         ${this.WIZARD_STEPS.map(st => {
           const done   = st.num < this.wizardStep;
-          const active = st.num === this.wizardStep;
-          const cls = active ? 'is-active' : (done ? 'is-done' : 'is-pending');
+          const isActive = st.num === this.wizardStep;
+          const cls = isActive ? 'is-active' : (done ? 'is-done' : 'is-pending');
           return `
-            <button data-cv-step="${st.num}" class="cv-step ${cls}">
+            <button data-cv-step="${st.num}" class="cv-step ${cls}"
+                    title="${this._esc(st.sub || '')}">
               <span class="cv-step-num">${done ? '✓' : st.num}</span>
-              <span class="cv-step-label">${this._esc(st.label)}</span>
+              <span class="cv-step-label">${this._esc(st.label.replace(/^\d+\.\s*/, ''))}</span>
             </button>
           `;
         }).join('')}
       </div>
+      ${active ? `
+        <div class="cv-step-hint">
+          <span class="cv-step-hint-icon">${active.icon || ''}</span>
+          <span><strong>${this._esc(active.label)}</strong> — ${this._esc(active.sub || '')}</span>
+        </div>
+      ` : ''}
     `;
   },
 
@@ -331,13 +340,16 @@ const Convoy = {
     if (this.wizardStep >= 2 && !hasProspects) this.wizardStep = 1;
     if (this.wizardStep >= 4 && !hasDrafts) this.wizardStep = 3;
 
+    // Ordre logique : 1.Importer → 2.Vérifier → 3.Pitch & génération
+    //                 → 4.Aperçu des mails → 5.Lancer l'envoi.
+    // (avant : envoi avant aperçu, ce qui était trompeur).
     const step = this.wizardStep;
     let stepHtml = '';
     if      (step === 1) stepHtml = this._stepImport(c);
     else if (step === 2) stepHtml = this._stepTable(c);
     else if (step === 3) stepHtml = this._stepCompose(c);
-    else if (step === 4) stepHtml = this._stepSend(c);
-    else if (step === 5) stepHtml = this._stepResults(c);
+    else if (step === 4) stepHtml = this._stepResults(c);   // aperçu mails
+    else if (step === 5) stepHtml = this._stepSend(c);      // lancer envoi
 
     const canPrev = step > 1;
     const canNext = (
@@ -349,8 +361,8 @@ const Convoy = {
     const nextLabel = {
       1: 'Vérifier les contacts',
       2: 'Définir le pitch',
-      3: 'Voir les mails à envoyer',
-      4: 'Voir les résultats',
+      3: 'Voir les mails générés',
+      4: 'Lancer l\'envoi',
     }[step] || 'Suivant';
 
     target.innerHTML = `
@@ -364,8 +376,8 @@ const Convoy = {
     if      (step === 1) this._bindStepImport();
     else if (step === 2) this._bindStepTable();
     else if (step === 3) this._bindStepCompose();
-    else if (step === 4) this._bindStepSend();
-    else if (step === 5) this._bindStepResults();
+    else if (step === 4) this._bindStepResults();
+    else if (step === 5) this._bindStepSend();
   },
 
   // ---- Header ------------------------------------------------------
