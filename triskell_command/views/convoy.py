@@ -33,7 +33,7 @@ except Exception:
     _HAS_DND = False
 
 from .. import theme as T
-from ..integrations import convoy_ai, convoy_parser, convoy_runner
+from ..integrations import catalog_repo, convoy_ai, convoy_parser, convoy_runner
 from ..widgets.components import (
     Card,
     EmptyState,
@@ -49,17 +49,10 @@ from .base import BaseView
 logger = logging.getLogger(__name__)
 
 
-SECTOR_DEFAULTS = [
-    {"name": "Pack Électricien Pro", "pitch": "Site web + outils métier pour électriciens",
-     "keywords": "électricien, électricité, courant, BTP, artisan bâtiment",
-     "url": "https://pack-elec.triskell-studio.fr"},
-    {"name": "Triskell Studio (sites)", "pitch": "Site vitrine clé en main pour artisans et commerçants",
-     "keywords": "artisan, commerçant, plombier, paysagiste, garagiste, salon, restaurant, boulangerie",
-     "url": "https://triskell-studio.fr"},
-    {"name": "Le Dénicheur", "pitch": "Outil de prospection desktop, paiement unique 129 €",
-     "keywords": "agence, freelance, prospection, growth, marketing, B2B",
-     "url": "https://denicheur.triskell-studio.fr"},
-]
+# NOTE : les valeurs par défaut du catalogue vivent maintenant dans
+# `integrations.catalog_repo.DEFAULTS`. La vue n'embarque plus de copie
+# locale — chaque nouvelle campagne lit le catalogue CENTRAL via
+# `catalog_repo.get_catalog()` au moment de sa création.
 
 
 class ConvoyView(BaseView):
@@ -225,7 +218,10 @@ class ConvoyView(BaseView):
             source_file="",
             mode="validation",
             user_brief="",
-            catalog=list(SECTOR_DEFAULTS),
+            # Snapshot du catalogue CENTRAL au moment de la création.
+            # À chaque génération de mail, on rechargera le catalogue central
+            # pour utiliser la version la plus à jour.
+            catalog=catalog_repo.get_catalog(),
             drafts=[],
             daily_cap=int(self.app_state.get("outreach", "daily_cap", default=40) or 40),
             delay_seconds=60,
@@ -626,22 +622,25 @@ class ConvoyView(BaseView):
 
         section = self._make_section(
             "3. Catalogue d'offres + instructions à l'IA",
-            "Le Convoi pioche dans ce catalogue l'offre dont les mots-clés "
-            "matchent le secteur de chaque prospect. Format CSV : "
-            "« Nom | Pitch | mots-clés (virgules) | URL ».",
+            "Catalogue CENTRAL — modifié ici, il s'applique à toutes tes "
+            "campagnes (présentes et futures). Le Convoi pioche dans ce "
+            "catalogue l'offre dont les mots-clés matchent le secteur de "
+            "chaque prospect. Format : « Nom | Pitch | mots-clés (virgules) | URL ».",
         )
 
-        # Catalogue (éditeur multi-ligne, parsé en CSV à la sauvegarde)
+        # Catalogue (éditeur multi-ligne, parsé en CSV à la sauvegarde).
+        # On lit TOUJOURS le central, pas le snapshot de la campagne.
         ctk.CTkLabel(
-            section, text="Catalogue d'offres",
+            section, text="Catalogue d'offres (central, partagé)",
             font=(T.FONT_FAMILY_FALLBACK, T.FONT_SIZE_SMALL, "bold"),
             text_color=c.text_secondary, anchor="w",
         ).pack(fill="x", padx=T.SPACE_LG, pady=(0, 2))
 
+        central_catalog = catalog_repo.get_catalog()
         catalog_text = "\n".join(
             f"{o.get('name','')} | {o.get('pitch','')} | "
             f"{o.get('keywords','')} | {o.get('url','')}"
-            for o in camp.catalog
+            for o in central_catalog
         )
         cat_box = ctk.CTkTextbox(
             section, height=110,
@@ -677,9 +676,16 @@ class ConvoyView(BaseView):
 
         def save_compose():
             camp.user_brief = brief_box.get("1.0", "end").rstrip()
-            camp.catalog = _parse_catalog(cat_box.get("1.0", "end"))
+            new_catalog = _parse_catalog(cat_box.get("1.0", "end"))
+            # 1. Sauvegarde dans le catalogue CENTRAL (toutes campagnes)
+            catalog_repo.set_catalog(new_catalog)
+            # 2. Snapshot dans la campagne courante (pour traçabilité historique)
+            camp.catalog = new_catalog
             camp.save()
-            self._toast("Catalogue + brief enregistrés.", kind="success")
+            self._toast(
+                "Catalogue central mis à jour + brief enregistré.",
+                kind="success",
+            )
 
         SecondaryButton(
             btns, colors=c, icon="save", text="Enregistrer",
@@ -699,7 +705,12 @@ class ConvoyView(BaseView):
         if camp is None:
             return
         camp.user_brief = brief_box.get("1.0", "end").rstrip()
-        camp.catalog = _parse_catalog(cat_box.get("1.0", "end"))
+        # On relit le contenu de la zone de texte (= source de vérité UI),
+        # on le pousse dans le catalogue CENTRAL, et on snapshot dans la
+        # campagne pour garder trace de la version utilisée.
+        new_catalog = _parse_catalog(cat_box.get("1.0", "end"))
+        catalog_repo.set_catalog(new_catalog)
+        camp.catalog = new_catalog
         camp.save()
 
         ai_cfg = self._ai_config()
@@ -738,6 +749,7 @@ class ConvoyView(BaseView):
                     )
                     draft.subject = msg.get("subject", "")
                     draft.body = msg.get("body", "")
+                    draft.body_html = msg.get("body_html", "")
                     draft.offer_name = msg.get("offer_name", "")
                     self._set_status(
                         f"  ({i}/{len(targets)}) {draft.prospect.get('email','')} OK"

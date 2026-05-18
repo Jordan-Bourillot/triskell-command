@@ -312,6 +312,105 @@ RÉPONDS AU FORMAT JSON STRICT (pas de markdown, pas de texte autour) :
 """
 
 
+# ---------------------------------------------------------------------------
+# Mise en forme HTML — joli mais sobre, pas de gros visuels qui font fuir
+# ---------------------------------------------------------------------------
+import html as _html_mod
+import re as _re_mod
+
+_URL_RE = _re_mod.compile(r'(https?://[^\s<>"\')\]]+)')
+
+
+def text_to_email_html(body_text: str, *,
+                        sender_name: str = "",
+                        primary_url: str = "",
+                        primary_label: str = "Découvrir",
+                        secondary_url: str = "",
+                        secondary_label: str = "Voir l'exemple") -> str:
+    """Transforme un body texte (généré par l'IA) en HTML mail propre.
+
+    - Paragraphes séparés par double saut de ligne
+    - URLs inline détectées et soulignées (clic = ouvre la page)
+    - 1 ou 2 boutons CTA en bas du mail si fournis (offre principale +
+      démo métier en seconde)
+    - Wrapper sobre : font Inter/system, couleur de marque légère
+    """
+    if not body_text:
+        return ""
+    accent = "#6366F1"   # cohérent avec Triskell (indigo)
+    text_color = "#1f2937"
+    muted_color = "#6b7280"
+    bg_color = "#f9fafb"
+
+    # 1) Échappe le HTML, puis détecte les URLs inline pour les rendre cliquables
+    safe = _html_mod.escape(body_text)
+    def _linkify(m):
+        u = m.group(1)
+        return (f'<a href="{u}" style="color:{accent};text-decoration:underline;'
+                f'word-break:break-all;">{u}</a>')
+    safe = _URL_RE.sub(_linkify, safe)
+
+    # 2) Découpe en paragraphes (double saut de ligne) puis en lignes
+    paragraphs = []
+    for chunk in safe.split("\n\n"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        lines = chunk.split("\n")
+        paragraphs.append("<br>".join(lines))
+    body_html_inner = "".join(
+        f'<p style="margin:0 0 14px;line-height:1.55;color:{text_color};font-size:15px;">{p}</p>'
+        for p in paragraphs
+    )
+
+    # 3) Boutons CTA (max 2 : offre principale + démo métier)
+    ctas: list[str] = []
+    if primary_url:
+        ctas.append(
+            f'<a href="{_html_mod.escape(primary_url)}" '
+            f'style="display:inline-block;background:{accent};color:white;'
+            f'padding:12px 24px;border-radius:8px;text-decoration:none;'
+            f'font-weight:600;font-size:14.5px;margin:6px;">'
+            f'{_html_mod.escape(primary_label)} →</a>'
+        )
+    if secondary_url and secondary_url != primary_url:
+        ctas.append(
+            f'<a href="{_html_mod.escape(secondary_url)}" '
+            f'style="display:inline-block;background:white;color:{accent};'
+            f'padding:11px 23px;border-radius:8px;text-decoration:none;'
+            f'font-weight:600;font-size:14.5px;margin:6px;'
+            f'border:1.5px solid {accent};">'
+            f'🖼️ {_html_mod.escape(secondary_label)}</a>'
+        )
+    ctas_block = ""
+    if ctas:
+        ctas_block = (
+            '<div style="text-align:center;margin:22px 0 8px;">'
+            + "".join(ctas) +
+            '</div>'
+        )
+
+    # 4) Wrapper sobre (pas de logo, pas de header lourd — l'IA a écrit
+    # un mail naturel, on le présente joliment sans le sur-charger)
+    return f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="margin:0;padding:0;background:{bg_color};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:{bg_color};">
+    <tr><td align="center" style="padding:24px 12px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+        <tr><td style="padding:28px 32px 4px;">
+          {body_html_inner}
+          {ctas_block}
+        </td></tr>
+      </table>
+      <div style="margin-top:14px;font-size:11px;color:{muted_color};">Envoyé par {_html_mod.escape(sender_name or '')}</div>
+    </td></tr>
+  </table>
+</body></html>"""
+
+
 def generate_message(
     prospect: dict[str, str],
     *,
@@ -322,7 +421,8 @@ def generate_message(
     model: str,
     api_keys: dict[str, str],
 ) -> dict[str, str]:
-    """Renvoie {'subject': '...', 'body': '...', 'offer_name': '...'}."""
+    """Renvoie {'subject': '...', 'body': '...', 'body_html': '...',
+    'offer_name': '...'}."""
     offer = pick_offer_for_sector(prospect.get("secteur", ""), catalog)
     demo = pick_demo_for_sector(prospect.get("secteur", ""), catalog)
     demo_block = ""
@@ -365,15 +465,32 @@ def generate_message(
     response = _call_ai(prompt, provider=provider, model=model, api_keys=api_keys)
     data = _parse_json_lenient(response)
     if not isinstance(data, dict):
-        # Fallback : on récupère un objet plausible si l'IA a parlé en clair
+        body_txt = response.strip() or "(génération vide)"
+        body_html = text_to_email_html(
+            body_txt, sender_name=sender_name,
+            primary_url=offer.get("url", ""),
+            primary_label=offer.get("name", "") or "Découvrir",
+            secondary_url=(demo or {}).get("url", ""),
+            secondary_label="Voir un exemple pour votre métier",
+        )
         return {
-            "subject": _fallback_subject(prospect, offer),
-            "body": response.strip() or "(génération vide)",
+            "subject":    _fallback_subject(prospect, offer),
+            "body":       body_txt,
+            "body_html":  body_html,
             "offer_name": offer.get("name", ""),
         }
+    body_txt = _stringify(data.get("body", "")) or "(génération vide)"
+    body_html = text_to_email_html(
+        body_txt, sender_name=sender_name,
+        primary_url=offer.get("url", ""),
+        primary_label=offer.get("name", "") or "Découvrir",
+        secondary_url=(demo or {}).get("url", ""),
+        secondary_label="Voir un exemple pour votre métier",
+    )
     return {
-        "subject": _stringify(data.get("subject", "")) or _fallback_subject(prospect, offer),
-        "body": _stringify(data.get("body", "")) or "(génération vide)",
+        "subject":    _stringify(data.get("subject", "")) or _fallback_subject(prospect, offer),
+        "body":       body_txt,
+        "body_html":  body_html,
         "offer_name": offer.get("name", ""),
     }
 

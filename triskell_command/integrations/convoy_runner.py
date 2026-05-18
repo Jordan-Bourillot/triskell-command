@@ -79,7 +79,8 @@ class ConvoyDraft:
     id: str
     prospect: dict[str, str]
     subject: str = ""
-    body: str = ""
+    body: str = ""              # version texte (fallback clients mail anciens)
+    body_html: str = ""         # version HTML (boutons cliquables, mise en page)
     offer_name: str = ""
     status: str = "pending"           # pending | approved | sent | failed | rejected
     sent_at: str = ""
@@ -96,6 +97,7 @@ class ConvoyDraft:
             prospect=dict(d.get("prospect") or {}),
             subject=d.get("subject", ""),
             body=d.get("body", ""),
+            body_html=d.get("body_html", ""),
             offer_name=d.get("offer_name", ""),
             status=d.get("status", "pending"),
             sent_at=d.get("sent_at", ""),
@@ -414,6 +416,7 @@ def send_draft(
             to=to,
             subject=draft.subject or "(sans objet)",
             body=draft.body or "",
+            body_html=draft.body_html or "",
         )
         draft.status = "sent"
         draft.sent_at = _now_iso()
