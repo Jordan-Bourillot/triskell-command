@@ -1070,9 +1070,10 @@ const Obelisk = {
       if (r && r.ok) this.state.config = r.config;
     }
     const cfg = this.state.config || {};
-    const defaultPlatforms = new Set(cfg.platforms || ['youtube', 'reddit']);
-
-    const monetMode = cfg.monetized_mode || (cfg.only_unmonetized ? 'unmonetized' : 'all');
+    // Défauts forcés à chaque ouverture du formulaire (Jordan veut toujours
+    // partir d'une feuille blanche : YouTube seul + Tous monétisés/non).
+    const defaultPlatforms = new Set(['youtube']);
+    const monetMode = 'all';
     c.innerHTML = `
       <div class="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5">
         <div class="bg-card border border-border rounded-xl p-6">
