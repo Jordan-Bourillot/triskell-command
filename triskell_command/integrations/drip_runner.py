@@ -250,7 +250,9 @@ def _should_skip(client, sent_row: dict, stage: str) -> bool:
     # depuis un autre runner ? On evite la double relance le meme jour.
     try:
         from . import prospect_status as PS
-        recent = PS.has_recent_send(client, prospect_id=prospect_id, hours=48)
+        # hours=None → lit le cooldown configuré (72h par défaut, ou
+        # shared_settings.email_cooldown_hours si Jordan l'a personnalisé)
+        recent = PS.has_recent_send(client, prospect_id=prospect_id, hours=None)
         if recent.get("recent"):
             return True
     except Exception:
