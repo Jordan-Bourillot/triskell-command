@@ -20,6 +20,10 @@ const Convoy = {
   genSeen:   0,
   sendPoll:  null,
   sendSeen:  0,
+  products:  null,        // catalogue central Triskell (chargé une fois)
+  selectedProductIds: new Set(),  // ids cochés pour la campagne courante
+  customOffers: [],       // offres ad-hoc spécifiques à la campagne courante
+  _composeInitForCid: null,
 
   // ------------------------------------------------------------------
   async render(container) {
@@ -143,7 +147,62 @@ const Convoy = {
       return;
     }
     this.detail = r.campaign;
+    await this._loadProducts();
+    this._initComposeState(this.detail);
     this._renderDetail();
+  },
+
+  // ------------------------------------------------------------------
+  //  Catalogue central : chargement + matching avec les offres campagne
+  // ------------------------------------------------------------------
+  async _loadProducts() {
+    if (Array.isArray(this.products)) return;  // déjà chargé
+    try {
+      const r = await App.api.catalog_get_full();
+      if (r && r.ok) {
+        const disabled = new Set(r.disabled_ids || []);
+        this.products = (r.products || []).filter(p => !disabled.has(p.id));
+      } else {
+        this.products = [];
+      }
+    } catch (e) {
+      this.products = [];
+    }
+  },
+
+  _initComposeState(c) {
+    // Reconstruit selectedProductIds + customOffers depuis c.catalog
+    // Évite de re-init si on est sur la même campagne (préserve les
+    // changements faits par l'utilisateur entre deux re-renders).
+    if (this._composeInitForCid === (c && c.id)) return;
+    this._composeInitForCid = c && c.id;
+    this.selectedProductIds = new Set();
+    this.customOffers = [];
+    const products = this.products || [];
+    const used = new Set();
+    for (const offer of (c.catalog || [])) {
+      const url = (offer.url || '').trim().toLowerCase();
+      const name = (offer.name || '').trim().toLowerCase();
+      let match = null;
+      for (const p of products) {
+        if (used.has(p.id)) continue;
+        const pu = (p.buy_url || '').trim().toLowerCase();
+        const pn = (p.name || '').trim().toLowerCase();
+        if ((url && pu && url === pu) || (name && pn && name === pn)) {
+          match = p; break;
+        }
+      }
+      if (match) {
+        this.selectedProductIds.add(match.id);
+        used.add(match.id);
+      } else if (offer.name || offer.url || offer.pitch) {
+        this.customOffers.push({
+          id: 'co_' + Math.random().toString(36).slice(2, 9),
+          name: offer.name || '', pitch: offer.pitch || '',
+          keywords: offer.keywords || '', url: offer.url || '',
+        });
+      }
+    }
   },
 
   async newCampaign() {
@@ -538,19 +597,55 @@ const Convoy = {
 
   // ---- Étape 3 : Composer ------------------------------------------
   _stepCompose(c) {
-    const catalogText = (c.catalog || []).map(o =>
-      `${o.name || ''} | ${o.pitch || ''} | ${o.keywords || ''} | ${o.url || ''}`
-    ).join('\n');
+    // S'assure que l'état est init (cas où _loadProducts a fini après le 1er render)
+    this._initComposeState(c);
+    const products = this.products || [];
+    // Groupe par catégorie pour clarté visuelle
+    const byCat = {};
+    for (const p of products) {
+      const k = p.category || 'autres';
+      if (!byCat[k]) byCat[k] = [];
+      byCat[k].push(p);
+    }
+    const selectedCount = this.selectedProductIds.size + this.customOffers.length;
     return `
       ${this._sectionOpen('3. Catalogue + instructions',
-        'Le catalogue est CENTRAL — tu l\'édites ici, il s\'applique à toutes tes campagnes. Format par ligne : « Nom | Pitch | mots-clés | URL ».')}
-        <label class="block mb-3">
-          <div class="text-xs font-medium text-text-secondary mb-1.5">Catalogue d'offres (1 par ligne)</div>
-          <textarea id="cv-catalog" rows="5"
-                    class="w-full px-3 py-2 rounded-lg bg-bg border border-border
-                           focus:border-accent focus:outline-none text-xs font-mono leading-relaxed
-                           resize-y">${this._esc(catalogText)}</textarea>
-        </label>
+        'Coche les offres à proposer dans cette campagne. L\'IA piochera dedans pour adapter le mail à chaque contact.')}
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-xs font-medium text-text-secondary">
+            Catalogue Triskell · <span id="cv-cat-count" class="text-accent font-semibold">${selectedCount}</span> offre${selectedCount > 1 ? 's' : ''} retenue${selectedCount > 1 ? 's' : ''}
+          </div>
+          <div class="flex gap-2">
+            <button id="cv-cat-all"  class="text-[11px] text-text-muted hover:text-accent underline underline-offset-2">Tout cocher</button>
+            <button id="cv-cat-none" class="text-[11px] text-text-muted hover:text-accent underline underline-offset-2">Tout décocher</button>
+          </div>
+        </div>
+
+        ${products.length === 0 ? `
+          <div class="text-xs text-text-muted italic mb-4 p-3 rounded-lg bg-bg border border-border">
+            Aucun produit dans ton catalogue Triskell pour l'instant. Ajoute-les en bas en « Offres custom », ou ouvre la page Catalogue dans l'écosystème.
+          </div>
+        ` : `
+          <div class="space-y-4 mb-4">
+            ${Object.entries(byCat).map(([cat, ps]) => `
+              <div>
+                <div class="text-[10px] font-bold tracking-widest text-text-muted mb-2 uppercase">${this._esc(this._categoryLabel(cat))}</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  ${ps.map(p => this._productCard(p)).join('')}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `}
+
+        <div class="border-t border-border pt-4 mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-[10px] font-bold tracking-widest text-text-muted uppercase">Offres custom (juste pour cette campagne)</div>
+            <button id="cv-add-offer" class="text-[11px] text-accent hover:underline">+ Ajouter une offre</button>
+          </div>
+          <div id="cv-custom-offers" class="space-y-2"></div>
+        </div>
+
         <label class="block mb-3">
           <div class="text-xs font-medium text-text-secondary mb-1.5">Tes instructions à l'IA (ton, contexte, contraintes)</div>
           <textarea id="cv-brief" rows="5"
@@ -584,22 +679,143 @@ const Convoy = {
     if (gt) gt.onclick = () => this._generate(5);
     const ga = document.getElementById('cv-gen-all');
     if (ga) ga.onclick = () => this._generate(null);
+
+    // Coches produits : update visuel + compteur + état interne
+    document.querySelectorAll('.cv-product-check').forEach(cb => {
+      cb.onchange = () => {
+        const pid = cb.getAttribute('data-product-id');
+        if (cb.checked) this.selectedProductIds.add(pid);
+        else this.selectedProductIds.delete(pid);
+        const card = cb.closest('.cv-product-card');
+        if (card) {
+          card.classList.toggle('border-accent', cb.checked);
+          card.classList.toggle('bg-accent/5', cb.checked);
+          card.classList.toggle('border-border', !cb.checked);
+        }
+        this._updateCatCount();
+      };
+    });
+    const allBtn = document.getElementById('cv-cat-all');
+    if (allBtn) allBtn.onclick = () => {
+      document.querySelectorAll('.cv-product-check').forEach(cb => {
+        if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
+      });
+    };
+    const noneBtn = document.getElementById('cv-cat-none');
+    if (noneBtn) noneBtn.onclick = () => {
+      document.querySelectorAll('.cv-product-check').forEach(cb => {
+        if (cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('change')); }
+      });
+    };
+
+    // Offres custom : ajout + rendu initial
+    const addBtn = document.getElementById('cv-add-offer');
+    if (addBtn) addBtn.onclick = () => {
+      this.customOffers.push({
+        id: 'co_' + Math.random().toString(36).slice(2, 9),
+        name: '', pitch: '', keywords: '', url: '',
+      });
+      this._renderCustomOffers();
+      this._updateCatCount();
+    };
+    this._renderCustomOffers();
+  },
+
+  _renderCustomOffers() {
+    const wrap = document.getElementById('cv-custom-offers');
+    if (!wrap) return;
+    if (!this.customOffers.length) {
+      wrap.innerHTML = `<div class="text-xs text-text-muted italic px-1">Aucune offre custom. Clique « + Ajouter » si tu veux proposer un service qui n'est pas dans ton catalogue.</div>`;
+      return;
+    }
+    wrap.innerHTML = this.customOffers.map(o => `
+      <div class="grid grid-cols-12 gap-2 items-center">
+        <input class="col-span-3 px-2 py-1.5 text-xs rounded-md bg-bg border border-border focus:border-accent focus:outline-none"
+               placeholder="Nom de l'offre" data-co-id="${this._esc(o.id)}" data-co-field="name" value="${this._esc(o.name || '')}">
+        <input class="col-span-4 px-2 py-1.5 text-xs rounded-md bg-bg border border-border focus:border-accent focus:outline-none"
+               placeholder="Pitch (1 phrase)" data-co-id="${this._esc(o.id)}" data-co-field="pitch" value="${this._esc(o.pitch || '')}">
+        <input class="col-span-2 px-2 py-1.5 text-xs rounded-md bg-bg border border-border focus:border-accent focus:outline-none"
+               placeholder="mots-clés" data-co-id="${this._esc(o.id)}" data-co-field="keywords" value="${this._esc(o.keywords || '')}">
+        <input class="col-span-2 px-2 py-1.5 text-xs rounded-md bg-bg border border-border focus:border-accent focus:outline-none"
+               placeholder="https://…" data-co-id="${this._esc(o.id)}" data-co-field="url" value="${this._esc(o.url || '')}">
+        <button class="col-span-1 text-danger hover:text-danger/80 text-xl leading-none font-bold"
+                data-co-remove="${this._esc(o.id)}" title="Retirer cette offre">×</button>
+      </div>
+    `).join('');
+    wrap.querySelectorAll('[data-co-id]').forEach(input => {
+      input.oninput = () => {
+        const id = input.getAttribute('data-co-id');
+        const field = input.getAttribute('data-co-field');
+        const offer = this.customOffers.find(o => o.id === id);
+        if (offer) offer[field] = input.value;
+      };
+    });
+    wrap.querySelectorAll('[data-co-remove]').forEach(btn => {
+      btn.onclick = () => {
+        const id = btn.getAttribute('data-co-remove');
+        this.customOffers = this.customOffers.filter(o => o.id !== id);
+        this._renderCustomOffers();
+        this._updateCatCount();
+      };
+    });
+  },
+
+  _updateCatCount() {
+    const el = document.getElementById('cv-cat-count');
+    if (!el) return;
+    const n = this.selectedProductIds.size + this.customOffers.filter(o => o.name || o.url || o.pitch).length;
+    el.textContent = String(n);
+  },
+
+  _productCard(p) {
+    const checked = this.selectedProductIds.has(p.id);
+    const initial = (p.initial || (p.name || '?').charAt(0)).toUpperCase();
+    const color = p.color || '#888';
+    return `
+      <label class="cv-product-card flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition hover:border-accent/60
+                     ${checked ? 'border-accent bg-accent/5' : 'border-border'}">
+        <input type="checkbox" data-product-id="${this._esc(p.id)}" ${checked ? 'checked' : ''}
+               class="mt-1 cv-product-check w-4 h-4 accent-accent flex-shrink-0">
+        <div class="w-8 h-8 rounded-md flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
+             style="background:${this._esc(color)}">${this._esc(initial)}</div>
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-semibold truncate">${this._esc(p.name || '')}</div>
+          <div class="text-xs text-text-muted line-clamp-2 mt-0.5">${this._esc(p.tagline || p.sales_pitch || '')}</div>
+        </div>
+      </label>
+    `;
+  },
+
+  _categoryLabel(cat) {
+    const map = {
+      sites: 'Sites web', creators: 'Créateurs', batiment: 'Bâtiment',
+      apps: 'Applications', service: 'Services', autres: 'Autres',
+    };
+    return map[cat] || cat;
   },
 
   _gatherCompose() {
     const brief = (document.getElementById('cv-brief') || {}).value || '';
-    const catText = (document.getElementById('cv-catalog') || {}).value || '';
-    const catalog = catText.split('\n').map(line => {
-      const parts = line.split('|').map(s => s.trim());
-      const name = parts[0] || '';
-      if (!name) return null;
-      return {
-        name,
-        pitch:    parts[1] || '',
-        keywords: parts[2] || '',
-        url:      parts[3] || '',
-      };
-    }).filter(Boolean);
+    const catalog = [];
+    // Produits du catalogue central cochés
+    for (const pid of this.selectedProductIds) {
+      const p = (this.products || []).find(x => x.id === pid);
+      if (!p) continue;
+      catalog.push({
+        name:     p.name || '',
+        pitch:    p.tagline || p.sales_pitch || '',
+        keywords: p.category || '',
+        url:      p.buy_url || '',
+      });
+    }
+    // Offres ad-hoc
+    for (const o of (this.customOffers || [])) {
+      if (!o.name && !o.url && !o.pitch) continue;
+      catalog.push({
+        name: o.name || '', pitch: o.pitch || '',
+        keywords: o.keywords || '', url: o.url || '',
+      });
+    }
     return { user_brief: brief, catalog };
   },
 
