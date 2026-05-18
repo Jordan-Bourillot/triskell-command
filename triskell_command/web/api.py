@@ -4670,20 +4670,56 @@ class Api:
             return None
         return {"provider": prov, "model": model, "api_keys": keys}
 
-    def _convoy_smtp_config(self) -> dict | None:
-        o = self._app_state.get("outreach", default={}) or {}
-        required = ("smtp_host", "smtp_port", "smtp_user", "smtp_password",
-                    "from_email")
-        if any(not o.get(k) for k in required):
-            return None
-        return {
-            "smtp_host": o.get("smtp_host"),
-            "smtp_port": int(o.get("smtp_port", 587)),
-            "smtp_user": o.get("smtp_user"),
-            "smtp_password": o.get("smtp_password"),
-            "from_email": o.get("from_email"),
-            "from_name": o.get("from_name", ""),
-        }
+    def _convoy_smtp_config(self, account_id: str = "primary") -> dict | None:
+        """Renvoie le dict SMTP pour le compte demandé.
+
+        - account_id = "primary" (défaut) : compte principal (settings.outreach
+          + miroir Supabase shared_secrets.smtp_config).
+        - account_id = id d'un compte secondaire : utilise
+          shared_secrets.get_account_by_id().
+
+        None si configuration incomplète.
+        """
+        aid = (account_id or "primary").strip() or "primary"
+        try:
+            from ..integrations import shared_secrets
+            client = self._supabase()
+            if aid == "primary":
+                cfg = shared_secrets.resolve_smtp_for_send(
+                    client=client, app_state=self._app_state)
+                return cfg  # déjà au bon format ou None
+            acc = shared_secrets.get_account_by_id(
+                aid, client=client, app_state=self._app_state)
+            if not acc:
+                return None
+            required = ("smtp_host", "smtp_port", "smtp_user",
+                        "smtp_password", "from_email")
+            if any(not acc.get(k) for k in required):
+                return None
+            return {
+                "smtp_host": acc.get("smtp_host"),
+                "smtp_port": int(acc.get("smtp_port") or 587),
+                "smtp_user": acc.get("smtp_user"),
+                "smtp_password": acc.get("smtp_password"),
+                "from_email": acc.get("from_email"),
+                "from_name": acc.get("from_name", ""),
+            }
+        except Exception as exc:
+            logger.warning("_convoy_smtp_config(%s) : %s", aid, exc)
+            # Fallback ultime : settings local
+            o = self._app_state.get("outreach", default={}) or {}
+            required = ("smtp_host", "smtp_port", "smtp_user", "smtp_password",
+                        "from_email")
+            if any(not o.get(k) for k in required):
+                return None
+            return {
+                "smtp_host": o.get("smtp_host"),
+                "smtp_port": int(o.get("smtp_port", 587)),
+                "smtp_user": o.get("smtp_user"),
+                "smtp_password": o.get("smtp_password"),
+                "from_email": o.get("from_email"),
+                "from_name": o.get("from_name", ""),
+            }
 
     def _convoy_serialize(self, camp) -> dict:
         """ConvoyCampaign → dict sérialisable pour le front."""
@@ -5181,6 +5217,9 @@ class Api:
                 except Exception: pass
             if "schedule_at" in p:
                 camp.schedule_at = str(p.get("schedule_at") or "").strip()
+            if "sender_account_id" in p:
+                aid = (p.get("sender_account_id") or "primary").strip()
+                camp.sender_account_id = aid or "primary"
             camp.save()
             return {"ok": True, "campaign": self._convoy_serialize(camp)}
         except Exception as exc:
@@ -5271,10 +5310,13 @@ class Api:
             camp = convoy_runner.load_campaign(cid)
             if not camp:
                 return {"ok": False, "error": "Campagne introuvable"}
-            smtp_cfg = self._convoy_smtp_config()
+            aid = (camp.sender_account_id or "primary").strip() or "primary"
+            smtp_cfg = self._convoy_smtp_config(aid)
             if not smtp_cfg:
+                label = "compte principal" if aid == "primary" else f"compte « {aid} »"
                 return {"ok": False, "error":
-                        "Compte mail non configuré — vérifie Réglages."}
+                        f"Le {label} n'est pas configuré ou il manque un "
+                        "champ (SMTP/mot de passe). Vérifie les Réglages."}
 
             rt = self._convoy_runtime_get(cid)
             with self._convoy_lock:

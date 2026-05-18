@@ -119,6 +119,9 @@ class ConvoyCampaign:
     daily_cap: int = 40
     delay_seconds: int = 60            # délai mini entre 2 envois
     schedule_at: str = ""              # ISO datetime pour démarrer plus tard, "" = maintenant
+    sender_account_id: str = "primary" # id du compte mail expéditeur
+                                       # ("primary" = compte principal,
+                                       # sinon id d'un compte secondaire)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -139,6 +142,7 @@ class ConvoyCampaign:
             daily_cap=int(d.get("daily_cap", 40)),
             delay_seconds=int(d.get("delay_seconds", 60)),
             schedule_at=d.get("schedule_at", ""),
+            sender_account_id=(d.get("sender_account_id") or "primary"),
         )
 
     @property
@@ -266,7 +270,16 @@ def _campaign_to_row(camp: ConvoyCampaign) -> dict[str, Any]:
         "daily_cap": camp.daily_cap,
         "delay_seconds": camp.delay_seconds,
         "schedule_at": camp.schedule_at or None,
+        "sender_account_id": camp.sender_account_id or "primary",
     }
+
+
+# Champs récemment ajoutés à la table convoy_campaigns. Si la colonne
+# n'existe pas encore sur Supabase (migration pas encore jouée), on
+# retire ces champs du payload et on retente — la campagne reste
+# synchronisée, juste sans la nouvelle info, jusqu'à ce que la
+# migration soit jouée.
+_OPTIONAL_CAMPAIGN_COLUMNS = ("sender_account_id",)
 
 
 def _row_to_campaign(row: dict[str, Any]) -> ConvoyCampaign:
@@ -282,6 +295,7 @@ def _row_to_campaign(row: dict[str, Any]) -> ConvoyCampaign:
         daily_cap=int(row.get("daily_cap") or 40),
         delay_seconds=int(row.get("delay_seconds") or 60),
         schedule_at=str(row.get("schedule_at") or ""),
+        sender_account_id=(row.get("sender_account_id") or "primary"),
     )
 
 
@@ -319,9 +333,30 @@ def _save_to_supabase(camp: ConvoyCampaign, client) -> None:
     try:
         camp_row = _campaign_to_row(camp)
         camp_row["created_by"] = client.user_id
-        client.raw.table("convoy_campaigns").upsert(
-            with_workspace(client, camp_row)
-        ).execute()
+        try:
+            client.raw.table("convoy_campaigns").upsert(
+                with_workspace(client, camp_row)
+            ).execute()
+        except Exception as exc:
+            # Si une colonne ajoutée récemment n'existe pas encore sur
+            # Supabase (migration pas jouée), on retire ces champs et
+            # on retente — la campagne reste synchronisée.
+            msg = str(exc).lower()
+            stripped = []
+            for col in _OPTIONAL_CAMPAIGN_COLUMNS:
+                if col in msg and "column" in msg and col in camp_row:
+                    camp_row.pop(col, None)
+                    stripped.append(col)
+            if not stripped:
+                raise
+            logger.warning(
+                "Colonnes Supabase manquantes %s — upsert sans ces champs. "
+                "Joue la migration SQL pour activer la fonctionnalité.",
+                stripped,
+            )
+            client.raw.table("convoy_campaigns").upsert(
+                with_workspace(client, camp_row)
+            ).execute()
         if camp.drafts:
             drafts_rows = [_draft_to_row(d, camp.id) for d in camp.drafts]
             client.raw.table("convoy_drafts").upsert(

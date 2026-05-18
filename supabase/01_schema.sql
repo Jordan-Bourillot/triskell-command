@@ -182,6 +182,10 @@ create table public.convoy_campaigns (
     daily_cap int not null default 40,
     delay_seconds int not null default 60,
     schedule_at timestamptz,
+    sender_account_id text not null default 'primary',   -- id du compte mail expéditeur
+                                                          -- ('primary' = compte principal,
+                                                          -- sinon id d'un compte secondaire stocké
+                                                          -- dans shared_settings.mail_accounts)
     raw_text text default '',                            -- texte brut extrait du fichier
     created_by uuid references public.users(user_id),
     created_at timestamptz not null default now(),

@@ -23,6 +23,7 @@ const Convoy = {
   products:  null,        // catalogue central Triskell (chargé une fois)
   selectedProductIds: new Set(),  // ids cochés pour la campagne courante
   customOffers: [],       // offres ad-hoc spécifiques à la campagne courante
+  mailAccounts: null,     // liste des comptes mail (principal + secondaires)
   _composeInitForCid: null,
   wizardStep: 1,          // étape active du wizard (1..5)
 
@@ -159,6 +160,7 @@ const Convoy = {
   },
 
   async refreshAll() {
+    await this._loadMailAccounts();
     await this._loadList();
     if (!this.selected && this.campaigns.length > 0) {
       await this.select(this.campaigns[0].id);
@@ -255,6 +257,38 @@ const Convoy = {
     } catch (e) {
       this.products = [];
     }
+  },
+
+  // Charge la liste des comptes mail (principal + secondaires).
+  // Mis en cache pour éviter un appel à chaque re-render.
+  async _loadMailAccounts(force = false) {
+    if (!force && Array.isArray(this.mailAccounts)) return;
+    if (!App.api || !App.api.mail_accounts_list) {
+      this.mailAccounts = [];
+      return;
+    }
+    try {
+      const r = await App.api.mail_accounts_list();
+      this.mailAccounts = (r && r.ok && Array.isArray(r.accounts)) ? r.accounts : [];
+    } catch (e) {
+      this.mailAccounts = [];
+    }
+  },
+
+  // Renvoie le compte mail correspondant à un id, ou null.
+  _findAccount(id) {
+    const aid = (id || 'primary').toString();
+    const list = this.mailAccounts || [];
+    return list.find(a => (a.id || '') === aid) || null;
+  },
+
+  // Libellé court d'un compte (« Nom — email@x »).
+  _accountLabel(a) {
+    if (!a) return '';
+    const lbl = a.label || a.from_name || '';
+    const mail = a.from_email || '';
+    if (lbl && mail && lbl !== mail) return `${lbl} — ${mail}`;
+    return mail || lbl || a.id;
   },
 
   _initComposeState(c) {
@@ -383,6 +417,13 @@ const Convoy = {
   // ---- Header ------------------------------------------------------
   _headerCard(c) {
     const fname = (c.source_file || '').split(/[\\/]/).pop() || '';
+    const senderId = (c && c.sender_account_id) || 'primary';
+    const senderAcc = this._findAccount(senderId);
+    const senderHtml = senderAcc
+      ? `<span title="Adresse expéditrice du convoi (modifiable à l'étape 5)">
+           ✉ depuis <b>${this._esc(senderAcc.from_email || '')}</b>
+         </span>`
+      : '';
     return `
       <div class="card p-4 sm:p-6">
         <div class="flex flex-col sm:flex-row sm:items-center gap-3">
@@ -396,9 +437,10 @@ const Convoy = {
             </button>
           </div>
         </div>
-        <div class="text-xs text-text-muted mt-2">
-          ${fname ? `📄 ${this._esc(fname)} · ` : ''}
-          créée le ${this._esc((c.created_at || '').slice(0, 16))}
+        <div class="text-xs text-text-muted mt-2 flex flex-wrap gap-x-3 gap-y-1">
+          ${fname ? `<span>📄 ${this._esc(fname)}</span>` : ''}
+          <span>créée le ${this._esc((c.created_at || '').slice(0, 16))}</span>
+          ${senderHtml}
         </div>
       </div>
     `;
@@ -1015,9 +1057,11 @@ const Convoy = {
 
   // ---- Étape 4 : Envoi ---------------------------------------------
   _stepSend(c) {
+    const senderHtml = this._renderSenderSelect(c);
     return `
       ${this._sectionOpen('4. Mode d\'envoi',
         'AUTO : tout part dès que tu lances. VALIDATION : tu approuves chaque mail un par un avant le départ.')}
+        ${senderHtml}
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label class="block">
             <div class="text-xs font-medium text-text-secondary mb-1.5">Mode</div>
@@ -1076,15 +1120,76 @@ const Convoy = {
     if (start) start.onclick = () => this._startSend();
     const stop  = document.getElementById('cv-stop-send');
     if (stop)  stop.onclick = () => this._stopSend();
+    const sender = document.getElementById('cv-sender');
+    if (sender) sender.onchange = () => this._refreshSenderPreview();
+    // Si la liste des comptes n'est pas encore chargée, on la charge
+    // puis on re-rend cette étape pour afficher les vraies options.
+    if (!Array.isArray(this.mailAccounts)) {
+      this._loadMailAccounts().then(() => {
+        if (this.wizardStep === 5) this._renderDetail();
+      });
+    }
+  },
+
+  // Sélecteur d'adresse expéditrice. Si aucun compte n'est dispo,
+  // affiche un message + lien vers les Réglages.
+  _renderSenderSelect(c) {
+    const accounts = this.mailAccounts || [];
+    const currentId = (c && c.sender_account_id) || 'primary';
+    const current = this._findAccount(currentId);
+    if (accounts.length === 0) {
+      return `
+        <div class="cv-sender-block">
+          <div class="text-xs font-medium text-text-secondary mb-1.5">Adresse expéditrice</div>
+          <div class="text-xs text-text-muted px-3 py-2 rounded-lg bg-bg border border-border">
+            Aucun compte mail configuré. Va dans Réglages pour ajouter ton compte principal,
+            ou un compte secondaire (ex : Lagriffe).
+          </div>
+        </div>`;
+    }
+    const opts = accounts.map(a => {
+      const sel = (a.id === currentId) ? 'selected' : '';
+      const lbl = this._esc(this._accountLabel(a));
+      return `<option value="${this._esc(a.id)}" ${sel}>${lbl}</option>`;
+    }).join('');
+    const previewLine = current
+      ? `Les mails partiront de <b>${this._esc(current.from_email || '')}</b>${current.from_name ? ' (<span>' + this._esc(current.from_name) + '</span>)' : ''}.`
+      : `Compte introuvable — choisis-en un autre.`;
+    return `
+      <div class="cv-sender-block mb-3">
+        <label class="block">
+          <div class="text-xs font-medium text-text-secondary mb-1.5">Adresse expéditrice (tout le convoi partira de ce compte)</div>
+          <select id="cv-sender"
+                  class="w-full px-3 py-2 rounded-lg bg-bg border border-border
+                         focus:border-accent focus:outline-none text-sm">
+            ${opts}
+          </select>
+        </label>
+        <div id="cv-sender-preview" class="text-xs text-text-muted mt-1.5">${previewLine}</div>
+      </div>
+    `;
+  },
+
+  _refreshSenderPreview() {
+    const sel = document.getElementById('cv-sender');
+    const out = document.getElementById('cv-sender-preview');
+    if (!sel || !out) return;
+    const acc = this._findAccount(sel.value);
+    if (!acc) { out.innerHTML = 'Compte introuvable.'; return; }
+    out.innerHTML = `Les mails partiront de <b>${this._esc(acc.from_email || '')}</b>${
+      acc.from_name ? ' (<span>' + this._esc(acc.from_name) + '</span>)' : ''
+    }.`;
   },
 
   _gatherSendSettings() {
+    const sender = (document.getElementById('cv-sender') || {}).value;
     return {
       campaign_id: this.detail.id,
       mode: (document.getElementById('cv-mode') || {}).value || 'validation',
       daily_cap: parseInt((document.getElementById('cv-cap') || {}).value, 10) || 40,
       delay_seconds: parseInt((document.getElementById('cv-delay') || {}).value, 10) || 60,
       schedule_at: ((document.getElementById('cv-sched') || {}).value || '').trim(),
+      sender_account_id: (sender || 'primary'),
     };
   },
 
