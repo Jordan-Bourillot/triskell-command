@@ -5060,12 +5060,16 @@ class Api:
         """Lance la génération IA des mails en thread daemon, retour immédiat.
         Le front polle convoy_generation_status pour suivre.
 
-        payload = {campaign_id, limit?: int}
+        payload = {campaign_id, limit?: int, test_mode?: bool}
+        Quand test_mode=True (typiquement appelé avec limit=5), les drafts
+        générés sont marqués is_test=True pour les afficher en haut de la
+        liste avec un badge.
         """
         from datetime import datetime
         p = payload or {}
         cid = (p.get("campaign_id") or "").strip()
         limit = p.get("limit")
+        test_mode = bool(p.get("test_mode"))
         if not cid:
             return {"ok": False, "error": "campaign_id requis"}
         try:
@@ -5102,6 +5106,7 @@ class Api:
             already_skipped = 0
             sent_skipped = 0
             targets: list = []
+            drafts_to_mark_skipped: list = []
             for d in camp.drafts:
                 if d.status == "sent":
                     sent_skipped += 1
@@ -5115,12 +5120,27 @@ class Api:
                         if recent.get("recent"):
                             already_contacted_emails.add(to)
                             already_skipped += 1
+                            # Marque le draft pour qu'il apparaisse comme
+                            # rejeté avec une raison claire dans le preview,
+                            # au lieu de rester "en attente" sans contenu.
+                            drafts_to_mark_skipped.append(d)
                             continue
                     except Exception:
                         pass
                 targets.append(d)
             if isinstance(limit, int) and limit > 0:
                 targets = targets[:limit]
+
+            # Pré-marque les skippés AVANT le worker pour que le preview
+            # reflète immédiatement l'état (sinon Jordan voit ses
+            # déjà-contactés "en attente").
+            if drafts_to_mark_skipped:
+                for d in drafts_to_mark_skipped:
+                    d.status = "rejected"
+                    d.error = ("Déjà contacté récemment (cooldown actif) — "
+                               "non régénéré ni envoyé.")
+                try: camp.save()
+                except Exception: pass
 
             def push(msg: str) -> None:
                 line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
@@ -5152,6 +5172,10 @@ class Api:
                             draft.body = msg.get("body", "")
                             draft.body_html = msg.get("body_html", "")
                             draft.offer_name = msg.get("offer_name", "")
+                            draft.offer_mail_account_id = (
+                                msg.get("offer_mail_account_id") or "")
+                            if test_mode:
+                                draft.is_test = True
                             push(f"  ({i}/{len(targets)}) {draft.prospect.get('email','')} OK")
                         except Exception as exc:
                             draft.error = f"génération échouée : {exc}"
@@ -5318,6 +5342,35 @@ class Api:
                         f"Le {label} n'est pas configuré ou il manque un "
                         "champ (SMTP/mot de passe). Vérifie les Réglages."}
 
+            # Comptes additionnels potentiels : ceux liés à un produit
+            # via `offer_mail_account_id` sur un draft approuvé.
+            # On résout la config de chacun pour permettre l'envoi
+            # depuis l'adresse du produit pitché.
+            needed_account_ids: set[str] = set()
+            for d in camp.drafts:
+                if d.status != "approved":
+                    continue
+                oid = (getattr(d, "offer_mail_account_id", "") or "").strip()
+                if oid and oid != aid:
+                    needed_account_ids.add(oid)
+            smtp_cfgs_by_account: dict[str, dict] = {}
+            unavailable: list[str] = []
+            for oid in sorted(needed_account_ids):
+                cfg = self._convoy_smtp_config(oid)
+                if cfg:
+                    smtp_cfgs_by_account[oid] = cfg
+                else:
+                    unavailable.append(oid)
+            if unavailable:
+                # On ne bloque PAS l'envoi : les drafts concernés tomberont
+                # juste sur le compte par défaut de la campagne avec un
+                # message dans le journal.
+                logger.info(
+                    "convoy_start_send: comptes liés à un produit non "
+                    "configurés (%s) — fallback compte campagne pour ces drafts",
+                    unavailable,
+                )
+
             rt = self._convoy_runtime_get(cid)
             with self._convoy_lock:
                 if rt.get("send_running"):
@@ -5349,8 +5402,17 @@ class Api:
             def worker():
                 try:
                     push(f"Envoi de {len(approved)} mail(s)…")
+                    if smtp_cfgs_by_account:
+                        push("Comptes additionnels (par produit) : "
+                             + ", ".join(sorted(smtp_cfgs_by_account.keys())))
+                    if unavailable:
+                        push("⚠ Comptes liés à un produit non configurés : "
+                             + ", ".join(unavailable)
+                             + " — fallback compte campagne pour ces drafts.")
                     convoy_runner.run_campaign_send(
-                        camp, smtp_cfg=smtp_cfg, progress=push,
+                        camp, smtp_cfg=smtp_cfg,
+                        smtp_cfgs_by_account=smtp_cfgs_by_account,
+                        progress=push,
                         stop_flag=lambda: bool(rt.get("send_stop_flag")),
                     )
                     push("Terminé.")

@@ -328,37 +328,69 @@ def has_recent_send(client, *, prospect_id: str = "", email: str = "",
     sb = client.raw
     threshold = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     try:
+        if prospect_id:
+            # Query rapide quand on a l'id : on peut limiter à 1.
+            q = (sb.table("email_history").select("ts,kind,extra,subject")
+                 .eq("kind", "email_sent")
+                 .gte("ts", threshold)
+                 .eq("prospect_id", prospect_id)
+                 .order("ts", desc=True).limit(1))
+            res = q.execute()
+            rows = res.data or []
+            if rows:
+                r = rows[0]
+                return {"recent": True, "last_ts": r.get("ts", ""),
+                        "last_kind": r.get("kind", "")}
+            return {"recent": False, "last_ts": "", "last_kind": ""}
+
+        # Pas d'id : on cherche par email dans extra->>to.
+        # Bug historique : on limitait à 1 row, ce qui ramenait le DERNIER
+        # mail envoyé toutes destinations confondues et passait toujours à
+        # côté quand ce dernier mail n'était pas pour ce prospect-ci.
+        # Fix : on tente une requête côté serveur sur extra->>to (cas
+        # mono-destinataire, qui est notre standard) ; en fallback, on
+        # ramène une fenêtre raisonnable puis on filtre côté Python.
+        email_low = (email or "").lower().strip()
+        if not email_low:
+            return {"recent": False, "last_ts": "", "last_kind": ""}
+        # 1) Tentative serveur : ultra-rapide, exploite l'index JSONB.
+        try:
+            q = (sb.table("email_history").select("ts,kind,extra,subject")
+                 .eq("kind", "email_sent")
+                 .gte("ts", threshold)
+                 .eq("extra->>to", email_low)
+                 .order("ts", desc=True).limit(1))
+            res = q.execute()
+            rows = res.data or []
+            if rows:
+                r = rows[0]
+                return {"recent": True, "last_ts": r.get("ts", ""),
+                        "last_kind": r.get("kind", "")}
+        except Exception as exc:
+            logger.debug("has_recent_send: server-side filter KO (%s) — "
+                         "fallback client-side", exc)
+        # 2) Fallback client-side : ramène les 500 derniers sends dans la
+        # fenêtre et filtre par email. Coûteux mais correct.
         q = (sb.table("email_history").select("ts,kind,extra,subject")
              .eq("kind", "email_sent")
              .gte("ts", threshold)
-             .order("ts", desc=True).limit(1))
-        if prospect_id:
-            q = q.eq("prospect_id", prospect_id)
+             .order("ts", desc=True).limit(500))
         res = q.execute()
         rows = res.data or []
-        # Si on a un prospect_id, on a deja filtre. Sinon, filtrer par email
-        # dans extra.to.
-        if not prospect_id and email:
-            email_low = email.lower()
-            filtered = []
-            for r in rows:
-                extra = r.get("extra") or {}
-                if isinstance(extra, str):
-                    try:
-                        import json as _json
-                        extra = _json.loads(extra)
-                    except Exception:
-                        extra = {}
-                tos = extra.get("to") or extra.get("recipients") or []
-                if isinstance(tos, str):
-                    tos = [tos]
-                if any((t or "").lower() == email_low for t in tos):
-                    filtered.append(r)
-            rows = filtered
-        if rows:
-            r = rows[0]
-            return {"recent": True, "last_ts": r.get("ts", ""),
-                    "last_kind": r.get("kind", "")}
+        for r in rows:
+            extra = r.get("extra") or {}
+            if isinstance(extra, str):
+                try:
+                    import json as _json
+                    extra = _json.loads(extra)
+                except Exception:
+                    extra = {}
+            tos = extra.get("to") or extra.get("recipients") or []
+            if isinstance(tos, str):
+                tos = [tos]
+            if any((t or "").lower() == email_low for t in tos):
+                return {"recent": True, "last_ts": r.get("ts", ""),
+                        "last_kind": r.get("kind", "")}
     except Exception as exc:
         logger.debug("has_recent_send: %s", exc)
     return {"recent": False, "last_ts": "", "last_kind": ""}

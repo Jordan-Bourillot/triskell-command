@@ -1014,6 +1014,7 @@ const Convoy = {
       r = await App.api.convoy_generate_messages({
         campaign_id: this.detail.id,
         limit: limit || null,
+        test_mode: !!(limit && limit > 0),  // batch limité = test
       });
     } catch (e) { r = { ok: false, error: String(e) }; }
     if (!r || !r.ok) {
@@ -1268,6 +1269,34 @@ const Convoy = {
   _stepResults(c) {
     const drafts = c.drafts || [];
     const counts = this._counts(drafts);
+
+    // Tri : mails TEST tout en haut → pending non vide → approved →
+    // pending vide (pas encore générés) → sent → failed → rejected.
+    // Permet à Jordan de retrouver instantanément ses 5 tests sans
+    // scroller, et de voir d'abord ce qui demande son attention.
+    const order = { pending: 1, approved: 2, sent: 3, failed: 4, rejected: 5 };
+    const sorted = drafts.slice().sort((a, b) => {
+      const ta = !!a.is_test, tb = !!b.is_test;
+      if (ta !== tb) return ta ? -1 : 1;
+      const ea = !(a.subject || a.body), eb = !(b.subject || b.body);
+      // Parmi les pending : non-vides avant vides
+      const sa = order[a.status] || 9;
+      const sb = order[b.status] || 9;
+      if (sa !== sb) return sa - sb;
+      if (sa === 1 && ea !== eb) return ea ? 1 : -1;
+      return 0;
+    });
+
+    const testCount = drafts.filter(d => d.is_test).length;
+    const testBanner = testCount > 0 ? `
+      <div class="cv-test-banner mb-4">
+        <span class="cv-test-pill">TEST</span>
+        Tu as <b>${testCount}</b> mail${testCount > 1 ? 's' : ''} test
+        en haut de la liste. Vérifie-${testCount > 1 ? 'les' : 'le'},
+        puis génère le reste si tu es satisfait.
+      </div>
+    ` : '';
+
     return `
       ${this._sectionOpen('5. Brouillons & résultats',
         'Édite, approuve ou rejette chaque mail. Les envoyés sont marqués ✓.')}
@@ -1279,8 +1308,9 @@ const Convoy = {
           ${this._kpi('Échecs',    counts.failed,  counts.failed > 0 ? 'danger' : '')}
           ${this._kpi('Rejetés',   counts.rejected)}
         </div>
+        ${testBanner}
         <div class="space-y-3">
-          ${drafts.map(d => this._draftCard(d)).join('')}
+          ${sorted.map(d => this._draftCard(d)).join('')}
         </div>
       ${this._sectionClose()}
     `;
@@ -1299,12 +1329,36 @@ const Convoy = {
     const badge = this._statusBadge(d.status);
     const empty = !d.subject && !d.body;
     const locked = ['sent', 'failed', 'rejected'].includes(d.status);
+    const testBadge = d.is_test
+      ? `<span class="cv-test-pill" title="Mail test généré via « Tester (5) »">TEST</span>`
+      : '';
+    // Adresse expéditrice utilisée pour CE draft :
+    // - override produit (offer_mail_account_id) s'il existe
+    // - sinon le compte de la campagne (sender_account_id)
+    const camp = this.detail || {};
+    const useId = (d.offer_mail_account_id || '').trim()
+                || camp.sender_account_id
+                || 'primary';
+    const acc = this._findAccount(useId);
+    const accFromEmail = acc ? (acc.from_email || '') : '';
+    const senderInfo = accFromEmail
+      ? `<span class="cv-draft-sender" title="${this._esc(useId === 'primary' ? 'compte principal' : 'compte ' + useId)}">✉ ${this._esc(accFromEmail)}</span>`
+      : '';
+    const cardCls = d.is_test ? 'card p-4 cv-draft-test' : 'card p-4';
     return `
-      <article class="card p-4" data-draft-card="${this._esc(d.id)}">
+      <article class="${cardCls}" data-draft-card="${this._esc(d.id)}">
         <header class="flex items-start justify-between gap-3 mb-2">
           <div class="min-w-0 flex-1">
-            <div class="font-semibold text-sm truncate">${this._esc(recipient)}</div>
-            <div class="text-xs text-text-muted break-all">${this._esc(p.email || '')}${p.ville ? ' · ' + this._esc(p.ville) : ''}${d.offer_name ? ` · 🎯 ${this._esc(d.offer_name)}` : ''}</div>
+            <div class="font-semibold text-sm truncate flex items-center gap-2">
+              ${testBadge}
+              <span class="truncate">${this._esc(recipient)}</span>
+            </div>
+            <div class="text-xs text-text-muted break-all flex flex-wrap gap-x-2 gap-y-0.5 mt-0.5">
+              <span>${this._esc(p.email || '')}</span>
+              ${p.ville ? `<span>· ${this._esc(p.ville)}</span>` : ''}
+              ${d.offer_name ? `<span>· 🎯 ${this._esc(d.offer_name)}</span>` : ''}
+              ${senderInfo ? `<span>· ${senderInfo}</span>` : ''}
+            </div>
           </div>
           ${badge}
         </header>

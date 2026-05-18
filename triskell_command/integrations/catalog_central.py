@@ -105,6 +105,7 @@ _DEFAULT_SITES = [
     {
         "id": "lagriffe",
         "name": "Lagriffe Studio",
+        "mail_account_id": "lagriffe",
         "tagline": "Ton site offert, 49 €/mois quand tu l'aimes.",
         "description": "Lagriffe Studio crée ton site web sur-mesure. Tu le découvres avant "
                        "de payer quoi que ce soit. Si tu valides, c'est 49 €/mois — hébergement, "
@@ -131,6 +132,7 @@ _DEFAULT_SITES = [
     {
         "id": "rankus",
         "name": "RankUs SEO",
+        "mail_account_id": "rankus",
         "tagline": "On référence ton site pour Google.",
         "description": "Service de référencement naturel pour faire monter ton site dans "
                        "Google. SEO tissé dans le code dès le départ, pas posé dessus. "
@@ -157,6 +159,7 @@ _DEFAULT_SITES = [
     {
         "id": "rankus-sites",
         "name": "RankUs Sites Web",
+        "mail_account_id": "rankus",
         "tagline": "Sites pros sur-mesure, code propre.",
         "description": "Création de sites web sur-mesure pour pros, agences et "
                        "indépendants. Sans templates, sans page-builder. Première "
@@ -183,6 +186,7 @@ _DEFAULT_SITES = [
     {
         "id": "rankus-audit",
         "name": "RankUs Audit",
+        "mail_account_id": "rankus",
         "tagline": "Audit complet de ton site existant.",
         "description": "Audit technique + SEO + UX de ton site web actuel. Tu reçois "
                        "un rapport détaillé avec les problèmes trouvés et les "
@@ -209,6 +213,7 @@ _DEFAULT_SITES = [
     {
         "id": "wow",
         "name": "WoW Studio",
+        "mail_account_id": "wow",
         "tagline": "Sites internet très haut de gamme.",
         "description": "WoW Studio est notre branche dédiée aux sites web de très "
                        "haute qualité. Conception et réalisation sur-mesure pour "
@@ -317,6 +322,10 @@ _STR_FIELDS = (
     "price_from", "price_note", "buy_url", "exe_path",
     "featured_label", "logo", "color", "initial",
     "keywords", "prospect_pitch",
+    "mail_account_id",   # id du compte mail expéditeur à utiliser quand
+                          # ce produit est pitché dans un mail Convoi.
+                          # ('primary' = compte principal, sinon id d'un
+                          # compte secondaire stocké dans shared_settings).
 )
 _NUM_FIELDS = ("price", "price_original")
 _BOOL_FIELDS = ("installed", "coming_soon", "featured")

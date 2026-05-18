@@ -205,6 +205,11 @@ create table public.convoy_drafts (
     subject text default '',
     body text default '',
     offer_name text default '',
+    offer_mail_account_id text not null default '',      -- compte mail lié à l'offre pitchée
+                                                          -- (vide = pas d'override, on prend
+                                                          -- celui de la campagne)
+    is_test boolean not null default false,              -- mail généré via « Tester (5) »
+                                                          -- → badge UI + tri en haut de liste
     status text not null default 'pending',              -- pending/approved/sent/failed/rejected
     sent_at timestamptz,
     error text default '',

@@ -82,6 +82,11 @@ class ConvoyDraft:
     body: str = ""              # version texte (fallback clients mail anciens)
     body_html: str = ""         # version HTML (boutons cliquables, mise en page)
     offer_name: str = ""
+    offer_mail_account_id: str = ""   # compte expéditeur lié à l'offre pitchée
+                                       # ("" = pas d'override, on prend celui
+                                       # de la campagne)
+    is_test: bool = False              # True quand le draft a été généré
+                                       # via « Tester (5) » → badge UI + tri
     status: str = "pending"           # pending | approved | sent | failed | rejected
     sent_at: str = ""
     error: str = ""
@@ -99,6 +104,8 @@ class ConvoyDraft:
             body=d.get("body", ""),
             body_html=d.get("body_html", ""),
             offer_name=d.get("offer_name", ""),
+            offer_mail_account_id=d.get("offer_mail_account_id", "") or "",
+            is_test=bool(d.get("is_test", False)),
             status=d.get("status", "pending"),
             sent_at=d.get("sent_at", ""),
             error=d.get("error", ""),
@@ -307,6 +314,8 @@ def _draft_to_row(d: ConvoyDraft, campaign_id: str) -> dict[str, Any]:
         "subject": d.subject,
         "body": d.body,
         "offer_name": d.offer_name,
+        "offer_mail_account_id": d.offer_mail_account_id or "",
+        "is_test": bool(d.is_test),
         "status": d.status,
         "sent_at": d.sent_at or None,
         "error": d.error,
@@ -321,11 +330,18 @@ def _row_to_draft(row: dict[str, Any]) -> ConvoyDraft:
         subject=row.get("subject", "") or "",
         body=row.get("body", "") or "",
         offer_name=row.get("offer_name", "") or "",
+        offer_mail_account_id=row.get("offer_mail_account_id", "") or "",
+        is_test=bool(row.get("is_test", False)),
         status=row.get("status", "pending"),
         sent_at=str(row.get("sent_at") or ""),
         error=row.get("error", "") or "",
         message_id=row.get("message_id", "") or "",
     )
+
+
+# Colonnes potentiellement manquantes côté Supabase si la migration n'a
+# pas encore été jouée — on les retire et on retente.
+_OPTIONAL_DRAFT_COLUMNS = ("offer_mail_account_id", "is_test")
 
 
 def _save_to_supabase(camp: ConvoyCampaign, client) -> None:
@@ -359,9 +375,28 @@ def _save_to_supabase(camp: ConvoyCampaign, client) -> None:
             ).execute()
         if camp.drafts:
             drafts_rows = [_draft_to_row(d, camp.id) for d in camp.drafts]
-            client.raw.table("convoy_drafts").upsert(
-                with_workspace(client, drafts_rows)
-            ).execute()
+            try:
+                client.raw.table("convoy_drafts").upsert(
+                    with_workspace(client, drafts_rows)
+                ).execute()
+            except Exception as exc:
+                msg = str(exc).lower()
+                stripped: list[str] = []
+                for col in _OPTIONAL_DRAFT_COLUMNS:
+                    if col in msg and "column" in msg:
+                        for r in drafts_rows:
+                            r.pop(col, None)
+                        stripped.append(col)
+                if not stripped:
+                    raise
+                logger.warning(
+                    "Colonnes Supabase manquantes (drafts) %s — upsert "
+                    "sans ces champs. Joue la migration SQL pour activer.",
+                    stripped,
+                )
+                client.raw.table("convoy_drafts").upsert(
+                    with_workspace(client, drafts_rows)
+                ).execute()
     except Exception as exc:
         logger.warning("Supabase save_campaign : %s — fallback local", exc)
         camp._save_local()
@@ -545,11 +580,20 @@ def run_campaign_send(
     campaign: ConvoyCampaign,
     *,
     smtp_cfg: dict[str, Any],
+    smtp_cfgs_by_account: dict[str, dict[str, Any]] | None = None,
     progress: Callable[[str], None] | None = None,
     stop_flag: Callable[[], bool] | None = None,
 ) -> dict[str, int]:
     """Envoie tous les drafts approuvés (en mode auto, on aura déjà passé
     tous les pending → approved en amont).
+
+    - `smtp_cfg` : compte par défaut (celui de la campagne).
+    - `smtp_cfgs_by_account` : optionnel, dict {account_id: smtp_cfg}.
+      Si un draft a un `offer_mail_account_id` non vide qui matche une
+      clé du dict, on utilise CE compte au lieu du compte de campagne.
+      (Permet d'envoyer chaque mail depuis l'adresse du produit pitché —
+      Lagriffe depuis contact@lagriffe-studio.fr, RankUs depuis sa boîte,
+      etc.)
 
     Renvoie les counts finaux.
     """
@@ -561,6 +605,8 @@ def run_campaign_send(
         log("⚠ Cap quotidien atteint avant de commencer — rien envoyé.")
         return campaign.counts()
 
+    overrides = dict(smtp_cfgs_by_account or {})
+
     for i, draft in enumerate(campaign.drafts):
         if stop_flag and stop_flag():
             log("⏹ Arrêt demandé.")
@@ -571,9 +617,18 @@ def run_campaign_send(
             log(f"⚠ Cap quotidien atteint ({campaign.daily_cap}) — pause.")
             break
 
+        # Choix du compte expéditeur : override produit > défaut campagne.
+        override_id = (getattr(draft, "offer_mail_account_id", "") or "").strip()
+        effective_cfg = smtp_cfg
+        used_label = "défaut"
+        if override_id and override_id in overrides and overrides[override_id]:
+            effective_cfg = overrides[override_id]
+            used_label = override_id
+
         log(f"→ [{i + 1}/{len(campaign.drafts)}] envoi à "
-            f"{draft.prospect.get('email', '?')}…")
-        send_draft(draft, smtp_cfg=smtp_cfg)
+            f"{draft.prospect.get('email', '?')} "
+            f"(via {effective_cfg.get('from_email', '?')})…")
+        send_draft(draft, smtp_cfg=effective_cfg)
         if draft.status == "sent":
             sent += 1
             log(f"  ✓ envoyé ({draft.subject})")

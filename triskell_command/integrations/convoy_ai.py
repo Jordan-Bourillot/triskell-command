@@ -474,10 +474,11 @@ def generate_message(
             secondary_label="Voir un exemple pour votre métier",
         )
         return {
-            "subject":    _fallback_subject(prospect, offer),
-            "body":       body_txt,
-            "body_html":  body_html,
-            "offer_name": offer.get("name", ""),
+            "subject":               _fallback_subject(prospect, offer),
+            "body":                  body_txt,
+            "body_html":             body_html,
+            "offer_name":            offer.get("name", ""),
+            "offer_mail_account_id": (offer.get("mail_account_id") or "").strip(),
         }
     body_txt = _stringify(data.get("body", "")) or "(génération vide)"
     body_html = text_to_email_html(
@@ -488,10 +489,11 @@ def generate_message(
         secondary_label="Voir un exemple pour votre métier",
     )
     return {
-        "subject":    _stringify(data.get("subject", "")) or _fallback_subject(prospect, offer),
-        "body":       body_txt,
-        "body_html":  body_html,
-        "offer_name": offer.get("name", ""),
+        "subject":               _stringify(data.get("subject", "")) or _fallback_subject(prospect, offer),
+        "body":                  body_txt,
+        "body_html":             body_html,
+        "offer_name":            offer.get("name", ""),
+        "offer_mail_account_id": (offer.get("mail_account_id") or "").strip(),
     }
 
 

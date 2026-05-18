@@ -150,12 +150,16 @@ def _product_to_prospect_entry(p: dict) -> dict[str, str] | None:
             bits.append(str(p["tagline"]))
         keywords = ", ".join(bits)
     url = (p.get("buy_url") or "").strip()
-    return {
+    mail_acc = (p.get("mail_account_id") or "").strip()
+    entry: dict[str, str] = {
         "name":     name,
         "pitch":    pitch,
         "keywords": keywords,
         "url":      url,
     }
+    if mail_acc:
+        entry["mail_account_id"] = mail_acc
+    return entry
 
 
 def _load_main_catalog_entries() -> tuple[list[dict[str, str]], set[str]]:

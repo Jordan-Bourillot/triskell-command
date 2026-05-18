@@ -975,6 +975,46 @@ html, body {
   font-weight: 700;
   color: hsl(var(--accent));
 }
+
+/* Badge TEST sur les drafts générés via « Tester (5) ».
+   Couleur ambrée, bien visible mais sans crier. */
+.cv-test-pill {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px;
+  font-size: 10px; font-weight: 800;
+  letter-spacing: 0.08em;
+  background: hsl(38 92% 50% / 0.18);
+  color: hsl(38 92% 35%);
+  border: 1px solid hsl(38 92% 50% / 0.35);
+  border-radius: 999px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.cv-test-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: hsl(38 92% 50% / 0.08);
+  border: 1px solid hsl(38 92% 50% / 0.25);
+  border-radius: 12px;
+  font-size: 13px;
+  color: hsl(var(--text-primary));
+  line-height: 1.45;
+}
+.cv-test-banner b { font-weight: 700; color: hsl(38 92% 35%); }
+
+/* Liseré ambré sur les cartes de mail test pour les repérer au scroll */
+.cv-draft-test {
+  border-left: 3px solid hsl(38 92% 50%);
+  background: hsl(38 92% 50% / 0.025);
+}
+
+/* Adresse expéditrice indiquée discrètement sur chaque draft */
+.cv-draft-sender {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", monospace;
+  font-size: 11px;
+  color: hsl(var(--text-secondary));
+  opacity: 0.85;
+}
 @keyframes cv-wizard-fade-in {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
