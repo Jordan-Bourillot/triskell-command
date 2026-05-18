@@ -100,6 +100,7 @@ def list_creators(*,
                   city: str = "",
                   q: str = "",
                   has_email: Optional[bool] = None,
+                  country: str = "",
                   limit: int = 100,
                   offset: int = 0) -> dict:
     """Retourne une page de prospects + le count total filtré.
@@ -113,6 +114,9 @@ def list_creators(*,
       - q          : texte libre (matche name / handle / website / description)
       - has_email  : True → uniquement avec emails non vides ; False → uniquement sans ;
                      None (défaut) → tout
+      - country    : "FR" → uniquement France ;
+                     "OTHERS" → tous SAUF France (vide ou autre code) ;
+                     "" → pas de filtre
     """
     sb = _sb()
     if sb is None:
@@ -149,6 +153,15 @@ def list_creators(*,
             # platform_url contient youtube.com / twitch.tv / etc. selon source
             p = platform.lower()
             qy = qy.ilike("platform_url", f"%{p}%")
+        if country:
+            cu = country.strip().upper()
+            if cu == "FR":
+                qy = qy.eq("country", "FR")
+            elif cu == "OTHERS":
+                qy = qy.neq("country", "FR")
+            else:
+                # Pays explicite : on filtre dessus
+                qy = qy.eq("country", cu)
         qy = qy.order("score", desc=True).order("updated_at", desc=True)
         qy = qy.range(offset, offset + max(0, limit - 1))
         res = qy.execute()

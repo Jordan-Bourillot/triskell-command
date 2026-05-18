@@ -2731,6 +2731,7 @@ class Api:
                 city=str(p.get("city") or "").strip(),
                 q=str(p.get("q") or "").strip(),
                 has_email=has_email,
+                country=str(p.get("country") or "").strip(),
                 limit=int(p.get("limit") or 100),
                 offset=int(p.get("offset") or 0),
             )

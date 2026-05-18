@@ -523,6 +523,11 @@ const Obelisk = {
           <option value="yes" ${this.state.filters.has_email === 'yes' ? 'selected' : ''}>Avec email</option>
           <option value="no" ${this.state.filters.has_email === 'no' ? 'selected' : ''}>Sans email</option>
         </select>
+        <select id="ob-f-country">
+          <option value="">Pays : tous</option>
+          <option value="FR" ${this.state.filters.country === 'FR' ? 'selected' : ''}>🇫🇷 France uniquement</option>
+          <option value="OTHERS" ${this.state.filters.country === 'OTHERS' ? 'selected' : ''}>🌍 Hors France</option>
+        </select>
         <input id="ob-f-score" class="ob-num" type="number" min="0" max="100" placeholder="Score ≥" value="${this.state.filters.min_score || ''}">
       </div>
 
@@ -537,6 +542,7 @@ const Obelisk = {
       this.state.filters.platform = document.getElementById('ob-f-platform').value;
       this.state.filters.status   = document.getElementById('ob-f-status').value;
       this.state.filters.has_email= document.getElementById('ob-f-email').value;
+      this.state.filters.country  = document.getElementById('ob-f-country').value;
       this.state.filters.min_score= parseInt(document.getElementById('ob-f-score').value, 10) || 0;
       this.state.page = 0;
       this._loadCreators();
@@ -550,7 +556,7 @@ const Obelisk = {
       qTimer = setTimeout(applyFromInputs, 280);
     });
     // Les selects/score filtrent dès le change
-    ['ob-f-platform', 'ob-f-status', 'ob-f-email', 'ob-f-score'].forEach(id => {
+    ['ob-f-platform', 'ob-f-status', 'ob-f-email', 'ob-f-country', 'ob-f-score'].forEach(id => {
       document.getElementById(id).addEventListener('change', applyFromInputs);
     });
 
@@ -583,6 +589,7 @@ const Obelisk = {
     if (f.platform)  chips.push(['platform', (this.PLATFORMS.find(p => p.id === f.platform) || {}).label || f.platform]);
     if (f.status)    chips.push(['status', this.STATUS_LABELS[f.status] || f.status]);
     if (f.has_email) chips.push(['has_email', f.has_email === 'yes' ? 'Avec email' : 'Sans email']);
+    if (f.country)   chips.push(['country', f.country === 'FR' ? '🇫🇷 France' : f.country === 'OTHERS' ? '🌍 Hors France' : f.country]);
     if (f.min_score) chips.push(['min_score', `Score ≥ ${f.min_score}`]);
     if (chips.length === 0) { wrap.className = ''; wrap.innerHTML = ''; return; }
     wrap.className = 'ob-active-filters';
@@ -599,7 +606,7 @@ const Obelisk = {
     });
     const clr = wrap.querySelector('[data-ob-clearall]');
     if (clr) clr.onclick = () => {
-      this.state.filters = { platform: '', status: '', min_score: 0, q: '', has_email: '' };
+      this.state.filters = { platform: '', status: '', min_score: 0, q: '', has_email: '', country: '' };
       this.state.page = 0;
       this._renderCreators();
     };
