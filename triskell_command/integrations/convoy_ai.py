@@ -139,6 +139,17 @@ def pick_offer_for_sector(sector: str, catalog: list[dict[str, str]]) -> dict[st
     """Sélectionne dans le catalogue l'offre dont les mots-clés matchent
     le mieux le secteur du prospect.
 
+    Stratégie :
+    1. Match parfait : keyword exact dans le secteur (« électricien » dans
+       « Électricien tous corps de métier ») → score le plus haut
+    2. Match partiel : racine du keyword (≥ 4 lettres) dans le secteur
+       (« électric » dans « électricité générale ») → score moyen
+    3. Match inverse : secteur dans un keyword (« plombier » dans
+       « plombier-chauffagiste ») → score faible
+    4. Fallback : si vraiment 0 match, on choisit le produit le plus
+       GÉNÉRIQUE du catalogue (celui avec le plus de keywords variés)
+       au lieu du 1er.
+
     Format attendu d'une entrée catalogue :
         {
             "name": "Pack Électricien Pro",
@@ -146,16 +157,30 @@ def pick_offer_for_sector(sector: str, catalog: list[dict[str, str]]) -> dict[st
             "keywords": "électricien, électricité, artisan bâtiment, BTP",
             "url": "https://pack-elec.triskell-studio.fr",
         }
-
-    Si rien ne match, on renvoie la 1re offre du catalogue (fallback générique).
     """
     if not catalog:
         return {}
-    sector_lc = (sector or "").lower()
-    if not sector_lc:
-        return catalog[0]
+    sector_lc = (sector or "").lower().strip()
 
-    best: dict[str, str] = catalog[0]
+    # Choix du fallback générique = produit avec le plus de keywords variés
+    # (= le plus "couvrant"). Si plusieurs ex-aequo, on prend le 1er.
+    def _generic_fallback() -> dict[str, str]:
+        best_count = -1
+        chosen = catalog[0]
+        for offer in catalog:
+            if not isinstance(offer, dict):
+                continue
+            kws = offer.get("keywords") or ""
+            count = len([k for k in re.split(r"[,\n;]+", kws) if k.strip()])
+            if count > best_count:
+                best_count = count
+                chosen = offer
+        return chosen
+
+    if not sector_lc:
+        return _generic_fallback()
+
+    best: dict[str, str] = {}
     best_score = 0
     for offer in catalog:
         if not isinstance(offer, dict):
@@ -166,11 +191,30 @@ def pick_offer_for_sector(sector: str, catalog: list[dict[str, str]]) -> dict[st
         score = 0
         for kw in re.split(r"[,\n;]+", kws):
             kw = kw.strip()
-            if kw and kw in sector_lc:
-                score += 1
+            if not kw:
+                continue
+            # 1. Match parfait : keyword tel quel dans le secteur
+            if kw in sector_lc:
+                score += 3
+                continue
+            # 2. Match partiel : racine du keyword (sans suffixes courants)
+            #    si ≥ 4 lettres pour éviter les faux positifs ("le", "un"...)
+            root = re.sub(r"(?:s|es|ier|iere|iste|ique|isme|age|aire)$",
+                           "", kw)
+            if len(root) >= 4 and root in sector_lc:
+                score += 2
+                continue
+            # 3. Match inverse : le secteur (ou un mot du secteur) apparaît
+            #    dans le keyword
+            for tok in re.split(r"\s+", sector_lc):
+                if len(tok) >= 4 and tok in kw:
+                    score += 1
+                    break
         if score > best_score:
             best_score = score
             best = offer
+    if not best or best_score == 0:
+        return _generic_fallback()
     return best
 
 
