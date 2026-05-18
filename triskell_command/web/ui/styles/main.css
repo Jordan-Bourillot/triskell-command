@@ -901,6 +901,63 @@ html, body {
   .cockpit-setup-cta   { grid-area: cta; justify-self: start; }
 }
 
+/* Convoi — wizard 5 étapes (importer → vérifier → pitch → générer → envoyer) */
+.cv-stepper {
+  display: flex; gap: 0; margin: 18px 0 22px;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px; padding: 6px; flex-wrap: wrap;
+}
+.cv-step {
+  flex: 1 1 0; min-width: 80px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 10px; border-radius: 10px;
+  background: transparent; border: 0;
+  color: hsl(var(--text-muted)); font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all 160ms;
+}
+.cv-step:hover { background: hsl(var(--surface-elevated)); color: hsl(var(--text)); }
+.cv-step.is-active {
+  background: hsl(var(--accent)); color: white;
+  box-shadow: 0 2px 8px hsl(var(--accent) / 0.32);
+}
+.cv-step.is-done {
+  color: hsl(var(--success));
+}
+.cv-step-num {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: hsl(var(--bg)); display: inline-flex;
+  align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+}
+.cv-step.is-active .cv-step-num { background: rgba(255,255,255,0.25); color: white; }
+.cv-step.is-done   .cv-step-num { background: hsl(var(--success) / 0.18); color: hsl(var(--success)); }
+.cv-step-label {
+  font-size: 13.5px; font-weight: 600;
+}
+@media (max-width: 720px) {
+  .cv-step-label { display: none; }
+}
+
+.cv-wizard-step {
+  animation: cv-wizard-fade-in 220ms ease-out;
+}
+@keyframes cv-wizard-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.cv-wizard-nav {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 24px; padding-top: 18px;
+  border-top: 1px solid hsl(var(--border));
+  gap: 12px; flex-wrap: wrap;
+}
+.cv-wz-next-cta {
+  font-size: 15px !important; padding: 12px 22px !important;
+  font-weight: 700 !important;
+}
+
 /* Bloc OBELISK — notif de fin de recherche prospection */
 .cockpit-obnotif {
   margin-top: 22px;

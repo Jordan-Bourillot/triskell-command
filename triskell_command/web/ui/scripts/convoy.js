@@ -24,6 +24,84 @@ const Convoy = {
   selectedProductIds: new Set(),  // ids cochés pour la campagne courante
   customOffers: [],       // offres ad-hoc spécifiques à la campagne courante
   _composeInitForCid: null,
+  wizardStep: 1,          // étape active du wizard (1..5)
+
+  // Auto-détecte l'étape la plus avancée selon l'état de la campagne.
+  // Permet de revenir directement à l'étape "non terminée" si on rouvre
+  // une campagne en cours.
+  _autoDetectStep(c) {
+    if (!c) return 1;
+    const drafts = c.drafts || [];
+    const hasSourceText = !!(c.source_file || (this.raw && this.raw.text_preview));
+    const hasProspects  = drafts.length > 0;
+    const hasBodies     = drafts.some(d => (d.body || '').trim().length > 0);
+    const hasSent       = drafts.some(d => d.status === 'sent');
+    if (hasSent && drafts.every(d => d.status === 'sent' || d.status === 'failed' || d.status === 'rejected')) {
+      return 5;  // tout est envoyé → on est sur l'étape finale
+    }
+    if (hasBodies) return 4;       // drafts prêts à envoyer
+    if (hasProspects) return 3;    // prospects extraits, manque le pitch
+    if (hasSourceText) return 2;   // fichier uploadé, prospects à vérifier
+    return 1;                      // rien encore : importer
+  },
+
+  WIZARD_STEPS: [
+    { num: 1, key: 'import',  label: 'Importer',      icon: '📂' },
+    { num: 2, key: 'verify',  label: 'Vérifier',      icon: '✓' },
+    { num: 3, key: 'pitch',   label: 'Pitch',         icon: '🎯' },
+    { num: 4, key: 'generate', label: 'Générer',      icon: '✍️' },
+    { num: 5, key: 'send',    label: 'Envoyer',       icon: '🚀' },
+  ],
+
+  // Va à une étape du wizard (avec garde-fous logiques)
+  goToStep(step) {
+    const s = Math.max(1, Math.min(5, step));
+    this.wizardStep = s;
+    this._renderDetail();
+  },
+
+  // Rendu de la barre de progression visuelle (1 ▸ 2 ▸ 3 ▸ 4 ▸ 5)
+  _renderStepper() {
+    return `
+      <div class="cv-stepper">
+        ${this.WIZARD_STEPS.map(st => {
+          const done   = st.num < this.wizardStep;
+          const active = st.num === this.wizardStep;
+          const cls = active ? 'is-active' : (done ? 'is-done' : 'is-pending');
+          return `
+            <button data-cv-step="${st.num}" class="cv-step ${cls}">
+              <span class="cv-step-num">${done ? '✓' : st.num}</span>
+              <span class="cv-step-label">${this._esc(st.label)}</span>
+            </button>
+          `;
+        }).join('')}
+      </div>
+    `;
+  },
+
+  _renderWizardNav(canPrev, canNext, nextLabel = 'Suivant') {
+    return `
+      <div class="cv-wizard-nav">
+        ${canPrev
+          ? `<button id="cv-wz-prev" class="btn btn-secondary">← Étape précédente</button>`
+          : `<span></span>`}
+        ${canNext
+          ? `<button id="cv-wz-next" class="btn btn-primary cv-wz-next-cta">${this._esc(nextLabel)} →</button>`
+          : `<span></span>`}
+      </div>
+    `;
+  },
+
+  _bindWizardNav() {
+    const prev = document.getElementById('cv-wz-prev');
+    if (prev) prev.onclick = () => this.goToStep(this.wizardStep - 1);
+    const next = document.getElementById('cv-wz-next');
+    if (next) next.onclick = () => this.goToStep(this.wizardStep + 1);
+    // Stepper cliquable (sauter directement à une étape)
+    document.querySelectorAll('[data-cv-step]').forEach(btn => {
+      btn.onclick = () => this.goToStep(parseInt(btn.dataset.cvStep, 10));
+    });
+  },
 
   // ------------------------------------------------------------------
   async render(container) {
@@ -241,20 +319,53 @@ const Convoy = {
     const c = this.detail;
     const target = document.getElementById('cv-detail');
     const drafts = c.drafts || [];
+    // 1er rendu après ouverture : on auto-positionne sur la bonne étape
+    if (this._lastRenderedCid !== c.id) {
+      this.wizardStep = this._autoDetectStep(c);
+      this._lastRenderedCid = c.id;
+    }
+    const hasProspects = drafts.length > 0 || this.raw;
+    const hasDrafts    = drafts.length > 0;
+
+    // Sécurise l'étape : on n'autorise pas une étape qui n'a pas de données
+    if (this.wizardStep >= 2 && !hasProspects) this.wizardStep = 1;
+    if (this.wizardStep >= 4 && !hasDrafts) this.wizardStep = 3;
+
+    const step = this.wizardStep;
+    let stepHtml = '';
+    if      (step === 1) stepHtml = this._stepImport(c);
+    else if (step === 2) stepHtml = this._stepTable(c);
+    else if (step === 3) stepHtml = this._stepCompose(c);
+    else if (step === 4) stepHtml = this._stepSend(c);
+    else if (step === 5) stepHtml = this._stepResults(c);
+
+    const canPrev = step > 1;
+    const canNext = (
+      (step === 1 && hasProspects) ||
+      (step === 2 && hasProspects) ||
+      (step === 3 && hasDrafts) ||
+      (step === 4 && hasDrafts)
+    );
+    const nextLabel = {
+      1: 'Vérifier les contacts',
+      2: 'Définir le pitch',
+      3: 'Voir les mails à envoyer',
+      4: 'Voir les résultats',
+    }[step] || 'Suivant';
+
     target.innerHTML = `
       ${this._headerCard(c)}
-      ${this._stepImport(c)}
-      ${(drafts.length > 0 || this.raw) ? this._stepTable(c) : ''}
-      ${(drafts.length > 0 || this.raw) ? this._stepCompose(c) : ''}
-      ${(drafts.length > 0) ? this._stepSend(c) : ''}
-      ${(drafts.length > 0) ? this._stepResults(c) : ''}
+      ${this._renderStepper()}
+      <div class="cv-wizard-step">${stepHtml}</div>
+      ${step < 5 ? this._renderWizardNav(canPrev, canNext, nextLabel) : this._renderWizardNav(canPrev, false)}
     `;
     this._bindHeader();
-    this._bindStepImport();
-    if (drafts.length > 0 || this.raw) this._bindStepTable();
-    if (drafts.length > 0 || this.raw) this._bindStepCompose();
-    if (drafts.length > 0) this._bindStepSend();
-    if (drafts.length > 0) this._bindStepResults();
+    this._bindWizardNav();
+    if      (step === 1) this._bindStepImport();
+    else if (step === 2) this._bindStepTable();
+    else if (step === 3) this._bindStepCompose();
+    else if (step === 4) this._bindStepSend();
+    else if (step === 5) this._bindStepResults();
   },
 
   // ---- Header ------------------------------------------------------
