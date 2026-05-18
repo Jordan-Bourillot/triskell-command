@@ -403,6 +403,15 @@ class RepliesView(BaseView):
             res = q.execute()
             rows = res.data or []
             out = []
+            # Rows detectees comme mails auto (newsletter / notif / no-reply)
+            # qui ne devraient jamais avoir atteri ici. On les marque
+            # handled=true en background pour qu'elles disparaissent
+            # definitivement.
+            auto_to_cleanup: list[str] = []
+            try:
+                from ..integrations import prospect_status as PS
+            except Exception:
+                PS = None
             for r in rows:
                 extra = r.get("extra") or {}
                 if isinstance(extra, str):
@@ -413,6 +422,19 @@ class RepliesView(BaseView):
                         extra = {}
                 if extra.get("handled"):
                     continue
+                # Detection retroactive des mails automatiques. Pour les
+                # anciens rows on n'a pas les headers IMAP stockes — on se
+                # rabat sur le from + subject, ce qui suffit pour les
+                # newsletters et notifs evidentes (noreply@, security@,
+                # domaines connus, sujets type "bulletin", "new login"...).
+                from_addr = (extra.get("from") or "").lower()
+                subject = r.get("subject") or ""
+                if PS is not None and PS.looks_like_automated(
+                        headers={}, from_addr=from_addr, subject=subject):
+                    rid = r.get("id")
+                    if rid:
+                        auto_to_cleanup.append(rid)
+                    continue
                 if category_filter != "all":
                     cat = (extra.get("classification") or {}).get("category", "unknown")
                     if cat != category_filter:
@@ -420,10 +442,49 @@ class RepliesView(BaseView):
                 # Reattach extra parsé pour l'affichage
                 r["extra"] = extra
                 out.append(r)
+            # Cleanup background : marque les autos handled=true en DB pour
+            # qu'ils ne reapparaissent plus aux prochains refresh.
+            if auto_to_cleanup:
+                threading.Thread(
+                    target=self._cleanup_auto_rows,
+                    args=(client, auto_to_cleanup),
+                    daemon=True,
+                ).start()
             return out
         except Exception as exc:
             logger.warning("fetch_unhandled: %s", exc)
             return []
+
+    def _cleanup_auto_rows(self, client, row_ids: list[str]) -> None:
+        """Marque handled=true les rows reply_received qui sont en fait des
+        mails automatiques. Appele en background depuis _fetch_unhandled.
+        """
+        if not row_ids:
+            return
+        sb = client.raw
+        from datetime import datetime
+        now = datetime.now().isoformat(timespec="seconds")
+        for rid in row_ids:
+            try:
+                # On lit l'extra courant pour preserver les autres cles
+                res = (sb.table("email_history").select("extra")
+                       .eq("id", rid).limit(1).execute())
+                row = (res.data or [{}])[0]
+                extra = row.get("extra") or {}
+                if isinstance(extra, str):
+                    try:
+                        import json
+                        extra = json.loads(extra)
+                    except Exception:
+                        extra = {}
+                extra["handled"] = True
+                extra["handled_at"] = now
+                extra["auto_cleanup"] = "filtered_as_automated_mail"
+                sb.table("email_history").update(
+                    {"extra": extra}).eq("id", rid).execute()
+            except Exception as exc:
+                logger.debug("cleanup auto row %s KO: %s", rid, exc)
+        logger.info("Reponses : %s mails auto nettoyes", len(row_ids))
 
     def _fetch_prospects(self, client, ids: list) -> dict:
         ids = [i for i in ids if i]

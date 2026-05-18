@@ -308,9 +308,7 @@ const Mails = {
           <!-- Body du mail original -->
           <div class="px-6 pb-6">
             <div class="text-xs uppercase tracking-widest text-text-muted font-bold mb-2">CONTENU DU MAIL</div>
-            <div class="rounded-xl bg-bg border border-border px-5 py-4">
-              <pre class="text-sm text-text whitespace-pre-wrap font-sans leading-relaxed m-0">${this._escape(body)}</pre>
-            </div>
+            ${this._renderMailBody(body)}
           </div>
 
           <!-- Séparateur visuel -->
@@ -1830,15 +1828,17 @@ const Mails = {
     };
     // Applique / bascule un tag de bloc (h2, blockquote, p…)
     const applyBlockTag = (tag /* 'h2', 'blockquote', 'p'… */) => {
+      ensureCaretInEditor();
       normalizeBlocks();
       const sel = window.getSelection();
-      if (!sel.rangeCount) return;
+      if (!sel.rangeCount) { ensureCaretInEditor(); }
       let block = findBlock(sel.anchorNode);
       if (!block) {
         if (!htmlArea.firstElementChild) {
           htmlArea.innerHTML = '<p><br></p>';
         }
-        block = htmlArea.firstElementChild;
+        block = htmlArea.querySelector('p, div, h1, h2, h3, h4, blockquote, li')
+             || htmlArea.firstElementChild;
       }
       // Toggle : si déjà du bon tag → repasse en <p>
       if (block.tagName.toLowerCase() === tag.toLowerCase()) {
@@ -2807,6 +2807,29 @@ const Mails = {
     return String(s ?? '')
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  },
+
+  // ----------------------------------------------------------------------
+  // Rend le corps d'un mail : si HTML détecté → iframe sandbox (rendu réel,
+  // sans exécuter de JS), sinon → bloc texte échappé (ancien comportement).
+  // L'iframe s'auto-redimensionne après chargement pour afficher tout le contenu.
+  // ----------------------------------------------------------------------
+  _renderMailBody(body) {
+    const text = String(body ?? '');
+    const looksHtml = /<\s*(html|body|table|div|p|a\b|img|h[1-6]|span|br|ul|ol|style|head|meta)\b/i.test(text);
+    if (!looksHtml) {
+      return `<div class="rounded-xl bg-bg border border-border px-5 py-4">
+        <pre class="text-sm text-text whitespace-pre-wrap font-sans leading-relaxed m-0">${this._escape(text)}</pre>
+      </div>`;
+    }
+    // Échappe pour l'attribut srcdoc (& et " uniquement, les < > restent intacts)
+    const srcdoc = text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    // sandbox="allow-same-origin" : permet au parent de lire scrollHeight pour
+    // auto-resize, sans autoriser JS, formulaires, popups, etc.
+    const onload = "try{var d=this.contentDocument;if(d){this.style.height=(d.documentElement.scrollHeight+24)+'px';}}catch(e){}";
+    return `<div class="rounded-xl bg-white border border-border overflow-hidden">
+      <iframe class="w-full block" sandbox="allow-same-origin" srcdoc="${srcdoc}" style="border:0;min-height:300px;background:#fff;" onload="${onload}"></iframe>
+    </div>`;
   },
 
   _fmtDate(iso) {

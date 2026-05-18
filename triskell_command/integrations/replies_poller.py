@@ -381,6 +381,23 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                             counters["skipped"] += 1
                         continue
 
+                    # --- Filtre : mails automatiques (newsletters, notifs,
+                    # no-reply, security alerts, accuses de reception...).
+                    # On les loggue en inbox_received pour audit, mais on ne
+                    # tente JAMAIS de les matcher a un prospect ni de les
+                    # classifier — ils ne doivent pas polluer la vue Reponses.
+                    if PS.looks_like_automated(headers, from_addr, subject):
+                        try:
+                            _log_inbox_mail(client, account_id,
+                                             from_addr=from_addr,
+                                             subject=f"[AUTO] {subject}",
+                                             body=body,
+                                             in_reply_to=in_reply_to)
+                        except Exception as exc:
+                            logger.debug("log_inbox_mail (auto) KO: %s", exc)
+                        counters["skipped"] += 1
+                        continue
+
                     # Match précis puis flou
                     prospect_id = None
                     for cand in [in_reply_to] + [
@@ -608,10 +625,19 @@ def _parse_fetch_response(msg_data) -> tuple[dict, str]:
     headers: dict = {}
     try:
         msg = email.message_from_string(raw_full)
+        # Headers fonctionnels (threading + identification)
         for k in ("From", "In-Reply-To", "References", "Subject", "Date"):
             v = msg.get(k)
             if v:
                 headers[k] = _mime_decode(v) if k in ("Subject", "From") else v
+        # Headers de detection "envoi automatique" — utilises par
+        # prospect_status.looks_like_automated() pour ecarter newsletters,
+        # notifs de plateformes, accuses de reception, etc.
+        for k in ("List-Unsubscribe", "List-Id", "Auto-Submitted",
+                  "Precedence", "X-Auto-Response-Suppress", "Feedback-ID"):
+            v = msg.get(k)
+            if v:
+                headers[k] = v
     except Exception:
         pass
 
