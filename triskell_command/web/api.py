@@ -460,6 +460,15 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def client_delete(self, payload: dict) -> dict:
+        p = payload or {}
+        try:
+            from ..integrations import clients_repo
+            ok = clients_repo.delete_project(p.get("id") or "")
+            return {"ok": ok}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ------------------------------------------------------------------
     # Fichier clients (table master `clients` — vue 360°)
     # ------------------------------------------------------------------
@@ -5047,8 +5056,33 @@ class Api:
                 or "L'équipe"
             )
 
-            targets = [d for d in camp.drafts
-                       if convoy_ai.validate_prospect(d.prospect).get("ok")]
+            # On NE régénère JAMAIS les drafts déjà envoyés (status='sent')
+            # — sinon Jordan perdrait la trace de ce qui est parti. Idem pour
+            # ceux dont l'email a été contacté ailleurs récemment (anti-doublon
+            # cross-campagne / cross-runner).
+            from . import prospect_status as PS
+            cli = self._supabase()
+            already_contacted_emails: set[str] = set()
+            already_skipped = 0
+            sent_skipped = 0
+            targets: list = []
+            for d in camp.drafts:
+                if d.status == "sent":
+                    sent_skipped += 1
+                    continue
+                if not convoy_ai.validate_prospect(d.prospect).get("ok"):
+                    continue
+                to = (d.prospect or {}).get("email", "").lower().strip()
+                if to and cli is not None:
+                    try:
+                        recent = PS.has_recent_send(cli, email=to)
+                        if recent.get("recent"):
+                            already_contacted_emails.add(to)
+                            already_skipped += 1
+                            continue
+                    except Exception:
+                        pass
+                targets.append(d)
             if isinstance(limit, int) and limit > 0:
                 targets = targets[:limit]
 
@@ -5061,6 +5095,11 @@ class Api:
 
             def worker():
                 try:
+                    if sent_skipped:
+                        push(f"⏭  {sent_skipped} déjà envoyé(s) — non régénéré(s).")
+                    if already_skipped:
+                        push(f"⏭  {already_skipped} déjà contacté(s) ailleurs "
+                              f"dans le cooldown — non régénéré(s).")
                     push(f"Génération de {len(targets)} mail(s)…")
                     for i, draft in enumerate(targets, 1):
                         try:
@@ -5075,6 +5114,7 @@ class Api:
                             )
                             draft.subject = msg.get("subject", "")
                             draft.body = msg.get("body", "")
+                            draft.body_html = msg.get("body_html", "")
                             draft.offer_name = msg.get("offer_name", "")
                             push(f"  ({i}/{len(targets)}) {draft.prospect.get('email','')} OK")
                         except Exception as exc:
