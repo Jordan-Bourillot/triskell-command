@@ -238,6 +238,35 @@ def update_creator(prospect_id: str, fields: dict) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+def mark_contacted(prospect_id: str) -> dict:
+    """Passe le statut d'un prospect à « contacted » s'il était en
+    new/qualified, et met à jour last_contact_at. Idempotent : on ne
+    régresse jamais un statut plus avancé (replied/won/lost/refused)."""
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré"}
+    try:
+        from datetime import datetime, timezone
+        cur = (sb.table("prospects").select("status")
+               .eq("id", prospect_id).limit(1).execute().data or [])
+        status_now = (cur[0].get("status") if cur else "") or ""
+        # On bascule seulement si on est en amont de la pipeline
+        if status_now in ("", "new", "qualified"):
+            sb.table("prospects").update({
+                "status":          "contacted",
+                "last_contact_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }).eq("id", prospect_id).execute()
+            return {"ok": True, "changed": True, "from": status_now}
+        # Sinon on met juste à jour last_contact_at (utile pour drips)
+        sb.table("prospects").update({
+            "last_contact_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }).eq("id", prospect_id).execute()
+        return {"ok": True, "changed": False, "from": status_now}
+    except Exception as exc:
+        logger.warning("obelisk.mark_contacted: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
 def delete_creator(prospect_id: str) -> dict:
     sb = _sb()
     if sb is None:

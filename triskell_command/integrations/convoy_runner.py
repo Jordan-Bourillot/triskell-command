@@ -447,6 +447,18 @@ def send_draft(
                 ).execute()
             except Exception as exc:
                 logger.warning("convoy log email_sent KO: %s", exc)
+            # Cherche le prospect par son email pour passer son statut
+            # à "contacted" → permet à Jordan de suivre dans le fichier
+            # Prospects qui a déjà été contacté ou pas.
+            try:
+                pid_rows = (cli.raw.table("prospects").select("id")
+                            .contains("emails", [to])
+                            .limit(1).execute().data or [])
+                if pid_rows:
+                    from .obelisk import repo as ob_repo
+                    ob_repo.mark_contacted(pid_rows[0]["id"])
+            except Exception as exc:
+                logger.debug("convoy mark_contacted KO: %s", exc)
     except Exception as exc:
         draft.status = "failed"
         draft.error = str(exc)
