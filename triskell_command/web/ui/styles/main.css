@@ -2101,6 +2101,69 @@ html, body {
   background: hsl(var(--bg) / 0.5);
 }
 
+/* ─── Modale d'aperçu d'une proposition ─── */
+.phare-preview-card { max-width: 920px; }
+.phare-preview-detail {
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: hsl(var(--text));
+  margin-bottom: 20px;
+}
+.phare-preview-detail p { margin: 0 0 10px; }
+.phare-preview-detail p:last-child { margin-bottom: 0; }
+.phare-preview-section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid hsl(var(--border));
+}
+.phare-preview-section h3 {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: hsl(var(--text-muted));
+  margin: 0 0 10px;
+}
+.phare-preview-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.phare-preview-section-head h3 { margin: 0; }
+.phare-preview-iframe-wrap {
+  position: relative;
+  width: 100%;
+  height: 420px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--bg));
+}
+.phare-preview-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+.phare-preview-hint {
+  font-size: 12px;
+  color: hsl(var(--text-muted));
+  margin: 8px 0 0;
+}
+.phare-preview-section--empty {
+  text-align: center;
+  padding: 24px 16px;
+  background: hsl(var(--bg) / 0.5);
+  border-radius: 12px;
+  border-top: none;
+  margin-top: 18px;
+}
+.phare-preview-empty-icon { font-size: 32px; margin-bottom: 8px; }
+.phare-preview-section--empty p { margin: 4px 0; font-size: 14px; }
+.phare-preview-empty-sub { color: hsl(var(--text-muted)); font-size: 13px !important; }
+
 /* Cartes agents */
 .agent-card {
   background: hsl(var(--surface));

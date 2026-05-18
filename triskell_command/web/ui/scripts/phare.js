@@ -17,6 +17,7 @@ const Phare = {
   selectedSite: null,
   filter: 'all',         // 'all' | 'internal' | 'external'
   _onboardKey: 'phare_onboarded_v1',
+  _currentActions: {},   // map id → action (alimentée au render pour la modale d'aperçu)
 
   async render(container) {
     if (this.view === 'site')      return this._renderSite(container);
@@ -215,6 +216,10 @@ const Phare = {
     const done = data.recently_done || [];
     const bull = data.bulletin || null;
 
+    // Indexer les propositions pour la modale d'aperçu
+    this._currentActions = {};
+    toReview.forEach(a => { if (a && a.id) this._currentActions[a.id] = a; });
+
     document.getElementById('ph-site-body').innerHTML = `
       <header class="phare-site-hero">
         <div class="phare-site-hero-left">
@@ -346,11 +351,14 @@ const Phare = {
           </div>
         </div>
         ${summaryShort ? `<div class="phare-action-summary">${summaryShort}</div>` : ''}
-        ${a.netlify_preview_url ? `<a class="phare-action-link" href="${this._esc(a.netlify_preview_url)}" target="_blank" rel="noopener">Voir l'aperçu avant validation →</a>` : ''}
         <footer class="phare-action-foot">
           <button class="btn btn-secondary btn-reject" data-reject="${this._esc(a.id || '')}">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
             Poubelle
+          </button>
+          <button class="btn btn-secondary" data-preview="${this._esc(a.id || '')}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            Aperçu
           </button>
           <button class="btn btn-primary" data-approve="${this._esc(a.id || '')}">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>
@@ -410,6 +418,118 @@ const Phare = {
         } catch (e) { this._toast('Erreur : ' + e, 'error'); restore(); }
       };
     });
+    root.querySelectorAll('[data-preview]').forEach(b => {
+      b.onclick = () => {
+        const id = b.dataset.preview;
+        const action = this._currentActions[id];
+        if (action) this._openPreviewDialog(action);
+      };
+    });
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  //  MODAL — aperçu d'une proposition (détail complet + preview visuelle)
+  // ════════════════════════════════════════════════════════════════════
+  _openPreviewDialog(a) {
+    const agentLabel = this._agentShortName(a.agent || '');
+    const date = (a.created_at || '').slice(0, 10);
+    const impact = Math.max(0, Math.min(5, a.impact || 0));
+    const impactDots = impact
+      ? '●'.repeat(impact) + '○'.repeat(5 - impact)
+      : '';
+    const detail = a.detail_md || a.summary || '';
+    const previewUrl = a.netlify_preview_url || '';
+    const prUrl = a.github_pr_url || '';
+
+    const dlg = document.createElement('div');
+    dlg.className = 'phare-modal phare-preview-modal';
+    dlg.innerHTML = `
+      <div class="phare-modal-backdrop" data-close></div>
+      <div class="phare-modal-card phare-preview-card">
+        <header class="phare-modal-head">
+          <div>
+            <div class="phare-kicker mb-1">APERÇU DE LA PROPOSITION</div>
+            <h2 class="text-xl font-semibold">${this._esc(a.title || a.kind || '—')}</h2>
+            <div class="phare-action-meta" style="margin-top:6px">
+              Proposition de ${this._esc(agentLabel)} · ${date || '—'}
+              ${impactDots ? `<span class="phare-action-impact" title="Impact estimé">${impactDots}</span>` : ''}
+            </div>
+          </div>
+          <button class="phare-modal-close" data-close aria-label="Fermer">×</button>
+        </header>
+        <div class="phare-modal-body">
+          ${detail ? `<div class="phare-preview-detail">${this._mdToHtml(detail)}</div>` : ''}
+          ${previewUrl ? `
+            <div class="phare-preview-section">
+              <div class="phare-preview-section-head">
+                <h3>Aperçu visuel du site avec les changements</h3>
+                <a class="phare-action-link" href="${this._esc(previewUrl)}" target="_blank" rel="noopener">Ouvrir en plein écran ↗</a>
+              </div>
+              <div class="phare-preview-iframe-wrap">
+                <iframe class="phare-preview-iframe" src="${this._esc(previewUrl)}" loading="lazy" title="Aperçu du site"></iframe>
+              </div>
+              <p class="phare-preview-hint">Si l'aperçu ne s'affiche pas, clique sur « Ouvrir en plein écran ».</p>
+            </div>
+          ` : `
+            <div class="phare-preview-section phare-preview-section--empty">
+              <div class="phare-preview-empty-icon">💡</div>
+              <p><strong>Pas d'aperçu visuel pour cette proposition.</strong></p>
+              <p class="phare-preview-empty-sub">${a.kind === 'recommandation'
+                ? "C'est une recommandation : rien à publier, juste à lire et à appliquer toi-même si ça te parle."
+                : "Cette proposition n'a pas encore généré de prévisualisation. Tu peux quand même l'approuver."}</p>
+            </div>
+          `}
+          ${prUrl ? `
+            <div class="phare-preview-section">
+              <h3>Modifications de code</h3>
+              <a class="phare-action-link" href="${this._esc(prUrl)}" target="_blank" rel="noopener">Voir le détail technique sur GitHub ↗</a>
+            </div>
+          ` : ''}
+        </div>
+        <footer class="phare-modal-foot">
+          <button class="btn btn-secondary" data-close>Fermer</button>
+          <button class="btn btn-secondary btn-reject" data-preview-reject="${this._esc(a.id || '')}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+            Poubelle
+          </button>
+          <button class="btn btn-primary" data-preview-approve="${this._esc(a.id || '')}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>
+            OK, applique
+          </button>
+        </footer>
+      </div>
+    `;
+    document.body.appendChild(dlg);
+    const close = () => dlg.remove();
+    dlg.querySelectorAll('[data-close]').forEach(el => el.onclick = close);
+    // Relier OK / Poubelle de la modale aux mêmes handlers que les cartes
+    const approveBtn = dlg.querySelector('[data-preview-approve]');
+    const rejectBtn = dlg.querySelector('[data-preview-reject]');
+    if (approveBtn) {
+      approveBtn.onclick = () => {
+        close();
+        const cardBtn = document.querySelector(`[data-approve="${a.id}"]`);
+        if (cardBtn) cardBtn.click();
+      };
+    }
+    if (rejectBtn) {
+      rejectBtn.onclick = () => {
+        close();
+        const cardBtn = document.querySelector(`[data-reject="${a.id}"]`);
+        if (cardBtn) cardBtn.click();
+      };
+    }
+    // Fermer avec Échap
+    const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
+    document.addEventListener('keydown', onKey);
+  },
+
+  // Markdown minimaliste : paragraphes + gras + retours à la ligne
+  _mdToHtml(md) {
+    const esc = this._esc(md);
+    const withBold = esc.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    const paras = withBold.split(/\n{2,}/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+    return paras;
   },
 
   _bulletinCard(b) {
