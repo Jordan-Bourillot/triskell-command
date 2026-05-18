@@ -3095,6 +3095,75 @@ class Api:
         from ..integrations import catalog_central
         return catalog_central.delete_bundle((payload or {}).get("id") or "")
 
+    def catalog_seed_lagriffe_demos(self, payload: dict | None = None) -> dict:
+        """Seed les 21 démos métier Lagriffe en un appel.
+        Idempotent : relancer ne crée pas de doublons (save_product upsert
+        sur id slugifié déterministe)."""
+        from ..integrations import catalog_central
+        DEMOS = [
+            ("Démo brasserie — La Rose des Vents", "https://brasserie-la-rose-des-vents.netlify.app",
+             "brasserie, bar à bières, microbrasserie, taverne, pub, débit de boissons, bar artisanal"),
+            ("Démo services à la personne — Ingrid Services", "https://ingrid-services.fr",
+             "ménage, services à la personne, aide à domicile, nettoyage, entretien maison, repassage, garde d'enfants"),
+            ("Démo boutique vape — Vaporlux", "https://vaporlux.triskell-studio.fr",
+             "vape, cigarette électronique, e-cigarette, vapoteur, e-liquide, CBD, boutique vape, vape shop"),
+            ("Démo atelier sculpteur — Missor", "https://missor.triskell-studio.fr",
+             "sculpteur, sculpture, fonderie, fondeur d'art, atelier d'art, bronze, statuaire, artisan d'art"),
+            ("Démo influenceur / créateur — Anyme", "https://anyme.triskell-studio.fr",
+             "influenceur, streamer, créateur de contenu, content creator, twitch, youtube, instagram, tiktok, personal branding"),
+            ("Démo garagiste — Triskell", "https://garage.triskell-studio.fr",
+             "garagiste, garage, mécanicien, mécanique auto, réparation automobile, carrosserie, entretien voiture, dépannage, automobile"),
+            ("Démo paysagiste — Triskell", "https://paysagiste.triskell-studio.fr",
+             "paysagiste, jardinier, espaces verts, aménagement paysager, jardin, entretien jardin, taille, élagage, terrasse, gazon"),
+            ("Démo thérapeute / bien-être — Graphothérapeute", "https://graphotherapeute.triskell-studio.fr",
+             "graphothérapeute, graphothérapie, yoga, professeur de yoga, orthophoniste, orthophonie, sophrologue, sophrologie, naturopathe, hypnothérapeute, médecine douce, bien-être, thérapeute, praticien, ostéopathe, réflexologue"),
+            ("Démo boutique vape — Variante moderne", "https://vape.triskell-studio.fr",
+             "vape, cigarette électronique, e-cigarette, vapoteur, e-liquide, CBD, boutique vape, vape shop"),
+            ("Démo plombier — Triskell", "https://plombier.triskell-studio.fr",
+             "plombier, plomberie, chauffagiste, dépannage plomberie, sanitaire, fuite d'eau, chauffage, installation sanitaire, robinetterie"),
+            ("Démo peintre — Triskell", "https://peintre.triskell-studio.fr",
+             "peintre, peinture, peintre en bâtiment, ravalement, papier peint, décoration murale, façade, peinture intérieure, peinture extérieure"),
+            ("Démo plaquiste — Triskell", "https://plaquiste.triskell-studio.fr",
+             "plaquiste, placo, cloisons, isolation, faux plafond, doublage, BA13, aménagement intérieur"),
+            ("Démo maçon — Triskell", "https://macon.triskell-studio.fr",
+             "maçon, maçonnerie, gros œuvre, construction, fondations, rénovation, BTP, entrepreneur, terrassement"),
+            ("Démo carreleur — Triskell", "https://carreleur.triskell-studio.fr",
+             "carreleur, carrelage, faïence, pose carrelage, salle de bain, sol, mosaïque, dallage"),
+            ("Démo électricien — Triskell", "https://electricien.triskell-studio.fr",
+             "électricien, électricité, installation électrique, dépannage électrique, tableau électrique, mise aux normes, courant fort, courant faible, domotique"),
+            ("Démo boulangerie — Le Fournil de Goulven", "https://boulangerie.triskell-studio.fr",
+             "boulanger, boulangerie, pain, viennoiserie, pâtisserie, baguette, artisan boulanger, fournil, pâtissier"),
+            ("Démo restaurant — La Belle Époque", "https://restaurant.triskell-studio.fr",
+             "restaurant, restaurateur, cuisine, brasserie, traiteur, bistrot, gastronomie, cuisine traditionnelle, menu, carte"),
+            ("Démo salon de coiffure — Maison Lou", "https://salon-coiffure.triskell-studio.fr",
+             "coiffeur, coiffeuse, salon de coiffure, coupe, coloration, balayage, mèches, brushing, soin capillaire"),
+            ("Démo barbier — L'Atelier de Brieuc", "https://salons.triskell-studio.fr",
+             "barbier, barber shop, barberie, rasage, taille de barbe, salon de barbier, soin homme, coupe homme"),
+            ("Démo restaurant cubain — Clandestino", "https://clandestino.triskell-studio.fr",
+             "restaurant cubain, cuisine latino, world food, bar à cocktails, restaurant à thème, tapas, ambiance, rhum, latino"),
+            ("Démo tatoueur — Despiertos", "https://despiertos.triskell-studio.fr",
+             "tatoueur, tatouage, tattoo, salon de tatouage, tattoo artist, piercing, body art, ink, atelier tatouage"),
+        ]
+        ok = 0
+        errs: list[dict] = []
+        for name, url, kws in DEMOS:
+            res = catalog_central.save_product({
+                "name":           name,
+                "kind":           "demo",
+                "category":       "sites",
+                "buy_url":        url,
+                "keywords":       kws,
+                "prospect_pitch": "Démo prête à montrer aux prospects de "
+                                   "ce métier : preuve visuelle directe "
+                                   "de ce qu'on peut leur faire.",
+            })
+            if res and res.get("ok"):
+                ok += 1
+            else:
+                errs.append({"name": name, "error": (res or {}).get("error", "?")})
+        return {"ok": len(errs) == 0, "added": ok, "errors": errs,
+                "total": len(DEMOS)}
+
     def open_url(self, payload: dict) -> dict:
         """Ouvre une URL dans le navigateur par défaut (depuis le launcher)."""
         url = (payload or {}).get("url") or ""
