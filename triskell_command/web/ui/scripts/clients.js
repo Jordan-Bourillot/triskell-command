@@ -112,6 +112,7 @@ const Clients = {
             <button class="text-[11px] text-accent hover:underline" data-edit>Édit</button>
             ${deliverBtn}
             ${timelineBtn}
+            <button class="text-[11px] text-danger hover:underline" data-delete title="Supprimer définitivement">Suppr.</button>
           </div>
           ${next ? `<button class="text-white bg-accent hover:bg-accent-hover text-sm w-6 h-6 rounded" data-mv="${next}">›</button>` : `<span class="w-6"></span>`}
         </div>
@@ -139,6 +140,17 @@ const Clients = {
         e.stopPropagation();
         const pid = timelineBtn.dataset.timeline;
         if (pid) App.show('prospect_timeline', { id: pid });
+      };
+      const deleteBtn = card.querySelector('[data-delete]');
+      if (deleteBtn) deleteBtn.onclick = async (e) => {
+        e.stopPropagation();
+        if (!App.api) return;
+        if (!confirm('Supprimer définitivement ce projet ?\n\nCette action est irréversible.')) return;
+        try {
+          const r = await App.api.client_delete({ id });
+          if (r && r.ok) await this.refresh();
+          else alert('Suppression impossible : ' + ((r && r.error) || 'erreur inconnue'));
+        } catch (err) { alert('Erreur : ' + err); }
       };
     });
   },

@@ -114,6 +114,18 @@ def transition(project_id: str, new_status: str) -> bool:
     return update_project(project_id, {"status": new_status})
 
 
+def delete_project(project_id: str) -> bool:
+    c = _client()
+    if c is None:
+        return False
+    try:
+        c.raw.table("client_projects").delete().eq("id", project_id).execute()
+        return True
+    except Exception as exc:
+        logger.warning("delete_project: %s", exc)
+        return False
+
+
 def record_payment(stripe_session_id: str, *, prospect_id: str = "",
                     product_key: str = "", product_name: str = "",
                     client_email: str = "", client_name: str = "",
