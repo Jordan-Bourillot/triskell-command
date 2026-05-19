@@ -39,6 +39,7 @@ from .views.templates import TemplatesView
 from .views.wow_intakes import WowIntakesView
 from .views.lagriffe_intakes import LagriffeIntakesView
 from .views.rankus_intakes import RankusIntakesView
+from .views.pixelpros_intakes import PixelProsIntakesView
 from .widgets.sidebar import Sidebar
 from .widgets.splash import SplashScreen
 from .widgets.status_bar import StatusBar
@@ -68,6 +69,7 @@ VIEW_REGISTRY: dict[str, type[BaseView]] = {
     "wow_intakes": WowIntakesView,
     "rankus_intakes": RankusIntakesView,
     "lagriffe_intakes": LagriffeIntakesView,
+    "pixelpros_intakes": PixelProsIntakesView,
     "la_forge":   LaForgeView,
     "studio":     StudioView,
     "billing":    BillingView,
@@ -538,9 +540,10 @@ class TriskellCommandApp(ctk.CTk):
         def worker():
             counters: dict[str, int] = {}
             mapping = [
-                ("lagriffe_intakes", "triskell_command.integrations.lagriffe.repo"),
-                ("rankus_intakes",   "triskell_command.integrations.rankus.repo"),
-                ("wow_intakes",      "triskell_command.integrations.wow.repo"),
+                ("lagriffe_intakes",  "triskell_command.integrations.lagriffe.repo"),
+                ("rankus_intakes",    "triskell_command.integrations.rankus.repo"),
+                ("wow_intakes",       "triskell_command.integrations.wow.repo"),
+                ("pixelpros_intakes", "triskell_command.integrations.pixelpros.repo"),
             ]
             for view_id, mod_path in mapping:
                 try:

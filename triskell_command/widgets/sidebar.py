@@ -66,10 +66,11 @@ SIDEBAR_SECTIONS = [
         ("phare",      "broadcast", "Le Phare — SEO"),
     ]),
     ("FABRICATION", [
-        ("la_forge",         "globe",   "La Forge du Web"),
-        ("lagriffe_intakes", "sparkle", "Lagriffe — validations"),
-        ("rankus_intakes",   "sparkle", "RankUs — validations"),
-        ("wow_intakes",      "sparkle", "Studio WoW — validations"),
+        ("la_forge",          "globe",   "La Forge du Web"),
+        ("lagriffe_intakes",  "sparkle", "Lagriffe — validations"),
+        ("rankus_intakes",    "sparkle", "RankUs — validations"),
+        ("wow_intakes",       "sparkle", "Studio WoW — validations"),
+        ("pixelpros_intakes", "sparkle", "Pixel Pros — pipeline"),
     ]),
 ]
 # Compat : on garde NAV_ITEMS comme la concat de toutes les sections
