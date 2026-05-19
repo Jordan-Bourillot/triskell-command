@@ -120,6 +120,8 @@ class PixelProsIntakesView(BaseView):
                         command=self._open_site).pack(side="left", padx=4)
         SecondaryButton(actions, text="Marquer comme failed",
                         command=self._mark_failed).pack(side="left", padx=4)
+        SecondaryButton(actions, text="🗑 Supprimer",
+                        command=self._delete_draft).pack(side="left", padx=4)
         self._status_lbl = ctk.CTkLabel(actions, text="",
                                          text_color=self.colors.text_muted)
         self._status_lbl.pack(side="left", padx=12)
@@ -305,6 +307,57 @@ class PixelProsIntakesView(BaseView):
             self._set_status("Pas d'URL de site (build pas terminé ?).", error=True)
             return
         webbrowser.open(url)
+
+    def _delete_draft(self):
+        intake = self._selected()
+        if intake is None:
+            self._set_status("Sélectionne d'abord une commande.", error=True)
+            return
+
+        business = intake.get("business_name") or "(sans nom)"
+        email = intake.get("email") or "(sans email)"
+        status = intake.get("status") or "?"
+
+        # On bloque la suppression d'un site déjà en ligne (sécurité),
+        # sauf si Jordan force vraiment (double confirmation).
+        if status == "live":
+            confirm = messagebox.askyesno(
+                "⚠️  Site en ligne",
+                f"Cette commande est en statut 'live' (site déployé).\n\n"
+                f"  {business} · {email}\n\n"
+                f"Supprimer cette ligne va perdre l'historique mais ne fermera "
+                f"PAS le site en ligne (à faire à la main séparément).\n\n"
+                f"Continuer quand même ?",
+            )
+            if not confirm:
+                return
+
+        confirm = messagebox.askyesno(
+            "Confirmer la suppression",
+            f"Supprimer définitivement cette commande ?\n\n"
+            f"  {business}\n"
+            f"  {email}\n"
+            f"  Statut : {status}\n\n"
+            f"Cette action est irréversible.",
+        )
+        if not confirm:
+            return
+
+        def _run():
+            ok, msg = pixelpros_repo.delete_intake(self._selected_id)
+            if ok:
+                self.after(0, lambda: (
+                    self._set_status(f"✓ {msg}"),
+                    setattr(self, '_selected_id', None),
+                    self._refresh(),
+                ))
+            else:
+                self.after(0, lambda: self._set_status(
+                    f"Échec suppression : {msg}", error=True,
+                ))
+
+        self._set_status("Suppression en cours…")
+        threading.Thread(target=_run, daemon=True).start()
 
     def _mark_failed(self):
         intake = self._selected()

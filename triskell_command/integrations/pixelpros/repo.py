@@ -227,6 +227,50 @@ def mark_failed(intake_id: str, *, error_message: str = "") -> bool:
                                  error_message=error_message or "Build échoué")
 
 
+def delete_intake(intake_id: str) -> tuple[bool, str]:
+    """Supprime définitivement un draft Pixel Pros.
+
+    Utile pour nettoyer les formulaires de test ou les commandes
+    abandonnées (status='draft' qui n'ont jamais été payées).
+
+    Appelle la RPC pp_delete_draft côté Supabase. Nécessite que le secret
+    PP_WEBHOOK_SECRET soit configuré dans les variables d'env (même secret
+    que celui en DB dans pp_secrets).
+    """
+    sb = _sb()
+    if sb is None:
+        return False, "Supabase non configuré côté Triskell Command."
+    secret = os.environ.get("PP_WEBHOOK_SECRET") or ""
+    if not secret:
+        # Fallback : peut-être que c'est dans settings.json sous pixel_pros
+        try:
+            settings_path = Path.home() / ".triskell-command" / "settings.json"
+            if settings_path.exists():
+                data = json.loads(settings_path.read_text(encoding="utf-8"))
+                pp = data.get("pixel_pros") or {}
+                secret = pp.get("webhook_secret") or pp.get("pp_webhook_secret") or ""
+        except Exception:
+            secret = ""
+    if not secret:
+        return False, (
+            "PP_WEBHOOK_SECRET introuvable (ni en env var, ni dans "
+            "settings.json[pixel_pros].webhook_secret)."
+        )
+    try:
+        result = sb.rpc("pp_delete_draft", {
+            "p_draft_id": intake_id,
+            "p_webhook_secret": secret,
+        }).execute()
+        # La RPC retourne true si supprimé, false sinon
+        ok = bool(result.data)
+        if ok:
+            return True, "Brouillon supprimé."
+        return False, "Brouillon introuvable (déjà supprimé ?)."
+    except Exception as exc:
+        logger.warning("pixelpros.delete_intake: %s", exc)
+        return False, str(exc)
+
+
 # ---------------------------------------------------------------------------
 # Déclenchement du build
 # ---------------------------------------------------------------------------
