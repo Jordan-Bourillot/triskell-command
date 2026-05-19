@@ -3,7 +3,20 @@
  * Workflow plus court que Lagriffe/RankUs/WoW (pas de validation humaine) :
  *   draft → paid → building → live (ou failed)
  *
- * Données venues de Supabase table pp_client_drafts via :
+ * UX choisie : Kanban à 4 colonnes (+ section "Échecs" séparée).
+ * Tout doit être lisible au premier coup d'œil :
+ *  - Funnel synthétique en haut avec les compteurs et les flèches qui
+ *    racontent le pipeline en une ligne.
+ *  - 4 colonnes Kanban, une couleur dominante par statut, une icône
+ *    par statut, les cartes qui glissent visuellement de gauche à droite.
+ *  - Chaque carte : grosse pastille initiale colorée + nom commercial gros
+ *    + formule achetée en badge + temps écoulé en relatif ("il y a 2 h").
+ *  - Au clic → panneau de détail à droite (slide-in) avec timeline,
+ *    données du formulaire et toutes les actions.
+ *  - Les commandes "Payé" en attente depuis +6h sont marquées URGENT
+ *    (bordure dorée animée) pour qu'on les voie tout de suite.
+ *
+ * Données via :
  *   App.api.pixelpros_list_intakes({ status?, limit? })
  *   App.api.pixelpros_get_intake({ id })
  *   App.api.pixelpros_dispatch_build({ id })
@@ -15,30 +28,32 @@
 
 const PixelPros = {
   state: {
-    statusFilter: '',          // '' = tous
     intakes: [],
     selectedId: null,
     detail: null,
     counts: null,
     loading: false,
+    search: '',
   },
 
-  STATUSES: [
-    { key: '',         label: 'Tous',              color: 'text-muted' },
-    { key: 'draft',    label: 'Formulaire reçu',   color: 'text-muted' },
-    { key: 'paid',     label: 'Payé · à construire', color: 'gold' },
-    { key: 'building', label: 'Construction en cours', color: 'accent' },
-    { key: 'live',     label: 'En ligne',          color: 'success' },
-    { key: 'failed',   label: 'Échec',             color: 'danger' },
+  // Colonnes Kanban : 4 statuts principaux dans l'ordre du flow.
+  // Les échecs ont leur propre section en bas.
+  COLUMNS: [
+    { status: 'draft',    label: 'Formulaire reçu',     icon: '📝', accent: '#94a3b8', short: 'Formulaires' },
+    { status: 'paid',     label: 'Payé · à construire', icon: '💳', accent: '#facc15', short: 'Payés' },
+    { status: 'building', label: 'En construction',     icon: '🛠',  accent: '#818cf8', short: 'En cours' },
+    { status: 'live',     label: 'En ligne',            icon: '✅', accent: '#22c55e', short: 'En ligne' },
   ],
 
   FORMULES: {
-    base:        { label: 'Site seul',                 price: '24,90 €' },
-    base_domain: { label: 'Site + domaine',            price: '33,90 €' },
-    base_seo:    { label: 'Site + SEO',                price: '59,80 €' },
-    base_all:    { label: 'Site + domaine + SEO',      price: '68,80 €' },
-    combo:       { label: 'Pack TOUT-EN-UN',           price: '49,90 €' },
+    base:        { label: 'Site seul',                 price: '24,90 €', color: '#94a3b8' },
+    base_domain: { label: 'Site + domaine',            price: '33,90 €', color: '#0ea5e9' },
+    base_seo:    { label: 'Site + SEO',                price: '59,80 €', color: '#a855f7' },
+    base_all:    { label: 'Site + domaine + SEO',      price: '68,80 €', color: '#ec4899' },
+    combo:       { label: 'Pack TOUT-EN-UN',           price: '49,90 €', color: '#facc15' },
   },
+
+  URGENT_THRESHOLD_H: 6,   // un draft "paid" depuis +6h sans build = urgent
 
   async render(container) {
     this._root = container;
@@ -46,25 +61,40 @@ const PixelPros = {
       <section class="animate-slide-up">
         <div class="mb-6 flex items-end justify-between flex-wrap gap-3">
           <div>
-            <div class="hero-kicker mb-2" style="color:#facc15;">PIXEL PROS</div>
-            <h1 class="hero-title mb-3" style="font-size: 36px;">Les sites client en cours.</h1>
-            <p class="hero-subtitle">Chaque inscription, son statut, et un bouton pour relancer la construction si besoin.</p>
+            <div class="hero-kicker mb-2" style="color:#facc15;">PIXEL PROS · PIPELINE</div>
+            <h1 class="hero-title mb-2" style="font-size: 34px;">Tes sites client en un coup d'œil.</h1>
+            <p class="hero-subtitle">Du formulaire reçu jusqu'au site en ligne — clique sur une carte pour les détails et les actions.</p>
           </div>
-          <button id="pp-refresh" class="btn btn-secondary">Rafraîchir</button>
+          <div class="flex items-center gap-2">
+            <input id="pp-search" type="search" placeholder="Rechercher (nom, email, slug)" style="padding:9px 14px; border-radius:8px; background:var(--surface, #0f172a); border:1px solid var(--border, #1e293b); color:#cbd5e1; font-size:13px; width:240px;" />
+            <button id="pp-refresh" class="btn btn-secondary">↻ Rafraîchir</button>
+          </div>
         </div>
 
-        <div id="pp-counts" class="mb-6"></div>
+        <!-- Funnel synthétique -->
+        <div id="pp-funnel" class="mb-7"></div>
 
-        <div class="flex gap-2 mb-4 flex-wrap" id="pp-filters"></div>
+        <!-- Kanban -->
+        <div id="pp-kanban" class="pp-kanban"></div>
 
-        <div id="pp-list" class="grid gap-3"></div>
+        <!-- Section Échecs (apparaît seulement s'il y a des failed) -->
+        <div id="pp-failures" class="mt-7"></div>
 
-        <div id="pp-detail" class="mt-8"></div>
+        <!-- Panneau de détail (slide-in à droite, vide par défaut) -->
+        <div id="pp-detail-overlay" class="pp-detail-overlay" hidden></div>
+        <aside id="pp-detail" class="pp-detail-panel" hidden></aside>
       </section>
     `;
     this._injectStyles();
+
     document.getElementById('pp-refresh').onclick = () => this.refresh();
-    this._renderFilters();
+    document.getElementById('pp-search').oninput = (e) => {
+      this.state.search = e.target.value.toLowerCase().trim();
+      this._renderKanban();
+      this._renderFailures();
+    };
+    document.getElementById('pp-detail-overlay').onclick = () => this._closeDetail();
+
     await this.refresh();
   },
 
@@ -73,220 +103,357 @@ const PixelPros = {
     const s = document.createElement('style');
     s.id = 'pp-styles';
     s.textContent = `
-      .pp-pill { display:inline-flex; align-items:center; gap:6px; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; letter-spacing:.02em; }
-      .pp-pill.gold { background:rgba(250,204,21,.15); color:#facc15; }
-      .pp-pill.success { background:rgba(34,197,94,.15); color:#22c55e; }
-      .pp-pill.danger { background:rgba(239,68,68,.15); color:#ef4444; }
-      .pp-pill.accent { background:rgba(99,102,241,.15); color:#818cf8; }
-      .pp-pill.text-muted { background:rgba(148,163,184,.15); color:#94a3b8; }
-      .pp-card { background:var(--surface, #0f172a); border:1px solid var(--border, #1e293b); border-radius:12px; padding:16px 18px; transition:border-color .15s; }
-      .pp-card:hover { border-color:#facc15; }
-      .pp-card.selected { border-color:#facc15; box-shadow: 0 0 0 1px #facc15; }
-      .pp-count { display:inline-flex; flex-direction:column; align-items:center; padding:12px 18px; min-width:88px; border:1px solid var(--border, #1e293b); border-radius:10px; background:var(--surface, #0f172a); }
-      .pp-count .n { font-size:22px; font-weight:800; line-height:1; }
-      .pp-count .l { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#94a3b8; margin-top:6px; }
-      .pp-filter-btn { padding:6px 12px; border-radius:999px; font-size:12px; font-weight:700; border:1px solid var(--border, #1e293b); background:transparent; color:#94a3b8; cursor:pointer; }
-      .pp-filter-btn.active { background:#facc15; color:#0f172a; border-color:#facc15; }
-      .pp-detail { background:var(--surface, #0f172a); border:1px solid var(--border, #1e293b); border-radius:12px; padding:22px; }
-      .pp-action-btn { padding:8px 14px; border-radius:8px; font-size:13px; font-weight:700; cursor:pointer; border:none; }
+      /* === FUNNEL synthétique === */
+      .pp-funnel { display:flex; align-items:stretch; gap:0; flex-wrap:wrap; background:var(--surface, #0f172a); border:1px solid var(--border, #1e293b); border-radius:14px; padding:14px; }
+      .pp-funnel-step { flex:1; min-width:120px; padding:10px 14px; display:flex; flex-direction:column; align-items:center; gap:4px; position:relative; }
+      .pp-funnel-step + .pp-funnel-step::before { content:'›'; position:absolute; left:-8px; top:50%; transform:translateY(-50%); font-size:22px; font-weight:300; color:#475569; }
+      .pp-funnel-icon { font-size:24px; line-height:1; margin-bottom:2px; }
+      .pp-funnel-n { font-size:24px; font-weight:800; line-height:1; }
+      .pp-funnel-l { font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#94a3b8; margin-top:2px; }
+      .pp-funnel-step.alert .pp-funnel-n { color:#facc15; }
+      .pp-funnel-step.alert .pp-funnel-l { color:#facc15; }
+      .pp-funnel-step.success .pp-funnel-n { color:#22c55e; }
+      .pp-funnel-step.success .pp-funnel-l { color:#22c55e; }
+
+      /* === KANBAN === */
+      .pp-kanban { display:grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap:14px; }
+      @media (max-width: 1100px) { .pp-kanban { grid-template-columns: repeat(2, 1fr); } }
+      @media (max-width: 640px)  { .pp-kanban { grid-template-columns: 1fr; } }
+
+      .pp-col { background:var(--surface, #0f172a); border:1px solid var(--border, #1e293b); border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:10px; min-height:200px; }
+      .pp-col-head { display:flex; align-items:center; justify-content:space-between; padding-bottom:10px; border-bottom:2px solid var(--col-accent, #94a3b8); }
+      .pp-col-title { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:800; color:var(--col-accent, #94a3b8); text-transform:uppercase; letter-spacing:.04em; }
+      .pp-col-title .ico { font-size:16px; }
+      .pp-col-count { background:rgba(255,255,255,.06); color:#cbd5e1; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:800; }
+      .pp-col-body { display:flex; flex-direction:column; gap:8px; }
+      .pp-col-empty { color:#64748b; font-size:12px; font-style:italic; text-align:center; padding:24px 8px; }
+
+      /* === CARTE === */
+      .pp-card { background:rgba(15, 23, 42, .6); border:1px solid var(--border, #1e293b); border-radius:10px; padding:11px; display:flex; align-items:center; gap:11px; cursor:pointer; transition:border-color .15s, transform .15s, background .15s; position:relative; }
+      .pp-card:hover { border-color:var(--col-accent, #facc15); background:rgba(15, 23, 42, .9); transform:translateX(2px); }
+      .pp-card.urgent { border-color:#facc15; box-shadow: 0 0 0 1px #facc15, 0 0 12px rgba(250,204,21,.3); animation: pp-pulse 2s ease-in-out infinite; }
+      .pp-card.selected { border-color:#facc15; background:rgba(250,204,21,.05); }
+      @keyframes pp-pulse { 0%, 100% { box-shadow: 0 0 0 1px #facc15, 0 0 12px rgba(250,204,21,.3); } 50% { box-shadow: 0 0 0 1px #facc15, 0 0 20px rgba(250,204,21,.6); } }
+
+      .pp-avatar { width:38px; height:38px; border-radius:9px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:16px; color:#0f172a; flex-shrink:0; text-transform:uppercase; }
+      .pp-card-body { flex:1; min-width:0; }
+      .pp-card-name { font-weight:700; font-size:13.5px; color:#e2e8f0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .pp-card-meta { font-size:11px; color:#94a3b8; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .pp-card-badges { display:flex; align-items:center; gap:6px; margin-top:6px; flex-wrap:wrap; }
+      .pp-formule-badge { padding:2px 7px; border-radius:6px; font-size:10px; font-weight:700; }
+      .pp-card-time { font-size:10.5px; color:#64748b; }
+      .pp-urgent-badge { background:#facc15; color:#0f172a; padding:1px 6px; border-radius:4px; font-size:9.5px; font-weight:800; letter-spacing:.04em; }
+
+      /* === SECTION ÉCHECS === */
+      .pp-failures { background:rgba(239,68,68,.06); border:1px solid rgba(239,68,68,.25); border-radius:14px; padding:14px; }
+      .pp-failures-title { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:800; color:#ef4444; text-transform:uppercase; letter-spacing:.04em; margin-bottom:10px; }
+      .pp-failures-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:10px; }
+      .pp-failures-empty { display:none; }
+
+      /* === PANNEAU DE DÉTAIL (slide-in droite) === */
+      .pp-detail-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:998; backdrop-filter: blur(2px); animation: pp-fadein .2s ease; }
+      .pp-detail-panel { position:fixed; top:0; right:0; bottom:0; width:min(560px, 95vw); background:var(--bg, #0b1020); border-left:1px solid var(--border, #1e293b); z-index:999; overflow-y:auto; padding:24px; box-shadow:-12px 0 30px rgba(0,0,0,.4); animation: pp-slidein .25s cubic-bezier(.2,.7,.3,1); }
+      @keyframes pp-fadein { from { opacity:0; } to { opacity:1; } }
+      @keyframes pp-slidein { from { transform:translateX(100%); } to { transform:translateX(0); } }
+
+      .pp-detail-close { position:absolute; top:14px; right:14px; width:36px; height:36px; border-radius:50%; background:rgba(148,163,184,.15); color:#cbd5e1; border:none; cursor:pointer; font-size:20px; display:flex; align-items:center; justify-content:center; }
+      .pp-detail-close:hover { background:rgba(239,68,68,.2); color:#fff; }
+      .pp-detail-head { display:flex; align-items:flex-start; gap:14px; margin-bottom:18px; padding-right:50px; }
+      .pp-detail-head .pp-avatar { width:54px; height:54px; font-size:22px; border-radius:12px; }
+      .pp-detail-name { font-size:22px; font-weight:800; color:#e2e8f0; line-height:1.2; }
+      .pp-detail-sub { font-size:13px; color:#94a3b8; margin-top:4px; }
+      .pp-detail-pill { display:inline-block; padding:3px 11px; border-radius:999px; font-size:11px; font-weight:700; letter-spacing:.02em; margin-top:8px; }
+
+      .pp-detail-section { margin-bottom:20px; }
+      .pp-detail-section-title { font-size:11px; font-weight:800; letter-spacing:.08em; color:#94a3b8; text-transform:uppercase; margin-bottom:10px; }
+
+      .pp-actions { display:flex; flex-wrap:wrap; gap:8px; }
+      .pp-action-btn { padding:9px 14px; border-radius:8px; font-size:13px; font-weight:700; cursor:pointer; border:1px solid transparent; }
       .pp-action-btn.primary { background:#facc15; color:#0f172a; }
-      .pp-action-btn.secondary { background:rgba(148,163,184,.15); color:#cbd5e1; }
-      .pp-action-btn.danger { background:rgba(239,68,68,.15); color:#ef4444; }
-      .pp-action-btn:hover { filter:brightness(1.1); }
-      .pp-action-btn:disabled { opacity:.5; cursor:not-allowed; }
-      .pp-timeline-row { display:flex; gap:10px; padding:6px 0; font-size:12.5px; color:#cbd5e1; }
-      .pp-timeline-row .ts { color:#64748b; min-width:130px; font-variant-numeric: tabular-nums; }
+      .pp-action-btn.secondary { background:rgba(148,163,184,.12); color:#cbd5e1; border-color:rgba(148,163,184,.25); }
+      .pp-action-btn.danger { background:rgba(239,68,68,.12); color:#fca5a5; border-color:rgba(239,68,68,.3); }
+      .pp-action-btn:hover { filter:brightness(1.12); }
+
+      .pp-detail-link { color:#facc15; font-weight:700; text-decoration:underline; }
+      .pp-detail-link:hover { color:#fde047; }
+
+      .pp-error-box { background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3); border-radius:8px; padding:11px 14px; color:#fca5a5; font-size:13px; }
+
+      .pp-timeline { border-left:2px solid var(--border, #1e293b); padding-left:14px; margin-left:6px; }
+      .pp-timeline-event { padding:8px 0; }
+      .pp-timeline-event .ts { font-size:11px; color:#64748b; font-variant-numeric:tabular-nums; margin-bottom:2px; }
+      .pp-timeline-event .lbl { font-size:13px; color:#cbd5e1; }
+      .pp-timeline-event.current .lbl { font-weight:700; color:#facc15; }
+
+      .pp-data-toggle { background:rgba(148,163,184,.08); border:1px solid var(--border, #1e293b); border-radius:8px; padding:8px 12px; cursor:pointer; font-size:12px; color:#94a3b8; user-select:none; }
+      .pp-data-toggle:hover { color:#cbd5e1; }
+      .pp-data-pre { margin-top:10px; padding:12px; background:#020617; border-radius:8px; font-size:11px; color:#cbd5e1; overflow:auto; max-height:340px; }
+
+      .pp-toast { position:fixed; bottom:30px; right:30px; padding:14px 18px; border-radius:10px; font-weight:700; font-size:13px; z-index:9999; box-shadow:0 6px 20px rgba(0,0,0,.4); animation: pp-toastin .2s ease; }
+      .pp-toast.ok { background:#facc15; color:#0f172a; }
+      .pp-toast.err { background:#ef4444; color:#fff; }
+      @keyframes pp-toastin { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
     `;
     document.head.appendChild(s);
   },
 
-  _renderFilters() {
-    const el = document.getElementById('pp-filters');
-    el.innerHTML = this.STATUSES.map(s =>
-      `<button class="pp-filter-btn ${this.state.statusFilter === s.key ? 'active' : ''}" data-st="${s.key}">${this._escape(s.label)}</button>`
-    ).join('');
-    el.querySelectorAll('[data-st]').forEach(b => {
-      b.onclick = () => { this.state.statusFilter = b.dataset.st; this.refresh(); };
-    });
-  },
-
   async refresh() {
     this.state.loading = true;
-    this._renderList();
-    // pipeline state (compteurs) + liste filtrée
+    this._renderFunnel();
+    this._renderKanban();
     const [stateRes, listRes] = await Promise.all([
       this._call('pixelpros_pipeline_state'),
-      this._call('pixelpros_list_intakes', { status: this.state.statusFilter, limit: 100 }),
+      this._call('pixelpros_list_intakes', { limit: 200 }),
     ]);
-    if (stateRes && stateRes.ok) {
-      this.state.counts = stateRes.counts || null;
-    }
-    if (listRes && listRes.ok) {
-      this.state.intakes = listRes.intakes || [];
-    } else if (listRes && listRes.error) {
-      this.state.intakes = [];
-      console.warn('pixelpros: list_intakes', listRes.error);
-    }
+    if (stateRes && stateRes.ok) this.state.counts = stateRes.counts || null;
+    this.state.intakes = (listRes && listRes.ok) ? (listRes.intakes || []) : [];
     this.state.loading = false;
-    this._renderCounts();
-    this._renderFilters();
-    this._renderList();
+
+    this._renderFunnel();
+    this._renderKanban();
+    this._renderFailures();
+
     if (this.state.selectedId) {
       await this._loadDetail(this.state.selectedId);
     }
   },
 
-  _renderCounts() {
-    const el = document.getElementById('pp-counts');
+  // ----- FUNNEL -----
+  _renderFunnel() {
+    const el = document.getElementById('pp-funnel');
     if (!el) return;
-    const c = this.state.counts;
-    if (!c) { el.innerHTML = ''; return; }
-    const items = [
-      { k: 'draft',    l: 'Formulaire' },
-      { k: 'paid',     l: 'Payé' },
-      { k: 'building', l: 'En constru.' },
-      { k: 'live',     l: 'En ligne' },
-      { k: 'failed',   l: 'Échec' },
+    const c = this.state.counts || {};
+    const steps = [
+      { k: 'draft',    l: 'Formulaire',      ico: '📝', cls: '' },
+      { k: 'paid',     l: 'À construire',    ico: '💳', cls: (c.paid||0) > 0 ? 'alert' : '' },
+      { k: 'building', l: 'En construction', ico: '🛠',  cls: '' },
+      { k: 'live',     l: 'En ligne',        ico: '✅', cls: (c.live||0) > 0 ? 'success' : '' },
     ];
-    el.innerHTML = `<div class="flex gap-3 flex-wrap">${items.map(i =>
-      `<div class="pp-count"><div class="n">${c[i.k] || 0}</div><div class="l">${i.l}</div></div>`
-    ).join('')}</div>`;
+    el.className = 'pp-funnel';
+    el.innerHTML = steps.map(s => `
+      <div class="pp-funnel-step ${s.cls}">
+        <span class="pp-funnel-icon">${s.ico}</span>
+        <span class="pp-funnel-n">${c[s.k] || 0}</span>
+        <span class="pp-funnel-l">${s.l}</span>
+      </div>
+    `).join('');
   },
 
-  _renderList() {
-    const el = document.getElementById('pp-list');
+  // ----- KANBAN -----
+  _renderKanban() {
+    const el = document.getElementById('pp-kanban');
     if (!el) return;
-    if (this.state.loading) { el.innerHTML = `<div style="color:#94a3b8; padding:18px;">Chargement…</div>`; return; }
-    if (!this.state.intakes.length) {
-      el.innerHTML = `<div style="color:#94a3b8; padding:30px; text-align:center; border:1px dashed var(--border, #1e293b); border-radius:12px;">Aucune inscription pour ce filtre.</div>`;
-      return;
+    const groups = {};
+    for (const col of this.COLUMNS) groups[col.status] = [];
+    const filtered = this._filteredIntakes();
+    for (const it of filtered) {
+      if (groups[it.status]) groups[it.status].push(it);
     }
-    el.innerHTML = this.state.intakes.map(it => this._renderCard(it)).join('');
-    el.querySelectorAll('[data-pp-id]').forEach(card => {
+
+    el.innerHTML = this.COLUMNS.map(col => {
+      const items = groups[col.status];
+      return `
+        <div class="pp-col" style="--col-accent:${col.accent};">
+          <div class="pp-col-head">
+            <div class="pp-col-title"><span class="ico">${col.icon}</span><span>${this._escape(col.short)}</span></div>
+            <span class="pp-col-count">${items.length}</span>
+          </div>
+          <div class="pp-col-body">
+            ${items.length === 0
+              ? `<div class="pp-col-empty">${this.state.loading ? 'Chargement…' : 'Aucune commande ici.'}</div>`
+              : items.map(it => this._renderCard(it, col.accent)).join('')}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    el.querySelectorAll('[data-pp-card]').forEach(card => {
       card.onclick = () => {
-        this.state.selectedId = card.dataset.ppId;
+        this.state.selectedId = card.dataset.ppCard;
         this._loadDetail(this.state.selectedId);
-        el.querySelectorAll('.pp-card').forEach(c => c.classList.remove('selected'));
-        card.classList.add('selected');
       };
     });
   },
 
-  _renderCard(it) {
-    const status = this.STATUSES.find(s => s.key === it.status) || { label: it.status || '?', color: 'text-muted' };
+  // ----- ÉCHECS -----
+  _renderFailures() {
+    const el = document.getElementById('pp-failures');
+    if (!el) return;
+    const failures = this._filteredIntakes().filter(it => it.status === 'failed');
+    if (!failures.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `
+      <div class="pp-failures">
+        <div class="pp-failures-title">⚠ Échecs (${failures.length}) — à relancer ou marquer en abandonné</div>
+        <div class="pp-failures-grid">${failures.map(it => this._renderCard(it, '#ef4444')).join('')}</div>
+      </div>
+    `;
+    el.querySelectorAll('[data-pp-card]').forEach(card => {
+      card.onclick = () => {
+        this.state.selectedId = card.dataset.ppCard;
+        this._loadDetail(this.state.selectedId);
+      };
+    });
+  },
+
+  _filteredIntakes() {
+    const q = this.state.search;
+    if (!q) return this.state.intakes;
+    return this.state.intakes.filter(it => {
+      const data = it.data || {};
+      const blob = [
+        data.business_name, data['business-name'], data.email,
+        it.slug, it.id, data.city, data.phone,
+      ].filter(Boolean).join(' ').toLowerCase();
+      return blob.includes(q);
+    });
+  },
+
+  _renderCard(it, accent) {
     const data = it.data || {};
-    const businessName = data.business_name || data['business-name'] || '(sans nom)';
-    const email = data.email || it.contact_email || '?';
-    const created = this._fmtDate(it.created_at);
+    const name = data.business_name || data['business-name'] || '(sans nom)';
+    const email = data.email || it.contact_email || '—';
+    const initial = name.trim().charAt(0).toUpperCase() || '?';
+    const color = this._colorFromName(name);
     const option = it.option || data.option || '';
-    const formule = this.FORMULES[option] || { label: option || '—', price: '' };
+    const formule = this.FORMULES[option] || null;
+    const isUrgent = it.status === 'paid' && this._hoursSince(it.updated_at || it.stripe_paid_at || it.created_at) > this.URGENT_THRESHOLD_H;
+    const selected = this.state.selectedId === it.id ? 'selected' : '';
     return `
-      <div class="pp-card ${this.state.selectedId === it.id ? 'selected' : ''}" data-pp-id="${this._escape(it.id)}" style="cursor:pointer;">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
-          <div style="min-width:0;">
-            <div style="font-weight:700; font-size:15px; color:#e2e8f0;">${this._escape(businessName)}</div>
-            <div style="font-size:12px; color:#94a3b8; margin-top:2px;">${this._escape(email)}</div>
-          </div>
-          <div class="flex items-center gap-3 flex-wrap">
-            <span style="font-size:12px; color:#cbd5e1;">${this._escape(formule.label)} ${formule.price ? `· ${formule.price}` : ''}</span>
-            <span class="pp-pill ${status.color}">${this._escape(status.label)}</span>
-            <span style="font-size:11px; color:#64748b;">${created}</span>
+      <div class="pp-card ${isUrgent ? 'urgent' : ''} ${selected}" data-pp-card="${this._escape(it.id)}" style="--col-accent:${accent};">
+        <div class="pp-avatar" style="background:${color};">${this._escape(initial)}</div>
+        <div class="pp-card-body">
+          <div class="pp-card-name">${this._escape(name)}</div>
+          <div class="pp-card-meta">${this._escape(email)}</div>
+          <div class="pp-card-badges">
+            ${formule ? `<span class="pp-formule-badge" style="background:${formule.color}20; color:${formule.color};">${this._escape(formule.label)}</span>` : ''}
+            <span class="pp-card-time">${this._timeRelative(it.updated_at || it.created_at)}</span>
+            ${isUrgent ? `<span class="pp-urgent-badge">URGENT</span>` : ''}
           </div>
         </div>
       </div>
     `;
   },
 
+  // ----- PANNEAU DE DÉTAIL -----
   async _loadDetail(id) {
-    const el = document.getElementById('pp-detail');
-    if (!el) return;
-    el.innerHTML = `<div style="color:#94a3b8; padding:18px;">Chargement…</div>`;
+    document.getElementById('pp-detail-overlay').hidden = false;
+    const panel = document.getElementById('pp-detail');
+    panel.hidden = false;
+    panel.innerHTML = `<div style="padding:60px 0; text-align:center; color:#94a3b8;">Chargement…</div>`;
     const res = await this._call('pixelpros_get_intake', { id });
     if (!res || !res.ok) {
-      el.innerHTML = `<div class="pp-detail" style="color:#ef4444;">Erreur de chargement : ${this._escape(res?.error || 'inconnue')}</div>`;
+      panel.innerHTML = `<button class="pp-detail-close" data-pp-close>×</button><div class="pp-error-box">Erreur de chargement : ${this._escape(res?.error || 'inconnue')}</div>`;
+      panel.querySelector('[data-pp-close]').onclick = () => this._closeDetail();
       return;
     }
     this.state.detail = res;
     this._renderDetail();
+    this._renderKanban(); // refresh la sélection visuelle
+  },
+
+  _closeDetail() {
+    document.getElementById('pp-detail-overlay').hidden = true;
+    const panel = document.getElementById('pp-detail');
+    panel.hidden = true;
+    panel.innerHTML = '';
+    this.state.selectedId = null;
+    this.state.detail = null;
+    this._renderKanban();
   },
 
   _renderDetail() {
-    const el = document.getElementById('pp-detail');
-    if (!el || !this.state.detail) return;
+    const panel = document.getElementById('pp-detail');
     const { intake, timeline } = this.state.detail;
     const data = intake.data || {};
-    const businessName = data.business_name || data['business-name'] || '(sans nom)';
-    const status = this.STATUSES.find(s => s.key === intake.status) || { label: intake.status, color: 'text-muted' };
+    const name = data.business_name || data['business-name'] || '(sans nom)';
+    const email = data.email || '—';
+    const phone = data.phone || '';
+    const initial = name.trim().charAt(0).toUpperCase() || '?';
+    const color = this._colorFromName(name);
+    const col = this.COLUMNS.find(c => c.status === intake.status) ||
+                { label: intake.status, accent: '#94a3b8', icon: '?' };
+    const errMsg = data.error || (intake.data && intake.data.error);
 
     const actions = this._availableActions(intake);
 
-    el.innerHTML = `
-      <div class="pp-detail">
-        <div class="flex items-start justify-between mb-4 flex-wrap gap-3">
-          <div>
-            <div style="font-weight:800; font-size:20px; color:#e2e8f0;">${this._escape(businessName)}</div>
-            <div style="font-size:13px; color:#94a3b8; margin-top:4px;">${this._escape(data.email || '?')} · ${this._escape(data.phone || '')}</div>
-          </div>
-          <span class="pp-pill ${status.color}">${this._escape(status.label)}</span>
+    panel.innerHTML = `
+      <button class="pp-detail-close" data-pp-close>×</button>
+
+      <div class="pp-detail-head">
+        <div class="pp-avatar" style="background:${color};">${this._escape(initial)}</div>
+        <div>
+          <div class="pp-detail-name">${this._escape(name)}</div>
+          <div class="pp-detail-sub">${this._escape(email)}${phone ? ' · ' + this._escape(phone) : ''}</div>
+          <span class="pp-detail-pill" style="background:${col.accent}25; color:${col.accent};">${col.icon} ${this._escape(col.label)}</span>
         </div>
+      </div>
 
-        <div class="flex gap-2 flex-wrap mb-5">${actions.join('')}</div>
+      ${errMsg ? `<div class="pp-detail-section"><div class="pp-error-box">⚠ ${this._escape(errMsg)}</div></div>` : ''}
 
-        ${intake.site_url ? `<div style="margin-bottom:14px;"><a href="${this._escape(intake.site_url)}" target="_blank" rel="noopener" style="color:#facc15; font-weight:700; text-decoration:underline;">→ Voir le site en ligne</a></div>` : ''}
+      <div class="pp-detail-section">
+        <div class="pp-detail-section-title">Actions</div>
+        <div class="pp-actions">${actions.join('')}</div>
+      </div>
 
-        ${intake.stripe_session_id ? `<div style="margin-bottom:14px; font-size:12px; color:#94a3b8;">Stripe session : <code style="color:#cbd5e1;">${this._escape(intake.stripe_session_id)}</code></div>` : ''}
+      ${intake.site_url ? `
+        <div class="pp-detail-section">
+          <div class="pp-detail-section-title">Site en ligne</div>
+          <a class="pp-detail-link" href="${this._escape(intake.site_url)}" target="_blank" rel="noopener">${this._escape(intake.site_url)} →</a>
+        </div>` : ''}
 
-        ${(data.error || (intake.data && intake.data.error)) ? `<div style="margin-bottom:14px; padding:10px 14px; background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3); border-radius:8px; color:#fca5a5; font-size:13px;">⚠ ${this._escape(data.error || intake.data.error)}</div>` : ''}
-
-        <details style="margin-bottom:18px;">
-          <summary style="cursor:pointer; color:#94a3b8; font-size:13px; font-weight:600;">Voir les données du formulaire</summary>
-          <pre style="margin-top:10px; padding:14px; background:#020617; border-radius:8px; font-size:11px; color:#cbd5e1; overflow:auto; max-height:400px;">${this._escape(JSON.stringify(data, null, 2))}</pre>
-        </details>
-
-        <div style="border-top:1px solid var(--border, #1e293b); padding-top:14px;">
-          <div style="font-size:12px; font-weight:700; letter-spacing:.06em; color:#94a3b8; text-transform:uppercase; margin-bottom:8px;">Chronologie</div>
+      <div class="pp-detail-section">
+        <div class="pp-detail-section-title">Chronologie</div>
+        <div class="pp-timeline">
           ${(timeline || []).map(ev => `
-            <div class="pp-timeline-row">
-              <span class="ts">${this._fmtDate(ev.ts)}</span>
-              <span>${this._escape(ev.label)}</span>
+            <div class="pp-timeline-event ${ev.kind === 'current' ? 'current' : ''}">
+              <div class="ts">${this._fmtDate(ev.ts)}</div>
+              <div class="lbl">${this._escape(ev.label)}</div>
             </div>
           `).join('')}
         </div>
       </div>
+
+      ${intake.stripe_session_id ? `
+        <div class="pp-detail-section">
+          <div class="pp-detail-section-title">Stripe</div>
+          <div style="font-size:12px; color:#94a3b8;">Session : <code style="color:#cbd5e1;">${this._escape(intake.stripe_session_id)}</code></div>
+        </div>` : ''}
+
+      <div class="pp-detail-section">
+        <div class="pp-detail-section-title">Données du formulaire</div>
+        <details>
+          <summary class="pp-data-toggle">Voir le JSON brut (${Object.keys(data).length} champs)</summary>
+          <pre class="pp-data-pre">${this._escape(JSON.stringify(data, null, 2))}</pre>
+        </details>
+      </div>
     `;
 
-    el.querySelectorAll('[data-pp-action]').forEach(b => {
+    panel.querySelector('[data-pp-close]').onclick = () => this._closeDetail();
+    panel.querySelectorAll('[data-pp-action]').forEach(b => {
       b.onclick = () => this._doAction(b.dataset.ppAction, intake);
     });
   },
 
   _availableActions(intake) {
-    const actions = [];
+    const out = [];
     const st = intake.status;
-
-    // Lancer / relancer le build (pour paid, failed, building OU live = debug)
     if (st === 'paid' || st === 'failed' || st === 'building' || st === 'live') {
-      const label = st === 'paid' ? '▶ Lancer la construction'
+      const label = st === 'paid'   ? '▶ Lancer la construction'
                   : st === 'failed' ? '↻ Relancer la construction'
-                  : st === 'live' ? '↻ Reconstruire (debug)'
-                  : '↻ Relancer (forcer)';
-      actions.push(`<button data-pp-action="dispatch" class="pp-action-btn primary">${label}</button>`);
+                  : st === 'live'   ? '↻ Reconstruire le site'
+                  : '↻ Forcer une nouvelle tentative';
+      out.push(`<button data-pp-action="dispatch" class="pp-action-btn primary">${label}</button>`);
     }
-
-    // Marquer failed (pour débloquer)
     if (st === 'building' || st === 'paid') {
-      actions.push(`<button data-pp-action="mark_failed" class="pp-action-btn danger">Marquer comme échec</button>`);
+      out.push(`<button data-pp-action="mark_failed" class="pp-action-btn danger">Marquer comme échec</button>`);
     }
-
-    // Renvoi des mails
     if (st !== 'draft') {
-      actions.push(`<button data-pp-action="resend_paid_mail" class="pp-action-btn secondary">Renvoyer mail "merci paiement"</button>`);
+      out.push(`<button data-pp-action="resend_paid_mail" class="pp-action-btn secondary">📧 Renvoyer mail "paiement reçu"</button>`);
     }
     if (st === 'live') {
-      actions.push(`<button data-pp-action="resend_live_mail" class="pp-action-btn secondary">Renvoyer mail "site en ligne"</button>`);
+      out.push(`<button data-pp-action="resend_live_mail" class="pp-action-btn secondary">📧 Renvoyer mail "site en ligne"</button>`);
     }
-
-    return actions;
+    return out;
   },
 
   async _doAction(action, intake) {
@@ -295,31 +462,28 @@ const PixelPros = {
     switch (action) {
       case 'dispatch':
         res = await this._call('pixelpros_dispatch_build', { id });
-        if (res && res.ok) this._toast(`Build lancé : ${res.message || ''}`);
-        else this._toast(`Échec : ${res?.error || res?.message || '?'}`, true);
+        this._toast(res?.ok ? `Build lancé : ${res.message || ''}` : `Échec : ${res?.error || res?.message || '?'}`, !res?.ok);
         break;
       case 'mark_failed': {
         const reason = prompt('Raison de l\'échec (optionnel) :', '');
         if (reason === null) return;
         res = await this._call('pixelpros_mark_failed', { id, reason });
-        if (res && res.ok) this._toast('Marqué comme échec');
-        else this._toast(`Échec : ${res?.error || '?'}`, true);
+        this._toast(res?.ok ? 'Marqué comme échec' : `Échec : ${res?.error || '?'}`, !res?.ok);
         break;
       }
       case 'resend_paid_mail':
         res = await this._call('pixelpros_resend_paid_mail', { id });
-        if (res && res.ok) this._toast('Mail "merci paiement" envoyé');
-        else this._toast(`Échec : ${res?.error || '?'}`, true);
+        this._toast(res?.ok ? `Mail "paiement reçu" envoyé : ${res.message || ''}` : `Échec : ${res?.error || res?.message || '?'}`, !res?.ok);
         break;
       case 'resend_live_mail':
         res = await this._call('pixelpros_resend_live_mail', { id });
-        if (res && res.ok) this._toast('Mail "site en ligne" envoyé');
-        else this._toast(`Échec : ${res?.error || '?'}`, true);
+        this._toast(res?.ok ? `Mail "site en ligne" envoyé : ${res.message || ''}` : `Échec : ${res?.error || res?.message || '?'}`, !res?.ok);
         break;
     }
     await this.refresh();
   },
 
+  // ----- HELPERS -----
   async _call(method, payload) {
     if (!App || !App.api || typeof App.api[method] !== 'function') {
       console.warn(`pixelpros: API.${method} introuvable`);
@@ -329,14 +493,42 @@ const PixelPros = {
     catch (e) { console.warn('pixelpros._call', method, e); return { ok: false, error: String(e) }; }
   },
 
+  _hoursSince(ts) {
+    if (!ts) return 0;
+    try {
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return 0;
+      return (Date.now() - d.getTime()) / 36e5;
+    } catch { return 0; }
+  },
+
+  _timeRelative(ts) {
+    if (!ts) return '—';
+    const h = this._hoursSince(ts);
+    if (h < 1)   return `il y a ${Math.max(1, Math.round(h * 60))} min`;
+    if (h < 24)  return `il y a ${Math.round(h)} h`;
+    const d = Math.round(h / 24);
+    if (d < 30) return `il y a ${d} j`;
+    return this._fmtDate(ts);
+  },
+
   _fmtDate(s) {
     if (!s) return '—';
     try {
       const d = new Date(s);
       if (isNaN(d.getTime())) return s;
-      return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' +
-             d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' }) +
+             ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     } catch { return s; }
+  },
+
+  _colorFromName(name) {
+    // Palette pastel cohérente, hash simple sur le nom.
+    const palette = ['#facc15', '#22c55e', '#0ea5e9', '#a855f7', '#ec4899', '#f97316', '#14b8a6', '#f43f5e'];
+    let h = 0;
+    const s = String(name || '');
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return palette[Math.abs(h) % palette.length];
   },
 
   _escape(s) {
@@ -348,7 +540,7 @@ const PixelPros = {
   _toast(msg, isError = false) {
     const t = document.createElement('div');
     t.textContent = msg;
-    t.style.cssText = `position:fixed; bottom:30px; right:30px; padding:14px 18px; border-radius:10px; font-weight:600; font-size:13px; z-index:9999; box-shadow:0 6px 20px rgba(0,0,0,.4); ${isError ? 'background:#ef4444; color:#fff;' : 'background:#facc15; color:#0f172a;'}`;
+    t.className = `pp-toast ${isError ? 'err' : 'ok'}`;
     document.body.appendChild(t);
     setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; }, 2800);
     setTimeout(() => t.remove(), 3200);
