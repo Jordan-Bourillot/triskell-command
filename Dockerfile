@@ -36,10 +36,21 @@ RUN git clone --depth=1 --branch ${TRISKELL_CORE_REF} \
     https://github.com/Jordan-Bourillot/triskell-core.git \
     /opt/triskell-core
 
+# Clone pixel-studio (le builder Python + templates). Permet au robot de
+# fabriquer les sites client à partir du formulaire payé, puis de les pousser
+# sur GitHub pour que Netlify les déploie automatiquement.
+ARG PIXEL_STUDIO_REF=main
+RUN git clone --branch ${PIXEL_STUDIO_REF} \
+    https://github.com/Jordan-Bourillot/pixel-studio.git \
+    /opt/pixel-studio
+
 # Install requirements en premier (cache layer optimisé : ne re-build pas les deps
 # si seul le code app change)
 COPY requirements-http.txt ./
 RUN pip install -r requirements-http.txt
+
+# Deps Python du builder Pixel Pros (Mustache renderer + adaptateur Claude)
+RUN pip install -r /opt/pixel-studio/builder/requirements.txt
 
 # Copie le code app (.dockerignore exclut .git, .venv, node_modules, etc.)
 COPY . .
@@ -52,6 +63,13 @@ ENV PYTHONPATH="/opt/triskell-core:/app"
 ENV HOME=/data
 RUN mkdir -p /data
 VOLUME ["/data"]
+
+# Indique au builder Pixel Pros où chercher son repo local cloné.
+ENV PIXEL_PROS_REPO_PATH=/opt/pixel-studio
+
+# Identité git par défaut pour les commits automatiques du builder Pixel Pros.
+RUN git config --global user.email "robot@pixel-pros.fr" \
+ && git config --global user.name "Pixel Pros Robot"
 
 # Healthcheck simple : ping /api/_health
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
