@@ -1232,8 +1232,8 @@ const Mails = {
                 <!-- Bouton Aperçu (visible uniquement en mode HTML enrichi via JS) -->
                 <button id="cmp-preview-top" type="button" class="hidden px-2.5 py-1 rounded-lg font-semibold transition-colors text-text-muted hover:bg-bg" title="Aperçu (rendu réel du mail)">👁 Aperçu</button>
                 <!-- Toggle fond clair / sombre de la zone d'écriture (style Outlook) -->
-                <button id="cmp-bg-toggle" type="button" class="px-2.5 py-1 rounded-lg font-semibold transition-colors text-text-muted hover:bg-bg flex items-center gap-1" title="Basculer le fond de la zone d'écriture (clair / sombre)">
-                  <span id="cmp-bg-toggle-icon">☀</span>
+                <button id="cmp-bg-toggle" type="button" class="rounded-lg font-semibold transition-colors text-text-muted hover:bg-bg flex items-center justify-center" style="width:32px;height:28px;" title="Basculer le fond de la zone d'écriture (clair / sombre)">
+                  <span id="cmp-bg-toggle-icon" style="display:inline-block;width:16px;text-align:center;line-height:1;">☀</span>
                 </button>
               </div>
             </div>
