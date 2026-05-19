@@ -151,8 +151,9 @@ const PixelPros = {
       .pp-failures-empty { display:none; }
 
       /* === PANNEAU DE DÉTAIL (slide-in droite) === */
-      .pp-detail-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:998; backdrop-filter: blur(2px); animation: pp-fadein .2s ease; }
-      .pp-detail-panel { position:fixed; top:0; right:0; bottom:0; width:min(560px, 95vw); background:var(--bg, #0b1020); border-left:1px solid var(--border, #1e293b); z-index:999; overflow-y:auto; padding:24px; box-shadow:-12px 0 30px rgba(0,0,0,.4); animation: pp-slidein .25s cubic-bezier(.2,.7,.3,1); }
+      .pp-detail-overlay { position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:998; backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); animation: pp-fadein .2s ease; }
+      /* Fond opaque solide, pas de var() qui pourrait être transparente. */
+      .pp-detail-panel { position:fixed; top:0; right:0; bottom:0; width:min(560px, 95vw); background:#0b1020; border-left:1px solid #1e293b; z-index:999; overflow-y:auto; padding:24px; box-shadow:-12px 0 30px rgba(0,0,0,.5); animation: pp-slidein .25s cubic-bezier(.2,.7,.3,1); color:#e2e8f0; }
       @keyframes pp-fadein { from { opacity:0; } to { opacity:1; } }
       @keyframes pp-slidein { from { transform:translateX(100%); } to { transform:translateX(0); } }
 
