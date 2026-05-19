@@ -261,7 +261,15 @@ def dispatch_build(intake_id: str) -> tuple[bool, str]:
 
 
 def _find_pixel_studio_dir() -> Optional[Path]:
-    """Cherche le dossier pixel-studio dans les emplacements habituels."""
+    """Cherche le dossier pixel-studio (local), ou le clone si introuvable.
+
+    Sur Coolify (volume /data), le repo n'est pas baked dans l'image (privé).
+    On le clone à la demande en utilisant GITHUB_TOKEN ; les appels suivants
+    feront juste un git pull pour rester à jour.
+
+    Renvoie None si :
+      - pas de dossier local ET pas de GITHUB_TOKEN pour cloner.
+    """
     candidates = [
         Path.home() / "Triskell" / "pixel-studio",
         Path.home() / "triskell" / "pixel-studio",
@@ -269,15 +277,67 @@ def _find_pixel_studio_dir() -> Optional[Path]:
         Path("/c/Users/jorda/Triskell/pixel-studio"),
         Path(r"C:\Users\jorda\Triskell\pixel-studio"),
     ]
-    # Variable d'env explicite si Jordan veut surcharger
+    # Variable d'env explicite (sert aussi de cible pour le clone runtime)
     env_path = os.environ.get("PIXEL_PROS_REPO_PATH")
     if env_path:
         candidates.insert(0, Path(env_path))
 
+    # 1) Si on a déjà un clone valide quelque part, on l'utilise (+ git pull)
     for p in candidates:
         if p.exists() and (p / "builder" / "build_site.py").exists():
+            _git_pull(p)
             return p
+
+    # 2) Sinon, on tente de cloner dans PIXEL_PROS_REPO_PATH (env) avec le token
+    target = Path(env_path) if env_path else Path("/data/pixel-studio")
+    if _git_clone_pixel_studio(target):
+        return target
     return None
+
+
+def _git_clone_pixel_studio(target: Path) -> bool:
+    """Clone pixel-studio dans `target` en utilisant GITHUB_TOKEN."""
+    token = (os.environ.get("GITHUB_TOKEN") or "").strip()
+    if not token:
+        logger.warning("pixelpros: GITHUB_TOKEN absent, impossible de cloner pixel-studio")
+        return False
+    import subprocess
+    url = f"https://x-access-token:{token}@github.com/Jordan-Bourillot/pixel-studio.git"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run(
+            ["git", "clone", "--branch", "main", url, str(target)],
+            capture_output=True, text=True, timeout=120,
+        )
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout or "").replace(token, "***")
+            logger.warning("pixelpros: git clone KO : %s", err[:300])
+            return False
+        return True
+    except Exception as exc:
+        logger.warning("pixelpros: git clone exception : %s", exc)
+        return False
+
+
+def _git_pull(repo: Path) -> None:
+    """Met à jour un clone existant. Silencieux en cas d'erreur (le build
+    continue avec ce qu'on a en local)."""
+    token = (os.environ.get("GITHUB_TOKEN") or "").strip()
+    if not token:
+        return  # pas de token = pas de pull, on garde ce qu'on a
+    import subprocess
+    url = f"https://x-access-token:{token}@github.com/Jordan-Bourillot/pixel-studio.git"
+    try:
+        subprocess.run(
+            ["git", "-C", str(repo), "fetch", url, "main"],
+            capture_output=True, text=True, timeout=60,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "reset", "--hard", "FETCH_HEAD"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception as exc:
+        logger.debug("pixelpros: git pull silencieux: %s", exc)
 
 
 def _dispatch_local(pixel_studio: Path, intake_id: str) -> tuple[bool, str]:
