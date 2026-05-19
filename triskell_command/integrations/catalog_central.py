@@ -211,6 +211,36 @@ _DEFAULT_SITES = [
         "is_builtin": True,
     },
     {
+        "id": "pixel-pros",
+        "name": "Pixel Pros",
+        "mail_account_id": "pixel-pros",
+        "tagline": "Site pro livré en 24h, 24,90 €/mois.",
+        "description": "Pixel Pros casse les codes du site internet. Le client remplit un "
+                       "formulaire de 20 minutes, paie 24,90 € HT/mois et reçoit son site en "
+                       "ligne sous 24h. Pas de devis, pas d'aller-retour, pas d'engagement. "
+                       "Cible : coiffeurs, plombiers, ostéos, artisans, restaurateurs — "
+                       "tous les pros qui veulent un site sans y passer 6 semaines.",
+        "sales_pitch": "Un site pro complet à 24,90 €/mois, livré en 24h après un formulaire de 20 min.",
+        "motto": "Le site pro accessible : 24h pour la livraison, 24,90 €/mois pour tout.",
+        "category": "sites",
+        "kind": "service",
+        "price": 24.90,
+        "price_note": "HT/mois",
+        "buy_url": "https://pixel-pros.fr",
+        "logo": "",
+        "color": "#facc15",
+        "initial": "P",
+        "features": [
+            {"title": "Formulaire 20 min", "detail": "Le client remplit ce qu'il veut sur son site, on s'occupe du reste."},
+            {"title": "Livraison en 24h", "detail": "Site en ligne le lendemain du paiement, sans devis ni aller-retour."},
+            {"title": "Textes relus et SEO", "detail": "Reformulation pro de tous les textes + optimisation Google dès la création, inclus."},
+            {"title": "Sections optionnelles", "detail": "Galerie, avis, prestations, zone d'intervention — le client active ce qui le concerne."},
+            {"title": "Pack tout-en-un possible", "detail": "Site + domaine + mail pro + SEO Google = 49,90 €/mois au lieu de 68,80 €."},
+            {"title": "Sans engagement", "detail": "Résiliable à tout moment, le client garde son contenu."},
+        ],
+        "is_builtin": True,
+    },
+    {
         "id": "wow",
         "name": "WoW Studio",
         "mail_account_id": "wow",
