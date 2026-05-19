@@ -2728,6 +2728,83 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
+    # Pixel Pros — pipeline (draft → paid → building → live)
+    # ------------------------------------------------------------------
+    def pixelpros_list_intakes(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        status = (p.get("status") or "").strip() or None
+        try: limit = int(p.get("limit") or 100)
+        except (TypeError, ValueError): limit = 100
+        try:
+            from ..integrations.pixelpros import repo as r
+            return {"ok": True, "intakes": r.list_intakes(status=status, limit=limit)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_get_intake(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.pixelpros import repo as r
+            intake = r.get_intake(iid)
+            if intake is None: return {"ok": False, "error": "intake introuvable"}
+            return {"ok": True, "intake": intake, "timeline": r.intake_timeline(iid)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_dispatch_build(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.pixelpros import repo as r
+            ok, msg = r.dispatch_build(iid)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_mark_failed(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        reason = ((payload or {}).get("reason") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.pixelpros import repo as r
+            return {"ok": bool(r.mark_failed(iid, error_message=reason))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_pipeline_state(self) -> dict:
+        try:
+            from ..integrations.pixelpros import repo as r
+            return {"ok": True, "counts": r.count_by_status(),
+                    "recent": r.list_intakes(limit=5)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_resend_paid_mail(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.pixelpros import repo as r, mailer as m
+            intake = r.get_intake(iid)
+            if not intake: return {"ok": False, "error": "intake introuvable"}
+            ok, msg = m.send_paid_mail(intake)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_resend_live_mail(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.pixelpros import repo as r, mailer as m
+            intake = r.get_intake(iid)
+            if not intake: return {"ok": False, "error": "intake introuvable"}
+            ok, msg = m.send_live_mail(intake)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
     # Modèles mails éditables (zone "Modèles Mails" dans la sidebar)
     # ------------------------------------------------------------------
     def mail_templates_list(self, payload: dict | None = None) -> dict:

@@ -39,6 +39,8 @@ PUBLIC_API_PATHS = {
     "/api/me",  # /me peut être appelé sans auth → renvoie {ok:true, connected:false}
     "/api/push/public_key",  # clé VAPID publique (pas un secret)
     "/api/billing/webhook",  # Stripe doit pouvoir poster sans cookie
+    "/api/pixelpros/on_paid",   # Webhook Stripe Netlify → mail paiement + déclenche build
+    "/api/pixelpros/on_built",  # Builder Python → mail "site en ligne"
 }
 
 # Utilisateurs reconnus (étendre ici si on ajoute du monde)

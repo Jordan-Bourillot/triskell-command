@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -422,6 +423,102 @@ def create_app() -> FastAPI:
                                 content={"ok": False, "error": str(exc)})
         except Exception as exc:
             logger.exception("billing.webhook a échoué")
+            return JSONResponse(status_code=500,
+                                content={"ok": False, "error": str(exc)})
+
+    # ------------------------------------------------------------------
+    # Pixel Pros — endpoints publics appelés par les webhooks externes
+    # ------------------------------------------------------------------
+    # Le secret partagé est PP_HOOK_TOKEN. Il est passé en Bearer header
+    # par :
+    #   1. Le webhook Stripe Netlify (`stripe-webhook.ts`), via la variable
+    #      d'env `PP_TRIGGER_BUILD_TOKEN`, pour appeler /on_paid.
+    #   2. Le builder Python (`build_site.py`), via la même variable, pour
+    #      appeler /on_built à la fin de la construction.
+
+    def _check_pp_token(request: Request) -> bool:
+        expected = (os.environ.get("PP_HOOK_TOKEN") or "").strip()
+        if not expected:
+            # Pas de token configuré côté serveur → on bloque par défaut.
+            return False
+        auth = request.headers.get("authorization", "")
+        if not auth.lower().startswith("bearer "):
+            return False
+        return auth[7:].strip() == expected
+
+    @app.post("/api/pixelpros/on_paid")
+    async def pixelpros_on_paid(request: Request) -> JSONResponse:
+        """Appelé par le webhook Stripe Netlify juste après mark_paid.
+
+        Body attendu : {"draftId": "<uuid>", "email": "...", "stripeSessionId": "..."}.
+        Actions : envoi du mail "merci paiement" + déclenchement du build.
+        """
+        if not _check_pp_token(request):
+            return JSONResponse(status_code=401,
+                                content={"ok": False, "error": "unauthorized"})
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        draft_id = (body.get("draftId") or body.get("draft_id") or "").strip()
+        if not draft_id:
+            return JSONResponse(status_code=400,
+                                content={"ok": False, "error": "draftId manquant"})
+        try:
+            from ..integrations.pixelpros import repo as r, mailer as m
+            intake = r.get_intake(draft_id)
+            if intake is None:
+                return JSONResponse(status_code=404,
+                                    content={"ok": False, "error": "intake introuvable"})
+
+            mail_ok, mail_msg = m.send_paid_mail(intake)
+            build_ok, build_msg = r.dispatch_build(draft_id)
+            return JSONResponse(content={
+                "ok": True,
+                "mail": {"ok": mail_ok, "message": mail_msg},
+                "build": {"ok": build_ok, "message": build_msg},
+            })
+        except Exception as exc:
+            logger.exception("pixelpros.on_paid a échoué")
+            return JSONResponse(status_code=500,
+                                content={"ok": False, "error": str(exc)})
+
+    @app.post("/api/pixelpros/on_built")
+    async def pixelpros_on_built(request: Request) -> JSONResponse:
+        """Appelé par le builder Python à la fin d'un build réussi.
+
+        Body attendu : {"draftId": "<uuid>", "siteUrl": "https://..."}.
+        Actions : marque le draft 'live' avec l'URL, envoie le mail "site en ligne".
+        Le builder peut aussi déjà avoir fait mark_live lui-même ; on idempotent.
+        """
+        if not _check_pp_token(request):
+            return JSONResponse(status_code=401,
+                                content={"ok": False, "error": "unauthorized"})
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        draft_id = (body.get("draftId") or body.get("draft_id") or "").strip()
+        site_url = (body.get("siteUrl") or body.get("site_url") or "").strip()
+        if not draft_id:
+            return JSONResponse(status_code=400,
+                                content={"ok": False, "error": "draftId manquant"})
+        try:
+            from ..integrations.pixelpros import repo as r, mailer as m
+            if site_url:
+                r.mark_live(draft_id, site_url=site_url)
+            intake = r.get_intake(draft_id)
+            if intake is None:
+                return JSONResponse(status_code=404,
+                                    content={"ok": False, "error": "intake introuvable"})
+            mail_ok, mail_msg = m.send_live_mail(intake)
+            return JSONResponse(content={
+                "ok": True,
+                "mail": {"ok": mail_ok, "message": mail_msg},
+                "site_url": intake.get("site_url"),
+            })
+        except Exception as exc:
+            logger.exception("pixelpros.on_built a échoué")
             return JSONResponse(status_code=500,
                                 content={"ok": False, "error": str(exc)})
 
