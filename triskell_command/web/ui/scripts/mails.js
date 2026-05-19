@@ -172,9 +172,37 @@ const Mails = {
 
       /* Sélection multiple : ligne mise en surbrillance quand cochée. */
       .mail-row.is-selected { background: hsl(var(--accent) / 0.10) !important; }
+      /* Cases à cocher discrètes : on remplace le rendu natif par une
+         boîte custom à bordure douce, qui ne s'affirme qu'au survol ou
+         une fois cochée. Évite l'effet "pavé blanc" sur fond sombre. */
       .mail-row-checkbox {
-        width: 18px; height: 18px; flex-shrink: 0; cursor: pointer;
-        accent-color: hsl(var(--accent));
+        appearance: none; -webkit-appearance: none; -moz-appearance: none;
+        width: 15px; height: 15px; flex-shrink: 0; cursor: pointer;
+        border: 1.5px solid hsl(var(--border));
+        border-radius: 4px;
+        background: transparent;
+        opacity: 0.55;
+        transition: opacity 120ms, border-color 120ms, background 120ms;
+        position: relative;
+        vertical-align: middle;
+      }
+      .mail-row:hover .mail-row-checkbox,
+      .mail-row-checkbox:hover { opacity: 1; border-color: hsl(var(--accent) / 0.6); }
+      .mail-row-checkbox:checked {
+        opacity: 1;
+        background: hsl(var(--accent));
+        border-color: hsl(var(--accent));
+      }
+      .mail-row-checkbox:checked::after {
+        content: ''; position: absolute;
+        left: 3px; top: 0px; width: 5px; height: 9px;
+        border: solid white;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+      .mail-row-checkbox:focus-visible {
+        outline: 2px solid hsl(var(--accent) / 0.5);
+        outline-offset: 1px;
       }
 
       /* Barre d'action de sélection (apparaît quand >0 cochés). */
