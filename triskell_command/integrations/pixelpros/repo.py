@@ -341,22 +341,50 @@ def _git_pull(repo: Path) -> None:
 
 
 def _dispatch_local(pixel_studio: Path, intake_id: str) -> tuple[bool, str]:
+    """Lance le builder en subprocess + draine ses logs vers le logger Python
+    (qui finit dans les logs Coolify, visibles en debug). Non bloquant."""
     import subprocess
     import sys
+    import threading
+
     builder = pixel_studio / "builder" / "build_site.py"
     try:
         proc = subprocess.Popen(
-            [sys.executable, str(builder), "--draft-id", intake_id],
+            [sys.executable, "-u", str(builder), "--draft-id", intake_id],
             cwd=str(pixel_studio),
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,
         )
-        # On NE bloque pas : le build peut prendre 1-2 minutes. On marque
-        # juste comme 'building' et on laisse tourner. La vue UI rafraîchira
-        # le status quand le builder finira et écrira 'live' ou 'failed' lui-même.
+
+        # Thread qui draine stdout au fur et à mesure → logger Python.
+        # Sans ça, les prints du builder sont perdus dans le buffer subprocess.
+        def _drain(p, iid):
+            short = iid[:8] if iid else "?"
+            try:
+                for line in iter(p.stdout.readline, ''):
+                    if not line:
+                        break
+                    logger.info("[builder %s] %s", short, line.rstrip())
+                p.stdout.close()
+                rc = p.wait(timeout=300)
+                logger.info("[builder %s] === fin du build, exit code=%s ===", short, rc)
+                if rc != 0:
+                    # Marque le draft 'failed' SI le builder n'a pas déjà mis 'live'
+                    cur = get_intake(iid)
+                    if cur and cur.get("status") not in ("live",):
+                        mark_failed(iid, error_message=f"Builder exit code {rc} (voir logs)")
+            except Exception as exc:
+                logger.warning("[builder %s] drain exception: %s", short, exc)
+
+        threading.Thread(target=_drain, args=(proc, intake_id), daemon=True).start()
+
         mark_building(intake_id)
-        return True, f"Build lancé localement (PID {proc.pid}). Le builder mettra le status à 'live' ou 'failed' à la fin."
+        return True, (
+            f"Build lancé localement (PID {proc.pid}). Logs en temps réel dans "
+            f"les logs Coolify, status final 'live' ou 'failed' dans 1-2 min."
+        )
     except Exception as exc:
         return False, f"Échec lancement subprocess : {exc}"
 

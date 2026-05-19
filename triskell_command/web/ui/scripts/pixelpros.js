@@ -264,10 +264,11 @@ const PixelPros = {
     const actions = [];
     const st = intake.status;
 
-    // Lancer / relancer le build (pour paid ou failed)
-    if (st === 'paid' || st === 'failed' || st === 'building') {
+    // Lancer / relancer le build (pour paid, failed, building OU live = debug)
+    if (st === 'paid' || st === 'failed' || st === 'building' || st === 'live') {
       const label = st === 'paid' ? '▶ Lancer la construction'
                   : st === 'failed' ? '↻ Relancer la construction'
+                  : st === 'live' ? '↻ Reconstruire (debug)'
                   : '↻ Relancer (forcer)';
       actions.push(`<button data-pp-action="dispatch" class="pp-action-btn primary">${label}</button>`);
     }
