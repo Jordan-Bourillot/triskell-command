@@ -2337,6 +2337,25 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def mails_delete(self, payload: dict) -> dict:
+        """Supprime plusieurs entrées d'email_history en une seule requête.
+        Utilisé par la sélection multiple côté UI (cases à cocher).
+        """
+        ids = (payload or {}).get("ids") or []
+        if not isinstance(ids, (list, tuple)):
+            return {"ok": False, "error": "ids doit être une liste"}
+        ids = [str(i).strip() for i in ids if str(i).strip()]
+        if not ids:
+            return {"ok": False, "error": "Aucun id fourni."}
+        try:
+            client = self._supabase()
+            if not client:
+                return {"ok": False, "error": "Base partagée non connectée"}
+            client.raw.table("email_history").delete().in_("id", ids).execute()
+            return {"ok": True, "deleted": len(ids)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def mails_list(self, payload: dict | None = None) -> dict:
         """Liste les mails enregistrés dans email_history.
 

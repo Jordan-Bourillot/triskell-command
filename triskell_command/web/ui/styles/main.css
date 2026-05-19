@@ -1938,7 +1938,7 @@ html, body {
 }
 .mail-row {
   display: grid;
-  grid-template-columns: 6px 220px 1fr auto;
+  grid-template-columns: auto 6px 220px 1fr auto;
   gap: 14px;
   align-items: center;
   padding: 10px 16px;
@@ -1987,13 +1987,14 @@ html, body {
 /* Responsive : sur mobile, on empile expéditeur sur une ligne, sujet sur l'autre */
 @media (max-width: 720px) {
   .mail-row {
-    grid-template-columns: 6px 1fr auto;
+    grid-template-columns: auto 6px 1fr auto;
     grid-template-areas:
-      "dot from date"
-      "dot main main";
+      "check dot from date"
+      "check dot main main";
     gap: 4px 12px;
     padding: 12px 14px;
   }
+  .mail-row-checkbox-wrap { grid-area: check; align-self: center; }
   .mail-row-dot { grid-area: dot; align-self: center; }
   .mail-row-from { grid-area: from; }
   .mail-row-date { grid-area: date; }

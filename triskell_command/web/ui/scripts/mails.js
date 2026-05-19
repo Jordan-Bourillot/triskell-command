@@ -19,6 +19,48 @@ const Mails = {
     mails: [],
     lastKnownInboundId: null,  // pour la notif desktop
     notifPollHandle: null,
+    // Mails déjà ouverts (lus) : Set d'ids, persisté en localStorage.
+    // Utilisé pour distinguer visuellement les mails non encore consultés.
+    readIds: null,
+    // Mails cochés pour suppression groupée : Set d'ids, vidé à chaque
+    // changement d'onglet / rechargement.
+    selectedIds: new Set(),
+  },
+
+  READ_STORAGE_KEY: 'triskell.mails.readIds',
+
+  _loadReadIds() {
+    if (this.state.readIds) return this.state.readIds;
+    try {
+      const raw = localStorage.getItem(this.READ_STORAGE_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      this.state.readIds = new Set(Array.isArray(arr) ? arr.map(String) : []);
+    } catch (_) {
+      this.state.readIds = new Set();
+    }
+    return this.state.readIds;
+  },
+
+  _saveReadIds() {
+    try {
+      // On plafonne à 5000 ids pour ne pas faire exploser localStorage,
+      // en gardant les plus récents (ordre d'ajout via Array.from).
+      const arr = Array.from(this.state.readIds || []);
+      const trimmed = arr.length > 5000 ? arr.slice(arr.length - 5000) : arr;
+      localStorage.setItem(this.READ_STORAGE_KEY, JSON.stringify(trimmed));
+    } catch (_) {}
+  },
+
+  _markRead(id) {
+    const set = this._loadReadIds();
+    const sid = String(id);
+    if (set.has(sid)) return;
+    set.add(sid);
+    this._saveReadIds();
+  },
+
+  _isRead(id) {
+    return this._loadReadIds().has(String(id));
   },
 
   async render(container) {
@@ -113,12 +155,55 @@ const Mails = {
                transition: color 160ms, border-color 160ms; }
       .m-tab:hover { color: hsl(var(--text)); }
       .m-tab.is-active { color: hsl(var(--accent)); border-bottom-color: hsl(var(--accent)); }
+
+      /* Mail non lu : bandeau accent à gauche + texte plus marqué.
+         Mail lu : opacité légèrement réduite, plus discret. */
+      .mail-row.is-unread { background: hsl(var(--accent) / 0.04); }
+      .mail-row.is-unread .mail-row-from,
+      .mail-row.is-unread .mail-row-subject { font-weight: 700; color: hsl(var(--text)); }
+      .mail-row.is-unread::before {
+        content: ''; position: absolute; left: 0; top: 8px; bottom: 8px;
+        width: 3px; border-radius: 0 2px 2px 0; background: hsl(var(--accent));
+      }
+      .mail-row { position: relative; }
+      .mail-row.is-read .mail-row-from,
+      .mail-row.is-read .mail-row-subject { color: hsl(var(--text-muted)); font-weight: 500; }
+      .mail-row.is-read .mail-row-snippet { color: hsl(var(--text-muted) / 0.8); }
+
+      /* Sélection multiple : ligne mise en surbrillance quand cochée. */
+      .mail-row.is-selected { background: hsl(var(--accent) / 0.10) !important; }
+      .mail-row-checkbox {
+        width: 18px; height: 18px; flex-shrink: 0; cursor: pointer;
+        accent-color: hsl(var(--accent));
+      }
+
+      /* Barre d'action de sélection (apparaît quand >0 cochés). */
+      .m-bulkbar {
+        display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+        padding: 10px 14px; margin-bottom: 10px;
+        background: hsl(var(--accent) / 0.08);
+        border: 1px solid hsl(var(--accent) / 0.25);
+        border-radius: 10px;
+        font-size: 13px;
+      }
+      .m-bulkbar-count { font-weight: 700; color: hsl(var(--accent)); }
+      .m-bulkbar-spacer { flex: 1; }
+      .m-bulkbar-btn {
+        padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
+        transition: background 120ms, color 120ms;
+      }
+      .m-bulkbar-btn-secondary { color: hsl(var(--text)); background: hsl(var(--surface)); border: 1px solid hsl(var(--border)); }
+      .m-bulkbar-btn-secondary:hover { background: hsl(var(--bg)); }
+      .m-bulkbar-btn-danger { color: white; background: hsl(var(--danger)); }
+      .m-bulkbar-btn-danger:hover { filter: brightness(1.08); }
+      .m-bulkbar-btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
     `;
     document.head.appendChild(s);
   },
 
   _switchTab(tab) {
     this.state.tab = tab;
+    this.state.selectedIds = new Set();
     document.querySelectorAll('[data-mtab]').forEach(b => {
       b.classList.toggle('is-active', b.dataset.mtab === tab);
     });
@@ -187,15 +272,110 @@ const Mails = {
       this._applySearch();
       return;
     }
-    root.innerHTML = limitedBanner + `<div class="mail-list">${this.state.mails.map(m => this._mailRow(m)).join('')}</div>`;
-    // Bind clic = ouvre modale détail
+    this._renderListAndBulk(root, limitedBanner);
+  },
+
+  _renderListAndBulk(root, limitedBanner) {
+    root.innerHTML = limitedBanner + this._renderBulkBar() +
+      `<div class="mail-list">${this.state.mails.map(m => this._mailRow(m)).join('')}</div>`;
+    this._wireListEvents(root);
+  },
+
+  _renderBulkBar() {
+    const selected = this.state.selectedIds || new Set();
+    const total = (this.state.mails || []).length;
+    const n = selected.size;
+    const allSelected = n > 0 && n === total;
+    return `
+      <div class="m-bulkbar">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" id="m-bulk-all" class="mail-row-checkbox" ${allSelected ? 'checked' : ''}>
+          <span class="text-xs text-text-muted">Tout sélectionner</span>
+        </label>
+        <span class="m-bulkbar-count">${n} mail${n > 1 ? 's' : ''} sélectionné${n > 1 ? 's' : ''}</span>
+        <div class="m-bulkbar-spacer"></div>
+        <button id="m-bulk-clear" class="m-bulkbar-btn m-bulkbar-btn-secondary" ${n ? '' : 'disabled style="display:none;"'}>Annuler la sélection</button>
+        <button id="m-bulk-delete" class="m-bulkbar-btn m-bulkbar-btn-danger" ${n ? '' : 'disabled'}>
+          🗑 Supprimer ${n > 0 ? `(${n})` : ''}
+        </button>
+      </div>
+    `;
+  },
+
+  _wireListEvents(root) {
+    // Clic sur ligne = ouvre modale détail (mais pas si on a cliqué sur la checkbox).
     root.querySelectorAll('[data-mail-open]').forEach(el => {
-      el.addEventListener('click', () => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('.mail-row-checkbox-wrap')) return;
         const id = el.dataset.mailOpen;
         const mail = this.state.mails.find(m => String(m.id) === String(id));
-        if (mail) this._openDetail(mail);
+        if (mail) {
+          this._markRead(id);
+          el.classList.remove('is-unread');
+          el.classList.add('is-read');
+          this._openDetail(mail);
+        }
       });
     });
+    // Cases à cocher de chaque ligne
+    root.querySelectorAll('[data-mail-check]').forEach(cb => {
+      cb.addEventListener('change', (e) => {
+        e.stopPropagation();
+        const id = String(cb.dataset.mailCheck);
+        if (cb.checked) this.state.selectedIds.add(id);
+        else this.state.selectedIds.delete(id);
+        // Re-render la barre d'action + état visuel de la ligne, sans recharger la liste
+        this._refreshBulkBar(root);
+        const row = root.querySelector(`[data-mail-open="${id.replace(/"/g, '\\"')}"]`);
+        if (row) row.classList.toggle('is-selected', cb.checked);
+      });
+    });
+    // Tout sélectionner
+    const allBox = root.querySelector('#m-bulk-all');
+    if (allBox) {
+      allBox.addEventListener('change', () => {
+        if (allBox.checked) {
+          this.state.selectedIds = new Set((this.state.mails || []).map(m => String(m.id)));
+        } else {
+          this.state.selectedIds = new Set();
+        }
+        this._renderListAndBulk(root, '');
+      });
+    }
+    // Annuler sélection
+    const clearBtn = root.querySelector('#m-bulk-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        this.state.selectedIds = new Set();
+        this._renderListAndBulk(root, '');
+      });
+    }
+    // Supprimer la sélection
+    const delBtn = root.querySelector('#m-bulk-delete');
+    if (delBtn) {
+      delBtn.addEventListener('click', async () => {
+        const ids = Array.from(this.state.selectedIds || []);
+        if (!ids.length) return;
+        if (!confirm(`Supprimer ${ids.length} mail${ids.length > 1 ? 's' : ''} de l’historique local ?`)) return;
+        delBtn.disabled = true;
+        delBtn.textContent = 'Suppression…';
+        const r = await App.api.mails_delete({ ids });
+        if (r && r.ok) {
+          this.state.selectedIds = new Set();
+          await this._load();
+        } else {
+          delBtn.disabled = false;
+          alert('Échec suppression : ' + ((r && r.error) || 'erreur inconnue'));
+        }
+      });
+    }
+  },
+
+  _refreshBulkBar(root) {
+    const bar = root.querySelector('.m-bulkbar');
+    if (!bar) return;
+    bar.outerHTML = this._renderBulkBar();
+    this._wireListEvents(root);
   },
 
   _mailRow(m) {
@@ -225,8 +405,15 @@ const Mails = {
     const senderMatch = senderRaw.match(/^([^<]+?)\s*<.+>$/);
     const senderName = senderMatch ? senderMatch[1].trim() : senderRaw;
     const snippet = (bodyExcerpt || '').replace(/\s+/g, ' ').trim();
+    const idStr = String(m.id);
+    const isRead = this._isRead(idStr);
+    const isSelected = this.state.selectedIds && this.state.selectedIds.has(idStr);
+    const stateClass = `${isRead ? 'is-read' : 'is-unread'}${isSelected ? ' is-selected' : ''}`;
     return `
-      <div class="mail-row" data-mail-open="${this._escape(m.id)}">
+      <div class="mail-row ${stateClass}" data-mail-open="${this._escape(m.id)}">
+        <label class="mail-row-checkbox-wrap flex items-center" onclick="event.stopPropagation()">
+          <input type="checkbox" class="mail-row-checkbox" data-mail-check="${this._escape(m.id)}" ${isSelected ? 'checked' : ''}>
+        </label>
         <span class="mail-row-dot" style="background: hsl(var(--${dotColor}))" title="${dotTitle}"></span>
         <div class="mail-row-from" title="${this._escape(senderRaw)}">${this._escape(senderName || '—')}</div>
         <div class="mail-row-main">
@@ -242,6 +429,9 @@ const Mails = {
   // Modale détail mail (style mail moderne)
   // ----------------------------------------------------------------------
   _openDetail(m) {
+    // Marque comme lu dès l'ouverture, quelle que soit la provenance
+    // (clic ligne, deep-link Morning Digest, etc.)
+    if (m && m.id != null) this._markRead(m.id);
     const extra = m.extra || {};
     const subject = m.subject || '(sans objet)';
     const fromAddr = extra.from || '';
@@ -556,15 +746,13 @@ const Mails = {
       root.innerHTML = `<div class="card p-10 text-center"><div class="text-3xl mb-3 opacity-60">∅</div><p class="text-text-muted">Aucun résultat pour "${this._escape(q)}".</p></div>`;
       return;
     }
-    root.innerHTML = `<div class="mail-list">${visible.map(m => this._mailRow(m)).join('')}</div>`;
-    // Re-bind clic
-    root.querySelectorAll('[data-mail-open]').forEach(el => {
-      el.addEventListener('click', () => {
-        const id = el.dataset.mailOpen;
-        const mail = all.find(m => String(m.id) === String(id));
-        if (mail) this._openDetail(mail);
-      });
-    });
+    // Sauvegarde la liste de référence pour les binds (sélection / clic)
+    const fullMails = this.state.mails;
+    this.state.mails = visible;
+    root.innerHTML = this._renderBulkBar() +
+      `<div class="mail-list">${visible.map(m => this._mailRow(m)).join('')}</div>`;
+    this._wireListEvents(root);
+    this.state.mails = fullMails;
   },
 
   // ----------------------------------------------------------------------
