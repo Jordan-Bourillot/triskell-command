@@ -188,6 +188,15 @@ const Mails = {
       }
       .mail-row:hover .mail-row-checkbox,
       .mail-row-checkbox:hover { opacity: 1; border-color: hsl(var(--accent) / 0.6); }
+      /* La case "Tout sélectionner" est isolée dans la barre d'action,
+         pas dans une mail-row : on la garde pleinement visible et avec
+         une bordure plus marquée pour qu'elle saute aux yeux. */
+      .m-bulkbar .mail-row-checkbox {
+        opacity: 1;
+        border-color: hsl(var(--accent) / 0.6);
+        border-width: 2px;
+      }
+      .m-bulkbar .mail-row-checkbox:hover { border-color: hsl(var(--accent)); }
       .mail-row-checkbox:checked {
         opacity: 1;
         background: hsl(var(--accent));
