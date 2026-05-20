@@ -2817,6 +2817,50 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def pixelpros_simulate_full_flow(self, payload: dict) -> dict:
+        """Simule un paiement Stripe complet : passe en 'paid', envoie le mail
+        'paiement reçu', et lance la construction. Le mail 'site en ligne'
+        sera envoyé tout seul à la fin du build (via on_built).
+
+        Force l'envoi du mail même si le toggle Auto est désactivé
+        (l'utilisateur a explicitement demandé à tout lancer).
+        """
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.pixelpros import repo as r, mailer as m
+            intake = r.get_intake(iid)
+            if intake is None:
+                return {"ok": False, "error": "intake introuvable"}
+            steps = []
+
+            # 1. Mark paid (sauf si déjà au-delà)
+            if intake.get("status") == "draft":
+                ok_paid, msg_paid = r.mark_paid_manual(iid)
+                steps.append({"step": "paid", "ok": ok_paid, "message": msg_paid})
+                if not ok_paid:
+                    return {"ok": False, "steps": steps, "error": f"paid: {msg_paid}"}
+                # refresh intake pour avoir les bons champs (stripe_paid_at)
+                intake = r.get_intake(iid) or intake
+            else:
+                steps.append({"step": "paid", "ok": True, "message": "déjà payé"})
+
+            # 2. Mail paiement reçu (forcé même si toggle manuel)
+            ok_mail, msg_mail = m.send_paid_mail(intake)
+            steps.append({"step": "paid_mail", "ok": ok_mail, "message": msg_mail})
+
+            # 3. Dispatch build
+            ok_build, msg_build = r.dispatch_build(iid)
+            steps.append({"step": "build", "ok": ok_build, "message": msg_build})
+
+            all_ok = all(s["ok"] for s in steps)
+            return {"ok": all_ok, "steps": steps,
+                    "message": "Tout déclenché." if all_ok
+                               else "Lancé avec des avertissements (voir détails)."}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ----- Templates mails Pixel Pros (paid / live) -----
     def pixelpros_mail_template_get(self, payload: dict | None = None) -> dict:
         kind = ((payload or {}).get("kind") or "").strip()

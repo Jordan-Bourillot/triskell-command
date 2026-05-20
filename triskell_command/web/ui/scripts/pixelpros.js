@@ -876,7 +876,8 @@ const PixelPros = {
     // Pour un formulaire pas (encore) payé : override manuel possible
     // pour tester, encaisser hors-Stripe ou faire un geste commercial.
     if (st === 'draft') {
-      out.push(`<button data-pp-action="force_build" class="pp-action-btn primary">▶ Lancer la construction tout de suite</button>`);
+      out.push(`<button data-pp-action="simulate_full_flow" class="pp-action-btn primary">▶ Tout déclencher comme un vrai paiement (mails + build)</button>`);
+      out.push(`<button data-pp-action="force_build" class="pp-action-btn secondary">▶ Lancer la construction tout de suite</button>`);
       out.push(`<button data-pp-action="mark_paid_manual" class="pp-action-btn secondary">💳 Marquer comme payé (sans construire)</button>`);
     }
     if (st === 'paid' || st === 'failed' || st === 'building' || st === 'live') {
@@ -903,6 +904,27 @@ const PixelPros = {
     const id = intake.id;
     let res = null;
     switch (action) {
+      case 'simulate_full_flow': {
+        const data = intake.data || {};
+        const name = data.business_name || data['business-name'] || '(sans nom)';
+        const email = data.email || '—';
+        const ok = confirm(
+          `Tout déclencher comme un vrai paiement Stripe ?\n\n` +
+          `  ${name}\n  ${email}\n\n` +
+          `Le client va recevoir le mail "paiement reçu" et le site va commencer à se construire. ` +
+          `Le mail "site en ligne" partira automatiquement quand le site sera prêt.\n\n` +
+          `À utiliser pour : tester le flux complet, encaisser hors-Stripe, faire un geste commercial.`
+        );
+        if (!ok) return;
+        res = await this._call('pixelpros_simulate_full_flow', { id });
+        if (res?.ok) {
+          this._toast('🚀 Tout est lancé — le client reçoit le mail, le site se construit');
+        } else {
+          const detail = (res?.steps || []).filter(s => !s.ok).map(s => `${s.step}: ${s.message}`).join(' · ');
+          this._toast(`Lancé avec souci : ${detail || res?.error || '?'}`, true);
+        }
+        break;
+      }
       case 'mark_paid_manual': {
         const data = intake.data || {};
         const name = data.business_name || data['business-name'] || '(sans nom)';
