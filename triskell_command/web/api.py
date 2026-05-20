@@ -5326,11 +5326,16 @@ class Api:
     # Chat 1-à-1 Jordan ↔ Thomas (équivalent web du FAB Tk)
     # ------------------------------------------------------------------
     def messages_me(self) -> dict:
-        """Renvoie mon user_id Supabase (pour aligner les bulles côté UI)."""
+        """Renvoie mon identité locale (jordan/thomas) pour aligner les bulles côté UI.
+        Jordan & Thomas partagent un même compte Supabase, donc on s'appuie sur
+        le cookie de session local (voir web/auth.py) plutôt que sur le user_id
+        Supabase qui serait identique pour les deux."""
         try:
-            from triskell_core.db import get_client
-            c = get_client()
-            return {"ok": True, "user_id": c.user_id}
+            from .auth import get_current_local_user, get_display_name
+            uid = get_current_local_user()
+            if not uid:
+                return {"ok": False, "error": "not_logged_in", "user_id": None}
+            return {"ok": True, "user_id": uid, "display_name": get_display_name(uid)}
         except Exception as exc:
             logger.debug("messages_me: %s", exc)
             return {"ok": False, "error": str(exc), "user_id": None}

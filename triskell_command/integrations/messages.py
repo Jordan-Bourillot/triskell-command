@@ -1,83 +1,110 @@
 """Chat 1-à-1 Jordan ↔ Thomas via la table Supabase `messages`.
 
 API minimale, conçue pour être appelée depuis le widget de chat :
-- `list_messages()`     — historique chronologique entre les 2 users
-- `send_message(body)`  — envoie un message à l'autre user
-- `mark_all_read()`     — marque comme lus tous les messages reçus
-- `count_unread()`      — combien de messages non lus pour pastille FAB
-- `other_user()`        — métadonnées de l'autre user (display_name, color)
+- `list_messages()`      — historique chronologique entre les 2 users
+- `send_message(body)`   — envoie un message à l'autre user
+- `mark_all_read()`      — marque comme lus tous les messages reçus
+- `count_unread()`       — combien de messages non lus pour pastille FAB
+- `other_user()`         — métadonnées de l'autre user (display_name)
+- `last_message_preview()` — dernier message pour tooltip / aperçu
+- `set_typing()` / `peer_is_typing()` — indicateur « X écrit »
 
-Tout fonctionne uniquement quand Supabase est configuré + l'user loggé.
-Sinon les fonctions renvoient des structures vides sans lever — l'UI doit
-juste afficher un état "indisponible". Pas de fallback local : un chat
-hors-ligne n'a pas de sens (Thomas est sur l'autre machine).
+Identité — IMPORTANT :
+    Jordan & Thomas partagent un MÊME compte Supabase. L'identification
+    "qui parle" se fait donc via le **cookie de session local** posé par
+    web/auth.py (`jordan` ou `thomas`). Le middleware HTTP pose cette
+    valeur dans un contextvar avant chaque appel API ; on la relit via
+    `web.auth.get_current_local_user()`.
+
+Stockage — la table Supabase `messages` sert juste de bus partagé entre
+les 2 PC. Ses colonnes sender_id / recipient_id sont du `text`
+('jordan' / 'thomas') depuis la migration 29_chat_local_users.sql.
+
+Si Supabase est indispo OU si on n'a pas d'identité locale, tout renvoie
+des structures vides sans lever — l'UI affiche un état "indisponible".
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 
-def _client():
-    """Retourne (client, user_id) si Supabase est dispo + loggé, sinon (None, None)."""
+def _supabase():
+    """Retourne le client Supabase brut si dispo + loggé, sinon None."""
     try:
-        from triskell_core.db import get_client, SupabaseNotConfigured
+        from triskell_core.db import get_client
     except ImportError:
-        return None, None
+        return None
     try:
         c = get_client()
     except Exception:
-        return None, None
+        return None
     if not c.is_authenticated:
-        return None, None
-    return c, c.user_id
+        return None
+    return c
 
 
-def other_user() -> dict[str, Any] | None:
-    """Renvoie le profil de l'autre user (Jordan voit Thomas, Thomas voit Jordan).
+def _me() -> Optional[str]:
+    """Identité locale (jordan/thomas) de la requête HTTP en cours."""
+    try:
+        from ..web.auth import get_current_local_user
+        return get_current_local_user()
+    except Exception:
+        return None
 
-    Renvoie None si pas loggé, ou si on est seul dans la table users."""
-    c, me = _client()
-    if c is None or me is None:
+
+def _opposite(user_id: Optional[str]) -> Optional[str]:
+    """L'autre membre du binôme (jordan ↔ thomas)."""
+    if user_id == "jordan":
+        return "thomas"
+    if user_id == "thomas":
+        return "jordan"
+    return None
+
+
+def other_user() -> Optional[dict[str, Any]]:
+    """Profil de l'autre user (Jordan voit Thomas, Thomas voit Jordan).
+    Renvoie None si on n'a pas d'identité locale (pas loggé)."""
+    me = _me()
+    other = _opposite(me)
+    if not other:
         return None
     try:
-        res = (c.raw.table("users")
-               .select("user_id, display_name, color")
-               .neq("user_id", me).limit(1).execute())
-        data = res.data or []
-        return data[0] if data else None
-    except Exception as exc:
-        logger.debug("other_user: %s", exc)
-        return None
+        from ..web.auth import get_display_name
+        display = get_display_name(other)
+    except Exception:
+        display = other.capitalize()
+    return {
+        "user_id": other,
+        "display_name": display,
+        "color": None,
+    }
 
 
 def list_messages(limit: int = 100) -> list[dict[str, Any]]:
     """Renvoie les `limit` derniers messages échangés avec l'autre user,
     ordre chronologique ascendant (plus ancien d'abord)."""
-    c, me = _client()
-    if c is None or me is None:
+    me = _me()
+    other = _opposite(me)
+    c = _supabase()
+    if c is None or not me or not other:
         return []
-    other = other_user()
-    if other is None:
-        return []
-    other_id = other["user_id"]
     try:
-        # On veut (sender=me, recipient=other) UNION (sender=other, recipient=me).
-        # supabase-py n'a pas d'OR sur 2 paires, donc 2 requêtes + merge côté client.
+        # supabase-py n'a pas d'OR sur 2 paires (sender,recipient) — on fait
+        # 2 requêtes (sens aller + retour) et on merge côté client.
         sent = (c.raw.table("messages")
                 .select("id, sender_id, recipient_id, body, created_at, read_at")
-                .eq("sender_id", me).eq("recipient_id", other_id)
+                .eq("sender_id", me).eq("recipient_id", other)
                 .order("created_at", desc=True).limit(limit).execute())
         recv = (c.raw.table("messages")
                 .select("id, sender_id, recipient_id, body, created_at, read_at")
-                .eq("sender_id", other_id).eq("recipient_id", me)
+                .eq("sender_id", other).eq("recipient_id", me)
                 .order("created_at", desc=True).limit(limit).execute())
         merged = (sent.data or []) + (recv.data or [])
         merged.sort(key=lambda m: m.get("created_at") or "")
-        # Garde les `limit` plus récents si l'union dépasse
         if len(merged) > limit:
             merged = merged[-limit:]
         return merged
@@ -86,22 +113,21 @@ def list_messages(limit: int = 100) -> list[dict[str, Any]]:
         return []
 
 
-def send_message(body: str) -> dict[str, Any] | None:
+def send_message(body: str) -> Optional[dict[str, Any]]:
     """Envoie un message à l'autre user. Renvoie la ligne insérée ou None."""
     body = (body or "").strip()
     if not body:
         return None
-    c, me = _client()
-    if c is None or me is None:
-        return None
-    other = other_user()
-    if other is None:
+    me = _me()
+    other = _opposite(me)
+    c = _supabase()
+    if c is None or not me or not other:
         return None
     try:
         res = (c.raw.table("messages")
                .insert({
                    "sender_id": me,
-                   "recipient_id": other["user_id"],
+                   "recipient_id": other,
                    "body": body,
                }).execute())
         data = res.data or []
@@ -114,8 +140,9 @@ def send_message(body: str) -> dict[str, Any] | None:
 def mark_all_read() -> int:
     """Marque comme lus tous les messages reçus encore non lus.
     Renvoie le nombre de messages mis à jour (ou 0 si erreur)."""
-    c, me = _client()
-    if c is None or me is None:
+    me = _me()
+    c = _supabase()
+    if c is None or not me:
         return 0
     from datetime import datetime, timezone
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -131,8 +158,9 @@ def mark_all_read() -> int:
 
 def count_unread() -> int:
     """Nombre de messages reçus non lus. 0 si pas loggé / erreur."""
-    c, me = _client()
-    if c is None or me is None:
+    me = _me()
+    c = _supabase()
+    if c is None or not me:
         return 0
     try:
         res = (c.raw.table("messages")
@@ -144,25 +172,22 @@ def count_unread() -> int:
         return 0
 
 
-def last_message_preview() -> dict | None:
+def last_message_preview() -> Optional[dict]:
     """Renvoie le dernier message échangé avec l'autre user, sous la forme
     {body, created_at, is_from_me}. None si pas dispo."""
-    c, me = _client()
-    if c is None or me is None:
+    me = _me()
+    other = _opposite(me)
+    c = _supabase()
+    if c is None or not me or not other:
         return None
-    other = other_user()
-    if other is None:
-        return None
-    other_id = other["user_id"]
     try:
-        # 2 requêtes (une dans chaque sens), on prend la plus récente.
         sent = (c.raw.table("messages")
                 .select("body, created_at, sender_id")
-                .eq("sender_id", me).eq("recipient_id", other_id)
+                .eq("sender_id", me).eq("recipient_id", other)
                 .order("created_at", desc=True).limit(1).execute())
         recv = (c.raw.table("messages")
                 .select("body, created_at, sender_id")
-                .eq("sender_id", other_id).eq("recipient_id", me)
+                .eq("sender_id", other).eq("recipient_id", me)
                 .order("created_at", desc=True).limit(1).execute())
         candidates = (sent.data or []) + (recv.data or [])
         if not candidates:
@@ -192,8 +217,9 @@ def set_typing(active: bool = True) -> bool:
     À throttler côté caller (ex: 1 appel max toutes les 2 s).
     Renvoie True si l'écriture a réussi.
     """
-    c, me = _client()
-    if c is None or me is None:
+    me = _me()
+    c = _supabase()
+    if c is None or not me:
         return False
     from datetime import datetime, timezone, timedelta
     if active:
@@ -203,7 +229,7 @@ def set_typing(active: bool = True) -> bool:
     try:
         (c.raw.table("typing_status")
          .upsert({"user_id": me, "until_ts": ts.isoformat()},
-                  on_conflict="user_id").execute())
+                 on_conflict="user_id").execute())
         return True
     except Exception as exc:
         logger.debug("set_typing: %s", exc)
@@ -212,18 +238,17 @@ def set_typing(active: bool = True) -> bool:
 
 def peer_is_typing() -> bool:
     """True si l'autre user a un until_ts > now() dans typing_status."""
-    c, me = _client()
-    if c is None or me is None:
-        return False
-    other = other_user()
-    if other is None:
+    me = _me()
+    other = _opposite(me)
+    c = _supabase()
+    if c is None or not me or not other:
         return False
     try:
         from datetime import datetime, timezone
         now_iso = datetime.now(timezone.utc).isoformat()
         res = (c.raw.table("typing_status")
                .select("until_ts")
-               .eq("user_id", other["user_id"])
+               .eq("user_id", other)
                .gt("until_ts", now_iso).limit(1).execute())
         return bool(res.data)
     except Exception as exc:

@@ -17,6 +17,7 @@ Génération des hash : `python scripts/hash_password.py`
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
@@ -28,6 +29,37 @@ import bcrypt
 from itsdangerous import BadSignature, URLSafeSerializer
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Identité locale (jordan / thomas) de la requête HTTP en cours.
+# Le middleware d'auth pose cette valeur dès qu'il a validé le cookie de
+# session ; les modules métier qui ont besoin de savoir QUI a fait l'appel
+# (chat 1-à-1, etc.) la relisent via get_current_local_user().
+# ---------------------------------------------------------------------------
+_current_local_user: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "tc_current_local_user", default=None
+)
+
+
+def set_current_local_user(user_id: Optional[str]):
+    """Pose l'identité locale (jordan/thomas) pour la requête courante.
+    Renvoie un token qu'on peut passer à reset_current_local_user pour
+    restaurer la valeur précédente en fin de requête."""
+    return _current_local_user.set(user_id)
+
+
+def reset_current_local_user(token) -> None:
+    """Restaure l'identité locale précédente (best-effort)."""
+    try:
+        _current_local_user.reset(token)
+    except Exception:
+        pass
+
+
+def get_current_local_user() -> Optional[str]:
+    """Renvoie l'identité locale posée par le middleware (jordan/thomas), sinon None."""
+    return _current_local_user.get()
 
 COOKIE_NAME = "tc_session"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 jours

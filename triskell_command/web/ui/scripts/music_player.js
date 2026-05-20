@@ -277,9 +277,10 @@ const MusicPlayer = {
         z-index: 55; /* au-dessus de la sidebar (z-50) pour rester visible sur mobile drawer */
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       }
-      /* Sur desktop, la sidebar (md:w-64 = 256px) occupe la gauche : on décale */
+      /* Desktop : ancré au-dessus du FAB Thomas (right:32 / bottom:116 / w:56)
+         pour ne pas le masquer quand le panneau du lecteur s'ouvre. */
       @media (min-width: 768px) {
-        .music-player { left: calc(16rem + 16px); }
+        .music-player { left: auto; right: 38px; bottom: 188px; }
       }
       @media (max-width: 767px) {
         .music-player { left: 12px; bottom: max(12px, env(safe-area-inset-bottom, 12px)); }

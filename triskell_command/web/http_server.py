@@ -75,6 +75,13 @@ def create_app() -> FastAPI:
                 )
             # Attache l'user au request pour usage downstream
             request.state.user_id = user_id
+            # Pose l'identité locale dans un contextvar lisible depuis les
+            # modules métier (ex: integrations/messages.py pour le chat).
+            token = tcauth.set_current_local_user(user_id)
+            try:
+                return await call_next(request)
+            finally:
+                tcauth.reset_current_local_user(token)
         return await call_next(request)
 
     # Singleton Api (workers backend démarrent au premier accès)
