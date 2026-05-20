@@ -68,7 +68,7 @@ const Phare = {
       </section>
     `;
 
-    container.querySelector('[data-act="add"]').onclick = () => this._openSiteDialog({});
+    container.querySelector('[data-act="add"]').onclick = () => this._openQuickAddDialog();
     container.querySelector('[data-act="coulisses"]').onclick = () => this._go('coulisses');
     container.querySelectorAll('[data-filter]').forEach(b => {
       b.onclick = () => { this.filter = b.dataset.filter; this._renderHome(container); };
@@ -674,7 +674,125 @@ const Phare = {
   },
 
   // ════════════════════════════════════════════════════════════════════
-  //  MODAL — ajouter / éditer un site (conservée de l'ancienne version)
+  //  MODAL — ajout simplifié (juste l'URL, Claude remplit le reste)
+  // ════════════════════════════════════════════════════════════════════
+  _openQuickAddDialog() {
+    const dlg = document.createElement('div');
+    dlg.className = 'phare-modal';
+    dlg.innerHTML = `
+      <div class="phare-modal-backdrop" data-close></div>
+      <div class="phare-modal-card" style="max-width:520px">
+        <header class="phare-modal-head">
+          <div>
+            <div class="phare-kicker mb-1">NOUVEAU SITE</div>
+            <h2 class="text-xl font-semibold">Ajouter un site</h2>
+          </div>
+          <button class="phare-modal-close" data-close aria-label="Fermer">×</button>
+        </header>
+        <div class="phare-modal-body" data-step="form">
+          <p class="text-sm text-text-muted mb-4">
+            Colle juste l'adresse du site. Claude analyse la page et remplit tout le reste : nom, pages à surveiller, secteur, configuration. Tu pourras ajuster après si besoin.
+          </p>
+          <form id="ph-quick-form" class="space-y-3">
+            <div>
+              <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">URL du site *</label>
+              <input type="text" name="url" placeholder="exemple : cabinet-dupont.fr"
+                     class="phare-input" autocomplete="off" spellcheck="false" required>
+            </div>
+            <p class="text-xs text-text-muted" style="margin-top:4px">
+              Tu peux écrire juste le domaine (<code>cabinet-dupont.fr</code>) ou l'URL complète (<code>https://cabinet-dupont.fr</code>).
+            </p>
+          </form>
+        </div>
+        <div class="phare-modal-body" data-step="loading" style="display:none;text-align:center;padding:32px 24px">
+          <div class="phare-loading" style="font-size:15px;margin-bottom:8px">⏳ Claude analyse le site…</div>
+          <div class="text-xs text-text-muted">Lecture de la page d'accueil, repérage du métier et des pages clés. Quelques secondes.</div>
+        </div>
+        <div class="phare-modal-body" data-step="done" style="display:none">
+          <div data-summary></div>
+        </div>
+        <footer class="phare-modal-foot" data-foot="form">
+          <button class="btn btn-secondary" data-close>Annuler</button>
+          <button class="btn btn-primary" data-save>Créer le site</button>
+        </footer>
+        <footer class="phare-modal-foot" data-foot="done" style="display:none">
+          <button class="btn btn-primary" data-close>Terminé</button>
+        </footer>
+      </div>
+    `;
+    document.body.appendChild(dlg);
+    const close = () => dlg.remove();
+    dlg.querySelectorAll('[data-close]').forEach(el => el.onclick = close);
+    const showStep = (step) => {
+      dlg.querySelectorAll('[data-step]').forEach(el => {
+        el.style.display = el.dataset.step === step ? '' : 'none';
+      });
+      dlg.querySelectorAll('[data-foot]').forEach(el => {
+        el.style.display = el.dataset.foot === (step === 'done' ? 'done' : 'form') ? '' : 'none';
+      });
+    };
+
+    dlg.querySelector('[data-save]').onclick = async () => {
+      const form = dlg.querySelector('#ph-quick-form');
+      const url = (new FormData(form).get('url') || '').toString().trim();
+      if (!url) { this._toast('Mets l’adresse du site.', 'error'); return; }
+      showStep('loading');
+      let res;
+      try { res = await App.api.phare_site_quick_add({ url }); }
+      catch (e) { this._toast('Erreur : ' + e, 'error'); showStep('form'); return; }
+      if (!res || !res.ok) {
+        this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
+        showStep('form');
+        return;
+      }
+      const site = res.site || {};
+      const ac = res.autoconfig || {};
+      const det = ac.detected || {};
+      const paths = Array.isArray(site.key_paths) ? site.key_paths : ['/'];
+      const summary = `
+        <div style="text-align:center;margin-bottom:18px">
+          <div style="font-size:36px;line-height:1">✨</div>
+          <h3 style="font-size:18px;font-weight:600;margin-top:8px">${this._esc(site.name || site.domain)}</h3>
+          <p class="text-xs text-text-muted">${this._esc(site.domain)}</p>
+        </div>
+        <div class="phare-summary-block">
+          <div class="phare-summary-row">
+            <span class="phare-summary-label">Type</span>
+            <span>${site.is_external_client ? '🌐 Site client externe' : '🏠 Site Triskell'}</span>
+          </div>
+          <div class="phare-summary-row">
+            <span class="phare-summary-label">Techno détectée</span>
+            <span>${this._esc(site.stack || 'html')}</span>
+          </div>
+          ${site.notes ? `
+          <div class="phare-summary-row">
+            <span class="phare-summary-label">Note</span>
+            <span>${this._esc(site.notes)}</span>
+          </div>` : ''}
+          <div class="phare-summary-row">
+            <span class="phare-summary-label">Pages surveillées</span>
+            <span>${paths.map(p => `<code style="background:rgba(0,0,0,.06);padding:1px 5px;border-radius:3px;margin-right:4px">${this._esc(p)}</code>`).join(' ')}</span>
+          </div>
+        </div>
+        <p class="text-xs text-text-muted" style="margin-top:14px;text-align:center">
+          ${ac.claude_used ? 'Claude a analysé la homepage.' : (ac.fetched ? 'Page lue (Claude non disponible — défauts utilisés).' : 'Page injoignable — défauts utilisés.')}
+          Tu peux ajuster les détails depuis la fiche du site.
+        </p>
+      `;
+      dlg.querySelector('[data-summary]').innerHTML = summary;
+      showStep('done');
+      this._toast('✓ Site ajouté — les robots prennent le relais');
+      dlg.querySelector('[data-foot="done"] [data-close]').onclick = () => {
+        close();
+        this._renderHome(document.getElementById('content'));
+      };
+    };
+
+    setTimeout(() => dlg.querySelector('input[name="url"]')?.focus(), 50);
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  //  MODAL — éditer un site existant (form complet, pour ajustements)
   // ════════════════════════════════════════════════════════════════════
   _openSiteDialog({ externalOnly = false, site = null } = {}) {
     const isEdit = !!(site && site.id);

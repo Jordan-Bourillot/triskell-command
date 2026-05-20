@@ -892,6 +892,30 @@ class Api:
             logger.warning("phare_site_dashboard: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def phare_site_quick_add(self, payload: dict) -> dict:
+        """Ajoute un site avec UNE seule info : son URL.
+
+        Claude + un fetch HTML extraient nom, stack, pages clés, notes,
+        externe/interne. Renvoie {ok, site, autoconfig} pour que l'UI
+        puisse afficher ce qui a été détecté.
+        """
+        url = ((payload or {}).get("url") or "").strip()
+        if not url:
+            return {"ok": False, "error": "URL manquante."}
+        try:
+            from ..integrations.phare import site_autoconfig, repo
+            site_payload = site_autoconfig.build_site_payload(url, app_state=self._app_state)
+            autoconfig = site_payload.pop("_autoconfig", {})
+            row = repo.upsert_site(site_payload)
+            if not row:
+                return {"ok": False, "error": "Impossible d'enregistrer le site (Supabase non joignable)."}
+            return {"ok": True, "site": row, "autoconfig": autoconfig}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            logger.warning("phare_site_quick_add: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def phare_site_upsert(self, payload: dict) -> dict:
         """Crée ou met à jour un site dans Le Phare.
 

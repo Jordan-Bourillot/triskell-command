@@ -2102,6 +2102,33 @@ html, body {
   background: hsl(var(--bg) / 0.5);
 }
 
+/* ─── Bloc résumé après ajout rapide (auto-config Claude) ─── */
+.phare-summary-block {
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  padding: 6px 0;
+  background: hsl(var(--bg) / 0.4);
+}
+.phare-summary-row {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 12px;
+  padding: 10px 16px;
+  font-size: 14px;
+  align-items: start;
+}
+.phare-summary-row + .phare-summary-row {
+  border-top: 1px solid hsl(var(--border));
+}
+.phare-summary-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: hsl(var(--text-muted));
+  padding-top: 2px;
+}
+
 /* ─── Modale d'aperçu d'une proposition ─── */
 .phare-preview-card { max-width: 920px; }
 .phare-preview-detail {
