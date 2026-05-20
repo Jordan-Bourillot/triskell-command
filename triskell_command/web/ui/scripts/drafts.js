@@ -51,18 +51,45 @@ const Drafts = {
       `;
       return;
     }
-    list.innerHTML = data.rows.map((r, i) => this._card(r, i)).join('');
+    const banner = data.truncated
+      ? `<div class="card p-3 sm:p-4 mb-3 text-sm text-text-muted">
+            On affiche les ${data.rows.length} brouillons les plus récents
+            (limite ${data.limit_per_source || 200} par source).
+            Approuve ou rejette pour faire descendre la file.
+          </div>`
+      : '';
+    list.innerHTML = banner + data.rows.map((r, i) => this._card(r, i)).join('');
     this._bind(data.rows);
   },
 
   _card(r, idx) {
     const ts = (r.ts || '').slice(0, 16);
+    const meta = [];
+    if (r.email) meta.push(this._esc(r.email));
+    if (r.city)  meta.push(this._esc(r.city));
+    if (ts)      meta.push(ts);
+    if (r.provider || r.model) {
+      meta.push(`${this._esc(r.provider)}/${this._esc(r.model)}`);
+    }
+    let badge = '';
+    if (r.source === 'convoy') {
+      const camp = r.campaign_name || r.offer_name || 'Convoi';
+      badge = `<span class="text-xs px-2 py-0.5 rounded-full bg-accent/15 text-accent">${this._esc(camp)}</span>`;
+    } else if (r.kind && r.kind !== 'first_contact') {
+      badge = `<span class="text-xs px-2 py-0.5 rounded-full bg-bg border border-border text-text-muted">${this._esc(r.kind)}</span>`;
+    }
+    const testBadge = r.is_test
+      ? `<span class="text-xs px-2 py-0.5 rounded-full bg-warning/20 text-warning ml-1">test</span>`
+      : '';
     return `
-      <article class="card p-4 sm:p-7" data-idx="${idx}" data-key="${this._esc(r.key)}">
+      <article class="card p-4 sm:p-7"
+               data-idx="${idx}"
+               data-id="${this._esc(r.id || r.key)}"
+               data-source="${this._esc(r.source || '')}">
         <header class="flex items-start justify-between mb-3 sm:mb-4 gap-3">
           <div class="min-w-0">
-            <div class="font-semibold text-base truncate">${this._esc(r.name)}</div>
-            <div class="text-xs sm:text-sm text-text-muted break-all">${this._esc(r.email)} · ${this._esc(r.city)} · ${ts} · ${this._esc(r.provider)}/${this._esc(r.model)}</div>
+            <div class="font-semibold text-base truncate">${this._esc(r.name)} ${badge}${testBadge}</div>
+            <div class="text-xs sm:text-sm text-text-muted break-all">${meta.join(' · ')}</div>
           </div>
         </header>
         <div class="text-sm font-semibold text-accent mb-2 break-words">OBJET : ${this._esc(r.subject)}</div>
@@ -75,7 +102,7 @@ const Drafts = {
                   rows="8">${this._esc(r.body)}</textarea>
         <footer class="flex flex-col sm:flex-row sm:justify-end gap-2 mt-4 pt-4 border-t border-border">
           <button class="btn btn-secondary justify-center" data-act="reject">Rejeter</button>
-          <button class="btn btn-primary justify-center" data-act="approve">Approuver & envoyer</button>
+          <button class="btn btn-primary justify-center" data-act="approve">${r.source === 'convoy' ? 'Approuver (mise en file)' : 'Approuver &amp; envoyer'}</button>
         </footer>
       </article>
     `;
@@ -84,19 +111,30 @@ const Drafts = {
   _bind(rows) {
     document.querySelectorAll('article[data-idx]').forEach(card => {
       const idx = parseInt(card.dataset.idx, 10);
-      const key = card.dataset.key;
+      const id = card.dataset.id;
+      const source = card.dataset.source || '';
       const bodyEl = card.querySelector('[data-body]');
+      const setBusy = (busy) => {
+        card.querySelectorAll('button').forEach(b => b.disabled = busy);
+        card.style.opacity = busy ? '0.6' : '1';
+      };
       card.querySelector('[data-act="reject"]').onclick = async () => {
         if (!App.api) return;
-        try { await App.api.draft_reject({ key }); }
-        catch (e) { console.warn(e); }
+        setBusy(true);
+        try {
+          const r = await App.api.draft_reject({ id, source, key: id });
+          if (r && r.ok === false) alert('Rejet KO : ' + (r.error || '?'));
+        } catch (e) { console.warn(e); }
         await this.refresh();
       };
       card.querySelector('[data-act="approve"]').onclick = async () => {
         if (!App.api) return;
         const body = bodyEl ? bodyEl.value : rows[idx].body;
-        try { await App.api.draft_approve({ key, body }); }
-        catch (e) { console.warn(e); }
+        setBusy(true);
+        try {
+          const r = await App.api.draft_approve({ id, source, key: id, body });
+          if (r && r.ok === false) alert('Envoi KO : ' + (r.error || '?'));
+        } catch (e) { console.warn(e); }
         await this.refresh();
       };
     });

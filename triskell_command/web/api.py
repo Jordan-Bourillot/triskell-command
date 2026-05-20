@@ -377,7 +377,130 @@ class Api:
     # ------------------------------------------------------------------
     # Brouillons à valider
     # ------------------------------------------------------------------
+    #
+    # Source de vérité : Supabase (tables prospect_drafts + convoy_drafts).
+    # Le compteur "X brouillons à valider" du cockpit lit ces deux tables ;
+    # cette vue doit donc lire au même endroit, sinon mismatch (le compteur
+    # affiche 660 mais la page renvoie "tu es à jour").
+    #
+    # Fallback CRM local : seulement si Supabase n'est pas connecté (mode
+    # offline / 1ère utilisation). Sinon Supabase fait foi.
+    # ------------------------------------------------------------------
+
+    _DRAFTS_LIMIT_PER_SOURCE = 200
+
+    def _supabase_client_or_none(self):
+        try:
+            from triskell_core.db import get_client, SupabaseNotConfigured
+        except ImportError:
+            return None
+        try:
+            c = get_client()
+        except SupabaseNotConfigured:
+            return None
+        if not getattr(c, "is_authenticated", False):
+            try:
+                c.restore_session()
+            except Exception:
+                return None
+        return c if getattr(c, "is_authenticated", False) else None
+
     def get_drafts(self) -> dict:
+        client = self._supabase_client_or_none()
+        if client is None:
+            return self._get_drafts_local_fallback()
+
+        rows: list[dict] = []
+        truncated = False
+        try:
+            sb = client.raw
+            # ---- prospect_drafts (Dénicheur / Drip / Post-sale / Dormant) --
+            # PostgREST embed : on récupère le prospect lié pour name/email/city.
+            res = (sb.table("prospect_drafts")
+                    .select("id, subject, body, kind, provider, model, "
+                            "created_at, "
+                            "prospects:prospect_id(name, legal_name, "
+                            "emails, city)")
+                    .eq("status", "pending")
+                    .order("created_at", desc=True)
+                    .limit(self._DRAFTS_LIMIT_PER_SOURCE)
+                    .execute())
+            for r in (res.data or []):
+                p = r.get("prospects") or {}
+                emails = p.get("emails") or []
+                rows.append({
+                    "source": "prospect",
+                    "id": r.get("id") or "",
+                    "key": r.get("id") or "",   # compat ancien front
+                    "name": (p.get("name")
+                              or p.get("legal_name") or "(sans nom)"),
+                    "email": (emails[0] if emails else ""),
+                    "city": p.get("city") or "",
+                    "subject": r.get("subject") or "",
+                    "body": r.get("body") or "",
+                    "ts": (r.get("created_at") or "")[:19],
+                    "provider": r.get("provider") or "",
+                    "model": r.get("model") or "",
+                    "kind": r.get("kind") or "",
+                })
+        except Exception as exc:
+            logger.warning("get_drafts: prospect_drafts KO: %s", exc)
+
+        try:
+            sb = client.raw
+            # ---- convoy_drafts (campagnes Convoy / Relances) ---------------
+            res = (sb.table("convoy_drafts")
+                    .select("id, subject, body, offer_name, prospect, "
+                            "is_test, created_at, "
+                            "convoy_campaigns:campaign_id(name)")
+                    .eq("status", "pending")
+                    .order("created_at", desc=True)
+                    .limit(self._DRAFTS_LIMIT_PER_SOURCE)
+                    .execute())
+            for r in (res.data or []):
+                p = r.get("prospect") or {}
+                camp = r.get("convoy_campaigns") or {}
+                rows.append({
+                    "source": "convoy",
+                    "id": r.get("id") or "",
+                    "key": r.get("id") or "",   # compat ancien front
+                    "name": (p.get("name") or p.get("legal_name")
+                              or "(sans nom)"),
+                    "email": (p.get("email")
+                              or (p.get("emails") or [""])[0]),
+                    "city": p.get("city") or "",
+                    "subject": r.get("subject") or "",
+                    "body": r.get("body") or "",
+                    "ts": (r.get("created_at") or "")[:19],
+                    "provider": "",
+                    "model": "",
+                    "kind": "convoy",
+                    "campaign_name": camp.get("name") or "",
+                    "offer_name": r.get("offer_name") or "",
+                    "is_test": bool(r.get("is_test")),
+                })
+        except Exception as exc:
+            logger.warning("get_drafts: convoy_drafts KO: %s", exc)
+
+        # Tri global desc par ts ; brouillons "test" Convoy remontent en tête
+        rows.sort(key=lambda x: (
+            0 if x.get("is_test") else 1, x.get("ts") or ""
+        ), reverse=False)
+        rows.sort(key=lambda x: x.get("ts") or "", reverse=True)
+        # is_test en premier après tri ts → on rebouge en tête
+        tests = [r for r in rows if r.get("is_test")]
+        others = [r for r in rows if not r.get("is_test")]
+        rows = tests + others
+
+        # Indicateur si on a tronqué (au moins une source à pile la limite)
+        if len(rows) >= self._DRAFTS_LIMIT_PER_SOURCE:
+            truncated = True
+
+        return {"ok": True, "rows": rows, "truncated": truncated,
+                "limit_per_source": self._DRAFTS_LIMIT_PER_SOURCE}
+
+    def _get_drafts_local_fallback(self) -> dict:
+        """Lecture depuis le CRM JSON local — uniquement si Supabase KO."""
         try:
             from triskell_core.prospect.pipeline import list_pending_drafts
             pairs = list_pending_drafts()
@@ -386,6 +509,8 @@ class Api:
         rows = []
         for prospect, draft in pairs:
             rows.append({
+                "source": "local",
+                "id": prospect.match_keys[0] if prospect.match_keys else "",
                 "key": prospect.match_keys[0] if prospect.match_keys else "",
                 "name": prospect.name or prospect.legal_name or "(sans nom)",
                 "email": (prospect.emails[0] if prospect.emails else ""),
@@ -395,18 +520,187 @@ class Api:
                 "ts": draft.get("ts", ""),
                 "provider": draft.get("provider", ""),
                 "model": draft.get("model", ""),
+                "kind": draft.get("kind", ""),
             })
         return {"ok": True, "rows": rows}
 
     def draft_approve(self, payload: dict) -> dict:
         p = payload or {}
-        key = p.get("key") or ""
+        source = (p.get("source") or "").strip()
+        draft_id = (p.get("id") or p.get("key") or "").strip()
         body = p.get("body")
+
+        # Fallback ancien front (pas de source) → on tente Supabase, sinon
+        # CRM local. Le "key" envoyé est soit un uuid (nouveau), soit un
+        # match_key (ancien).
+        if source == "prospect" or (not source and self._looks_like_uuid(draft_id)):
+            return self._approve_prospect_draft(draft_id, body)
+        if source == "convoy":
+            return self._approve_convoy_draft(draft_id, body)
+        # Fallback ultime : ancien chemin CRM local
+        return self._approve_local_draft(draft_id, body)
+
+    def draft_reject(self, payload: dict) -> dict:
+        p = payload or {}
+        source = (p.get("source") or "").strip()
+        draft_id = (p.get("id") or p.get("key") or "").strip()
+
+        if source == "prospect" or (not source and self._looks_like_uuid(draft_id)):
+            return self._reject_supabase_draft("prospect_drafts", draft_id)
+        if source == "convoy":
+            return self._reject_supabase_draft("convoy_drafts", draft_id)
+        return self._reject_local_draft(draft_id)
+
+    @staticmethod
+    def _looks_like_uuid(s: str) -> bool:
+        import re
+        return bool(re.match(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+            r"[0-9a-f]{4}-[0-9a-f]{12}$", (s or "").lower()))
+
+    @staticmethod
+    def _iso_now() -> str:
+        from datetime import datetime
+        return datetime.now().isoformat(timespec="seconds")
+
+    # ----- prospect_drafts : approve = update body + envoi SMTP + log ----
+    def _approve_prospect_draft(self, draft_id: str, body) -> dict:
+        if not draft_id:
+            return {"ok": False, "error": "id manquant"}
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Supabase non connecté"}
+
+        from ..integrations import shared_secrets
+        from ..integrations.multi_tenant import with_workspace
+        from triskell_core.prospect.outreach.smtp_sender import send_email
+
+        sb = client.raw
+
+        # 1) lit le draft + prospect lié
+        try:
+            res = (sb.table("prospect_drafts")
+                    .select("id, subject, body, prospect_id, "
+                            "prospects:prospect_id(id, name, emails)")
+                    .eq("id", draft_id).limit(1).execute())
+        except Exception as exc:
+            return {"ok": False, "error": f"lecture draft KO : {exc}"}
+
+        data = res.data or []
+        if not data:
+            return {"ok": False, "error": "draft introuvable"}
+        d = data[0]
+        subject = d.get("subject") or ""
+        final_body = body if body is not None else (d.get("body") or "")
+        prospect = d.get("prospects") or {}
+        to = ((prospect.get("emails") or [""])[0] or "").strip()
+        if not to:
+            return {"ok": False, "error": "pas d'email sur le prospect"}
+
+        # 2) résout la config SMTP avant de toucher au statut
+        smtp_cfg = shared_secrets.resolve_smtp_for_send(
+            client=client, app_state=self._app_state)
+        if not smtp_cfg:
+            return {"ok": False,
+                    "error": "config SMTP introuvable — rien envoyé"}
+
+        # 3) statut → approved + body mis à jour
+        try:
+            sb.table("prospect_drafts").update({
+                "body": final_body,
+                "status": "approved",
+                "approved_at": self._iso_now(),
+                "approved_by": client.user_id,
+            }).eq("id", draft_id).execute()
+        except Exception as exc:
+            return {"ok": False, "error": f"update KO : {exc}"}
+
+        # 4) envoi SMTP
+        try:
+            msg_id = send_email(smtp_cfg, to=to,
+                                 subject=subject, body=final_body)
+        except Exception as exc:
+            # Envoi KO → on remet en pending pour ne pas perdre le brouillon
+            try:
+                sb.table("prospect_drafts").update({
+                    "status": "pending",
+                }).eq("id", draft_id).execute()
+            except Exception:
+                pass
+            return {"ok": False, "error": f"envoi KO : {exc}"}
+
+        # 5) statut → sent + log email_history + prospect contacté
+        try:
+            sb.table("prospect_drafts").update({
+                "status": "sent",
+                "sent_at": self._iso_now(),
+            }).eq("id", draft_id).execute()
+        except Exception as exc:
+            logger.warning("update draft sent KO: %s", exc)
+
+        try:
+            sb.table("email_history").insert(with_workspace(client, {
+                "prospect_id": prospect.get("id"),
+                "kind": "email_sent",
+                "ts": self._iso_now(),
+                "subject": subject[:200],
+                "body": final_body[:5000],
+                "message_id": msg_id,
+                "extra": {"from_draft_id": draft_id,
+                          "approved_from_sas": True},
+                "created_by": client.user_id,
+            })).execute()
+        except Exception as exc:
+            logger.warning("log email_history KO: %s", exc)
+
+        try:
+            sb.table("prospects").update({
+                "status": "contacted",
+                "last_contact_at": self._iso_now(),
+            }).eq("id", prospect.get("id")).execute()
+        except Exception as exc:
+            logger.debug("update prospect after approve: %s", exc)
+
+        return {"ok": True, "message_id": msg_id}
+
+    # ----- convoy_drafts : approve = update body + status='approved' -----
+    # (l'envoi est piloté par convoy_runner qui scrute les 'approved')
+    def _approve_convoy_draft(self, draft_id: str, body) -> dict:
+        if not draft_id:
+            return {"ok": False, "error": "id manquant"}
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Supabase non connecté"}
+        try:
+            update: dict = {"status": "approved"}
+            if body is not None:
+                update["body"] = body
+            client.raw.table("convoy_drafts").update(update).eq(
+                "id", draft_id).execute()
+            return {"ok": True, "queued": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ----- reject Supabase ---------------------------------------------
+    def _reject_supabase_draft(self, table: str, draft_id: str) -> dict:
+        if not draft_id:
+            return {"ok": False, "error": "id manquant"}
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Supabase non connecté"}
+        try:
+            client.raw.table(table).update({"status": "rejected"}).eq(
+                "id", draft_id).execute()
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ----- fallback CRM local ------------------------------------------
+    def _approve_local_draft(self, key: str, body) -> dict:
         try:
             from triskell_core.prospect.core.crm import CRM
             from triskell_core.prospect.pipeline import approve_draft
             if body is not None:
-                # Met à jour le 1er brouillon avec body édité
                 crm = CRM()
                 target = next((x for x in crm.all()
                                 if key in x.match_keys), None)
@@ -418,8 +712,7 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    def draft_reject(self, payload: dict) -> dict:
-        key = (payload or {}).get("key") or ""
+    def _reject_local_draft(self, key: str) -> dict:
         try:
             from triskell_core.prospect.pipeline import reject_draft
             return reject_draft(key, draft_index=0)
