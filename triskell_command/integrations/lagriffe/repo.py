@@ -393,14 +393,16 @@ MAIL_TEMPLATE_PRODUCTS = {
 
 def mail_templates_list() -> dict:
     """Retourne tous les templates groupés par product (pour l'écran Triskell
-    Command). Chaque template renvoie aussi sa liste de placeholders."""
+    Command). Chaque template renvoie aussi sa liste de placeholders, ainsi
+    que sa catégorie ('transactionnel' ou 'prospection') et son label libre."""
     sb = _sb()
     if sb is None:
         return {"ok": False, "error": "Supabase non configuré", "products": {}}
     try:
         rows = (sb.table("triskell_email_templates")
                   .select("product, key, from_address, from_name, subject, "
-                          "description, placeholders, enabled, updated_at, updated_by")
+                          "description, placeholders, enabled, category, label, "
+                          "updated_at, updated_by")
                   .order("product")
                   .order("key")
                   .execute().data or [])
@@ -412,6 +414,11 @@ def mail_templates_list() -> dict:
             p = r.get("product") or "shared"
             if p not in products:
                 products[p] = {"label": p, "templates": []}
+            # Garantit que les anciennes lignes (avant migration 28) remontent
+            # bien avec category='transactionnel' côté front même si la colonne
+            # n'a pas encore été appliquée en base.
+            if not r.get("category"):
+                r["category"] = "transactionnel"
             products[p]["templates"].append(r)
         return {"ok": True, "products": products}
     except Exception as exc:
@@ -450,7 +457,7 @@ def mail_templates_save(product: str, key: str, fields: dict, updated_by: str = 
 
     ALLOWED = ("from_address", "from_name", "subject",
                "body_html", "body_text", "description",
-               "placeholders", "enabled")
+               "placeholders", "enabled", "category", "label")
     payload = {"product": product, "key": key}
     for k in ALLOWED:
         if k in fields:
@@ -470,6 +477,14 @@ def mail_templates_save(product: str, key: str, fields: dict, updated_by: str = 
         payload["body_text"] = payload["body_text"][:200_000]
     if "enabled" in payload:
         payload["enabled"] = bool(payload["enabled"])
+    # Catégorie : on n'accepte que 'transactionnel' ou 'prospection'.
+    # Tout autre valeur (vide, inconnue) retombe sur 'transactionnel' pour
+    # ne pas casser l'affichage à l'écran.
+    if "category" in payload:
+        cat = str(payload["category"] or "").strip().lower()
+        payload["category"] = cat if cat in ("transactionnel", "prospection") else "transactionnel"
+    if "label" in payload and isinstance(payload["label"], str):
+        payload["label"] = payload["label"][:200]
 
     payload["updated_at"] = datetime.now(timezone.utc).isoformat()
     payload["updated_by"] = (updated_by or "")[:200]

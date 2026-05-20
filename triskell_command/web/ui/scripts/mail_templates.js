@@ -19,9 +19,22 @@ const MailTemplates = {
     selected: null,   // { product, key } courant
     editing: null,    // copie de travail (jamais persistée tant qu'on clique pas Enregistrer)
     busy: false,
-    catalog: null,    // fusion base + catalogue connu, groupé par adresse mail
-    senderFilter: '', // adresse mail filtrée ('' = toutes)
+    catalog: null,    // mode transactionnel : groupé par adresse mail
+    catalogProspection: null, // mode prospection : groupé par produit du catalogue
+    senderFilter: '', // adresse mail filtrée en mode transactionnel ('' = toutes)
+    productFilter: '',// produit filtré en mode prospection ('' = tous)
+    categoryMode: 'transactionnel', // 'transactionnel' | 'prospection'
+    catalogueProducts: [], // produits du catalogue Triskell, chargés à la demande pour la prospection
   },
+
+  // Produits "techniques" historiques (réservés aux mails transactionnels).
+  // En mode Prospection, on les masque de la liste des produits sélectionnables —
+  // un mail de démarchage se range sous un produit commercial du catalogue
+  // (Pixel Pros, Lagriffe, RankUs…), pas sous "billing" ou "internal".
+  PROSPECTION_EXCLUDED_PRODUCTS: new Set([
+    'reply', 'drip', 'post_sale', 'billing', 'internal', 'shared',
+    'delivery_pack_elec', 'delivery_studio_pdf', 'delivery_obelisk',
+  ]),
 
   // Catalogue de référence — pour que l'éditeur propose toujours les bons
   // templates même si la base est vide / partielle. Chaque entrée déclare
@@ -267,12 +280,32 @@ const MailTemplates = {
 
         <div id="mt-banner" class="mb-4 text-[12px] text-text-muted"></div>
 
-        <div class="flex items-center gap-3 mb-3 flex-wrap">
+        <div class="mt-cat-toggle mb-4" role="tablist" aria-label="Catégorie de modèle">
+          <button class="mt-cat-btn is-active" data-mt-cat="transactionnel" role="tab">
+            <span class="mt-cat-title">Transactionnel</span>
+            <span class="mt-cat-sub">Mails auto envoyés par tes sites</span>
+          </button>
+          <button class="mt-cat-btn" data-mt-cat="prospection" role="tab">
+            <span class="mt-cat-title">Prospection</span>
+            <span class="mt-cat-sub">Mails de démarchage par produit</span>
+          </button>
+        </div>
+
+        <div id="mt-toolbar-transac" class="flex items-center gap-3 mb-3 flex-wrap">
           <label class="text-xs text-text-muted">Filtrer par adresse&nbsp;:</label>
           <select id="mt-sender-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm">
             <option value="">— Toutes les adresses —</option>
           </select>
           <span id="mt-count" class="text-[11px] text-text-muted ml-auto"></span>
+        </div>
+
+        <div id="mt-toolbar-prosp" class="flex items-center gap-3 mb-3 flex-wrap" style="display:none;">
+          <label class="text-xs text-text-muted">Filtrer par produit&nbsp;:</label>
+          <select id="mt-product-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm">
+            <option value="">— Tous les produits —</option>
+          </select>
+          <button id="mt-new-prosp" class="btn btn-primary text-sm">+ Nouveau modèle</button>
+          <span id="mt-count-prosp" class="text-[11px] text-text-muted ml-auto"></span>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
@@ -287,7 +320,38 @@ const MailTemplates = {
       this._state.senderFilter = e.target.value;
       this._renderList();
     };
+    document.getElementById('mt-product-filter').onchange = (e) => {
+      this._state.productFilter = e.target.value;
+      this._renderList();
+    };
+    document.getElementById('mt-new-prosp').onclick = () => this.openNewProspection();
+    document.querySelectorAll('[data-mt-cat]').forEach(btn => {
+      btn.onclick = () => this._switchCategory(btn.dataset.mtCat);
+    });
     await this.refresh();
+  },
+
+  _switchCategory(mode) {
+    if (mode !== 'transactionnel' && mode !== 'prospection') return;
+    if (this._state.categoryMode === mode) return;
+    this._state.categoryMode = mode;
+    this._state.selected = null;
+    this._state.editing = null;
+    document.querySelectorAll('[data-mt-cat]').forEach(b => {
+      b.classList.toggle('is-active', b.dataset.mtCat === mode);
+    });
+    document.getElementById('mt-toolbar-transac').style.display = (mode === 'transactionnel') ? '' : 'none';
+    document.getElementById('mt-toolbar-prosp').style.display   = (mode === 'prospection')   ? '' : 'none';
+    this._renderList();
+    // Auto-select : premier template du mode courant
+    const cat = (mode === 'prospection') ? this._state.catalogProspection : this._state.catalog;
+    let target = null;
+    for (const info of Object.values(cat || {})) {
+      const t = (info.templates || [])[0];
+      if (t) { target = { product: t.product, key: t.key }; break; }
+    }
+    if (target) this.openTemplate(target.product, target.key);
+    else this._renderEmptyEditor();
   },
 
   _injectStyles() {
@@ -371,6 +435,50 @@ const MailTemplates = {
         transition: color 120ms, border-color 120ms;
       }
       .mt-tab.is-active { color: hsl(var(--accent)); border-bottom-color: hsl(var(--accent)); }
+
+      /* Toggle Transactionnel / Prospection */
+      .mt-cat-toggle {
+        display: inline-flex; gap: 4px;
+        padding: 4px; border-radius: 12px;
+        background: hsl(var(--bg));
+        border: 1px solid hsl(var(--border));
+      }
+      .mt-cat-btn {
+        display: flex; flex-direction: column; align-items: flex-start;
+        padding: 8px 16px; border-radius: 8px;
+        background: transparent; border: none; cursor: pointer;
+        transition: background 140ms, color 140ms;
+        text-align: left;
+      }
+      .mt-cat-btn:hover { background: hsl(var(--card)); }
+      .mt-cat-btn.is-active {
+        background: hsl(var(--accent) / .14);
+        color: hsl(var(--accent));
+      }
+      .mt-cat-btn .mt-cat-title {
+        font-size: 13px; font-weight: 700; color: inherit; line-height: 1.2;
+      }
+      .mt-cat-btn .mt-cat-sub {
+        font-size: 10.5px; color: hsl(var(--text-muted)); margin-top: 2px;
+        font-weight: 500;
+      }
+      .mt-cat-btn.is-active .mt-cat-sub { color: hsl(var(--accent) / .75); }
+
+      /* En mode prospection, l'entête de groupe affiche le nom du produit */
+      .mt-prod-h {
+        padding: 12px 8px 6px;
+        border-top: 1px solid hsl(var(--border) / .5);
+        margin-top: 4px;
+      }
+      .mt-prod-h:first-child { border-top: none; margin-top: 0; }
+      .mt-prod-h .mt-prod-name {
+        display: block; font-size: 12.5px; font-weight: 700;
+        color: hsl(var(--accent)); letter-spacing: .01em;
+      }
+      .mt-prod-h .mt-prod-count {
+        display: block; font-size: 9.5px; letter-spacing: .14em;
+        text-transform: uppercase; color: hsl(var(--text-muted)); margin-top: 2px;
+      }
     `;
     document.head.appendChild(s);
   },
@@ -381,23 +489,34 @@ const MailTemplates = {
     list.innerHTML = '<div class="p-4 text-[12px] text-text-muted">Chargement…</div>';
     const banner = document.getElementById('mt-banner');
 
-    const res = await this._api('list');
+    // Charge en parallèle : templates + catalogue produits (pour le mode prospection)
+    const [res, prods] = await Promise.all([
+      this._api('list'),
+      this._loadCatalogueProducts(),
+    ]);
+    this._state.catalogueProducts = prods || [];
+
     if (!res || !res.ok) {
       banner.innerHTML = `<span class="text-danger">Impossible de charger les templates : ${res && res.error ? res.error : 'erreur inconnue'}.</span>`;
       this._state.products = {};
     } else {
       this._state.products = res.products || {};
-      banner.innerHTML = `Templates synchronisés avec Supabase. Les mails non listés utilisent encore leur version codée en dur — clique sur un template ci-contre pour l'éditer.`;
+      banner.innerHTML = `Templates synchronisés avec Supabase. Bascule entre <strong>Transactionnel</strong> (mails auto envoyés par tes sites) et <strong>Prospection</strong> (mails de démarchage rangés par produit).`;
     }
 
     this._state.catalog = this._buildCatalog();
+    this._state.catalogProspection = this._buildCatalogProspection();
     this._populateSenderFilter();
+    this._populateProductFilter();
     this._renderList();
 
-    // Auto-select : premier template, ou celui qui était déjà ouvert
+    // Auto-select : premier template du mode courant, ou celui qui était déjà ouvert
     let target = this._state.selected;
     if (!target) {
-      for (const info of Object.values(this._state.catalog)) {
+      const cat = (this._state.categoryMode === 'prospection')
+        ? this._state.catalogProspection
+        : this._state.catalog;
+      for (const info of Object.values(cat || {})) {
         const t = (info.templates || [])[0];
         if (t) { target = { product: t.product, key: t.key }; break; }
       }
@@ -406,6 +525,19 @@ const MailTemplates = {
     else this._renderEmptyEditor();
 
     this._state.busy = false;
+  },
+
+  // Charge la liste des produits du Catalogue Triskell (Pixel Pros, Lagriffe…).
+  // Utilisée en mode Prospection pour proposer le bon ensemble de produits.
+  async _loadCatalogueProducts() {
+    if (typeof Catalogue === 'undefined' || typeof Catalogue.list !== 'function') return [];
+    try {
+      const items = await Catalogue.list();
+      return Array.isArray(items) ? items : [];
+    } catch (e) {
+      console.warn('mail_templates: chargement catalogue produits raté', e);
+      return [];
+    }
   },
 
   // Fusionne base + catalogue connu, puis groupe par adresse mail expéditrice.
@@ -418,13 +550,15 @@ const MailTemplates = {
       knownByKey[`${k.product}::${k.key}`] = k;
     }
 
-    // 2) Liste complète des templates (base + connus pas encore en base)
+    // 2) Liste complète des templates (base + connus pas encore en base) — uniquement transactionnels
     const all = [];
     const dbKeys = new Set();
     for (const [p, info] of Object.entries(this._state.products || {})) {
       for (const t of info.templates || []) {
         const id = `${p}::${t.key}`;
         dbKeys.add(id);
+        // En mode transactionnel on ignore les lignes catégorisées 'prospection'
+        if ((t.category || 'transactionnel') === 'prospection') continue;
         const meta = knownByKey[id] || {};
         all.push({
           ...t,
@@ -449,6 +583,7 @@ const MailTemplates = {
         description: k.description,
         placeholders: k.placeholders || [],
         enabled: true,
+        category: 'transactionnel',
         _source: 'fallback',
         _label: k.label,
         _runtime: k.runtime || 'netlify',
@@ -499,8 +634,74 @@ const MailTemplates = {
     sel.innerHTML = opts.join('');
   },
 
-  _updateCount(visible, total) {
-    const el = document.getElementById('mt-count');
+  _populateProductFilter() {
+    const sel = document.getElementById('mt-product-filter');
+    if (!sel) return;
+    const current = this._state.productFilter || '';
+    const cat = this._state.catalogProspection || {};
+    const opts = ['<option value="">— Tous les produits —</option>'];
+    for (const [pid, info] of Object.entries(cat)) {
+      const cnt = (info.templates || []).length;
+      const label = info.label || pid;
+      opts.push(`<option value="${this._esc(pid)}" ${pid === current ? 'selected' : ''}>${this._esc(label)} (${cnt})</option>`);
+    }
+    sel.innerHTML = opts.join('');
+  },
+
+  // Construit le groupement pour le mode Prospection : par produit du catalogue
+  // (Pixel Pros, Lagriffe, RankUs…). On part de la liste des produits du
+  // Catalogue Triskell pour que tous les produits soient visibles même sans
+  // template encore créé. Les templates en base avec category='prospection'
+  // sont rattachés à leur produit. Les produits "techniques" historiques
+  // (billing, internal, drip…) sont masqués via PROSPECTION_EXCLUDED_PRODUCTS.
+  _buildCatalogProspection() {
+    const groups = {};
+
+    // 1) Pré-remplit avec tous les produits du catalogue Triskell
+    for (const p of this._state.catalogueProducts || []) {
+      if (!p || !p.id) continue;
+      if (this.PROSPECTION_EXCLUDED_PRODUCTS.has(p.id)) continue;
+      groups[p.id] = {
+        id: p.id,
+        label: p.name || p.id,
+        templates: [],
+      };
+    }
+
+    // 2) Rattache les templates de prospection existants à leur produit
+    for (const [pid, info] of Object.entries(this._state.products || {})) {
+      for (const t of info.templates || []) {
+        if ((t.category || 'transactionnel') !== 'prospection') continue;
+        if (!groups[pid]) {
+          // Produit pas dans le catalogue (créé à la main, ou catalogue pas encore chargé)
+          groups[pid] = { id: pid, label: pid, templates: [] };
+        }
+        groups[pid].templates.push({
+          ...t,
+          product: pid,
+          _source: 'db',
+          _label: t.label || this._humanKey(t.key),
+        });
+      }
+    }
+
+    // 3) Ordre : produits avec templates d'abord (par nom), puis vides (par nom)
+    const withTpl = [];
+    const empty = [];
+    for (const g of Object.values(groups)) {
+      (g.templates.length > 0 ? withTpl : empty).push(g);
+    }
+    withTpl.sort((a, b) => a.label.localeCompare(b.label, 'fr'));
+    empty.sort((a, b) => a.label.localeCompare(b.label, 'fr'));
+
+    const ordered = {};
+    for (const g of withTpl) ordered[g.id] = g;
+    for (const g of empty)   ordered[g.id] = g;
+    return ordered;
+  },
+
+  _updateCount(visible, total, countElId = 'mt-count') {
+    const el = document.getElementById(countElId);
     if (!el) return;
     el.textContent = visible === total
       ? `${total} modèle${total > 1 ? 's' : ''}`
@@ -508,6 +709,14 @@ const MailTemplates = {
   },
 
   _renderList() {
+    if (this._state.categoryMode === 'prospection') {
+      this._renderListProspection();
+    } else {
+      this._renderListTransactionnel();
+    }
+  },
+
+  _renderListTransactionnel() {
     const list = document.getElementById('mt-list');
     const cat = this._state.catalog;
     const filter = (this._state.senderFilter || '').toLowerCase();
@@ -562,7 +771,62 @@ const MailTemplates = {
         this.openTemplate(p, k);
       };
     });
-    this._updateCount(visibleCount, totalCount);
+    this._updateCount(visibleCount, totalCount, 'mt-count');
+  },
+
+  _renderListProspection() {
+    const list = document.getElementById('mt-list');
+    const cat = this._state.catalogProspection || {};
+    const filter = (this._state.productFilter || '').trim();
+    let html = '';
+    let visibleCount = 0;
+    let totalCount = 0;
+    let visibleProducts = 0;
+    for (const [pid, info] of Object.entries(cat)) {
+      const tpls = info.templates || [];
+      totalCount += tpls.length;
+      if (filter && pid !== filter) continue;
+      visibleProducts++;
+      html += `
+        <div class="mt-prod-h">
+          <span class="mt-prod-name">${this._esc(info.label || pid)}</span>
+          <span class="mt-prod-count">${tpls.length} modèle${tpls.length > 1 ? 's' : ''}</span>
+        </div>`;
+      if (tpls.length === 0) {
+        html += `<div class="px-3 py-3 text-[12px] text-text-muted italic">
+          Aucun mail de prospection. Clique sur <strong>+ Nouveau modèle</strong> pour en créer un.
+        </div>`;
+        continue;
+      }
+      for (const t of tpls) {
+        visibleCount++;
+        const isActive = this._state.selected
+          && this._state.selected.product === t.product
+          && this._state.selected.key === t.key;
+        const label = t._label || t.label || this._humanKey(t.key);
+        const pill = (t.enabled === false)
+          ? '<span class="mt-pill mt-pill-off">Off</span>'
+          : '<span class="mt-pill mt-pill-on">Actif</span>';
+        html += `
+          <button class="mt-row ${isActive ? 'is-active' : ''}"
+                  data-mt-open="${this._esc(t.product)}::${this._esc(t.key)}">
+            <div>${this._esc(label)}${pill}</div>
+            <div class="mt-row-sub">${this._esc(t.subject || '').slice(0, 80)}</div>
+          </button>
+        `;
+      }
+    }
+    if (visibleProducts === 0) {
+      html = '<div class="p-4 text-[12px] text-text-muted">Aucun produit ne correspond à ce filtre.</div>';
+    }
+    list.innerHTML = html;
+    list.querySelectorAll('[data-mt-open]').forEach(btn => {
+      btn.onclick = () => {
+        const [p, k] = btn.dataset.mtOpen.split('::');
+        this.openTemplate(p, k);
+      };
+    });
+    this._updateCount(visibleCount, totalCount, 'mt-count-prosp');
   },
 
   // ---------- Open / edit ----------
@@ -576,9 +840,15 @@ const MailTemplates = {
     const known = this.KNOWN.find(k => k.product === product && k.key === key) || {};
     let tpl;
     if (res && res.ok && res.template) {
-      tpl = { ...res.template, _runtime: known.runtime || 'netlify', _label: known.label };
+      tpl = {
+        ...res.template,
+        category: res.template.category || 'transactionnel',
+        _runtime: known.runtime || 'netlify',
+        _label: res.template.label || known.label,
+      };
     } else {
       // Pas en base : template "à créer". Pré-rempli depuis le catalogue connu.
+      // (Cas exclusivement transactionnel — un nouveau prospection passe par openNewProspection.)
       tpl = {
         product, key,
         from_address: known.from_address || 'noreply@triskell-studio.fr',
@@ -589,12 +859,52 @@ const MailTemplates = {
         description: known.description || '',
         placeholders: known.placeholders || [],
         enabled: true,
+        category: 'transactionnel',
+        label: '',
         _isNew: true,
         _runtime: known.runtime || 'netlify',
         _label: known.label,
       };
     }
     this._state.editing = JSON.parse(JSON.stringify(tpl));
+    this._renderEditor({});
+  },
+
+  // Ouvre l'éditeur sur un nouveau template de prospection (vide).
+  // Le produit sélectionné par défaut est celui du filtre courant, sinon
+  // le premier produit du catalogue.
+  openNewProspection() {
+    const cat = this._state.catalogProspection || {};
+    let pid = this._state.productFilter || '';
+    if (!pid) {
+      const firstId = Object.keys(cat)[0];
+      pid = firstId || 'pixel-pros';
+    }
+    const prodInfo = cat[pid] || { id: pid, label: pid };
+    // Génère une clé technique unique : prosp_<timestamp_court>
+    const ts = Date.now().toString(36);
+    const key = `prosp_${ts}`;
+    const tpl = {
+      product: pid,
+      key,
+      from_address: 'contact@triskell-studio.fr',
+      from_name: 'Jordan Bourillot',
+      subject: '',
+      body_html: '',
+      body_text: '',
+      description: '',
+      placeholders: ['name', 'first_name', 'signature'],
+      enabled: true,
+      category: 'prospection',
+      label: '',
+      _isNew: true,
+      _runtime: 'manual',
+      _label: `Nouveau modèle — ${prodInfo.label || pid}`,
+      _productLabel: prodInfo.label || pid,
+    };
+    this._state.selected = { product: pid, key };
+    this._state.editing = tpl;
+    this._renderList();
     this._renderEditor({});
   },
 
@@ -615,19 +925,28 @@ const MailTemplates = {
     if (!t) { this._renderEmptyEditor(); return; }
 
     const isNew = !!t._isNew;
+    const isProspection = (t.category === 'prospection');
     const placeholders = Array.isArray(t.placeholders) ? t.placeholders : [];
     const senderAddr = (t.from_address || '').trim() || '(adresse non définie)';
     const senderLabel = this.SENDER_LABELS[senderAddr.toLowerCase()] || '';
-    const headerLabel = t._label || this._humanKey(t.key);
+    const headerLabel = t._label || t.label || this._humanKey(t.key);
     const isPipeline = t._runtime === 'pipeline';
+
+    // En prospection on affiche le produit du catalogue plutôt que l'adresse mail
+    const cat = this._state.catalogProspection || {};
+    const productLabel = (cat[t.product] && cat[t.product].label)
+      || t._productLabel
+      || t.product;
 
     e.innerHTML = `
       <div class="mb-5 pb-4 border-b border-border">
-        <div class="hero-kicker mb-1">${this._esc(senderAddr)}${senderLabel ? ` · ${this._esc(senderLabel)}` : ''}</div>
+        ${isProspection
+          ? `<div class="hero-kicker mb-1">PROSPECTION · ${this._esc(productLabel)}</div>`
+          : `<div class="hero-kicker mb-1">${this._esc(senderAddr)}${senderLabel ? ` · ${this._esc(senderLabel)}` : ''}</div>`}
         <h2 class="text-xl font-bold">${this._esc(headerLabel)}</h2>
         <div class="text-[11px] text-text-muted mt-1">Clé technique&nbsp;: <code>${this._esc(t.product)}::${this._esc(t.key)}</code></div>
         ${t.description ? `<p class="text-sm text-text-muted mt-2 leading-relaxed">${this._esc(t.description)}</p>` : ''}
-        ${isPipeline ? `
+        ${(!isProspection && isPipeline) ? `
           <div class="mt-3 text-[12px] text-warning bg-warning/10 border border-warning/30 rounded px-3 py-2 leading-relaxed">
             <strong>⚠️ Modèle pipeline.</strong> Aujourd'hui le runner Python qui envoie ce mail
             (drip / post-vente / réponses IA / Phare / facturation) lit encore son texte
@@ -635,7 +954,10 @@ const MailTemplates = {
             ne s'appliquera <em>pas tant qu'on n'a pas branché le runner</em> sur la table
             <code>triskell_email_templates</code>. À faire en phase suivante.
           </div>` : ''}
-        ${isNew && !isPipeline ? '<div class="mt-3 text-[12px] text-warning bg-warning/10 border border-warning/30 rounded px-3 py-2">Ce modèle n\'a jamais été édité. Aujourd\'hui la fonction Netlify utilise sa version <strong>par défaut codée en dur</strong>. Modifie le sujet/corps ci-dessous puis enregistre pour reprendre la main.</div>' : ''}
+        ${(!isProspection && isNew && !isPipeline) ? '<div class="mt-3 text-[12px] text-warning bg-warning/10 border border-warning/30 rounded px-3 py-2">Ce modèle n\'a jamais été édité. Aujourd\'hui la fonction Netlify utilise sa version <strong>par défaut codée en dur</strong>. Modifie le sujet/corps ci-dessous puis enregistre pour reprendre la main.</div>' : ''}
+        ${isProspection ? `<div class="mt-3 text-[12px] text-text-muted bg-accent/5 border border-accent/20 rounded px-3 py-2 leading-relaxed">
+          📨 <strong>Mail de prospection.</strong> Tu l'envoies à la main (depuis Triskell Command ou ton client mail). Aucun automatisme ne le déclenche.
+        </div>` : ''}
       </div>
 
       <div class="mt-tabs">
@@ -644,6 +966,19 @@ const MailTemplates = {
       </div>
 
       <div id="mt-pane-edit">
+        ${isProspection ? `
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label class="mt-field">
+              <label>Titre du modèle</label>
+              <input id="mt-label" value="${this._esc(t.label || '')}" placeholder="Mail 1 — commission classique">
+            </label>
+            <label class="mt-field">
+              <label>Produit</label>
+              <select id="mt-product-select">${this._renderProductOptions(t.product)}</select>
+            </label>
+          </div>
+        ` : ''}
+
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label class="mt-field">
             <label>Expéditeur (nom)</label>
@@ -657,7 +992,7 @@ const MailTemplates = {
 
         <div class="mt-field">
           <label>Sujet du mail</label>
-          <input id="mt-subject" value="${this._esc(t.subject || '')}" placeholder="Votre maquette Lagriffe Studio vous attend">
+          <input id="mt-subject" value="${this._esc(t.subject || '')}" placeholder="${isProspection ? 'Une idée pour monétiser ton audience' : 'Votre maquette Lagriffe Studio vous attend'}">
         </div>
 
         ${placeholders.length ? `
@@ -741,6 +1076,20 @@ const MailTemplates = {
     iframe.srcdoc = doc;
   },
 
+  _renderProductOptions(currentProduct) {
+    const cat = this._state.catalogProspection || {};
+    const ids = Object.keys(cat);
+    if (ids.length === 0) {
+      // Fallback : au moins le produit courant
+      return `<option value="${this._esc(currentProduct)}" selected>${this._esc(currentProduct)}</option>`;
+    }
+    return ids.map(pid => {
+      const label = cat[pid].label || pid;
+      const sel = (pid === currentProduct) ? 'selected' : '';
+      return `<option value="${this._esc(pid)}" ${sel}>${this._esc(label)}</option>`;
+    }).join('');
+  },
+
   _insertPlaceholder(text) {
     const ta = document.getElementById('mt-body-html');
     if (!ta) return;
@@ -755,6 +1104,8 @@ const MailTemplates = {
   async save() {
     const t = this._state.editing;
     if (!t) return;
+    const isProspection = (t.category === 'prospection');
+
     const fields = {
       from_name:    document.getElementById('mt-from-name').value.trim(),
       from_address: document.getElementById('mt-from-address').value.trim(),
@@ -764,7 +1115,16 @@ const MailTemplates = {
       enabled:      document.getElementById('mt-enabled').checked,
       placeholders: Array.isArray(t.placeholders) ? t.placeholders : [],
       description:  t.description || '',
+      category:     t.category || 'transactionnel',
     };
+    if (isProspection) {
+      const labelEl = document.getElementById('mt-label');
+      fields.label = labelEl ? labelEl.value.trim() : (t.label || '');
+      if (!fields.label) {
+        alert('Le titre du modèle est obligatoire (ex. "Mail 1 — commission classique").');
+        return;
+      }
+    }
     if (!fields.subject) {
       alert('Le sujet du mail est obligatoire.');
       return;
@@ -773,17 +1133,36 @@ const MailTemplates = {
       alert('L\'adresse d\'expéditeur est obligatoire.');
       return;
     }
+
+    // En prospection, le produit peut être changé via le select.
+    let targetProduct = t.product;
+    if (isProspection) {
+      const prodSel = document.getElementById('mt-product-select');
+      if (prodSel && prodSel.value && prodSel.value !== t.product) {
+        targetProduct = prodSel.value;
+      }
+    }
+
     const btn = document.getElementById('mt-save');
     if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
-    const res = await this._api('save', { product: t.product, key: t.key, fields });
+
+    // Si le produit a changé, on supprime l'ancien enregistrement (s'il existait)
+    // puis on upsert sous le nouveau couple (product, key).
+    if (isProspection && targetProduct !== t.product && !t._isNew) {
+      await this._api('delete', { product: t.product, key: t.key });
+    }
+
+    const res = await this._api('save', { product: targetProduct, key: t.key, fields });
     if (btn) { btn.disabled = false; btn.textContent = 'Enregistrer'; }
     if (!res || !res.ok) {
       alert('Échec de l\'enregistrement : ' + (res && res.error || 'erreur inconnue'));
       return;
     }
-    // Toast léger
-    this._toast('Modèle enregistré. Effet immédiat (cache 60 s max côté Netlify).');
-    // Recharge la liste pour mettre à jour les pills "Édité"
+    // Met à jour la sélection (utile si on a changé de produit ou créé un nouveau)
+    this._state.selected = { product: targetProduct, key: t.key };
+    this._toast(isProspection
+      ? 'Modèle de prospection enregistré.'
+      : 'Modèle enregistré. Effet immédiat (cache 60 s max côté Netlify).');
     await this.refresh();
   },
 
