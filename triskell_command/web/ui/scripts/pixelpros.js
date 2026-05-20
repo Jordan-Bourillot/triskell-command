@@ -106,7 +106,6 @@ const PixelPros = {
       /* === FUNNEL synthétique === */
       .pp-funnel { display:flex; align-items:stretch; gap:0; flex-wrap:wrap; background:var(--surface, #0f172a); border:1px solid var(--border, #1e293b); border-radius:14px; padding:14px; }
       .pp-funnel-step { flex:1; min-width:120px; padding:10px 14px; display:flex; flex-direction:column; align-items:center; gap:4px; position:relative; }
-      .pp-funnel-step + .pp-funnel-step::before { content:'›'; position:absolute; left:-8px; top:50%; transform:translateY(-50%); font-size:22px; font-weight:300; color:#475569; }
       .pp-funnel-icon { font-size:24px; line-height:1; margin-bottom:2px; }
       .pp-funnel-n { font-size:24px; font-weight:800; line-height:1; }
       .pp-funnel-l { font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#94a3b8; margin-top:2px; }
@@ -114,6 +113,44 @@ const PixelPros = {
       .pp-funnel-step.alert .pp-funnel-l { color:#facc15; }
       .pp-funnel-step.success .pp-funnel-n { color:#22c55e; }
       .pp-funnel-step.success .pp-funnel-l { color:#22c55e; }
+
+      /* Marqueurs ✉️ entre étapes : mails envoyés automatiquement au client */
+      .pp-funnel-gap { width:20px; display:flex; align-items:center; justify-content:center; color:#475569; font-size:22px; font-weight:300; }
+      .pp-funnel-gap::after { content:'›'; }
+      .pp-mail-marker {
+        display:flex; flex-direction:column; align-items:center; gap:2px;
+        padding:8px 10px; margin:0 4px;
+        background: color-mix(in srgb, var(--mc) 12%, transparent);
+        border: 1px dashed color-mix(in srgb, var(--mc) 55%, transparent);
+        border-radius: 10px; cursor:pointer; min-width:90px;
+        color:#cbd5e1; font: inherit;
+        transition: background .15s, transform .15s, border-color .15s;
+        position:relative;
+      }
+      .pp-mail-marker:hover {
+        background: color-mix(in srgb, var(--mc) 22%, transparent);
+        border-color: var(--mc);
+        transform: translateY(-1px);
+      }
+      .pp-mail-marker .pp-mail-ico { font-size:18px; line-height:1; }
+      .pp-mail-marker .pp-mail-lbl { font-size:10.5px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color: var(--mc); }
+      .pp-mail-marker .pp-mail-edit { font-size:9.5px; color:#94a3b8; opacity:0; transition:opacity .15s; }
+      .pp-mail-marker:hover .pp-mail-edit { opacity:1; }
+
+      /* Champs de l'éditeur de mail */
+      .pp-mail-input, .pp-mail-textarea {
+        width:100%; padding:10px 12px; border-radius:8px;
+        background:#0b1020; border:1px solid var(--border, #1e293b);
+        color:#e2e8f0; font-size:13px; font-family: inherit; line-height:1.5;
+        box-sizing:border-box;
+      }
+      .pp-mail-input:focus, .pp-mail-textarea:focus { outline:none; border-color:#facc15; }
+      .pp-mail-textarea { resize:vertical; }
+      .pp-mail-textarea-code { font-family: ui-monospace, 'SF Mono', Consolas, monospace; font-size:11.5px; }
+      .pp-mail-preview { width:100%; min-height:340px; border-radius:8px; background:#fff; border:1px solid var(--border, #1e293b); margin-top:10px; }
+      .pp-mail-vars { font-size:12px; color:#94a3b8; line-height:1.9; }
+      .pp-mail-vars code { background:#020617; color:#facc15; padding:2px 6px; border-radius:4px; font-size:11px; margin-right:8px; }
+      .pp-action-btn:disabled { opacity:0.4; cursor:not-allowed; }
 
       /* === KANBAN === */
       .pp-kanban { display:grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap:14px; }
@@ -226,6 +263,16 @@ const PixelPros = {
   },
 
   // ----- FUNNEL -----
+  // On affiche un mini-marqueur ✉️ entre les étapes pour visualiser quand
+  // un mail est envoyé au client. Au clic, ça ouvre l'éditeur du mail.
+  //
+  // Mails dans le pipeline Pixel Pros :
+  //   draft → [✉️ paiement reçu] → paid → building → [✉️ site en ligne] → live
+  MAILS_BETWEEN: {
+    'draft→paid':     { kind: 'paid', label: 'Mail "paiement reçu"',  short: 'Paiement reçu',  color: '#facc15' },
+    'building→live':  { kind: 'live', label: 'Mail "site en ligne"',  short: 'Site en ligne',  color: '#22c55e' },
+  },
+
   _renderFunnel() {
     const el = document.getElementById('pp-funnel');
     if (!el) return;
@@ -237,13 +284,175 @@ const PixelPros = {
       { k: 'live',     l: 'En ligne',        ico: '✅', cls: (c.live||0) > 0 ? 'success' : '' },
     ];
     el.className = 'pp-funnel';
-    el.innerHTML = steps.map(s => `
-      <div class="pp-funnel-step ${s.cls}">
-        <span class="pp-funnel-icon">${s.ico}</span>
-        <span class="pp-funnel-n">${c[s.k] || 0}</span>
-        <span class="pp-funnel-l">${s.l}</span>
+
+    const parts = [];
+    steps.forEach((s, i) => {
+      parts.push(`
+        <div class="pp-funnel-step ${s.cls}">
+          <span class="pp-funnel-icon">${s.ico}</span>
+          <span class="pp-funnel-n">${c[s.k] || 0}</span>
+          <span class="pp-funnel-l">${s.l}</span>
+        </div>
+      `);
+      if (i < steps.length - 1) {
+        const next = steps[i + 1];
+        const transitionKey = `${s.k}→${next.k}`;
+        const mail = this.MAILS_BETWEEN[transitionKey];
+        if (mail) {
+          parts.push(`
+            <button class="pp-mail-marker" data-pp-mail="${mail.kind}"
+                    style="--mc:${mail.color};"
+                    title="Voir / modifier le mail « ${this._escape(mail.short)} »">
+              <span class="pp-mail-ico">✉️</span>
+              <span class="pp-mail-lbl">${this._escape(mail.short)}</span>
+              <span class="pp-mail-edit">Modifier</span>
+            </button>
+          `);
+        } else {
+          parts.push('<div class="pp-funnel-gap"></div>');
+        }
+      }
+    });
+    el.innerHTML = parts.join('');
+
+    // Bind des marqueurs ✉️
+    el.querySelectorAll('[data-pp-mail]').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        this._openMailEditor(btn.dataset.ppMail);
+      };
+    });
+  },
+
+  // ----- ÉDITEUR DE MAIL -----
+  async _openMailEditor(kind) {
+    if (!kind) return;
+    // Overlay + panel
+    let overlay = document.getElementById('pp-mail-overlay');
+    let panel = document.getElementById('pp-mail-panel');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'pp-mail-overlay';
+      overlay.className = 'pp-detail-overlay';
+      overlay.onclick = () => this._closeMailEditor();
+      document.body.appendChild(overlay);
+    }
+    if (!panel) {
+      panel = document.createElement('aside');
+      panel.id = 'pp-mail-panel';
+      panel.className = 'pp-detail-panel';
+      document.body.appendChild(panel);
+    }
+    overlay.hidden = false;
+    panel.hidden = false;
+    panel.innerHTML = `<div style="padding:60px 0; text-align:center; color:#94a3b8;">Chargement…</div>`;
+
+    const res = await this._call('pixelpros_mail_template_get', { kind });
+    if (!res || !res.ok) {
+      panel.innerHTML = `<button class="pp-detail-close" data-pp-mail-close>×</button>
+        <div class="pp-error-box">Erreur de chargement : ${this._escape(res?.error || 'inconnue')}</div>`;
+      panel.querySelector('[data-pp-mail-close]').onclick = () => this._closeMailEditor();
+      return;
+    }
+    this._renderMailEditor(kind, res.template);
+  },
+
+  _renderMailEditor(kind, tpl) {
+    const panel = document.getElementById('pp-mail-panel');
+    if (!panel) return;
+    const mailMeta = kind === 'paid'
+      ? { title: 'Mail "Paiement reçu"', sub: 'Envoyé automatiquement quand Stripe confirme le paiement (passage en statut "Payé").', accent: '#facc15' }
+      : { title: 'Mail "Site en ligne"',  sub: 'Envoyé automatiquement quand le site est mis en ligne (passage en statut "En ligne").',  accent: '#22c55e' };
+
+    const isCustom = !!tpl.is_custom;
+
+    panel.innerHTML = `
+      <button class="pp-detail-close" data-pp-mail-close>×</button>
+
+      <div class="pp-detail-head">
+        <div class="pp-avatar" style="background:${mailMeta.accent};">✉️</div>
+        <div>
+          <div class="pp-detail-name">${this._escape(mailMeta.title)}</div>
+          <div class="pp-detail-sub">${this._escape(mailMeta.sub)}</div>
+          <span class="pp-detail-pill" style="background:${mailMeta.accent}25; color:${mailMeta.accent};">
+            ${isCustom ? '✏️ Modifié par toi' : '⚙️ Texte par défaut'}
+          </span>
+        </div>
       </div>
-    `).join('');
+
+      <div class="pp-detail-section">
+        <div class="pp-detail-section-title">Sujet du mail</div>
+        <input id="pp-mail-subject" type="text" class="pp-mail-input" value="${this._escape(tpl.subject || '')}" />
+      </div>
+
+      <div class="pp-detail-section">
+        <div class="pp-detail-section-title">Texte brut (clients sans HTML)</div>
+        <textarea id="pp-mail-text" class="pp-mail-textarea" rows="10">${this._escape(tpl.body_text || '')}</textarea>
+      </div>
+
+      <div class="pp-detail-section">
+        <div class="pp-detail-section-title">Version HTML (mise en forme jolie)</div>
+        <textarea id="pp-mail-html" class="pp-mail-textarea pp-mail-textarea-code" rows="14">${this._escape(tpl.body_html || '')}</textarea>
+        <details style="margin-top:10px;">
+          <summary class="pp-data-toggle">👁 Aperçu du HTML</summary>
+          <iframe id="pp-mail-preview" class="pp-mail-preview" sandbox=""></iframe>
+        </details>
+      </div>
+
+      <div class="pp-detail-section">
+        <div class="pp-detail-section-title">Variables disponibles (à coller dans le texte ou le HTML)</div>
+        <div class="pp-mail-vars">
+          <code>{firstname}</code> <span>prénom du client</span><br>
+          <code>{business}</code> <span>nom de l'entreprise</span><br>
+          <code>{business_paren}</code> <span>" (nom)" entre parenthèses, ou rien</span><br>
+          <code>{business_space}</code> <span>" nom" avec espace devant, ou rien</span><br>
+          <code>{site_url}</code> <span>URL du site (mail "en ligne" uniquement)</span>
+        </div>
+      </div>
+
+      <div class="pp-detail-section">
+        <div class="pp-actions">
+          <button data-pp-mail-save class="pp-action-btn primary">💾 Enregistrer</button>
+          <button data-pp-mail-reset class="pp-action-btn danger" ${isCustom ? '' : 'disabled'}>↺ Remettre par défaut</button>
+        </div>
+      </div>
+    `;
+
+    panel.querySelector('[data-pp-mail-close]').onclick = () => this._closeMailEditor();
+
+    // Aperçu HTML live
+    const htmlField = panel.querySelector('#pp-mail-html');
+    const preview = panel.querySelector('#pp-mail-preview');
+    const refreshPreview = () => {
+      if (!preview) return;
+      preview.srcdoc = htmlField.value || '<i>(vide)</i>';
+    };
+    htmlField.addEventListener('input', refreshPreview);
+    refreshPreview();
+
+    panel.querySelector('[data-pp-mail-save]').onclick = async () => {
+      const subject = panel.querySelector('#pp-mail-subject').value.trim();
+      const body_text = panel.querySelector('#pp-mail-text').value;
+      const body_html = panel.querySelector('#pp-mail-html').value;
+      if (!subject) { this._toast('Le sujet ne peut pas être vide', true); return; }
+      const res = await this._call('pixelpros_mail_template_save', { kind, subject, body_text, body_html });
+      this._toast(res?.ok ? `Sauvegardé : ${res.message || ''}` : `Échec : ${res?.error || res?.message || '?'}`, !res?.ok);
+      if (res?.ok) this._openMailEditor(kind);  // recharge pour mettre à jour la pastille "Modifié"
+    };
+
+    panel.querySelector('[data-pp-mail-reset]').onclick = async () => {
+      if (!confirm('Remettre le mail à sa version par défaut ? Tes modifications seront perdues.')) return;
+      const res = await this._call('pixelpros_mail_template_reset', { kind });
+      this._toast(res?.ok ? `Remis par défaut : ${res.message || ''}` : `Échec : ${res?.error || res?.message || '?'}`, !res?.ok);
+      if (res?.ok) this._openMailEditor(kind);
+    };
+  },
+
+  _closeMailEditor() {
+    const overlay = document.getElementById('pp-mail-overlay');
+    const panel = document.getElementById('pp-mail-panel');
+    if (overlay) overlay.hidden = true;
+    if (panel) { panel.hidden = true; panel.innerHTML = ''; }
   },
 
   // ----- KANBAN -----

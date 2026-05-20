@@ -2806,6 +2806,43 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    # ----- Templates mails Pixel Pros (paid / live) -----
+    def pixelpros_mail_template_get(self, payload: dict | None = None) -> dict:
+        kind = ((payload or {}).get("kind") or "").strip()
+        if kind not in ("paid", "live"):
+            return {"ok": False, "error": "kind invalide (attendu 'paid' ou 'live')"}
+        try:
+            from ..integrations.pixelpros import mailer as m
+            return {"ok": True, "template": m.load_template(kind)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_mail_template_save(self, payload: dict) -> dict:
+        p = payload or {}
+        kind = (p.get("kind") or "").strip()
+        subject = (p.get("subject") or "").strip()
+        body_text = p.get("body_text") or ""
+        body_html = p.get("body_html") or ""
+        if kind not in ("paid", "live"):
+            return {"ok": False, "error": "kind invalide"}
+        try:
+            from ..integrations.pixelpros import mailer as m
+            ok, msg = m.save_template(kind, subject, body_text, body_html)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_mail_template_reset(self, payload: dict) -> dict:
+        kind = ((payload or {}).get("kind") or "").strip()
+        if kind not in ("paid", "live"):
+            return {"ok": False, "error": "kind invalide"}
+        try:
+            from ..integrations.pixelpros import mailer as m
+            ok, msg = m.reset_template(kind)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def pixelpros_pipeline_state(self) -> dict:
         try:
             from ..integrations.pixelpros import repo as r
