@@ -225,6 +225,77 @@ def gather_context(app_state) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Appel Claude
 # ---------------------------------------------------------------------------
+CONVO_SYSTEM_PROMPT = """Tu es Claude, l'assistant vocal de Jordan, cofondateur de Studio Triskell (agence web bretonne, basée près de Brest, fondée avec Thomas).
+
+Tu es en MODE CONVERSATION VOCALE. Jordan te parle à l'oral via un micro, tu lui réponds à l'oral via une synthèse vocale.
+
+Règles d'or :
+- Réponds comme un ami au café, pas comme un rapport. Phrases courtes, naturelles, ton détendu. Comme à l'oral.
+- Pas de gros titre, pas de liste à puces, pas d'émoji, pas de markdown. Du texte brut qu'on prononce bien.
+- Garde tes réponses entre 1 et 4 phrases en général. Plus seulement si Jordan demande clairement plus de détail.
+- Tutoie Jordan, sois familier sans être vulgaire.
+- Tu connais son écosystème : Studio Triskell est la maison-mère ; il opère Pixel Pros (sites pros à 24,90€/mois), Lagriffe Studio (sites sur mesure à 49€/mois quand le client aime), WoW Studio (sites très haut de gamme), Rankus Studio (SEO autonome) ; Carnet est leur outil devis/factures pour micro-entrepreneurs ; Triskell Command est l'app que tu es littéralement en train d'animer.
+- Tu peux poser une question de clarif quand sa demande est floue.
+- N'invente jamais de chiffres ou de faits sur son business. Si tu ne sais pas, dis-le.
+- Si c'est une question générale (pas liée à son business), réponds normalement, comme un assistant cultivé.
+- N'ajoute jamais d'annotation type "Réponse :" ou "Claude :" — donne directement la réponse, point.
+"""
+
+
+def chat_with_claude(app_state, *, question: str,
+                     history: Optional[list] = None) -> dict[str, Any]:
+    """Conversation libre avec Claude (mode vocal).
+
+    Renvoie {ok, text, error}. Pas de format structuré — juste du texte brut
+    qu'on peut lire à voix haute.
+    """
+    out: dict[str, Any] = {"ok": False, "text": "", "error": ""}
+
+    ai = _resolve_ai(app_state)
+    if not ai.get("api_key"):
+        out["error"] = "ai_not_configured"
+        return out
+
+    history = history or []
+    # Limite l'historique aux 10 derniers tours pour éviter d'exploser les tokens
+    convo_parts: list[str] = []
+    for turn in history[-10:]:
+        role = (turn.get("role") or "user").lower()
+        content = (turn.get("content") or "").strip()
+        if not content:
+            continue
+        speaker = "Jordan" if role == "user" else "Claude"
+        convo_parts.append(f"{speaker} : {content}")
+    convo_parts.append(f"Jordan : {question.strip()}")
+    convo_parts.append("Claude :")
+
+    full_prompt = (CONVO_SYSTEM_PROMPT + "\n\n---\n\n"
+                   + "\n\n".join(convo_parts))
+
+    try:
+        from triskell_core.ai.providers import send_to_provider, ProviderError
+    except ImportError:
+        out["error"] = "core_unavailable"
+        return out
+
+    try:
+        api_keys = {ai["provider"]: ai["api_key"]}
+        text = send_to_provider(
+            ai["provider"],
+            ai.get("model") or "",
+            full_prompt,
+            api_keys,
+        )
+        out["text"] = (text or "").strip()
+        out["ok"] = bool(out["text"])
+    except ProviderError as exc:
+        out["error"] = f"ai_error: {exc}"
+    except Exception as exc:
+        out["error"] = f"ai_exception: {exc}"
+
+    return out
+
+
 def ask_claude(app_state, *, mode: str = "interactive",
                 user_question: Optional[str] = None) -> dict[str, Any]:
     """Appelle Claude avec le contexte courant. Renvoie le dict de conseil.

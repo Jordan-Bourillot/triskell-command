@@ -353,6 +353,7 @@ const Claude = {
   _startConversation(overlay) {
     if (this._convoMode) return;
     this._convoMode = true;
+    this._convoHistory = []; // historique des tours pour donner du contexte à Claude
     // Stoppe toute écoute / lecture en cours d'un précédent mode
     if (this._recognition) { try { this._recognition.abort(); } catch (e) {} this._recognition = null; }
     if (window.speechSynthesis) { try { window.speechSynthesis.cancel(); } catch (e) {} }
@@ -455,19 +456,31 @@ const Claude = {
     this._setConvoState(overlay, 'thinking', 'Je réfléchis…');
     this._setConvoTranscript(overlay, '« ' + question + ' »');
 
-    let advice = null;
+    // Endpoint dédié à la conversation libre (texte brut, pas de format imposé,
+    // historique passé pour que Claude suive le fil)
+    let reply = null;
     try {
-      advice = await App.api.claude_ask({ question });
+      reply = await App.api.claude_chat({
+        question,
+        history: this._convoHistory || [],
+      });
     } catch (e) { /* swallow */ }
 
     if (!this._convoMode) return;
 
     let speakable = '';
-    if (advice && advice.ok) {
-      speakable = [advice.headline, advice.advice].filter(Boolean).join('. ');
-    }
-    if (!speakable) {
-      speakable = "Désolé, je n'ai pas pu répondre cette fois. Réessaye ?";
+    if (reply && reply.ok && reply.text) {
+      speakable = reply.text;
+      // On nourrit l'historique pour les tours suivants
+      this._convoHistory = this._convoHistory || [];
+      this._convoHistory.push({ role: 'user',      content: question });
+      this._convoHistory.push({ role: 'assistant', content: reply.text });
+      // Borne à 20 tours pour pas exploser
+      if (this._convoHistory.length > 20) {
+        this._convoHistory = this._convoHistory.slice(-20);
+      }
+    } else {
+      speakable = "Désolé, je n'ai pas pu te répondre cette fois. Réessaye ?";
     }
 
     this._convoSpeak(overlay, speakable);
@@ -485,6 +498,33 @@ const Claude = {
       .replace(/\n{3,}/g, '\n\n');
   },
 
+  _pickBestFrenchVoice() {
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices || !voices.length) return null;
+    const fr = voices.filter(v => v.lang && v.lang.toLowerCase().startsWith('fr'));
+    if (!fr.length) return null;
+    // Préfère par ordre : Google (Chrome) > voix Apple Premium > voix neuronales
+    // Microsoft > voix par défaut. Évite "Hortense" (très robotique).
+    const score = (v) => {
+      const n = (v.name || '').toLowerCase();
+      let s = 0;
+      if (n.includes('google')) s += 100;          // Chrome's voice — la plus naturelle
+      if (n.includes('amelie') || n.includes('amélie')) s += 80;  // macOS premium
+      if (n.includes('thomas')) s += 75;            // macOS premium
+      if (n.includes('audrey')) s += 70;            // macOS
+      if (n.includes('paul')) s += 65;
+      if (n.includes('neural') || n.includes('online')) s += 50;  // voix cloud Microsoft
+      if (n.includes('natural')) s += 50;
+      if (n.includes('denise')) s += 40;            // bonne Microsoft online
+      if (n.includes('hortense')) s -= 50;          // robotique
+      if (v.localService === false) s += 20;        // cloud > local en général
+      if (v.default) s += 5;
+      return s;
+    };
+    fr.sort((a, b) => score(b) - score(a));
+    return fr[0];
+  },
+
   _convoSpeak(overlay, text) {
     if (!this._convoMode) return;
     const clean = this._stripMarkdown(text);
@@ -498,15 +538,24 @@ const Claude = {
 
     const u = new SpeechSynthesisUtterance(clean);
     u.lang = 'fr-FR';
-    u.rate = 1.0;
+    u.rate = 1.02;   // légèrement plus rapide que 1 → moins traînant
     u.pitch = 1.0;
-    const voices = window.speechSynthesis.getVoices();
-    const fr = voices.find(v => v.lang && v.lang.startsWith('fr'));
-    if (fr) u.voice = fr;
+    u.volume = 1.0;
+    const best = this._pickBestFrenchVoice();
+    if (best) u.voice = best;
     u.onend = () => {
       if (this._convoMode) this._convoListen(overlay);
     };
     u.onerror = u.onend;
+    // Sécurité : si onend ne se déclenche jamais (bug Chrome), on relance après
+    // un timeout proportionnel au texte (~0.06s par caractère + 1s de marge)
+    const failSafe = setTimeout(() => {
+      if (this._convoMode) this._convoListen(overlay);
+    }, Math.max(3000, clean.length * 60 + 1500));
+    u.onend = () => {
+      clearTimeout(failSafe);
+      if (this._convoMode) this._convoListen(overlay);
+    };
     window.speechSynthesis.speak(u);
   },
 

@@ -147,6 +147,25 @@ class Api:
             logger.warning("claude_ask: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def claude_chat(self, payload: dict) -> dict:
+        """Conversation vocale libre avec Claude.
+
+        payload = {question: str, history: [{role, content}, ...]}
+        Renvoie {ok, text, error}.
+        """
+        question = (payload or {}).get("question") or ""
+        history = (payload or {}).get("history") or []
+        try:
+            from ..integrations import claude_advisor
+            return claude_advisor.chat_with_claude(
+                self._app_state,
+                question=question,
+                history=history,
+            )
+        except Exception as exc:
+            logger.warning("claude_chat: %s", exc)
+            return {"ok": False, "text": "", "error": str(exc)}
+
     def claude_consume_pending(self) -> dict | None:
         """Renvoie le conseil proactif en attente (ou None)."""
         try:
@@ -2965,6 +2984,107 @@ class Api:
             from ..integrations.pixelpros import mailer as m
             ok, msg = m.set_auto(kind, value)
             return {"ok": ok, "message": msg, "auto": m.is_auto(kind)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Pixel Pros — Programme d'affiliation
+    # ------------------------------------------------------------------
+    def pixelpros_affiliates_list(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        status = ((p.get("status") or "").strip() or None)
+        try: limit = int(p.get("limit") or 100)
+        except (TypeError, ValueError): limit = 100
+        try:
+            from ..integrations.pixelpros import affiliates as a
+            return {"ok": True,
+                    "affiliates": a.list_affiliates(status=status, limit=limit),
+                    "counts": a.count_by_status()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_affiliate_get(self, payload: dict) -> dict:
+        aid = ((payload or {}).get("id") or "").strip()
+        if not aid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.pixelpros import affiliates as a
+            row = a.get_affiliate(aid)
+            if row is None: return {"ok": False, "error": "affilié introuvable"}
+            return {"ok": True,
+                    "affiliate": row,
+                    "stats": a.affiliate_stats(aid),
+                    "sales": a.list_sales(affiliate_id=aid, limit=200)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_affiliate_set_status(self, payload: dict) -> dict:
+        aid = ((payload or {}).get("id") or "").strip()
+        new_status = ((payload or {}).get("status") or "").strip()
+        if not aid or not new_status:
+            return {"ok": False, "error": "id et status requis"}
+        try:
+            from ..integrations.pixelpros import affiliates as a
+            ok, msg = a.set_affiliate_status(aid, new_status)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_affiliate_sales_list(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        status = ((p.get("status") or "").strip() or None)
+        try: limit = int(p.get("limit") or 200)
+        except (TypeError, ValueError): limit = 200
+        try:
+            from ..integrations.pixelpros import affiliates as a
+            return {"ok": True,
+                    "sales": a.list_sales_with_affiliate(payout_status=status, limit=limit)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_affiliate_mark_sales_paid(self, payload: dict) -> dict:
+        ids = (payload or {}).get("ids") or []
+        batch_ref = ((payload or {}).get("batch_ref") or "").strip()
+        if not isinstance(ids, list) or not ids:
+            return {"ok": False, "error": "ids manquants"}
+        try:
+            from ..integrations.pixelpros import affiliates as a
+            n, msg = a.mark_sales_paid(ids, batch_ref=batch_ref)
+            return {"ok": n > 0, "count": n, "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_affiliate_cancel_sale(self, payload: dict) -> dict:
+        sid = ((payload or {}).get("id") or "").strip()
+        reason = ((payload or {}).get("reason") or "").strip()
+        if not sid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.pixelpros import affiliates as a
+            ok, msg = a.cancel_sale(sid, reason=reason)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_affiliate_prepare_payouts(self, payload: dict | None = None) -> dict:
+        """Calcule la liste des paiements à effectuer (commissions 'available'
+        groupées par affilié, seuil 50 €). Ne fait PAS la transition de status."""
+        try:
+            from ..integrations.pixelpros import affiliates as a
+            payouts = a.prepare_monthly_payouts()
+            total_cents = sum(p["total_cents"] for p in payouts)
+            return {"ok": True, "payouts": payouts, "total_cents": total_cents}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_affiliate_promote_pending(self, payload: dict | None = None) -> dict:
+        """Passe en 'available' toutes les ventes 'pending' > 30 jours.
+        À appeler manuellement ou via cron mensuel."""
+        try:
+            from ..integrations.pixelpros import affiliates as a
+            try: days = int((payload or {}).get("min_age_days") or 30)
+            except (TypeError, ValueError): days = 30
+            n = a.promote_pending_sales(min_age_days=days)
+            return {"ok": True, "promoted": n,
+                    "message": f"{n} commission(s) passée(s) en 'versable'."}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
