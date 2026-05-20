@@ -886,6 +886,13 @@ class TriskellCommandApp(ctk.CTk):
             logger.info("Veille Claude active (cycle 1 h).")
         except Exception as exc:
             logger.debug("Veille Claude non démarrée : %s", exc)
+        # Pixel Pros — promote auto les commissions affiliés pending > 30j.
+        try:
+            from .integrations.pixelpros import affiliate_payouts_runner
+            if affiliate_payouts_runner.start_worker(self.app_state):
+                logger.info("PixelPros affiliate payouts runner actif (cycle 6 h).")
+        except Exception as exc:
+            logger.debug("PixelPros affiliate payouts runner non démarré : %s", exc)
         # Chat Thomas : compteur de non-lus initial
         try:
             self._refresh_unread_badge()

@@ -528,6 +528,88 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=500,
                                 content={"ok": False, "error": str(exc)})
 
+    # ---------------- Affiliés : magic link de reconnexion ----------------
+    # Endpoint PUBLIC (pas de PP_HOOK_TOKEN car appelé par le navigateur des
+    # affiliés). Rate-limité grossièrement par IP pour éviter le bourrage de mails.
+
+    _affiliate_login_rate: dict[str, list[float]] = {}
+
+    def _rate_limit_ok(ip: str, max_per_hour: int = 5) -> bool:
+        import time
+        now = time.time()
+        bucket = _affiliate_login_rate.setdefault(ip, [])
+        # purge les hits > 1h
+        cutoff = now - 3600
+        bucket[:] = [t for t in bucket if t > cutoff]
+        if len(bucket) >= max_per_hour:
+            return False
+        bucket.append(now)
+        # Limite globale du dict (anti memory leak)
+        if len(_affiliate_login_rate) > 5000:
+            _affiliate_login_rate.clear()
+        return True
+
+    @app.post("/api/pixelpros/affiliate-login-request")
+    async def pixelpros_affiliate_login_request(request: Request) -> JSONResponse:
+        """Reçoit {email}, génère un magic link et l'envoie par mail.
+
+        Renvoie toujours un message générique (ne révèle pas si l'email existe).
+        Rate-limit : 5 requêtes par IP par heure.
+        """
+        ip = (request.client.host if request.client else "?") or "?"
+        if not _rate_limit_ok(ip):
+            return JSONResponse(status_code=429, content={
+                "ok": False,
+                "error": "Trop de demandes. Réessaie dans une heure."
+            })
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        email = (body.get("email") or "").strip()
+        if not email or "@" not in email:
+            return JSONResponse(status_code=400, content={
+                "ok": False, "error": "Email invalide."
+            })
+
+        # Réponse générique uniforme (anti-énumération)
+        generic_response = {
+            "ok": True,
+            "message": "Si cet email correspond à un compte affilié, on vient d'envoyer un lien de connexion. Vérifie ta boîte (et tes spams)."
+        }
+
+        try:
+            from ..integrations.pixelpros import affiliates as a_repo
+            from ..integrations.pixelpros import mailer as m
+
+            sb = a_repo._sb() if hasattr(a_repo, '_sb') else None
+            if sb is None:
+                # Tente via le repo principal qui partage la connexion
+                from ..integrations.pixelpros.repo import _sb as _main_sb
+                sb = _main_sb()
+
+            if sb is None:
+                logger.warning("affiliate-login-request: Supabase indispo")
+                return JSONResponse(content=generic_response)
+
+            res = sb.rpc("pp_affiliate_request_login", {"p_email": email}).execute()
+            rows = res.data or []
+            row = rows[0] if isinstance(rows, list) and rows else (rows if isinstance(rows, dict) else None)
+            if not row or not row.get("success"):
+                # Email inconnu OU compte non actif → on garde la réponse générique
+                return JSONResponse(content=generic_response)
+
+            token = row.get("token") or ""
+            firstname = row.get("firstname") or ""
+            ok, msg = m.send_affiliate_login_mail(email, token, firstname)
+            if not ok:
+                logger.warning("affiliate-login-request: envoi KO : %s", msg)
+            return JSONResponse(content=generic_response)
+        except Exception as exc:
+            logger.exception("affiliate-login-request a échoué")
+            return JSONResponse(content=generic_response)
+
     # ---------------- Static files (UI) ----------------
 
     if UI_DIR.exists():

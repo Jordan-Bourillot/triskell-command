@@ -41,6 +41,7 @@ PUBLIC_API_PATHS = {
     "/api/billing/webhook",  # Stripe doit pouvoir poster sans cookie
     "/api/pixelpros/on_paid",   # Webhook Stripe Netlify → mail paiement + déclenche build
     "/api/pixelpros/on_built",  # Builder Python → mail "site en ligne"
+    "/api/pixelpros/affiliate-login-request",  # Demande de magic link affilié (public, rate-limité)
 }
 
 # Utilisateurs reconnus (étendre ici si on ajoute du monde)

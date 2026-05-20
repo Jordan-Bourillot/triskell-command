@@ -518,3 +518,69 @@ def send_live_mail(intake: dict) -> tuple[bool, str]:
     ok = _send_via_smtp(cfg, to=to, subject=subject, body=body, body_html=body_html,
                         source="pixelpros_live_mail")
     return (True, f"Envoyé à {to}") if ok else (False, "Envoi SMTP a échoué (voir logs)")
+
+
+# ---------------------------------------------------------------------------
+# Mail "lien de connexion affilié" (magic link)
+# ---------------------------------------------------------------------------
+AFFILIATE_LOGIN_MAIL = {
+    "subject": "Ton lien de connexion Pixel Pros Affiliés",
+    "body_text": (
+        "Salut {firstname},\n\n"
+        "Voilà ton lien de connexion à ton espace affilié Pixel Pros :\n"
+        "{login_url}\n\n"
+        "Ce lien est valable 7 jours et te connecte automatiquement, pas de mot de passe à retenir.\n\n"
+        "Si tu n'as pas demandé ce mail, ignore-le simplement.\n\n"
+        "L'équipe Pixel Pros\n"
+        "https://pixel-pros.fr"
+    ),
+}
+
+
+def _build_affiliate_login_mail(firstname: str, token: str) -> tuple[str, str, str]:
+    login_url = f"https://pixel-pros.fr/affilie-acces.html?token={token}"
+    fn_raw = firstname or "affilié"
+    subject = AFFILIATE_LOGIN_MAIL["subject"]
+    body_text = (AFFILIATE_LOGIN_MAIL["body_text"]
+                 .replace("{firstname}", fn_raw)
+                 .replace("{login_url}", login_url))
+
+    fn = _html(fn_raw)
+    body_html = (
+        "<!doctype html>\n"
+        "<html lang=\"fr\"><head><meta charset=\"utf-8\">\n"
+        "<link href=\"https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@500;700;800;900&display=swap\" rel=\"stylesheet\">\n"
+        "</head>\n"
+        "<body style=\"margin:0; padding:0; background:#fff8ed; font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color:#0b0d1a;\">\n"
+        "<div style=\"max-width:560px; margin:0 auto; padding:32px 20px;\">\n"
+        "  <div style=\"text-align:center; margin-bottom:24px;\">\n"
+        "    <span style=\"font-family:'Press Start 2P', monospace; font-size:14px; color:#0b0d1a; letter-spacing:0.05em;\">PIXEL</span>\n"
+        "    <span style=\"font-family:'Press Start 2P', monospace; font-size:14px; color:#facc15; text-shadow:2px 2px 0 #0b0d1a; letter-spacing:0.05em; margin-left:6px;\">PROS</span>\n"
+        "  </div>\n"
+        "  <div style=\"background:#0ea5ff; color:#fff; padding:14px 18px; border:3px solid #0b0d1a; border-radius:10px; box-shadow:6px 6px 0 #0b0d1a; font-family:'Press Start 2P', monospace; font-size:12px; text-align:center; letter-spacing:0.03em; margin-bottom:28px;\">\n"
+        "    ★ ESPACE AFFILIÉ\n"
+        "  </div>\n"
+        "  <div style=\"background:#ffffff; border:3px solid #0b0d1a; border-radius:14px; box-shadow:6px 6px 0 #0b0d1a; padding:28px 26px;\">\n"
+        f"    <p style=\"margin:0 0 14px; font-size:16px;\">Salut <strong>{fn}</strong>,</p>\n"
+        "    <p style=\"margin:0 0 22px; font-size:15px; line-height:1.6;\">Voilà ton lien personnel pour te connecter à ton espace affilié Pixel Pros. Un clic et c'est ouvert, pas de mot de passe à retenir.</p>\n"
+        f"    <p style=\"text-align:center; margin:22px 0;\"><a href=\"{login_url}\" style=\"display:inline-block; background:#facc15; color:#0b0d1a; padding:14px 28px; border:3px solid #0b0d1a; border-radius:10px; box-shadow:5px 5px 0 #0b0d1a; font-family:'Press Start 2P', monospace; font-size:12px; text-decoration:none; letter-spacing:0.03em;\">▶ OUVRIR MON ESPACE</a></p>\n"
+        "    <p style=\"margin:18px 0 0; font-size:13px; color:#51546b; line-height:1.55;\">Ce lien est valable <strong>7 jours</strong>. Si tu n'as pas demandé ce mail, ignore-le.</p>\n"
+        "  </div>\n"
+        "  <p style=\"text-align:center; margin-top:24px; font-size:12px; color:#51546b;\">Pixel Pros · Tous les pros à égalité</p>\n"
+        "</div></body></html>"
+    )
+    return subject, body_text, body_html
+
+
+def send_affiliate_login_mail(email: str, token: str, firstname: str = "") -> tuple[bool, str]:
+    """Envoie le mail magique de connexion à un affilié."""
+    cfg = _load_smtp_config()
+    if cfg is None:
+        return False, "Config SMTP introuvable"
+    to = (email or "").strip()
+    if not to:
+        return False, "Email destinataire manquant"
+    subject, body, body_html = _build_affiliate_login_mail(firstname, token)
+    ok = _send_via_smtp(cfg, to=to, subject=subject, body=body, body_html=body_html,
+                        source="pixelpros_affiliate_login")
+    return (True, f"Envoyé à {to}") if ok else (False, "Envoi SMTP a échoué (voir logs)")
