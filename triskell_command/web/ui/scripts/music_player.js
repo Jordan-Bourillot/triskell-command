@@ -274,10 +274,14 @@ const MusicPlayer = {
         position: fixed;
         left: 16px;
         bottom: 16px;
-        z-index: 45;
+        z-index: 55; /* au-dessus de la sidebar (z-50) pour rester visible sur mobile drawer */
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       }
-      @media (max-width: 768px) {
+      /* Sur desktop, la sidebar (md:w-64 = 256px) occupe la gauche : on décale */
+      @media (min-width: 768px) {
+        .music-player { left: calc(16rem + 16px); }
+      }
+      @media (max-width: 767px) {
         .music-player { left: 12px; bottom: max(12px, env(safe-area-inset-bottom, 12px)); }
       }
       .music-player-toggle {
