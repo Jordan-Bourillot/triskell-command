@@ -68,6 +68,16 @@ const NewBadge = {
         cursor: pointer;
       }
       .new-badge button:hover { color: white; }
+      /* Variante verte discrète — pour les nouveautés du jour / de la veille */
+      .new-badge.is-green {
+        background: #16a34a;
+        font-size: 8px;
+        padding: 1px 3px 1px 4px;
+        letter-spacing: 0.4px;
+        box-shadow: 0 1px 2px rgba(22,163,74,0.3);
+        opacity: 0.92;
+      }
+      .new-badge.is-green:hover { opacity: 1; }
     `;
     document.head.appendChild(s);
   },
@@ -85,7 +95,8 @@ const NewBadge = {
     if (existing) return existing;
 
     const badge = document.createElement('span');
-    badge.className = 'new-badge ' + (options.inline ? 'new-badge-inline' : 'new-badge-abs');
+    const variantCls = options.variant === 'green' ? ' is-green' : '';
+    badge.className = 'new-badge ' + (options.inline ? 'new-badge-inline' : 'new-badge-abs') + variantCls;
     badge.innerHTML = `<span>NEW</span><button type="button" title="Marquer comme vu">×</button>`;
     badge.dataset.newBadge = id;
 
@@ -113,3 +124,55 @@ const NewBadge = {
 };
 
 window.NewBadge = NewBadge;
+
+/* ─────────────────────────────────────────────────────────────
+ * Registre auto-attaché : pastilles "NEW" vertes pour toutes
+ * les nouveautés implémentées depuis hier (2026-05-19).
+ *
+ * Le DOM des vues étant dynamique (re-render à chaque navigation),
+ * on ré-essaie d'attacher après chaque mutation majeure, debounce 150ms.
+ * Chaque badge est dismissable via la croix, indépendamment des autres.
+ * Quand tout est dismissé, on déconnecte l'observer.
+ * ───────────────────────────────────────────────────────────── */
+const NewFeaturesSinceYesterday = {
+  features: [
+    // Sidebar — chaque lien d'une vue qui contient du nouveau
+    { selector: '[data-view="mails"]',     id: 'new-20260519:mails-multi-actions' },
+    { selector: '[data-view="pixelpros"]', id: 'new-20260519:pixelpros-kanban' },
+    { selector: '[data-view="phare"]',     id: 'new-20260520:phare-quickadd' },
+    { selector: '[data-view="catalogue"]', id: 'new-20260519:catalogue-pixelpros' },
+    // Cockpit — citation du jour
+    { selector: '.daily-quote',            id: 'new-20260520:cockpit-quote' },
+    // Composer mail — autocomplétion du destinataire
+    { selector: '#cmp-to-wrap',            id: 'new-20260520:composer-autocomplete' },
+  ],
+
+  allDismissed() {
+    return this.features.every(f => NewBadge.isDismissed(f.id));
+  },
+
+  tryAttachAll() {
+    this.features.forEach(f => {
+      const el = document.querySelector(f.selector);
+      if (el) NewBadge.attach(el, f.id, { variant: 'green', inline: !!f.inline });
+    });
+  },
+
+  init() {
+    this.tryAttachAll();
+    if (this.allDismissed()) return;
+    let pending = null;
+    const obs = new MutationObserver(() => {
+      if (pending) return;
+      pending = setTimeout(() => {
+        pending = null;
+        this.tryAttachAll();
+        if (this.allDismissed()) obs.disconnect();
+      }, 150);
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  },
+};
+
+window.addEventListener('DOMContentLoaded', () => NewFeaturesSinceYesterday.init());
+window.NewFeaturesSinceYesterday = NewFeaturesSinceYesterday;
