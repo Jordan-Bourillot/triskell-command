@@ -85,20 +85,26 @@ def _replies_breakdown(client, day_start: str, day_end: str) -> dict[str, int]:
 
 
 def _count_pending_prospect_drafts(client) -> int:
+    # On exclut les coquilles vides (body == "") : ce ne sont pas des
+    # brouillons à valider mais des prospects en attente de génération IA.
+    # Cohérent avec la vue Brouillons (Api.get_drafts) qui filtre pareil.
     try:
         sb = client.raw
         res = (sb.table("prospect_drafts").select("id", count="exact")
-               .eq("status", "pending").limit(1).execute())
+               .eq("status", "pending").neq("body", "")
+               .limit(1).execute())
         return int(res.count or 0)
     except Exception:
         return 0
 
 
 def _count_pending_convoy_drafts(client) -> int:
+    # Idem : on ne compte que les drafts qui ont vraiment du contenu.
     try:
         sb = client.raw
         res = (sb.table("convoy_drafts").select("id", count="exact")
-               .eq("status", "pending").limit(1).execute())
+               .eq("status", "pending").neq("body", "")
+               .limit(1).execute())
         return int(res.count or 0)
     except Exception:
         return 0

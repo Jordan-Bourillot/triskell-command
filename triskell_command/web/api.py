@@ -422,6 +422,7 @@ class Api:
                             "prospects:prospect_id(name, legal_name, "
                             "emails, city)")
                     .eq("status", "pending")
+                    .neq("body", "")
                     .order("created_at", desc=True)
                     .limit(self._DRAFTS_LIMIT_PER_SOURCE)
                     .execute())
@@ -454,6 +455,7 @@ class Api:
                             "is_test, created_at, "
                             "convoy_campaigns:campaign_id(name)")
                     .eq("status", "pending")
+                    .neq("body", "")
                     .order("created_at", desc=True)
                     .limit(self._DRAFTS_LIMIT_PER_SOURCE)
                     .execute())
