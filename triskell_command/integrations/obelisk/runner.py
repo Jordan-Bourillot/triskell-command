@@ -584,6 +584,26 @@ def _sync_keys_to_ledenicheur(ucfg: dict, log) -> None:
         v = ucfg.get(k)
         if v not in (None, "", [], {}):
             payload[k] = v
+
+    # ⚡ Clés IA (Anthropic/Google/OpenAI/…) — stockées dans le coffre
+    # partagé Triskell (Réglages → Services IA), pas dans la config Obelisk.
+    # Le pipeline natif les lit dans `denicheur_cfg["ai_api_keys"]` et skippe
+    # l'étape IA si aucune n'est trouvée.
+    try:
+        from .. import shared_secrets
+        from triskell_core.db import get_client, SupabaseNotConfigured
+        try:
+            sb = get_client()
+            sb = sb if getattr(sb, "is_authenticated", False) else None
+        except SupabaseNotConfigured:
+            sb = None
+        ai_keys = shared_secrets.get_ai_keys(client=sb) or {}
+        ai_keys = {p: k for p, k in ai_keys.items() if k}
+        if ai_keys:
+            payload["ai_api_keys"] = ai_keys
+    except Exception as exc:
+        log(f"⚠ Lecture des clés IA Triskell échouée : {exc}")
+
     if not payload:
         log("⚠ Aucune clé API trouvée dans la config Supabase à synchroniser.")
         return
