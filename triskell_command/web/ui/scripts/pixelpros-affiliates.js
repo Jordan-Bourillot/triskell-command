@@ -37,7 +37,7 @@ const PixelProsAffiliates = {
           <div>
             <div class="hero-kicker mb-2" style="color:#facc15;">PIXEL PROS · AFFILIÉS</div>
             <h1 class="hero-title mb-2" style="font-size: 34px;">Programme d'affiliation.</h1>
-            <p class="hero-subtitle">10 % de commission sur 12 mois. Suivi des ventes, paiements à préparer, gestion des comptes.</p>
+            <p class="hero-subtitle">20 % de commission sur 12 mois. Suivi des ventes, paiements à préparer, gestion des comptes.</p>
           </div>
           <div class="flex items-center gap-2">
             <button id="ppa-promote" class="btn btn-secondary" title="Passe en 'versable' les commissions pending de plus de 30 jours">
