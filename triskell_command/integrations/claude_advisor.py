@@ -222,6 +222,235 @@ def gather_context(app_state) -> dict[str, Any]:
     return ctx
 
 
+def _safe_pick(d: Any, keys: list[str]) -> dict:
+    """Ne garde que les clés listées (et ignore les valeurs nulles/vides)."""
+    if not isinstance(d, dict):
+        return {}
+    out = {}
+    for k in keys:
+        v = d.get(k)
+        if v not in (None, "", [], {}):
+            out[k] = v
+    return out
+
+
+def gather_voice_context(app_state) -> dict[str, Any]:
+    """Snapshot ÉLARGI pour le mode conversation vocale.
+
+    Contrairement à gather_context (qui se concentre sur le cockpit
+    prospection), cette version balaye tous les modules de l'app
+    (catalogue, clients, projets, Pixel Pros, Lagriffe, Obélisk, Phare,
+    Convoi, Forge, factures, funnel) afin que le mode vocal puisse
+    répondre à n'importe quelle question sur l'état de Triskell Command.
+
+    Chaque bloc est wrappé dans try/except pour qu'un module en panne
+    (Supabase déconnecté, table manquante…) ne casse pas la collecte.
+    """
+    ctx = gather_context(app_state)
+
+    # Catalogue produits
+    try:
+        from . import catalog_central
+        full = catalog_central.get_full() or {}
+        prods = full.get("products") or []
+        bundles = full.get("bundles") or []
+        ctx["catalog"] = {
+            "products_total": len(prods),
+            "products_active": sum(
+                1 for p in prods if p.get("active") is not False
+            ),
+            "bundles_total": len(bundles),
+            "products": [
+                _safe_pick(p, ["id", "name", "category", "price",
+                                 "price_monthly", "active", "tagline"])
+                for p in prods[:40]
+            ],
+            "bundles": [
+                _safe_pick(b, ["id", "name", "price", "items", "active"])
+                for b in bundles[:20]
+            ],
+        }
+    except Exception as exc:
+        logger.debug("voice ctx catalog: %s", exc)
+
+    # Clients (master)
+    try:
+        from . import clients_master_repo
+        clients = clients_master_repo.list_clients(limit=200) or []
+        by_status: dict[str, int] = {}
+        for c in clients:
+            s = (c.get("status") or "unknown")
+            by_status[s] = by_status.get(s, 0) + 1
+        ctx["clients_master"] = {
+            "total": len(clients),
+            "by_status": by_status,
+            "recent": [
+                _safe_pick(c, ["display_name", "company", "email",
+                                 "status", "tags", "created_at",
+                                 "last_contacted_at"])
+                for c in clients[:20]
+            ],
+        }
+    except Exception as exc:
+        logger.debug("voice ctx clients_master: %s", exc)
+
+    # Projets clients (détail par statut)
+    try:
+        from . import clients_repo
+        grouped = clients_repo.list_grouped() or {}
+        ctx["client_projects_detail"] = {
+            status: [
+                _safe_pick(p, ["id", "display_name", "client_name",
+                                 "product_type", "amount", "price",
+                                 "status", "updated_at", "nps_sent_at",
+                                 "site_url"])
+                for p in (items or [])[:10]
+            ]
+            for status, items in grouped.items()
+        }
+    except Exception as exc:
+        logger.debug("voice ctx client_projects: %s", exc)
+
+    # Pixel Pros (intakes + affiliés)
+    try:
+        from .pixelpros import repo as pp_repo
+        pp = {
+            "intakes_by_status": pp_repo.count_by_status() or {},
+            "recent_intakes": [
+                _safe_pick(i, ["id", "company", "email", "status",
+                                 "site_url", "domain", "created_at",
+                                 "paid_at"])
+                for i in (pp_repo.list_intakes(limit=15) or [])
+            ],
+        }
+        try:
+            from .pixelpros import affiliates as pp_aff
+            pp["affiliates_by_status"] = pp_aff.count_by_status() or {}
+        except Exception:
+            pass
+        ctx["pixel_pros"] = pp
+    except Exception as exc:
+        logger.debug("voice ctx pixel_pros: %s", exc)
+
+    # Lagriffe
+    try:
+        from .lagriffe import repo as lg_repo
+        ctx["lagriffe"] = {
+            "intakes_by_status": lg_repo.count_by_status() or {},
+            "recent_intakes": [
+                _safe_pick(i, ["id", "company", "name", "email",
+                                 "status", "created_at"])
+                for i in (lg_repo.list_intakes(limit=15) or [])
+            ],
+        }
+    except Exception as exc:
+        logger.debug("voice ctx lagriffe: %s", exc)
+
+    # Obélisk (créateurs)
+    try:
+        from .obelisk import repo as ob_repo
+        ob_stats = ob_repo.stats() or {}
+        creators = ob_repo.list_creators(limit=15) or []
+        if isinstance(creators, dict):
+            creators = creators.get("creators") or []
+        ctx["obelisk"] = {
+            "stats": ob_stats,
+            "recent_creators": [
+                _safe_pick(c, ["name", "handle", "platform", "followers",
+                                 "status", "niche", "contacted_at"])
+                for c in creators
+            ],
+        }
+    except Exception as exc:
+        logger.debug("voice ctx obelisk: %s", exc)
+
+    # Phare (SEO)
+    try:
+        from .phare import repo as ph_repo
+        sites = ph_repo.list_sites(active_only=True) or []
+        ctx["phare"] = {
+            "active_sites": len(sites),
+            "sites": [
+                _safe_pick(s, ["id", "name", "domain", "client_id",
+                                 "cadence"])
+                for s in sites[:30]
+            ],
+            "pending_actions": ph_repo.pending_actions_count() or 0,
+        }
+    except Exception as exc:
+        logger.debug("voice ctx phare: %s", exc)
+
+    # Convoi (campagnes de prospection)
+    try:
+        from . import convoy_runner
+        camps = convoy_runner.list_campaigns() or []
+        ctx["convoy"] = {
+            "campaigns_total": len(camps),
+            "campaigns": [
+                {
+                    "id": getattr(c, "id", ""),
+                    "name": getattr(c, "name", ""),
+                    "status": getattr(c, "status", ""),
+                    "drafts_total": len(getattr(c, "drafts", []) or []),
+                    "drafts_pending": sum(
+                        1 for d in (getattr(c, "drafts", []) or [])
+                        if (getattr(d, "status", "") or "") == "pending"
+                    ),
+                    "drafts_sent": sum(
+                        1 for d in (getattr(c, "drafts", []) or [])
+                        if (getattr(d, "status", "") or "") == "sent"
+                    ),
+                }
+                for c in camps[:20]
+            ],
+        }
+    except Exception as exc:
+        logger.debug("voice ctx convoy: %s", exc)
+
+    # Forge (briefs entrants Lagriffe / WoW)
+    try:
+        from .forge import repo as fg_repo
+        ctx["forge"] = {
+            "new_briefs": fg_repo.count_briefs("new") or 0,
+            "queued_projects": fg_repo.count_projects("queued") or 0,
+            "recent_briefs": [
+                _safe_pick(b, ["id", "subject", "from_addr", "status",
+                                 "created_at"])
+                for b in (fg_repo.list_briefs(limit=10) or [])
+            ],
+            "recent_projects": [
+                _safe_pick(p, ["id", "name", "status", "created_at"])
+                for p in (fg_repo.list_projects(limit=10) or [])
+            ],
+        }
+    except Exception as exc:
+        logger.debug("voice ctx forge: %s", exc)
+
+    # Facturation (Carnet — devis & factures)
+    try:
+        from .billing import repo as bl_repo
+        invoices = bl_repo.list_invoices(limit=20) or []
+        ctx["billing"] = {
+            "recent_invoices": [
+                _safe_pick(inv, ["invoice_number", "client_name",
+                                   "total_ht", "total_ttc", "status",
+                                   "issued_at", "paid_at", "due_at"])
+                for inv in invoices
+            ],
+        }
+    except Exception as exc:
+        logger.debug("voice ctx billing: %s", exc)
+
+    # Tunnel de conversion (30 derniers jours)
+    try:
+        from . import funnel_metrics
+        ctx["funnel_30d"] = funnel_metrics.compute_funnel("30d", "all") or {}
+    except Exception as exc:
+        logger.debug("voice ctx funnel: %s", exc)
+
+    return ctx
+
+
 # ---------------------------------------------------------------------------
 # Appel Claude
 # ---------------------------------------------------------------------------
@@ -259,9 +488,23 @@ CONTEXTE (à n'utiliser QUE si on te le demande)
 ═══════════════════════════════════════════════════════════════
 Studio Triskell est la maison-mère. Jordan & Thomas opèrent : Pixel Pros (sites pros à 24,90€/mois), Lagriffe Studio (sites sur mesure à 49€/mois quand le client aime), WoW Studio (sites très haut de gamme), Rankus Studio (SEO autonome). Carnet est leur outil devis/factures pour micro-entrepreneurs. Triskell Command est l'app que tu es en train d'animer.
 
-Tu reçois aussi en bas de ce prompt un bloc JSON intitulé « ÉTAT DU COCKPIT EN DIRECT ». Ce JSON est un snapshot LIVE de l'app Triskell Command au moment où Jordan te parle (envois du jour, réponses entrantes, alertes, projets clients, état config, workers…). Tu peux t'en servir pour répondre à toute question sur l'état de l'app, les chiffres du jour, les prospects, les workers, etc. NE le mentionne PAS de toi-même tant que Jordan ne te pose pas une question dessus, mais utilise-le librement quand il te demande quelque chose qui s'y trouve.
+Tu reçois aussi en bas de ce prompt un bloc JSON intitulé « ÉTAT DE TOUTE L'APP TRISKELL COMMAND EN DIRECT ». Ce JSON est un snapshot LIVE de l'app entière au moment où Jordan te parle. Il contient :
+- Cockpit prospection : envois du jour, réponses entrantes (par catégorie), alertes, totaux, queue, workers, état config (SMTP/IMAP/IA).
+- Catalogue : produits actifs avec prix, bundles.
+- Clients (clients_master) : liste, statuts, contacts récents.
+- Projets clients (client_projects_detail) : groupés par statut (proposed, in_progress, delivered…), montants, NPS.
+- Pixel Pros : intakes par statut, derniers sites publiés/en cours, programme d'affiliation.
+- Lagriffe : intakes (sites 49€/mois) par statut.
+- Obélisk : créateurs prospectés, stats.
+- Phare (SEO) : sites suivis, actions en attente.
+- Convoi : campagnes de prospection, brouillons (pending / sent par campagne).
+- Forge : briefs entrants et projets en queue.
+- Carnet (billing) : factures récentes.
+- Tunnel de conversion sur 30 jours (funnel_30d).
 
-N'invente jamais de chiffres ou de faits. Si la donnée n'est pas dans le JSON ou dans l'historique, dis que tu ne sais pas.
+Tu peux t'en servir pour répondre à TOUTE question sur l'app : chiffres du jour, projets en cours, état d'un client, statut d'une campagne, etc. NE le déroule PAS de toi-même tant que Jordan ne te pose pas une question dessus, mais utilise-le librement quand il te demande quelque chose qui s'y trouve.
+
+N'invente jamais de chiffres ou de faits. Si la donnée n'est pas dans le JSON ou dans l'historique, dis que tu ne sais pas et propose à Jordan d'aller voir la vue concernée.
 """
 
 
@@ -292,19 +535,21 @@ def chat_with_claude(app_state, *, question: str,
     convo_parts.append(f"Jordan : {question.strip()}")
     convo_parts.append("Claude :")
 
-    # Snapshot LIVE de l'état du cockpit, pour que le mode vocal puisse
-    # répondre aux questions sur les chiffres du jour, les réponses en
-    # attente, l'état config, etc. On le sérialise en JSON et on l'injecte
-    # juste avant l'historique de la conversation.
+    # Snapshot LIVE de toute l'app (cockpit + catalogue + clients +
+    # projets + Pixel Pros + Lagriffe + Obélisk + Phare + Convoi + Forge
+    # + factures + funnel), pour que le mode vocal puisse répondre à
+    # n'importe quelle question sur Triskell Command. On le sérialise en
+    # JSON et on l'injecte juste avant l'historique de la conversation.
     try:
-        context = gather_context(app_state)
+        context = gather_voice_context(app_state)
         context_block = (
-            "ÉTAT DU COCKPIT EN DIRECT (JSON, snapshot pris à l'instant) :\n"
+            "ÉTAT DE TOUTE L'APP TRISKELL COMMAND EN DIRECT "
+            "(JSON, snapshot pris à l'instant) :\n"
             + json.dumps(context, ensure_ascii=False, indent=2, default=str)
         )
     except Exception as exc:
-        logger.debug("convo gather_context: %s", exc)
-        context_block = "ÉTAT DU COCKPIT EN DIRECT : (indisponible)"
+        logger.debug("convo gather_voice_context: %s", exc)
+        context_block = "ÉTAT DE L'APP EN DIRECT : (indisponible)"
 
     full_prompt = (CONVO_SYSTEM_PROMPT + "\n\n---\n\n"
                    + context_block + "\n\n---\n\n"
