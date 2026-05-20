@@ -696,8 +696,12 @@ const Phare = {
           <form id="ph-quick-form" class="space-y-3">
             <div>
               <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">URL du site *</label>
-              <input type="text" name="url" placeholder="exemple : cabinet-dupont.fr"
-                     class="phare-input" autocomplete="off" spellcheck="false" required>
+              <input type="text" name="phare_site_url" id="ph-quick-url"
+                     placeholder="exemple : cabinet-dupont.fr"
+                     class="phare-input phare-input--url"
+                     autocomplete="off" autocorrect="off" autocapitalize="off"
+                     spellcheck="false" required
+                     data-1p-ignore data-lpignore="true" data-form-type="other">
             </div>
             <p class="text-xs text-text-muted" style="margin-top:4px">
               Tu peux écrire juste le domaine (<code>cabinet-dupont.fr</code>) ou l'URL complète (<code>https://cabinet-dupont.fr</code>).
@@ -733,8 +737,7 @@ const Phare = {
     };
 
     dlg.querySelector('[data-save]').onclick = async () => {
-      const form = dlg.querySelector('#ph-quick-form');
-      const url = (new FormData(form).get('url') || '').toString().trim();
+      const url = (dlg.querySelector('#ph-quick-url')?.value || '').trim();
       if (!url) { this._toast('Mets l’adresse du site.', 'error'); return; }
       showStep('loading');
       let res;
@@ -788,7 +791,7 @@ const Phare = {
       };
     };
 
-    setTimeout(() => dlg.querySelector('input[name="url"]')?.focus(), 50);
+    setTimeout(() => dlg.querySelector('#ph-quick-url')?.focus(), 50);
   },
 
   // ════════════════════════════════════════════════════════════════════

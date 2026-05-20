@@ -2027,13 +2027,39 @@ html, body {
   box-shadow: 0 0 0 3px hsl(var(--accent) / 0.18);
 }
 .phare-input:disabled { opacity: 0.6; }
+.phare-input::placeholder {
+  color: hsl(var(--text-muted));
+  opacity: 1;
+}
+.phare-input {
+  color-scheme: inherit;
+  caret-color: hsl(var(--accent));
+}
+/* Champ URL de l'ajout rapide — texte toujours bien visible
+   peu importe le thème, les extensions de mot de passe ou Chrome autofill */
+.phare-input--url,
+.phare-input--url:hover,
+.phare-input--url:focus,
+.phare-input--url:active {
+  background: hsl(var(--surface-elevated)) !important;
+  color: hsl(var(--text)) !important;
+  -webkit-text-fill-color: hsl(var(--text)) !important;
+  caret-color: hsl(var(--accent)) !important;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+}
+.phare-input--url::placeholder {
+  color: hsl(var(--text-muted)) !important;
+  opacity: 0.7 !important;
+  -webkit-text-fill-color: hsl(var(--text-muted)) !important;
+}
 /* Fix Chrome autofill qui force un fond clair + texte clair (invisible) */
 .phare-input:-webkit-autofill,
 .phare-input:-webkit-autofill:hover,
 .phare-input:-webkit-autofill:focus,
 .phare-input:-webkit-autofill:active {
   -webkit-text-fill-color: hsl(var(--text)) !important;
-  -webkit-box-shadow: 0 0 0 1000px hsl(var(--bg)) inset !important;
+  -webkit-box-shadow: 0 0 0 1000px hsl(var(--surface-elevated)) inset !important;
   caret-color: hsl(var(--text)) !important;
   transition: background-color 5000s ease-in-out 0s;
 }
