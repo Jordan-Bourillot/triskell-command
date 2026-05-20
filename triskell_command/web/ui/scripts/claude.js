@@ -61,6 +61,104 @@
     .claude-speak-btn.is-speaking {
       background:#22c55e; border-color:#16a34a; color:#fff;
     }
+    /* ─── Mode Conversation : écran d'appel téléphonique ─── */
+    .claude-convo-screen {
+      position:absolute; inset:0; z-index:5;
+      background: linear-gradient(180deg,
+        hsl(var(--surface)) 0%,
+        hsl(var(--bg)) 100%);
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      padding: 32px;
+      gap: 24px;
+      animation: claude-convo-fadein 200ms ease-out;
+    }
+    @keyframes claude-convo-fadein { from { opacity:0 } to { opacity:1 } }
+    .claude-convo-orb {
+      position: relative;
+      width: 160px; height: 160px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .claude-convo-orb .orb-core {
+      position: absolute; inset: 0;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%,
+        hsl(var(--accent)) 0%,
+        hsl(var(--accent) / 0.6) 60%,
+        hsl(var(--accent) / 0.3) 100%);
+      box-shadow: 0 12px 40px hsl(var(--accent) / 0.4);
+      transition: background 300ms, box-shadow 300ms;
+    }
+    .claude-convo-orb .orb-pulse {
+      position: absolute; inset: 0;
+      border-radius: 50%;
+      border: 2px solid hsl(var(--accent) / 0.5);
+      opacity: 0;
+    }
+    .claude-convo-orb[data-state="listening"] .orb-core {
+      background: radial-gradient(circle at 35% 35%, #ef4444 0%, #dc2626 60%, #991b1b 100%);
+      box-shadow: 0 12px 50px rgba(239,68,68,0.5);
+    }
+    .claude-convo-orb[data-state="listening"] .orb-pulse {
+      animation: claude-orb-pulse 1.4s ease-out infinite;
+      border-color: rgba(239,68,68,0.6);
+    }
+    .claude-convo-orb[data-state="thinking"] .orb-core {
+      background: radial-gradient(circle at 35% 35%, #fbbf24 0%, #f59e0b 60%, #b45309 100%);
+      box-shadow: 0 12px 50px rgba(251,191,36,0.5);
+      animation: claude-orb-breathe 1.4s ease-in-out infinite;
+    }
+    .claude-convo-orb[data-state="speaking"] .orb-core {
+      background: radial-gradient(circle at 35% 35%, #22c55e 0%, #16a34a 60%, #14532d 100%);
+      box-shadow: 0 12px 50px rgba(34,197,94,0.5);
+      animation: claude-orb-wave 0.6s ease-in-out infinite;
+    }
+    @keyframes claude-orb-pulse {
+      0%   { opacity: 0.6; transform: scale(1); }
+      100% { opacity: 0; transform: scale(1.5); }
+    }
+    @keyframes claude-orb-breathe {
+      0%, 100% { transform: scale(1); }
+      50%      { transform: scale(1.08); }
+    }
+    @keyframes claude-orb-wave {
+      0%, 100% { transform: scale(1); }
+      50%      { transform: scale(1.04); }
+    }
+    .claude-convo-status {
+      font-size: 18px; font-weight: 700; letter-spacing: -0.3px;
+      color: hsl(var(--text));
+      text-align: center;
+      min-height: 28px;
+    }
+    .claude-convo-transcript {
+      max-width: 560px; width: 100%;
+      min-height: 60px; max-height: 160px;
+      overflow-y: auto;
+      padding: 12px 16px;
+      border-radius: 14px;
+      background: hsl(var(--surface-elevated));
+      border: 1px solid hsl(var(--border));
+      font-size: 14px; line-height: 1.55;
+      color: hsl(var(--text-secondary));
+      text-align: center;
+    }
+    .claude-convo-transcript:empty::before {
+      content: '…'; color: hsl(var(--text-muted));
+    }
+    .claude-convo-stop {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 28px;
+      border-radius: 999px;
+      background: #ef4444; color: white;
+      border: 0; cursor: pointer;
+      font-size: 14px; font-weight: 700;
+      letter-spacing: 0.5px;
+      box-shadow: 0 6px 20px rgba(239,68,68,0.4);
+      transition: transform 100ms, box-shadow 200ms;
+    }
+    .claude-convo-stop:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(239,68,68,0.55); }
+    .claude-convo-stop:active { transform: translateY(0); }
   `;
   document.head.appendChild(s);
 })();
@@ -139,9 +237,12 @@ const Claude = {
 
   close(overlay) {
     if (!overlay) return;
+    // Sort proprement du mode conversation si actif
+    this._convoMode = false;
     // Coupe la dictée et la synthèse vocale si elles tournent
     if (this._recognition) {
-      try { this._recognition.stop(); } catch (e) {}
+      try { this._recognition.abort(); } catch (e) {}
+      this._recognition = null;
     }
     if (window.speechSynthesis && window.speechSynthesis.speaking) {
       try { window.speechSynthesis.cancel(); } catch (e) {}
@@ -189,6 +290,9 @@ const Claude = {
           <div class="flex flex-col sm:flex-row gap-2 items-stretch">
             <button id="claude-mic-btn" type="button" class="claude-mic-btn"
                     title="Parler à Claude (dictée vocale)" aria-label="Dicter ma question">🎤</button>
+            <button id="claude-convo-btn" type="button" class="claude-mic-btn"
+                    title="Conversation vocale en continu" aria-label="Démarrer une conversation vocale"
+                    style="font-size:16px;">📞</button>
             <input id="claude-question" type="text"
                    class="flex-1 min-w-0 px-4 py-2.5 text-sm rounded-xl bg-surface border border-border
                           focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent
@@ -230,7 +334,180 @@ const Claude = {
         micBtn.onclick = () => this._toggleVoiceInput(overlay);
       }
     }
+
+    // Bouton conversation vocale en continu (mode "appel")
+    const convoBtn = overlay.querySelector('#claude-convo-btn');
+    if (convoBtn) {
+      if (!this._supportsVoiceInput() || !this._supportsVoiceOutput()) {
+        convoBtn.disabled = true;
+        convoBtn.title = "Ton navigateur ne supporte pas la voix dans les deux sens";
+      } else {
+        convoBtn.onclick = () => this._startConversation(overlay);
+      }
+    }
     return overlay;
+  },
+
+  // ---- Mode Conversation : boucle écoute → réponse vocale → écoute ----
+
+  _startConversation(overlay) {
+    if (this._convoMode) return;
+    this._convoMode = true;
+    // Stoppe toute écoute / lecture en cours d'un précédent mode
+    if (this._recognition) { try { this._recognition.abort(); } catch (e) {} this._recognition = null; }
+    if (window.speechSynthesis) { try { window.speechSynthesis.cancel(); } catch (e) {} }
+
+    // Construit l'écran d'appel par-dessus le body+footer du modal
+    const card = overlay.querySelector('.modal-card');
+    if (!card) return;
+    const screen = document.createElement('div');
+    screen.className = 'claude-convo-screen';
+    screen.id = 'claude-convo-screen';
+    screen.innerHTML = `
+      <div class="claude-convo-orb" data-state="idle">
+        <div class="orb-core"></div>
+        <div class="orb-pulse"></div>
+      </div>
+      <div class="claude-convo-status">Connexion…</div>
+      <div class="claude-convo-transcript"></div>
+      <button class="claude-convo-stop" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(135deg)"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.37 1.9.72 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.35 1.85.59 2.81.72A2 2 0 0 1 22 16.92z"/></svg>
+        Raccrocher
+      </button>
+    `;
+    card.appendChild(screen);
+
+    screen.querySelector('.claude-convo-stop').onclick = () => this._stopConversation(overlay);
+
+    // Démarre la boucle après un court fade-in
+    setTimeout(() => this._convoListen(overlay), 300);
+  },
+
+  _stopConversation(overlay) {
+    this._convoMode = false;
+    if (this._recognition) { try { this._recognition.abort(); } catch (e) {} this._recognition = null; }
+    if (window.speechSynthesis) { try { window.speechSynthesis.cancel(); } catch (e) {} }
+    const screen = overlay.querySelector('#claude-convo-screen');
+    if (screen) screen.remove();
+  },
+
+  _setConvoState(overlay, state, label) {
+    const orb = overlay.querySelector('.claude-convo-orb');
+    const status = overlay.querySelector('.claude-convo-status');
+    if (orb) orb.setAttribute('data-state', state);
+    if (status && label) status.textContent = label;
+  },
+
+  _setConvoTranscript(overlay, text) {
+    const t = overlay.querySelector('.claude-convo-transcript');
+    if (t) t.textContent = text || '';
+  },
+
+  _convoListen(overlay) {
+    if (!this._convoMode) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { this._stopConversation(overlay); return; }
+
+    this._setConvoState(overlay, 'listening', 'Je t\'écoute…');
+
+    const rec = new SR();
+    rec.lang = 'fr-FR';
+    rec.continuous = false;        // s'arrête tout seul après silence
+    rec.interimResults = true;
+    this._recognition = rec;
+
+    let finalText = '';
+    rec.onresult = (e) => {
+      finalText = '';
+      let interim = '';
+      for (let i = 0; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t;
+        else interim += t;
+      }
+      this._setConvoTranscript(overlay, (finalText + interim).trim());
+    };
+    rec.onerror = (e) => {
+      // 'no-speech' = silence prolongé, c'est normal en conversation
+      try { rec.stop(); } catch (err) {}
+    };
+    rec.onend = () => {
+      this._recognition = null;
+      const q = finalText.trim();
+      if (!this._convoMode) return;
+      if (!q) {
+        // Rien dit → on relance l'écoute après une courte pause
+        setTimeout(() => this._convoListen(overlay), 400);
+        return;
+      }
+      this._convoAsk(overlay, q);
+    };
+
+    try { rec.start(); }
+    catch (e) {
+      // Souvent un "already started" — on retente après un cycle
+      setTimeout(() => this._convoMode && this._convoListen(overlay), 300);
+    }
+  },
+
+  async _convoAsk(overlay, question) {
+    if (!this._convoMode) return;
+    this._setConvoState(overlay, 'thinking', 'Je réfléchis…');
+    this._setConvoTranscript(overlay, '« ' + question + ' »');
+
+    let advice = null;
+    try {
+      advice = await App.api.claude_ask({ question });
+    } catch (e) { /* swallow */ }
+
+    if (!this._convoMode) return;
+
+    let speakable = '';
+    if (advice && advice.ok) {
+      speakable = [advice.headline, advice.advice].filter(Boolean).join('. ');
+    }
+    if (!speakable) {
+      speakable = "Désolé, je n'ai pas pu répondre cette fois. Réessaye ?";
+    }
+
+    this._convoSpeak(overlay, speakable);
+  },
+
+  _stripMarkdown(text) {
+    return String(text || '')
+      .replace(/```[\s\S]*?```/g, '')                 // blocs de code
+      .replace(/`([^`]+)`/g, '$1')                    // inline code
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')        // liens [txt](url) → txt
+      .replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, '$1')   // gras / italique
+      .replace(/^#{1,6}\s+/gm, '')                    // titres
+      .replace(/^>\s+/gm, '')                         // citations
+      .replace(/^[-*+]\s+/gm, '')                     // listes
+      .replace(/\n{3,}/g, '\n\n');
+  },
+
+  _convoSpeak(overlay, text) {
+    if (!this._convoMode) return;
+    const clean = this._stripMarkdown(text);
+    this._setConvoState(overlay, 'speaking', 'Je te réponds…');
+    this._setConvoTranscript(overlay, clean);
+
+    if (!window.speechSynthesis) {
+      setTimeout(() => this._convoListen(overlay), 1500);
+      return;
+    }
+
+    const u = new SpeechSynthesisUtterance(clean);
+    u.lang = 'fr-FR';
+    u.rate = 1.0;
+    u.pitch = 1.0;
+    const voices = window.speechSynthesis.getVoices();
+    const fr = voices.find(v => v.lang && v.lang.startsWith('fr'));
+    if (fr) u.voice = fr;
+    u.onend = () => {
+      if (this._convoMode) this._convoListen(overlay);
+    };
+    u.onerror = u.onend;
+    window.speechSynthesis.speak(u);
   },
 
   _supportsVoiceInput() {
