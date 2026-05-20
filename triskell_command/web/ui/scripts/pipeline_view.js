@@ -811,7 +811,12 @@ function makePipelineView(config) {
           const current = btn.dataset.pvCurrent;
           const next = current === 'manual' ? 'auto' : 'manual';
           this._saveMode(key, next);
-          this._loadPipeline(true);   // refresh visuel
+          // Re-render direct : _renderPipelineFlow lit le mode depuis
+          // localStorage (mis à jour synchrone par _saveMode). Pas besoin
+          // d'attendre un round-trip API. Et surtout on contourne le
+          // diff-de-signature de _loadPipeline qui ignore les changements
+          // de mode si les counts n'ont pas bougé (= toggle invisible).
+          if (this.state.pipeline) this._renderPipelineFlow(this.state.pipeline);
         });
       });
 
