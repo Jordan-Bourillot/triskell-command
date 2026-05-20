@@ -2387,7 +2387,15 @@ const Mails = {
     // Le body est conceptuellement [partie écrite par le user] + [marker] + [signature]
     // On marque la signature avec un commentaire HTML invisible pour pouvoir la
     // remplacer proprement quand le user change de signature.
-    const SIG_MARK_HTML = '<div data-signature-block style="margin-top:1.5em;">';
+    //
+    // - contenteditable=false : la signature est un bloc figé. Pas d'édition
+    //   inline dans le composeur — la gestion se fait depuis les Réglages.
+    //   Évite aussi que la sélection du curseur "tombe" dans le bloc et
+    //   colle le texte tapé dedans par erreur.
+    // - spellcheck=false : sans ça, le correcteur du navigateur souligne en
+    //   rouge tous les mots de marque (Triskell, Cofondateurs…), les URLs
+    //   et les emails de la signature — l'affichage devient illisible.
+    const SIG_MARK_HTML = '<div data-signature-block contenteditable="false" spellcheck="false" style="margin-top:1.5em; cursor:default; user-select:text;">';
     const SIG_MARK_HTML_END = '</div>';
 
     const applySignature = (sig) => {
