@@ -266,55 +266,64 @@ const MailTemplates = {
     this._root = container;
     container.innerHTML = `
       <section class="animate-slide-up">
-        <div class="mb-6 flex items-end justify-between">
+        <!-- En-tête épuré : titre court, pas de gros pavé d'intro -->
+        <header class="mb-5 flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <div class="hero-kicker mb-2">MODÈLES MAILS</div>
-            <h1 class="hero-title mb-3" style="font-size: 36px;">Le ton de tes mails, en un clic.</h1>
-            <p class="hero-subtitle">
-              Chaque mail envoyé par tes sites (relances, bienvenues, finalisations) est éditable
-              ici. Sujet, expéditeur, corps HTML — tu ajustes le ton sans toucher au code.
-            </p>
+            <h1 class="text-2xl font-bold leading-tight">Modèles de mails</h1>
+            <p class="text-sm text-text-muted mt-1">Sujet, expéditeur, corps — tu modifies, ça s'applique tout de suite.</p>
           </div>
-          <button id="mt-refresh" class="btn btn-secondary">Rafraîchir</button>
-        </div>
+          <div class="flex items-center gap-2">
+            <button id="mt-banner-help" class="btn btn-ghost text-[12px]" title="Comment ça marche ?">ⓘ Aide</button>
+            <button id="mt-refresh" class="btn btn-secondary text-sm">↻ Rafraîchir</button>
+          </div>
+        </header>
 
-        <div id="mt-banner" class="mb-4 text-[12px] text-text-muted"></div>
+        <!-- Banner d'aide masqué par défaut, affichable via le bouton ⓘ -->
+        <div id="mt-banner" class="mb-4 text-[12px] text-text-muted px-3 py-2 rounded-lg bg-accent/5 border border-accent/20" style="display:none;"></div>
 
-        <div class="mt-cat-toggle mb-4" role="tablist" aria-label="Catégorie de modèle">
+        <!-- Onglets compacts (sans sous-titres redondants) -->
+        <div class="mt-cat-toggle mb-3" role="tablist" aria-label="Catégorie de modèle">
           <button class="mt-cat-btn is-active" data-mt-cat="transactionnel" role="tab">
+            <span class="mt-cat-ico">🤖</span>
             <span class="mt-cat-title">Transactionnel</span>
-            <span class="mt-cat-sub">Mails auto envoyés par tes sites</span>
           </button>
           <button class="mt-cat-btn" data-mt-cat="prospection" role="tab">
+            <span class="mt-cat-ico">📨</span>
             <span class="mt-cat-title">Prospection</span>
-            <span class="mt-cat-sub">Mails de démarchage par produit</span>
           </button>
         </div>
 
-        <div id="mt-toolbar-transac" class="flex items-center gap-3 mb-3 flex-wrap">
-          <label class="text-xs text-text-muted">Filtrer par adresse&nbsp;:</label>
-          <select id="mt-sender-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm">
+        <!-- Toolbar : filtre + compteur sur la même ligne, pas de label en double -->
+        <div id="mt-toolbar-transac" class="flex items-center gap-2 mb-3 flex-wrap">
+          <select id="mt-sender-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm" aria-label="Filtrer par adresse">
             <option value="">— Toutes les adresses —</option>
           </select>
           <span id="mt-count" class="text-[11px] text-text-muted ml-auto"></span>
         </div>
 
-        <div id="mt-toolbar-prosp" class="flex items-center gap-3 mb-3 flex-wrap" style="display:none;">
-          <label class="text-xs text-text-muted">Filtrer par produit&nbsp;:</label>
-          <select id="mt-product-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm">
+        <div id="mt-toolbar-prosp" class="flex items-center gap-2 mb-3 flex-wrap" style="display:none;">
+          <select id="mt-product-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm" aria-label="Filtrer par produit">
             <option value="">— Tous les produits —</option>
           </select>
           <button id="mt-new-prosp" class="btn btn-primary text-sm">+ Nouveau modèle</button>
           <span id="mt-count-prosp" class="text-[11px] text-text-muted ml-auto"></span>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
-          <aside id="mt-list" class="bg-card border border-border rounded-xl p-3 overflow-y-auto" style="max-height: calc(100vh - 260px);"></aside>
-          <main  id="mt-editor" class="bg-card border border-border rounded-xl p-6 min-h-[500px]"></main>
+        <div class="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4">
+          <aside id="mt-list" class="bg-card border border-border rounded-xl p-2 overflow-y-auto" style="max-height: calc(100vh - 240px);"></aside>
+          <main  id="mt-editor" class="bg-card border border-border rounded-xl p-5 min-h-[500px]"></main>
         </div>
       </section>
     `;
     this._injectStyles();
+    // Toggle du panneau d'aide
+    const helpBtn = document.getElementById('mt-banner-help');
+    const banner  = document.getElementById('mt-banner');
+    if (helpBtn && banner) {
+      helpBtn.onclick = () => {
+        banner.style.display = (banner.style.display === 'none') ? '' : 'none';
+      };
+    }
     document.getElementById('mt-refresh').onclick = () => this.refresh();
     document.getElementById('mt-sender-filter').onchange = (e) => {
       this._state.senderFilter = e.target.value;
@@ -458,11 +467,97 @@ const MailTemplates = {
       .mt-cat-btn .mt-cat-title {
         font-size: 13px; font-weight: 700; color: inherit; line-height: 1.2;
       }
+      .mt-cat-btn .mt-cat-ico { font-size: 15px; line-height: 1; }
       .mt-cat-btn .mt-cat-sub {
         font-size: 10.5px; color: hsl(var(--text-muted)); margin-top: 2px;
         font-weight: 500;
       }
       .mt-cat-btn.is-active .mt-cat-sub { color: hsl(var(--accent) / .75); }
+      /* Boutons d'onglets compacts : icône + titre alignés en ligne */
+      .mt-cat-btn { flex-direction: row !important; align-items: center !important; gap: 8px !important; padding: 7px 14px !important; }
+
+      /* === Chips contextuelles (en haut de l'éditeur) === */
+      .mt-chip {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 3px 10px; border-radius: 999px;
+        font-size: 11px; font-weight: 700; letter-spacing: .02em;
+        border: 1px solid hsl(var(--border));
+        background: hsl(var(--bg));
+        color: hsl(var(--text-muted));
+      }
+      .mt-chip-prosp  { background: hsl(var(--accent) / .12); color: hsl(var(--accent)); border-color: hsl(var(--accent) / .3); }
+      .mt-chip-auto   { background: hsl(var(--success) / .12); color: hsl(var(--success)); border-color: hsl(var(--success) / .3); }
+      .mt-chip-target { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 10.5px; }
+
+      /* === Bandeau d'avertissement compact === */
+      .mt-warn {
+        margin-top: 10px;
+        padding: 8px 11px;
+        background: hsl(var(--warning) / .1);
+        border-left: 3px solid hsl(var(--warning));
+        border-radius: 4px;
+        font-size: 12px;
+        color: hsl(var(--warning));
+        line-height: 1.5;
+      }
+
+      /* === SUJET en grand (champ "hero") === */
+      .mt-field-hero input {
+        font-size: 16px !important;
+        font-weight: 600;
+        padding: 12px 14px !important;
+      }
+
+      /* === CORPS en grand textarea === */
+      .mt-textarea-hero {
+        min-height: 360px !important;
+      }
+
+      /* === Placeholders sur une ligne compacte au lieu d'un bloc === */
+      .mt-placeholders-row {
+        display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+        margin: -6px 0 12px;
+        padding: 6px 10px;
+        background: hsl(var(--bg));
+        border-radius: 6px;
+        border: 1px dashed hsl(var(--border));
+      }
+      .mt-placeholders-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+      .mt-placeholders-row .mt-placeholder-chip { margin: 0; }
+
+      /* === Bloc "Réglages avancés" replié === */
+      .mt-advanced {
+        margin-top: 18px;
+        border: 1px solid hsl(var(--border));
+        border-radius: 10px;
+        background: hsl(var(--bg) / .4);
+      }
+      .mt-advanced > summary {
+        padding: 10px 14px;
+        cursor: pointer;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: hsl(var(--text));
+        list-style: none;
+        user-select: none;
+      }
+      .mt-advanced > summary::-webkit-details-marker { display: none; }
+      .mt-advanced > summary::before {
+        content: '▸';
+        display: inline-block;
+        margin-right: 6px;
+        transition: transform .15s;
+        color: hsl(var(--text-muted));
+      }
+      .mt-advanced[open] > summary::before { transform: rotate(90deg); }
+      .mt-advanced-body { padding: 6px 14px 14px; }
+
+      /* === Checkbox inline avec label (modèle actif…) === */
+      .mt-field-inline {
+        display: flex; align-items: center; gap: 10px;
+        margin-bottom: 14px; font-size: 13px;
+      }
+      .mt-field-inline input[type="checkbox"] { width: auto; margin: 0; }
 
       /* En mode prospection, l'entête de groupe affiche le nom du produit */
       .mt-prod-h {
@@ -938,100 +1033,118 @@ const MailTemplates = {
       || t._productLabel
       || t.product;
 
+    // Petites pastilles contextuelles : type + cible. Concises, en haut.
+    const typeChip = isProspection
+      ? `<span class="mt-chip mt-chip-prosp" title="Mail de prospection — envoi manuel">📨 Prospection</span>`
+      : `<span class="mt-chip mt-chip-auto" title="Mail transactionnel — envoyé automatiquement par tes sites">🤖 Auto</span>`;
+    const targetChip = isProspection
+      ? `<span class="mt-chip mt-chip-target">${this._esc(productLabel)}</span>`
+      : `<span class="mt-chip mt-chip-target" title="${this._esc(senderLabel || '')}">${this._esc(senderAddr)}</span>`;
+
+    // Bandeau d'avertissement : un seul, le plus pertinent
+    let warnHtml = '';
+    if (!isProspection && isPipeline) {
+      warnHtml = `<div class="mt-warn">⚠ Modifications stockées en base, mais le runner Python lit encore son texte par défaut. Branchage à faire en phase suivante.</div>`;
+    } else if (!isProspection && isNew) {
+      warnHtml = `<div class="mt-warn">Modèle pas encore édité — la fonction Netlify utilise sa version par défaut. Modifie et enregistre pour reprendre la main.</div>`;
+    }
+
     e.innerHTML = `
-      <div class="mb-5 pb-4 border-b border-border">
-        ${isProspection
-          ? `<div class="hero-kicker mb-1">PROSPECTION · ${this._esc(productLabel)}</div>`
-          : `<div class="hero-kicker mb-1">${this._esc(senderAddr)}${senderLabel ? ` · ${this._esc(senderLabel)}` : ''}</div>`}
-        <h2 class="text-xl font-bold">${this._esc(headerLabel)}</h2>
-        <div class="text-[11px] text-text-muted mt-1">Clé technique&nbsp;: <code>${this._esc(t.product)}::${this._esc(t.key)}</code></div>
-        ${t.description ? `<p class="text-sm text-text-muted mt-2 leading-relaxed">${this._esc(t.description)}</p>` : ''}
-        ${(!isProspection && isPipeline) ? `
-          <div class="mt-3 text-[12px] text-warning bg-warning/10 border border-warning/30 rounded px-3 py-2 leading-relaxed">
-            <strong>⚠️ Modèle pipeline.</strong> Aujourd'hui le runner Python qui envoie ce mail
-            (drip / post-vente / réponses IA / Phare / facturation) lit encore son texte
-            <strong>codé en dur</strong>. Ton édition sera bien stockée en base mais elle
-            ne s'appliquera <em>pas tant qu'on n'a pas branché le runner</em> sur la table
-            <code>triskell_email_templates</code>. À faire en phase suivante.
-          </div>` : ''}
-        ${(!isProspection && isNew && !isPipeline) ? '<div class="mt-3 text-[12px] text-warning bg-warning/10 border border-warning/30 rounded px-3 py-2">Ce modèle n\'a jamais été édité. Aujourd\'hui la fonction Netlify utilise sa version <strong>par défaut codée en dur</strong>. Modifie le sujet/corps ci-dessous puis enregistre pour reprendre la main.</div>' : ''}
-        ${isProspection ? `<div class="mt-3 text-[12px] text-text-muted bg-accent/5 border border-accent/20 rounded px-3 py-2 leading-relaxed">
-          📨 <strong>Mail de prospection.</strong> Tu l'envoies à la main (depuis Triskell Command ou ton client mail). Aucun automatisme ne le déclenche.
-        </div>` : ''}
+      <!-- En-tête minimal : titre + 2 chips. La description et la clé tech sont dépliables. -->
+      <div class="mb-4 pb-3 border-b border-border">
+        <div class="flex items-center gap-2 mb-2 flex-wrap">
+          ${typeChip}
+          ${targetChip}
+        </div>
+        <h2 class="text-lg font-bold leading-tight">${this._esc(headerLabel)}</h2>
+        ${t.description ? `<p class="text-[12.5px] text-text-muted mt-1 leading-snug">${this._esc(t.description)}</p>` : ''}
+        ${warnHtml}
       </div>
 
+      <!-- Tabs Édition / Aperçu (gardés mais plus discrets) -->
       <div class="mt-tabs">
-        <button class="mt-tab is-active" data-mt-pane="edit">Édition</button>
-        <button class="mt-tab" data-mt-pane="preview">Aperçu</button>
+        <button class="mt-tab is-active" data-mt-pane="edit">✎ Édition</button>
+        <button class="mt-tab" data-mt-pane="preview">👁 Aperçu</button>
       </div>
 
       <div id="mt-pane-edit">
-        ${isProspection ? `
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label class="mt-field">
-              <label>Titre du modèle</label>
-              <input id="mt-label" value="${this._esc(t.label || '')}" placeholder="Mail 1 — commission classique">
-            </label>
-            <label class="mt-field">
-              <label>Produit</label>
-              <select id="mt-product-select">${this._renderProductOptions(t.product)}</select>
-            </label>
-          </div>
-        ` : ''}
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <label class="mt-field">
-            <label>Expéditeur (nom)</label>
-            <input id="mt-from-name" value="${this._esc(t.from_name || '')}" placeholder="Lagriffe Studio">
-          </label>
-          <label class="mt-field">
-            <label>Expéditeur (adresse)</label>
-            <input id="mt-from-address" value="${this._esc(t.from_address || '')}" placeholder="noreply@triskell-studio.fr">
-          </label>
-        </div>
-
-        <div class="mt-field">
+        <!-- SUJET : grand, c'est ce que voit le destinataire en premier -->
+        <div class="mt-field mt-field-hero">
           <label>Sujet du mail</label>
           <input id="mt-subject" value="${this._esc(t.subject || '')}" placeholder="${isProspection ? 'Une idée pour monétiser ton audience' : 'Votre maquette Lagriffe Studio vous attend'}">
         </div>
 
         ${placeholders.length ? `
-          <div class="mb-3">
-            <div class="text-[11px] font-bold tracking-wider uppercase text-text-muted mb-2">Variables disponibles · clique pour insérer</div>
-            <div>${placeholders.map(p => `<span class="mt-placeholder-chip" data-mt-insert="{{${this._esc(p)}}}">{{${this._esc(p)}}}</span>`).join('')}</div>
+          <div class="mt-placeholders-row">
+            <span class="text-[10.5px] font-bold tracking-wider uppercase text-text-muted shrink-0">Insérer :</span>
+            <div class="mt-placeholders-chips">${placeholders.map(p => `<span class="mt-placeholder-chip" data-mt-insert="{{${this._esc(p)}}}">{{${this._esc(p)}}}</span>`).join('')}</div>
           </div>
         ` : ''}
 
+        <!-- CORPS HTML : dominant, le cœur de la page -->
         <div class="mt-field">
           <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
-            <label style="margin:0; padding:0;">Corps HTML</label>
+            <label style="margin:0; padding:0;">Corps du mail (HTML)</label>
             <button id="mt-insert-product" type="button"
                     class="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-border text-text-muted hover:border-accent hover:text-accent transition-colors"
                     title="Insérer un produit du Catalogue Triskell">
               + Produit du Catalogue
             </button>
           </div>
-          <textarea id="mt-body-html" spellcheck="false" placeholder="<p>Bonjour {{first_name}},</p>…">${this._esc(t.body_html || '')}</textarea>
+          <textarea id="mt-body-html" class="mt-textarea-hero" spellcheck="false" placeholder="<p>Bonjour {{first_name}},</p>…">${this._esc(t.body_html || '')}</textarea>
         </div>
 
-        <div class="mt-field">
-          <label>Corps texte (optionnel, fallback)</label>
-          <textarea id="mt-body-text" spellcheck="false" style="min-height: 100px;" placeholder="Version texte brut, pour les clients mail qui ne lisent pas HTML.">${this._esc(t.body_text || '')}</textarea>
-        </div>
+        <!-- Bloc replié : tout ce qui est secondaire (expéditeur, fallback texte, actif…) -->
+        <details class="mt-advanced">
+          <summary>⚙ Réglages avancés <span class="text-text-muted text-[11px]">— expéditeur, texte brut, activation…</span></summary>
+          <div class="mt-advanced-body">
+            ${isProspection ? `
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label class="mt-field">
+                  <label>Titre du modèle (interne)</label>
+                  <input id="mt-label" value="${this._esc(t.label || '')}" placeholder="Mail 1 — commission classique">
+                </label>
+                <label class="mt-field">
+                  <label>Produit</label>
+                  <select id="mt-product-select">${this._renderProductOptions(t.product)}</select>
+                </label>
+              </div>
+            ` : ''}
 
-        <div class="mt-field">
-          <label style="display:flex; align-items:center; gap:8px; text-transform: none; letter-spacing: 0; font-size: 13px; color: hsl(var(--text)); font-weight: 500;">
-            <input type="checkbox" id="mt-enabled" ${t.enabled !== false ? 'checked' : ''} style="width:auto;">
-            <span>Modèle actif <span class="text-text-muted">— si décoché, la fonction Netlify retombe sur sa version codée en dur.</span></span>
-          </label>
-        </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label class="mt-field">
+                <label>Expéditeur (nom)</label>
+                <input id="mt-from-name" value="${this._esc(t.from_name || '')}" placeholder="Lagriffe Studio">
+              </label>
+              <label class="mt-field">
+                <label>Expéditeur (adresse)</label>
+                <input id="mt-from-address" value="${this._esc(t.from_address || '')}" placeholder="noreply@triskell-studio.fr">
+              </label>
+            </div>
 
+            <div class="mt-field">
+              <label>Corps texte (fallback pour les clients mail sans HTML)</label>
+              <textarea id="mt-body-text" spellcheck="false" style="min-height: 90px;" placeholder="Version texte brut, optionnelle.">${this._esc(t.body_text || '')}</textarea>
+            </div>
+
+            <label class="mt-field-inline">
+              <input type="checkbox" id="mt-enabled" ${t.enabled !== false ? 'checked' : ''}>
+              <span>Modèle actif <span class="text-text-muted text-[12px]">— si décoché, la fonction Netlify retombe sur sa version par défaut.</span></span>
+            </label>
+
+            <div class="text-[11px] text-text-muted pt-2 border-t border-border/50">
+              Clé technique&nbsp;: <code>${this._esc(t.product)}::${this._esc(t.key)}</code>
+            </div>
+          </div>
+        </details>
+
+        <!-- Toolbar : enregistrer + supprimer + date de modif -->
         <div class="mt-toolbar">
           <div class="grow text-[11px] text-text-muted">
             ${t.updated_at ? `Dernière modif&nbsp;: ${this._formatDate(t.updated_at)}${t.updated_by ? ` par ${this._esc(t.updated_by)}` : ''}` : ''}
           </div>
           ${!isNew ? `<button id="mt-delete" class="btn btn-ghost text-danger">Supprimer</button>` : ''}
-          <button id="mt-save" class="btn btn-primary">Enregistrer</button>
+          <button id="mt-save" class="btn btn-primary">💾 Enregistrer</button>
         </div>
       </div>
 
