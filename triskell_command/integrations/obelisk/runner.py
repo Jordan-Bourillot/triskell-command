@@ -592,15 +592,26 @@ def _sync_keys_to_ledenicheur(ucfg: dict, log) -> None:
     try:
         from .. import shared_secrets
         from triskell_core.db import get_client, SupabaseNotConfigured
+        sb = None
         try:
             sb = get_client()
-            sb = sb if getattr(sb, "is_authenticated", False) else None
+            if not getattr(sb, "is_authenticated", False):
+                try:
+                    sb.restore_session()
+                except Exception:
+                    pass
+            if not getattr(sb, "is_authenticated", False):
+                sb = None
         except SupabaseNotConfigured:
             sb = None
         ai_keys = shared_secrets.get_ai_keys(client=sb) or {}
         ai_keys = {p: k for p, k in ai_keys.items() if k}
         if ai_keys:
             payload["ai_api_keys"] = ai_keys
+            log(f"🧠 Clés IA récupérées : {', '.join(sorted(ai_keys.keys()))}")
+        else:
+            log(f"⚠ Aucune clé IA trouvée (Supabase auth={bool(sb)}). "
+                f"Vérifie Réglages → Services IA.")
     except Exception as exc:
         log(f"⚠ Lecture des clés IA Triskell échouée : {exc}")
 
