@@ -144,6 +144,12 @@ const PixelPros = {
       .pp-card-time { font-size:10.5px; color:#64748b; }
       .pp-urgent-badge { background:#facc15; color:#0f172a; padding:1px 6px; border-radius:4px; font-size:9.5px; font-weight:800; letter-spacing:.04em; }
 
+      /* Petit bouton corbeille en haut-droite de la carte, visible au survol.
+         Permet de supprimer un formulaire sans avoir à ouvrir le détail. */
+      .pp-card-trash { position:absolute; top:6px; right:6px; width:26px; height:26px; border-radius:6px; background:rgba(239,68,68,.15); color:#fca5a5; border:none; cursor:pointer; font-size:13px; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .15s, background .15s; }
+      .pp-card:hover .pp-card-trash { opacity:1; }
+      .pp-card-trash:hover { background:#ef4444; color:#fff; }
+
       /* === SECTION ÉCHECS === */
       .pp-failures { background:rgba(239,68,68,.06); border:1px solid rgba(239,68,68,.25); border-radius:14px; padding:14px; }
       .pp-failures-title { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:800; color:#ef4444; text-transform:uppercase; letter-spacing:.04em; margin-bottom:10px; }
@@ -268,12 +274,7 @@ const PixelPros = {
       `;
     }).join('');
 
-    el.querySelectorAll('[data-pp-card]').forEach(card => {
-      card.onclick = () => {
-        this.state.selectedId = card.dataset.ppCard;
-        this._loadDetail(this.state.selectedId);
-      };
-    });
+    this._bindCardActions(el);
   },
 
   // ----- ÉCHECS -----
@@ -288,10 +289,27 @@ const PixelPros = {
         <div class="pp-failures-grid">${failures.map(it => this._renderCard(it, '#ef4444')).join('')}</div>
       </div>
     `;
-    el.querySelectorAll('[data-pp-card]').forEach(card => {
+    this._bindCardActions(el);
+  },
+
+  _bindCardActions(root) {
+    if (!root) return;
+    // Clic sur la carte → ouvre le panneau de détail
+    root.querySelectorAll('[data-pp-card]').forEach(card => {
       card.onclick = () => {
         this.state.selectedId = card.dataset.ppCard;
         this._loadDetail(this.state.selectedId);
+      };
+    });
+    // Clic sur la corbeille → suppression directe sans ouvrir le détail
+    root.querySelectorAll('[data-pp-trash]').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const id = btn.dataset.ppTrash;
+        const intake = (this.state.intakes || []).find(it => it.id === id);
+        if (!intake) return;
+        this._doAction('delete', intake);
       };
     });
   },
@@ -321,6 +339,7 @@ const PixelPros = {
     const selected = this.state.selectedId === it.id ? 'selected' : '';
     return `
       <div class="pp-card ${isUrgent ? 'urgent' : ''} ${selected}" data-pp-card="${this._escape(it.id)}" style="--col-accent:${accent};">
+        <button class="pp-card-trash" data-pp-trash="${this._escape(it.id)}" title="Supprimer ce formulaire" aria-label="Supprimer">🗑</button>
         <div class="pp-avatar" style="background:${color};">${this._escape(initial)}</div>
         <div class="pp-card-body">
           <div class="pp-card-name">${this._escape(name)}</div>
