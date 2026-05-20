@@ -2886,6 +2886,30 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def pixelpros_mail_auto_get(self, payload: dict | None = None) -> dict:
+        """Renvoie l'état auto/manuel des mails 'paid' et 'live'."""
+        try:
+            from ..integrations.pixelpros import mailer as m
+            return {"ok": True, "auto": {
+                "paid": m.is_auto("paid"),
+                "live": m.is_auto("live"),
+            }}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_mail_auto_set(self, payload: dict) -> dict:
+        """Bascule un mail en auto (True) ou manuel (False)."""
+        kind = ((payload or {}).get("kind") or "").strip()
+        if kind not in ("paid", "live"):
+            return {"ok": False, "error": "kind doit être 'paid' ou 'live'"}
+        value = bool((payload or {}).get("auto", True))
+        try:
+            from ..integrations.pixelpros import mailer as m
+            ok, msg = m.set_auto(kind, value)
+            return {"ok": ok, "message": msg, "auto": m.is_auto(kind)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ------------------------------------------------------------------
     # Modèles mails éditables (zone "Modèles Mails" dans la sidebar)
     # ------------------------------------------------------------------

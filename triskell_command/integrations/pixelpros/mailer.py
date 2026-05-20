@@ -32,6 +32,13 @@ TEMPLATE_KEYS = {
     "live": "pixelpros_mail_live",
 }
 
+# Clés pour le mode auto/manuel d'envoi des mails.
+# True = auto (défaut), False = manuel (Jordan déclenche depuis l'UI).
+AUTO_KEYS = {
+    "paid": "pixelpros_mail_auto_paid",
+    "live": "pixelpros_mail_auto_live",
+}
+
 DEFAULT_PAID = {
     "subject": "On a bien reçu ton paiement — ton site Pixel Pros arrive sous 24h",
     "body_text": (
@@ -270,6 +277,40 @@ def save_template(kind: str, subject: str, body_text: str, body_html: str) -> tu
             "body_html": body_html,
         })
         return True, "Mail sauvegardé."
+    except Exception as exc:
+        return False, str(exc)
+
+
+def is_auto(kind: str) -> bool:
+    """True si l'envoi auto est activé pour ce mail (défaut). False si Jordan
+    a basculé en mode manuel — dans ce cas l'envoi automatique (webhook Stripe
+    ou fin de build) est ignoré, l'envoi se déclenche uniquement via l'UI.
+    """
+    if kind not in AUTO_KEYS:
+        return True
+    c = _get_supabase()
+    if c is None:
+        return True
+    try:
+        v = c.get_shared_setting(AUTO_KEYS[kind], default=None)
+        if v is None:
+            return True
+        return bool(v)
+    except Exception as exc:
+        logger.debug("pixelpros.mailer.is_auto: %s", exc)
+        return True
+
+
+def set_auto(kind: str, value: bool) -> tuple[bool, str]:
+    """Active/désactive l'envoi auto pour 'paid' ou 'live'."""
+    if kind not in AUTO_KEYS:
+        return False, f"kind invalide : {kind}"
+    c = _get_supabase()
+    if c is None:
+        return False, "Supabase non configuré ou non authentifié."
+    try:
+        c.set_shared_setting(AUTO_KEYS[kind], bool(value))
+        return True, "Mode mis à jour."
     except Exception as exc:
         return False, str(exc)
 

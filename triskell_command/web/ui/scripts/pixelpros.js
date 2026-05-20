@@ -34,6 +34,9 @@ const PixelPros = {
     counts: null,
     loading: false,
     search: '',
+    // Mode auto/manuel pour les mails du pipeline (true = auto, défaut).
+    // Sync depuis le backend au refresh.
+    mailAuto: { paid: true, live: true },
   },
 
   // Colonnes Kanban : 4 statuts principaux dans l'ordre du flow.
@@ -136,6 +139,50 @@ const PixelPros = {
       .pp-mail-marker .pp-mail-lbl { font-size:10.5px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color: var(--mc); }
       .pp-mail-marker .pp-mail-edit { font-size:9.5px; color:#94a3b8; opacity:0; transition:opacity .15s; }
       .pp-mail-marker:hover .pp-mail-edit { opacity:1; }
+
+      /* Wrapper du marqueur mail + son toggle Auto/Manuel */
+      .pp-mail-marker-wrap { display:flex; flex-direction:column; align-items:stretch; gap:6px; margin:0 4px; min-width:96px; }
+      .pp-mail-marker-wrap .pp-mail-marker { margin:0; }
+      .pp-mail-marker-wrap.is-manual .pp-mail-marker {
+        opacity: 0.55;
+        filter: grayscale(0.4);
+      }
+      .pp-mail-marker-wrap.is-manual .pp-mail-marker:hover {
+        opacity: 1;
+        filter: none;
+      }
+      .pp-mail-toggle {
+        font: inherit;
+        font-size: 10px; font-weight: 800;
+        letter-spacing: .04em;
+        padding: 4px 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: background .15s, border-color .15s, color .15s, transform .1s;
+        text-align: center;
+        line-height: 1.2;
+      }
+      .pp-mail-toggle.is-auto {
+        background: rgba(34,197,94,.12);
+        border-color: rgba(34,197,94,.35);
+        color: #4ade80;
+      }
+      .pp-mail-toggle.is-auto:hover {
+        background: rgba(34,197,94,.22);
+        border-color: rgba(34,197,94,.55);
+      }
+      .pp-mail-toggle.is-manual {
+        background: rgba(251,146,60,.14);
+        border-color: rgba(251,146,60,.4);
+        color: #fb923c;
+      }
+      .pp-mail-toggle.is-manual:hover {
+        background: rgba(251,146,60,.24);
+        border-color: rgba(251,146,60,.6);
+      }
+      .pp-mail-toggle:active { transform: translateY(1px); }
+      .pp-mail-toggle:disabled { opacity: .5; cursor: wait; }
 
       /* Champs de l'éditeur de mail */
       .pp-mail-input, .pp-mail-textarea {
@@ -245,12 +292,19 @@ const PixelPros = {
     this.state.loading = true;
     this._renderFunnel();
     this._renderKanban();
-    const [stateRes, listRes] = await Promise.all([
+    const [stateRes, listRes, autoRes] = await Promise.all([
       this._call('pixelpros_pipeline_state'),
       this._call('pixelpros_list_intakes', { limit: 200 }),
+      this._call('pixelpros_mail_auto_get'),
     ]);
     if (stateRes && stateRes.ok) this.state.counts = stateRes.counts || null;
     this.state.intakes = (listRes && listRes.ok) ? (listRes.intakes || []) : [];
+    if (autoRes && autoRes.ok && autoRes.auto) {
+      this.state.mailAuto = {
+        paid: autoRes.auto.paid !== false,
+        live: autoRes.auto.live !== false,
+      };
+    }
     this.state.loading = false;
 
     this._renderFunnel();
@@ -299,14 +353,26 @@ const PixelPros = {
         const transitionKey = `${s.k}→${next.k}`;
         const mail = this.MAILS_BETWEEN[transitionKey];
         if (mail) {
+          const isAuto = (this.state.mailAuto || {})[mail.kind] !== false;
+          const modeLabel = isAuto ? '🤖 Auto' : '✋ Manuel';
+          const modeTitle = isAuto
+            ? `Mode auto : le mail « ${mail.short} » part tout seul. Clique pour passer en manuel.`
+            : `Mode manuel : tu déclenches le mail « ${mail.short} » à la main depuis la fiche du client. Clique pour repasser en auto.`;
           parts.push(`
-            <button class="pp-mail-marker" data-pp-mail="${mail.kind}"
-                    style="--mc:${mail.color};"
-                    title="Voir / modifier le mail « ${this._escape(mail.short)} »">
-              <span class="pp-mail-ico">✉️</span>
-              <span class="pp-mail-lbl">${this._escape(mail.short)}</span>
-              <span class="pp-mail-edit">Modifier</span>
-            </button>
+            <div class="pp-mail-marker-wrap ${isAuto ? 'is-auto' : 'is-manual'}">
+              <button class="pp-mail-marker" data-pp-mail="${mail.kind}"
+                      style="--mc:${mail.color};"
+                      title="Voir / modifier le mail « ${this._escape(mail.short)} »">
+                <span class="pp-mail-ico">✉️</span>
+                <span class="pp-mail-lbl">${this._escape(mail.short)}</span>
+                <span class="pp-mail-edit">Modifier</span>
+              </button>
+              <button class="pp-mail-toggle ${isAuto ? 'is-auto' : 'is-manual'}"
+                      data-pp-mail-toggle="${mail.kind}"
+                      title="${this._escape(modeTitle)}">
+                ${modeLabel}
+              </button>
+            </div>
           `);
         } else {
           parts.push('<div class="pp-funnel-gap"></div>');
@@ -320,6 +386,30 @@ const PixelPros = {
       btn.onclick = (e) => {
         e.stopPropagation();
         this._openMailEditor(btn.dataset.ppMail);
+      };
+    });
+
+    // Bind des toggles Auto/Manuel
+    el.querySelectorAll('[data-pp-mail-toggle]').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const kind = btn.dataset.ppMailToggle;
+        const current = (this.state.mailAuto || {})[kind] !== false;
+        const next = !current;
+        btn.disabled = true;
+        btn.textContent = '…';
+        const res = await this._call('pixelpros_mail_auto_set', { kind, auto: next });
+        btn.disabled = false;
+        if (res && res.ok) {
+          this.state.mailAuto = { ...this.state.mailAuto, [kind]: res.auto !== false };
+          this._toast(next
+            ? `Mail « ${this.MAILS_BETWEEN[Object.keys(this.MAILS_BETWEEN).find(k => this.MAILS_BETWEEN[k].kind === kind)].short} » : envoi automatique activé`
+            : `Mail « ${this.MAILS_BETWEEN[Object.keys(this.MAILS_BETWEEN).find(k => this.MAILS_BETWEEN[k].kind === kind)].short} » : à déclencher manuellement depuis la fiche client`);
+          this._renderFunnel();
+        } else {
+          this._toast(`Erreur : ${res?.error || res?.message || 'inconnue'}`, true);
+          this._renderFunnel();
+        }
       };
     });
   },

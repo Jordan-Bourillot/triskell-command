@@ -471,7 +471,10 @@ def create_app() -> FastAPI:
                 return JSONResponse(status_code=404,
                                     content={"ok": False, "error": "intake introuvable"})
 
-            mail_ok, mail_msg = m.send_paid_mail(intake)
+            if m.is_auto("paid"):
+                mail_ok, mail_msg = m.send_paid_mail(intake)
+            else:
+                mail_ok, mail_msg = False, "skipped (mode manuel — déclencher depuis l'UI)"
             build_ok, build_msg = r.dispatch_build(draft_id)
             return JSONResponse(content={
                 "ok": True,
@@ -511,7 +514,10 @@ def create_app() -> FastAPI:
             if intake is None:
                 return JSONResponse(status_code=404,
                                     content={"ok": False, "error": "intake introuvable"})
-            mail_ok, mail_msg = m.send_live_mail(intake)
+            if m.is_auto("live"):
+                mail_ok, mail_msg = m.send_live_mail(intake)
+            else:
+                mail_ok, mail_msg = False, "skipped (mode manuel — déclencher depuis l'UI)"
             return JSONResponse(content={
                 "ok": True,
                 "mail": {"ok": mail_ok, "message": mail_msg},
