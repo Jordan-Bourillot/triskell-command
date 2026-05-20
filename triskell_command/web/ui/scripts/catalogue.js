@@ -75,13 +75,30 @@ const Catalogue = {
     {
       id: 'pixel-pros',
       name: 'Pixel Pros',
-      tagline: 'Site pro livré en 24h, 24,90 €/mois.',
-      description: "Pixel Pros casse les codes du site internet. Le client remplit un " +
-        "formulaire de 20 minutes, paie 24,90 € HT/mois et reçoit son site en ligne sous 24h. " +
-        "Pas de devis, pas d'aller-retour, pas d'engagement. Cible : coiffeurs, plombiers, " +
-        "ostéos, artisans, restaurateurs — tous les pros qui veulent un site sans y passer 6 semaines.",
-      sales_pitch: "Un site pro complet à 24,90 €/mois, livré en 24h après un formulaire de 20 min.",
-      motto: "Le site pro accessible : 24h pour la livraison, 24,90 €/mois pour tout.",
+      tagline: 'Le site pro à 24,90 €/mois, livré en 24h. Le prix d’un forfait téléphone.',
+      description: "Pixel Pros casse le marché du site internet pour les pros. Là où une agence " +
+        "classique facture 1 500 à 5 000 € d’avance plus 50 à 150 €/mois de maintenance pour le " +
+        "même résultat, ici c’est 24,90 € HT/mois tout compris — sans avance, sans frais cachés, " +
+        "sans engagement. Le client remplit un formulaire de 20 minutes, paie en carte, et reçoit " +
+        "son site en ligne sous 24h. Pas de devis, pas de réunions, pas d’aller-retour interminables. " +
+        "Le prix tient parce qu’on a standardisé une one-page pro qui convertit pour 95 % des métiers " +
+        "(artisans, commerçants, indépendants, professions libérales) et qu’on a automatisé tout le " +
+        "build : un site sort en 1-2 minutes côté serveur. Tout est inclus dans l’abonnement : design " +
+        "pro, rédaction et reformulation des textes, hébergement haut de gamme, certificat SSL, " +
+        "sauvegardes, modifications illimitées au fil de l’eau (changement de prix, nouvelle photo, " +
+        "ajout d’un service, correction de texte), maintenance technique, support humain par mail. " +
+        "Le client n’a rien à installer, rien à configurer, aucune compétence technique à avoir. Et " +
+        "il garde la main : résiliation libre à tout moment, il repart avec son contenu. Trois options " +
+        "pour monter en gamme sans casser le modèle : +9 €/mois pour un nom de domaine pro et une " +
+        "adresse mail personnalisée, +34,90 €/mois pour le référencement Google local complet (SEO + " +
+        "Google Business + suivi), ou 49,90 €/mois pour le pack tout-en-un (au lieu de 68,80 €). " +
+        "Cible : coiffeurs, plombiers, ostéos, restaurateurs, artisans, indépendants — tous les pros " +
+        "qui ont besoin d’un site sérieux mais qui n’ont ni le budget ni le temps d’une agence classique.",
+      sales_pitch: "Un site pro complet pour le prix d’un forfait téléphone : 24,90 € HT/mois, " +
+        "livré en 24h, tout compris, sans engagement. Une agence facturerait 1 500 à 5 000 € " +
+        "d’avance pour le même résultat.",
+      motto: "Le site pro à la portée de tous : 24h pour la livraison, 24,90 €/mois pour tout, " +
+        "zéro avance, zéro engagement.",
       category: 'sites',
       kind: 'service',
       buy_url: 'https://pixel-pros.fr',
@@ -89,12 +106,26 @@ const Catalogue = {
       color: '#facc15',
       initial: 'P',
       features: [
-        { title: 'Formulaire 20 min', detail: "Le client remplit ce qu'il veut sur son site, on s'occupe du reste." },
-        { title: 'Livraison en 24h', detail: "Site en ligne le lendemain du paiement, sans devis ni aller-retour." },
-        { title: 'Textes relus et SEO', detail: "Reformulation pro de tous les textes + optimisation Google dès la création, inclus." },
-        { title: 'Sections optionnelles', detail: "Galerie, avis, prestations, zone d'intervention — le client active ce qui le concerne." },
-        { title: 'Pack tout-en-un possible', detail: "Site + domaine + mail pro + SEO Google = 49,90 €/mois au lieu de 68,80 €." },
-        { title: 'Sans engagement', detail: "Résiliable à tout moment, le client garde son contenu." },
+        { title: 'Le prix d’un forfait téléphone',
+          detail: "24,90 € HT/mois tout compris. Une agence classique facturerait 1 500 à 5 000 € d’avance + 50 à 150 €/mois de maintenance pour le même résultat." },
+        { title: 'Zéro avance, zéro engagement',
+          detail: "Pas de devis, pas de frais d’installation, pas de durée minimum. Le client paie le premier mois en carte et c’est parti. Résiliable à tout moment." },
+        { title: 'Livraison en 24h',
+          detail: "Site en ligne le lendemain du paiement, pas dans 6 semaines. Possible parce qu’on a automatisé tout le build et standardisé une structure éprouvée." },
+        { title: 'Formulaire 20 min, pas de réunions',
+          detail: "Le client remplit ce qu’il veut sur son site (photos, services, horaires, zone), on s’occupe du reste. Pas d’aller-retour, pas de relances commerciales." },
+        { title: 'Tout est inclus, vraiment',
+          detail: "Design pro, textes reformulés, hébergement, SSL, sauvegardes, maintenance technique, modifications illimitées (changement de prix, nouvelle photo, ajout de service), support." },
+        { title: 'Modifications à la demande',
+          detail: "Le client nous écrit, on modifie dans la journée. Tant que ça reste raisonnable, c’est inclus dans l’abonnement — pas de devis pour chaque virgule." },
+        { title: 'Une one-page qui convertit',
+          detail: "Structure pro éprouvée qui marche pour 95 % des métiers : présentation, services, preuves sociales, contact, carte. Pas de réinvention de la roue, juste ce qui marche." },
+        { title: 'Sections optionnelles',
+          detail: "Galerie, avis Google, prestations détaillées, zone d’intervention, formulaire de contact — le client active ce qui le concerne, le reste reste propre." },
+        { title: 'Pack tout-en-un',
+          detail: "Site + domaine pro + mail personnalisé + SEO Google local + suivi = 49,90 €/mois au lieu de 68,80 €. La formule complète pour devenir vraiment visible." },
+        { title: 'Aucune compétence technique requise',
+          detail: "Le client n’installe rien, ne configure rien, ne touche à rien. Il garde son contenu s’il part. Pour des pros qui veulent un site, pas un projet." },
       ],
     },
     {
