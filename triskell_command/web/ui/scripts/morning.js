@@ -597,9 +597,11 @@ const Morning = {
 
     return `
       <div class="cockpit-hero" data-state="${state}">
-        <div class="cockpit-hero-kicker">${kicker}</div>
-        <h2 class="cockpit-hero-title">${title}</h2>
-        <p class="cockpit-hero-body">${body}</p>
+        <div class="cockpit-hero-text">
+          <div class="cockpit-hero-kicker">${kicker}</div>
+          <h2 class="cockpit-hero-title">${title}</h2>
+          <p class="cockpit-hero-body">${body}</p>
+        </div>
         <button class="btn btn-primary" onclick="App.show('${target}')">${cta}</button>
       </div>
     `;

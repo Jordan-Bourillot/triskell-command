@@ -482,13 +482,24 @@ html, body {
 .cockpit-hero {
   position: relative;
   margin-top: 16px;
-  padding: 28px 32px;
+  padding: 18px 22px;
   background: linear-gradient(135deg,
     hsl(var(--surface)) 0%,
     hsl(var(--surface-elevated)) 100%);
   border: 1px solid hsl(var(--border));
-  border-radius: 20px;
+  border-radius: 16px;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.cockpit-hero > .cockpit-hero-text {
+  flex: 1;
+  min-width: 240px;
+}
+.cockpit-hero > .btn {
+  flex-shrink: 0;
 }
 .cockpit-hero::before {
   content: '';
@@ -508,34 +519,34 @@ html, body {
 .cockpit-hero-kicker {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: hsl(var(--accent));
-  margin-bottom: 10px;
+  margin-bottom: 4px;
 }
 .cockpit-hero-kicker::before {
   content: '▸';
-  font-size: 14px;
+  font-size: 12px;
 }
 .cockpit-hero-title {
   font-family: 'Cinzel', serif;
-  font-size: 34px;
+  font-size: 22px;
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.15;
   letter-spacing: -0.01em;
   color: hsl(var(--text));
-  margin-bottom: 10px;
+  margin-bottom: 4px;
 }
 .cockpit-hero-body {
-  font-size: 15px;
-  line-height: 1.55;
+  font-size: 13.5px;
+  line-height: 1.5;
   color: hsl(var(--text-secondary));
-  max-width: 56ch;
-  margin-bottom: 18px;
+  max-width: 64ch;
+  margin-bottom: 0;
 }
 
 /* Grille KPIs principaux */
@@ -1287,9 +1298,9 @@ html, body {
   .cockpit-kpi-value { font-size: 42px; }
 }
 @media (max-width: 640px) {
-  .cockpit-hero { padding: 22px; }
-  .cockpit-hero-title { font-size: 24px; }
-  .cockpit-hero-body { font-size: 14px; }
+  .cockpit-hero { padding: 16px 18px; }
+  .cockpit-hero-title { font-size: 19px; }
+  .cockpit-hero-body { font-size: 13px; }
   .cockpit-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .cockpit-kpi { padding: 14px 14px 12px; border-radius: 12px; }
   .cockpit-kpi-value { font-size: 32px; }
