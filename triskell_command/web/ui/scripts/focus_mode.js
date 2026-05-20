@@ -17,6 +17,7 @@ const FocusMode = {
   STORAGE_KEY:    'tc-focus-until',
   INTENT_KEY:     'tc-focus-intent',
   STYLE_INJECTED: false,
+  _button:        null,
 
   isOn() {
     try {
@@ -42,6 +43,7 @@ const FocusMode = {
       sessionStorage.setItem(this.INTENT_KEY, intent || '');
     } catch (e) {}
     this.showOverlay();
+    this._paintButton();
   },
 
   stop() {
@@ -50,6 +52,48 @@ const FocusMode = {
       sessionStorage.removeItem(this.INTENT_KEY);
     } catch (e) {}
     this.hideOverlay();
+    this._paintButton();
+  },
+
+  // ----- Bouton "Concentration" du Cockpit : état armé visible -----
+  bindButton(btn) {
+    if (!btn) return;
+    this._button = btn;
+    if (!btn.dataset.focusOriginal) {
+      btn.dataset.focusOriginal = btn.innerHTML;
+    }
+    this._injectStyles();
+    this._paintButton();
+  },
+
+  _paintButton() {
+    let btn = this._button;
+    if (!btn || !document.body.contains(btn)) {
+      btn = document.getElementById('m-focus');
+      if (btn) this._button = btn;
+    }
+    if (!btn) return;
+
+    if (this.isOn()) {
+      const remaining = Math.max(0, this.getEndsAt() - Date.now());
+      const totalMins = Math.ceil(remaining / 60_000);
+      const label = totalMins >= 60
+        ? `${Math.floor(totalMins / 60)} h ${String(totalMins % 60).padStart(2, '0')}`
+        : `${totalMins} min`;
+      btn.classList.add('is-focus-active');
+      btn.innerHTML = `
+        <span class="focus-btn-dot" aria-hidden="true"></span>
+        <span>Concentration</span>
+        <span class="focus-btn-time">· ${label}</span>
+      `;
+      btn.title = `Concentration en cours — encore ${label}. Cliquer pour réafficher l'écran focus.`;
+      btn.setAttribute('aria-pressed', 'true');
+    } else {
+      btn.classList.remove('is-focus-active');
+      if (btn.dataset.focusOriginal) btn.innerHTML = btn.dataset.focusOriginal;
+      btn.title = 'Mode Concentration';
+      btn.setAttribute('aria-pressed', 'false');
+    }
   },
 
   // ----- UI -----
@@ -116,6 +160,41 @@ const FocusMode = {
       body.is-focus-mode #m-content > div:nth-child(3) {
         opacity: 0.25; filter: blur(2px); transition: opacity 300ms, filter 300ms;
       }
+
+      /* Bouton "Concentration" — état armé (focus mode ON) */
+      .btn.is-focus-active {
+        background: hsl(var(--accent) / 0.14) !important;
+        border-color: hsl(var(--accent) / 0.55) !important;
+        color: hsl(var(--accent)) !important;
+        box-shadow: 0 0 0 1px hsl(var(--accent) / 0.15), 0 4px 14px hsl(var(--accent) / 0.18);
+      }
+      .btn.is-focus-active:hover {
+        background: hsl(var(--accent) / 0.22) !important;
+        border-color: hsl(var(--accent) / 0.75) !important;
+      }
+      .btn.is-focus-active svg { color: hsl(var(--accent)); }
+      .focus-btn-dot {
+        display: inline-block;
+        width: 9px; height: 9px;
+        border-radius: 50%;
+        background: hsl(142 71% 45%);
+        margin-right: 2px;
+        box-shadow: 0 0 0 0 hsl(142 71% 45% / 0.6);
+        animation: focus-btn-pulse 1.8s ease-in-out infinite;
+        vertical-align: middle;
+        position: relative;
+        top: -1px;
+      }
+      @keyframes focus-btn-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 hsl(142 71% 45% / 0.55); }
+        50%      { box-shadow: 0 0 0 7px hsl(142 71% 45% / 0); }
+      }
+      .focus-btn-time {
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+        opacity: 0.9;
+        margin-left: 2px;
+      }
     `;
     document.head.appendChild(s);
   },
@@ -175,6 +254,7 @@ const FocusMode = {
     ov.querySelector('#focus-timer-text').textContent = txt;
     const intent = this.getIntent();
     ov.querySelector('#focus-intent-text').textContent = intent || 'Tu travailles sans interruption.';
+    this._paintButton();
   },
 
   _showFinishedTeaser() {

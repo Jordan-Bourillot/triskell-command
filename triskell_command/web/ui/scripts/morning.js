@@ -103,6 +103,9 @@ const Morning = {
         if (FocusMode.isOn()) FocusMode.showOverlay();
         else FocusMode.openStartDialog();
       };
+      if (typeof FocusMode !== 'undefined' && FocusMode.bindButton) {
+        FocusMode.bindButton(focusBtn);
+      }
     }
 
     // Pastilles "NEW"

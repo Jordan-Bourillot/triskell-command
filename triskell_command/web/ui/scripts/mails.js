@@ -724,6 +724,7 @@ const Mails = {
           in_reply_to: inReplyTo || '',
         });
         if (r && r.ok) {
+          if (window.MailAddressBook) window.MailAddressBook.record(to);
           status.textContent = '✓ Envoyé !';
           status.className = 'text-xs text-success text-right flex-1';
           sendBtn.innerHTML = '✓ Envoyé';
@@ -1528,6 +1529,49 @@ const Mails = {
           font-size: 13px;
           padding: 4px 0;
         }
+        /* Dropdown autocomplétion du carnet d'adresses */
+        .chips-autocomplete {
+          position: absolute;
+          left: 0; right: 0; top: calc(100% + 4px);
+          max-height: 240px;
+          overflow-y: auto;
+          background: hsl(var(--surface-elevated));
+          border: 1px solid hsl(var(--border));
+          border-radius: 10px;
+          box-shadow: 0 12px 32px rgba(0,0,0,0.20);
+          z-index: 60;
+          display: none;
+          font-size: 13px;
+          padding: 4px;
+        }
+        .chips-autocomplete[data-open="1"] { display: block; }
+        .chips-ac-item {
+          display: flex; align-items: center; justify-content: space-between;
+          gap: 8px;
+          padding: 7px 10px;
+          border-radius: 7px;
+          cursor: pointer;
+          color: hsl(var(--text));
+          transition: background-color 100ms;
+        }
+        .chips-ac-item:hover,
+        .chips-ac-item.is-active {
+          background: hsl(var(--accent) / 0.15);
+          color: hsl(var(--accent));
+        }
+        .chips-ac-email { font-weight: 500; }
+        .chips-ac-meta {
+          font-size: 11px;
+          color: hsl(var(--text-muted));
+          font-variant-numeric: tabular-nums;
+          flex-shrink: 0;
+        }
+        .chips-ac-empty {
+          padding: 10px 12px;
+          color: hsl(var(--text-muted));
+          font-size: 12px;
+          font-style: italic;
+        }
       `;
       document.head.appendChild(s);
     }
@@ -1548,6 +1592,65 @@ const Mails = {
       const inputEl = wrapEl.querySelector('.chips-text');
       let chips = [];
       const escape = (s) => this._escape(s);
+
+      // --- Autocomplétion (carnet d'adresses) ---
+      let acDropdown = null;
+      let acSuggestions = [];
+      let acIndex = -1;
+
+      const ensureAcDropdown = () => {
+        if (acDropdown) return acDropdown;
+        if (getComputedStyle(wrapEl).position === 'static') {
+          wrapEl.style.position = 'relative';
+        }
+        acDropdown = document.createElement('div');
+        acDropdown.className = 'chips-autocomplete';
+        acDropdown.setAttribute('role', 'listbox');
+        wrapEl.appendChild(acDropdown);
+        return acDropdown;
+      };
+      const hideAc = () => {
+        if (acDropdown) acDropdown.removeAttribute('data-open');
+        acSuggestions = [];
+        acIndex = -1;
+      };
+      const renderAc = () => {
+        if (!window.MailAddressBook) { hideAc(); return; }
+        const q = inputEl.value.trim();
+        const usedSet = new Set(chips.map(c => c.toLowerCase()));
+        const all = window.MailAddressBook.search(q, 20);
+        acSuggestions = all.filter(s => !usedSet.has(s.email)).slice(0, 6);
+        if (acSuggestions.length === 0) { hideAc(); return; }
+        if (acIndex >= acSuggestions.length) acIndex = acSuggestions.length - 1;
+        const dd = ensureAcDropdown();
+        dd.innerHTML = acSuggestions.map((s, i) => {
+          const meta = s.count > 1 ? `${s.count} fois` : '';
+          return `<div class="chips-ac-item${i === acIndex ? ' is-active' : ''}" data-idx="${i}" role="option">
+            <span class="chips-ac-email">${escape(s.email)}</span>
+            <span class="chips-ac-meta">${meta}</span>
+          </div>`;
+        }).join('');
+        dd.setAttribute('data-open', '1');
+        [...dd.querySelectorAll('.chips-ac-item')].forEach(el => {
+          el.onmousedown = (e) => {
+            e.preventDefault();
+            selectAc(parseInt(el.dataset.idx, 10));
+          };
+          el.onmouseenter = () => {
+            acIndex = parseInt(el.dataset.idx, 10);
+            dd.querySelectorAll('.chips-ac-item').forEach((n, j) => {
+              n.classList.toggle('is-active', j === acIndex);
+            });
+          };
+        });
+      };
+      const selectAc = (i) => {
+        if (i < 0 || i >= acSuggestions.length) return;
+        inputEl.value = acSuggestions[i].email;
+        hideAc();
+        tryCommit();
+        inputEl.focus();
+      };
 
       const renderChips = () => {
         [...wrapEl.querySelectorAll('.chip')].forEach(el => el.remove());
@@ -1581,6 +1684,39 @@ const Mails = {
       };
 
       inputEl.addEventListener('keydown', (e) => {
+        // Si dropdown autocomplétion ouvert, prioritaire sur le commit
+        const acOpen = acDropdown && acDropdown.getAttribute('data-open') === '1' && acSuggestions.length > 0;
+        if (acOpen) {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            acIndex = Math.min((acIndex < 0 ? -1 : acIndex) + 1, acSuggestions.length - 1);
+            renderAc();
+            return;
+          }
+          if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            acIndex = Math.max(acIndex - 1, 0);
+            renderAc();
+            return;
+          }
+          if (e.key === 'Enter' && acIndex >= 0) {
+            e.preventDefault();
+            selectAc(acIndex);
+            return;
+          }
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            hideAc();
+            return;
+          }
+          if (e.key === 'Tab' && acIndex >= 0) {
+            // Tab valide la suggestion sélectionnée puis commit (comportement Gmail)
+            e.preventDefault();
+            selectAc(acIndex);
+            return;
+          }
+        }
+
         if (e.key === 'Enter' || e.key === ',' || e.key === ';' || e.key === 'Tab') {
           if (inputEl.value.trim()) {
             e.preventDefault();
@@ -1593,10 +1729,17 @@ const Mails = {
         } else if (e.key === 'Backspace' && inputEl.value === '' && chips.length > 0) {
           chips.pop();
           renderChips();
+          hideAc();
         }
       });
+      inputEl.addEventListener('input', () => { acIndex = -1; renderAc(); });
+      inputEl.addEventListener('focus', renderAc);
       inputEl.addEventListener('blur', () => {
-        if (inputEl.value.trim()) tryCommit();
+        // Petit délai pour permettre le clic (mousedown) sur une suggestion
+        setTimeout(() => {
+          if (inputEl.value.trim()) tryCommit();
+          hideAc();
+        }, 120);
       });
       // Coller : si plusieurs adresses, splitter
       inputEl.addEventListener('paste', (e) => {
@@ -2665,6 +2808,9 @@ const Mails = {
               })),
             });
             if (r && r.ok) {
+              if (window.MailAddressBook) {
+                window.MailAddressBook.record([].concat(p.to || [], p.ccList || [], p.bccList || []));
+              }
               status.textContent = `✓ Mail programmé pour ${prettyDate}`;
               status.className = 'text-xs text-success';
               try { localStorage.removeItem('tc-mail-draft'); } catch (e) {}
@@ -2836,6 +2982,9 @@ const Mails = {
           })),
         });
         if (r && r.ok) {
+          if (window.MailAddressBook) {
+            window.MailAddressBook.record([].concat(to || [], ccList || [], bccList || []));
+          }
           status.textContent = '✓ Envoyé !';
           status.className = 'text-xs text-success';
           sendBtn.innerHTML = '✓ Envoyé';
