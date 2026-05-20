@@ -3066,3 +3066,55 @@ html, body {
        phare-kicker, phare-title, phare-subtitle — déjà définies plus haut ─── */
 
 
+/* ═══════════════════════════════════════════════════════════════════════
+   FIX SCROLL MOBILE
+   ─────────────────────────────────────────────────────────────────────
+   Sur mobile, 100vh inclut TOUJOURS la barre d'URL, même quand elle est
+   visible — résultat : `h-screen` (= 100vh) dépasse l'écran visible et
+   le contenu du bas est coupé. Avec `overflow-hidden` sur le body, le
+   scroll est carrément bloqué.
+
+   Fix : utiliser `100dvh` (dynamic viewport height) qui suit la zone
+   réellement visible et se réajuste quand la barre d'URL apparaît/se
+   masque. Plus padding safe-area-inset-bottom pour ne pas être caché
+   par la home bar des iPhone à encoche.
+   ═══════════════════════════════════════════════════════════════════════ */
+@supports (height: 100dvh) {
+  @media (max-width: 768px) {
+    html, body { height: 100dvh; }
+    body.h-screen { height: 100dvh !important; }
+    .h-screen { height: 100dvh !important; }
+    .min-h-screen { min-height: 100dvh !important; }
+
+    /* Modales avec hauteur viewport : on remplace XXvh par XXdvh */
+    [class*="h-[88vh]"] { height: 88dvh !important; }
+    [class*="h-[85vh]"] { height: 85dvh !important; }
+    [class*="h-[80vh]"] { height: 80dvh !important; }
+    [class*="max-h-[90vh]"] { max-height: 90dvh !important; }
+    [class*="max-h-[88vh]"] { max-height: 88dvh !important; }
+    [class*="max-h-[85vh]"] { max-height: 85dvh !important; }
+    [class*="max-h-[78vh]"] { max-height: 78dvh !important; }
+    [class*="max-h-[70vh]"] { max-height: 70dvh !important; }
+
+    /* Marge basse pour ne pas être caché par la home bar / encoche */
+    main { padding-bottom: env(safe-area-inset-bottom, 0); }
+  }
+}
+
+/* Garantit que les conteneurs flex enfants puissent réduire leur taille
+   (sinon ils débordent et bloquent le scroll de l'ancêtre overflow-auto) */
+@media (max-width: 768px) {
+  .flex > *,
+  .flex-1 { min-height: 0; }
+
+  /* Le wrap principal : h-screen + pt-14 sur mobile = 100vh - 56px d'espace
+     pour main. Avec dvh ça reste juste, donc on s'assure que ses enfants
+     ne dépassent pas et que main est bien le conteneur scrollable. */
+  main { -webkit-overflow-scrolling: touch; }
+
+  /* Lien dur : si une modale fixed inset-0 contient un enfant trop haut,
+     on force l'ancêtre à scroller plutôt que de couper. */
+  .fixed.inset-0 { overflow-y: auto; }
+}
+
+
