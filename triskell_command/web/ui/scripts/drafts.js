@@ -15,12 +15,39 @@ const Drafts = {
           </div>
           <div class="flex flex-wrap gap-2 sm:gap-3 mt-5 sm:mt-6">
             <button id="d-refresh" class="btn btn-secondary">Rafraîchir</button>
+            <button id="d-cleanup" class="btn btn-secondary" title="Supprime les brouillons en attente qui n'ont jamais reçu de contenu (coquilles vides)">Vider les coquilles vides</button>
           </div>
         </div>
         <div id="d-list" class="space-y-3 sm:space-y-4"></div>
       </section>
     `;
     document.getElementById('d-refresh').onclick = () => this.refresh();
+    document.getElementById('d-cleanup').onclick = () => this._cleanup();
+    await this.refresh();
+  },
+
+  async _cleanup() {
+    if (!App.api) return;
+    const ok = confirm(
+      "Supprimer tous les brouillons en attente qui n’ont jamais reçu " +
+      "de contenu (coquilles vides) ?\n\n" +
+      "Les vrais brouillons (avec texte) ne sont pas touchés. " +
+      "Les prospects ne sont pas supprimés non plus."
+    );
+    if (!ok) return;
+    const btn = document.getElementById('d-cleanup');
+    if (btn) { btn.disabled = true; btn.textContent = 'Nettoyage…'; }
+    let res;
+    try { res = await App.api.cleanup_empty_drafts({}); }
+    catch (e) { alert('Erreur : ' + e); }
+    finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Vider les coquilles vides'; }
+    }
+    if (res && res.ok) {
+      alert(`${res.total} coquille(s) vide(s) supprimée(s).`);
+    } else if (res) {
+      alert('Nettoyage partiel. Erreurs : ' + (res.errors || []).join(' ; '));
+    }
     await this.refresh();
   },
 

@@ -697,6 +697,58 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    # ----- ménage : supprime les coquilles pending sans contenu ---------
+    def cleanup_empty_drafts(self, payload: dict | None = None) -> dict:
+        """Supprime tous les drafts status='pending' sans subject ni body.
+
+        Ce sont des prospects en attente de génération IA qui n'a jamais
+        abouti — ils polluent le compteur et la file. Ne touche jamais
+        aux drafts approuvés, envoyés, rejetés ou avec contenu.
+        """
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Supabase non connecté"}
+        sb = client.raw
+        deleted = {"prospect_drafts": 0, "convoy_drafts": 0}
+        errors: list[str] = []
+
+        for table in ("prospect_drafts", "convoy_drafts"):
+            try:
+                page_size = 500
+                offset = 0
+                empty_ids: list[str] = []
+                while True:
+                    res = (sb.table(table).select("id, subject, body")
+                            .eq("status", "pending")
+                            .range(offset, offset + page_size - 1).execute())
+                    data = res.data or []
+                    if not data:
+                        break
+                    for r in data:
+                        if not (r.get("subject") or "").strip() \
+                           and not (r.get("body") or "").strip():
+                            empty_ids.append(r["id"])
+                    if len(data) < page_size:
+                        break
+                    offset += page_size
+                    if offset > 50000:
+                        break
+                # delete par lots de 100
+                for i in range(0, len(empty_ids), 100):
+                    batch = empty_ids[i:i + 100]
+                    sb.table(table).delete().in_("id", batch).execute()
+                deleted[table] = len(empty_ids)
+            except Exception as exc:
+                errors.append(f"{table}: {exc}")
+
+        total = deleted["prospect_drafts"] + deleted["convoy_drafts"]
+        return {
+            "ok": not errors,
+            "deleted": deleted,
+            "total": total,
+            "errors": errors,
+        }
+
     # ----- reject Supabase ---------------------------------------------
     def _reject_supabase_draft(self, table: str, draft_id: str) -> dict:
         if not draft_id:
