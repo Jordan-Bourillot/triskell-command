@@ -45,9 +45,10 @@ const Morning = {
           ${Help.button('morning')}
         </div>
 
-        <!-- Salutation discrète + quickbar -->
-        <div class="mt-5 flex items-end justify-between gap-3 flex-wrap">
+        <!-- Salutation discrète + citation du jour + quickbar -->
+        <div class="mt-5 flex items-end justify-between gap-6 flex-wrap">
           <h1 class="hero-title">${userName ? `${greeting} ${nameWithCrown}.` : `${greeting}.`}</h1>
+          ${typeof DailyQuote !== 'undefined' ? DailyQuote.renderHTML() : ''}
         </div>
         <div class="cockpit-quickbar">
           <button id="m-refresh" class="btn btn-secondary" title="Rafraîchir les chiffres">
