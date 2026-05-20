@@ -184,6 +184,58 @@ const PixelPros = {
       .pp-mail-toggle:active { transform: translateY(1px); }
       .pp-mail-toggle:disabled { opacity: .5; cursor: wait; }
 
+      /* Édition du contact (mail / téléphone) depuis la fiche intake */
+      .pp-detail-sub { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+      .pp-edit-contact-btn {
+        background:rgba(148,163,184,.12);
+        border:1px solid var(--border, #1e293b);
+        color:#94a3b8;
+        width:26px; height:26px;
+        border-radius:6px;
+        font-size:13px;
+        cursor:pointer;
+        display:inline-flex; align-items:center; justify-content:center;
+        transition: background .15s, color .15s, border-color .15s;
+      }
+      .pp-edit-contact-btn:hover {
+        background:rgba(250,204,21,.18);
+        border-color: rgba(250,204,21,.5);
+        color:#facc15;
+      }
+      .pp-edit-overlay {
+        position:fixed; inset:0; z-index:1100;
+        background:rgba(0,0,0,.55);
+        backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+        display:flex; align-items:center; justify-content:center;
+        padding:20px;
+        animation: pp-fadein .15s ease;
+      }
+      .pp-edit-dialog {
+        background:#0f172a;
+        border:1px solid #1e293b;
+        border-radius:14px;
+        padding:24px;
+        width:100%; max-width:420px;
+        box-shadow: 0 20px 60px rgba(0,0,0,.5);
+        animation: pp-slideup .2s ease;
+      }
+      @keyframes pp-slideup { from { transform:translateY(10px); opacity:0; } to { transform:translateY(0); opacity:1; } }
+      .pp-edit-title { font-size:16px; font-weight:800; color:#e2e8f0; margin-bottom:16px; }
+      .pp-edit-label { display:block; font-size:12px; font-weight:600; color:#94a3b8; margin-bottom:14px; }
+      .pp-edit-hint { font-weight:400; color:#64748b; }
+      .pp-edit-input {
+        display:block; width:100%;
+        margin-top:6px;
+        padding:10px 12px;
+        background:#020617;
+        border:1px solid #1e293b;
+        border-radius:8px;
+        color:#e2e8f0;
+        font-size:14px;
+      }
+      .pp-edit-input:focus { outline:none; border-color:#facc15; }
+      .pp-edit-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+
       /* Champs de l'éditeur de mail */
       .pp-mail-input, .pp-mail-textarea {
         width:100%; padding:10px 12px; border-radius:8px;
@@ -700,9 +752,12 @@ const PixelPros = {
 
       <div class="pp-detail-head">
         <div class="pp-avatar" style="background:${color};">${this._escape(initial)}</div>
-        <div>
+        <div style="flex:1; min-width:0;">
           <div class="pp-detail-name">${this._escape(name)}</div>
-          <div class="pp-detail-sub">${this._escape(email)}${phone ? ' · ' + this._escape(phone) : ''}</div>
+          <div class="pp-detail-sub">
+            <span>${this._escape(email)}${phone ? ' · ' + this._escape(phone) : ''}</span>
+            <button class="pp-edit-contact-btn" data-pp-edit-contact title="Modifier le mail / téléphone">✏️</button>
+          </div>
           <span class="pp-detail-pill" style="background:${col.accent}25; color:${col.accent};">${col.icon} ${this._escape(col.label)}</span>
         </div>
       </div>
@@ -751,6 +806,68 @@ const PixelPros = {
     panel.querySelectorAll('[data-pp-action]').forEach(b => {
       b.onclick = () => this._doAction(b.dataset.ppAction, intake);
     });
+    const editBtn = panel.querySelector('[data-pp-edit-contact]');
+    if (editBtn) {
+      editBtn.onclick = () => this._editContact(intake);
+    }
+  },
+
+  // Mini-dialog pour modifier email/téléphone d'un intake.
+  async _editContact(intake) {
+    const data = intake.data || {};
+    const currentEmail = data.email || '';
+    const currentPhone = data.phone || '';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'pp-edit-overlay';
+    overlay.innerHTML = `
+      <div class="pp-edit-dialog">
+        <div class="pp-edit-title">Modifier le contact</div>
+        <label class="pp-edit-label">Adresse mail
+          <input type="email" id="pp-edit-email" class="pp-edit-input" value="${this._escape(currentEmail)}" placeholder="email@exemple.fr" />
+        </label>
+        <label class="pp-edit-label">Téléphone <span class="pp-edit-hint">(optionnel)</span>
+          <input type="tel" id="pp-edit-phone" class="pp-edit-input" value="${this._escape(currentPhone)}" placeholder="06 12 34 56 78" />
+        </label>
+        <div class="pp-edit-actions">
+          <button class="pp-action-btn secondary" data-pp-edit-cancel>Annuler</button>
+          <button class="pp-action-btn primary" data-pp-edit-save>Enregistrer</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+    overlay.querySelector('[data-pp-edit-cancel]').onclick = close;
+    overlay.querySelector('#pp-edit-email').focus();
+
+    overlay.querySelector('[data-pp-edit-save]').onclick = async () => {
+      const newEmail = overlay.querySelector('#pp-edit-email').value.trim();
+      const newPhone = overlay.querySelector('#pp-edit-phone').value.trim();
+      if (newEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+        this._toast('Adresse mail invalide', true);
+        return;
+      }
+      const saveBtn = overlay.querySelector('[data-pp-edit-save]');
+      saveBtn.disabled = true;
+      saveBtn.textContent = '…';
+      const res = await this._call('pixelpros_update_contact', {
+        id: intake.id,
+        email: newEmail,
+        phone: newPhone,
+      });
+      if (res && res.ok) {
+        this._toast('Contact mis à jour');
+        close();
+        await this._loadDetail(intake.id);
+        await this.refresh();
+      } else {
+        this._toast(`Erreur : ${res?.error || res?.message || 'inconnue'}`, true);
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Enregistrer';
+      }
+    };
   },
 
   _availableActions(intake) {

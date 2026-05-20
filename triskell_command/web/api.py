@@ -2886,6 +2886,20 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def pixelpros_update_contact(self, payload: dict) -> dict:
+        """Met à jour l'email et/ou le téléphone d'un intake Pixel Pros."""
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid:
+            return {"ok": False, "error": "id manquant"}
+        email = (payload or {}).get("email")
+        phone = (payload or {}).get("phone")
+        try:
+            from ..integrations.pixelpros import repo as r
+            ok, msg = r.update_intake_contact(iid, email=email, phone=phone)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def pixelpros_mail_auto_get(self, payload: dict | None = None) -> dict:
         """Renvoie l'état auto/manuel des mails 'paid' et 'live'."""
         try:

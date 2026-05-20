@@ -227,6 +227,46 @@ def mark_failed(intake_id: str, *, error_message: str = "") -> bool:
                                  error_message=error_message or "Build échoué")
 
 
+def update_intake_contact(intake_id: str, *, email: str | None = None,
+                          phone: str | None = None) -> tuple[bool, str]:
+    """Met à jour les champs contact (email / phone) dans data.
+
+    Passer None pour un champ = on n'y touche pas. Passer une chaîne vide
+    = on retire le champ (revient à la valeur par défaut "—").
+    """
+    sb = _sb()
+    if sb is None:
+        return False, "Supabase non configuré."
+    intake = get_intake(intake_id)
+    if intake is None:
+        return False, "Intake introuvable."
+    data = intake.get("data") or {}
+    if not isinstance(data, dict):
+        data = {}
+    if email is not None:
+        clean = email.strip()
+        if clean:
+            data["email"] = clean
+        else:
+            data.pop("email", None)
+    if phone is not None:
+        clean = phone.strip()
+        if clean:
+            data["phone"] = clean
+        else:
+            data.pop("phone", None)
+    patch = {
+        "data": data,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        sb.table(TABLE).update(patch).eq("id", intake_id).execute()
+        return True, "Contact mis à jour."
+    except Exception as exc:
+        logger.warning("pixelpros.update_intake_contact: %s", exc)
+        return False, str(exc)
+
+
 def mark_paid_manual(intake_id: str) -> tuple[bool, str]:
     """Override manuel : passe un draft directement au statut 'paid' sans
     attendre le webhook Stripe.
