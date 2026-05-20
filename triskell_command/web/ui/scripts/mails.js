@@ -1128,15 +1128,26 @@ const Mails = {
         if (r && r.ok) signatures = r.signatures || [];
       } catch (e) {}
     }
+    // Liste filtrée des signatures visibles pour un compte donné.
+    // Règle : une signature attribuée à un compte précis (account_ids non vide)
+    // ne s'affiche QUE pour les comptes concernés. Une signature sans
+    // account_ids est universelle (visible partout).
+    const signaturesForAccount = (accId) => {
+      return signatures.filter(s => {
+        const ids = s.account_ids || [];
+        return ids.length === 0 || ids.includes(accId);
+      });
+    };
     // Détermine la signature à utiliser par défaut pour le compte courant
     const pickSigForAccount = (accId) => {
-      if (!signatures.length) return null;
+      const visible = signaturesForAccount(accId);
+      if (!visible.length) return null;
       // 1) Signature explicitement attribuée au compte
-      let s = signatures.find(s => (s.account_ids || []).includes(accId));
+      let s = visible.find(s => (s.account_ids || []).includes(accId));
       // 2) Sinon signature "toutes adresses" (account_ids vide)
-      if (!s) s = signatures.find(s => !(s.account_ids || []).length);
-      // 3) Sinon la première
-      return s || signatures[0] || null;
+      if (!s) s = visible.find(s => !(s.account_ids || []).length);
+      // 3) Sinon la première visible
+      return s || visible[0] || null;
     };
     let currentSig = pickSigForAccount(defaultAccountId);
     let signature = currentSig?.body_text || '';
@@ -1233,7 +1244,7 @@ const Mails = {
                           class="px-2.5 py-1 rounded-lg bg-bg border border-border font-semibold text-text"
                           style="min-width: 160px; max-width: 220px;">
                     <option value="">Sans signature</option>
-                    ${signatures.map(s =>
+                    ${signaturesForAccount(defaultAccountId).map(s =>
                       `<option value="${this._escape(s.id)}" ${currentSig && s.id === currentSig.id ? 'selected' : ''}>${this._escape(s.name)}</option>`
                     ).join('')}
                   </select>
@@ -2452,13 +2463,26 @@ const Mails = {
       };
     }
 
-    // Bind du dropdown compte expéditeur : auto-sélection de la signature
+    // Bind du dropdown compte expéditeur : on filtre les signatures visibles
+    // pour ce compte et on auto-sélectionne la bonne signature.
     const fromSel = overlay.querySelector('#cmp-from');
     if (fromSel) {
       fromSel.addEventListener('change', () => {
-        const newSig = pickSigForAccount(fromSel.value);
-        if (newSig?.id !== currentSig?.id) {
-          if (sigSelect) sigSelect.value = newSig?.id || '';
+        const accId = fromSel.value;
+        const visible = signaturesForAccount(accId);
+        const newSig = pickSigForAccount(accId);
+        // Re-rend les options du dropdown signature pour ne montrer que celles
+        // pertinentes pour le nouveau compte.
+        if (sigSelect) {
+          const opts = ['<option value="">Sans signature</option>'];
+          visible.forEach(s => {
+            const sel = (newSig && s.id === newSig.id) ? ' selected' : '';
+            opts.push(`<option value="${this._escape(s.id)}"${sel}>${this._escape(s.name)}</option>`);
+          });
+          sigSelect.innerHTML = opts.join('');
+        }
+        // Applique la nouvelle signature dans le body si elle a changé.
+        if ((newSig?.id || '') !== (currentSig?.id || '')) {
           applySignature(newSig);
         }
       });
