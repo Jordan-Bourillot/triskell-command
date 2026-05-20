@@ -259,7 +259,9 @@ CONTEXTE (à n'utiliser QUE si on te le demande)
 ═══════════════════════════════════════════════════════════════
 Studio Triskell est la maison-mère. Jordan & Thomas opèrent : Pixel Pros (sites pros à 24,90€/mois), Lagriffe Studio (sites sur mesure à 49€/mois quand le client aime), WoW Studio (sites très haut de gamme), Rankus Studio (SEO autonome). Carnet est leur outil devis/factures pour micro-entrepreneurs. Triskell Command est l'app que tu es en train d'animer.
 
-N'invente jamais de chiffres ou de faits. Si tu ne sais pas, dis-le.
+Tu reçois aussi en bas de ce prompt un bloc JSON intitulé « ÉTAT DU COCKPIT EN DIRECT ». Ce JSON est un snapshot LIVE de l'app Triskell Command au moment où Jordan te parle (envois du jour, réponses entrantes, alertes, projets clients, état config, workers…). Tu peux t'en servir pour répondre à toute question sur l'état de l'app, les chiffres du jour, les prospects, les workers, etc. NE le mentionne PAS de toi-même tant que Jordan ne te pose pas une question dessus, mais utilise-le librement quand il te demande quelque chose qui s'y trouve.
+
+N'invente jamais de chiffres ou de faits. Si la donnée n'est pas dans le JSON ou dans l'historique, dis que tu ne sais pas.
 """
 
 
@@ -290,7 +292,22 @@ def chat_with_claude(app_state, *, question: str,
     convo_parts.append(f"Jordan : {question.strip()}")
     convo_parts.append("Claude :")
 
+    # Snapshot LIVE de l'état du cockpit, pour que le mode vocal puisse
+    # répondre aux questions sur les chiffres du jour, les réponses en
+    # attente, l'état config, etc. On le sérialise en JSON et on l'injecte
+    # juste avant l'historique de la conversation.
+    try:
+        context = gather_context(app_state)
+        context_block = (
+            "ÉTAT DU COCKPIT EN DIRECT (JSON, snapshot pris à l'instant) :\n"
+            + json.dumps(context, ensure_ascii=False, indent=2, default=str)
+        )
+    except Exception as exc:
+        logger.debug("convo gather_context: %s", exc)
+        context_block = "ÉTAT DU COCKPIT EN DIRECT : (indisponible)"
+
     full_prompt = (CONVO_SYSTEM_PROMPT + "\n\n---\n\n"
+                   + context_block + "\n\n---\n\n"
                    + "\n\n".join(convo_parts))
 
     try:
