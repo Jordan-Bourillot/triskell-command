@@ -95,10 +95,24 @@ def _send_mail(to: str, subject: str, body: str) -> dict:
 
     try:
         message_id = send_email(cfg, to=to, subject=subject, body=body)
-        return {"ok": True, "message_id": message_id}
     except Exception as exc:
         logger.warning("send_email failed: %s", exc)
         return {"ok": False, "error": str(exc)}
+
+    # Log dans l'historique pour apparaître dans la vue « Mails envoyés »
+    try:
+        from ..email_history_log import log_sent_pipeline_mail
+        log_sent_pipeline_mail(
+            to=to,
+            subject=subject,
+            body=body,
+            from_email=cfg.get("from_email", "") if isinstance(cfg, dict) else "",
+            message_id=message_id or "",
+            source="phare_alert",
+        )
+    except Exception as exc:
+        logger.debug("phare.notifications: log_sent_pipeline_mail KO : %s", exc)
+    return {"ok": True, "message_id": message_id}
 
 
 # ---------------------------------------------------------------------------

@@ -393,19 +393,39 @@ def _load_smtp_config() -> Optional[dict]:
     return None
 
 
-def _send_via_smtp(cfg: dict, *, to: str, subject: str, body: str, body_html: str = "") -> bool:
-    """Wrapper autour de triskell_core.prospect.outreach.smtp_sender.send_email."""
+def _send_via_smtp(cfg: dict, *, to: str, subject: str, body: str,
+                   body_html: str = "", source: str = "") -> bool:
+    """Wrapper autour de triskell_core.prospect.outreach.smtp_sender.send_email.
+
+    En cas de succès, logge l'envoi dans `email_history` pour que le mail
+    apparaisse dans la vue « Mails envoyés ».
+    """
     try:
         from triskell_core.prospect.outreach.smtp_sender import send_email
     except ImportError as exc:
         logger.error("pixelpros.mailer: smtp_sender introuvable : %s", exc)
         return False
     try:
-        send_email(cfg, to=to, subject=subject, body=body, body_html=body_html)
-        return True
+        message_id = send_email(cfg, to=to, subject=subject, body=body, body_html=body_html)
     except Exception as exc:
         logger.warning("pixelpros.mailer envoi KO : %s", exc)
         return False
+
+    # Log dans l'historique (non bloquant)
+    try:
+        from ..email_history_log import log_sent_pipeline_mail
+        log_sent_pipeline_mail(
+            to=to,
+            subject=subject,
+            body=body,
+            body_html=body_html,
+            from_email=cfg.get("from_email", "") if isinstance(cfg, dict) else "",
+            message_id=message_id or "",
+            source=source or "pixelpros_pipeline",
+        )
+    except Exception as exc:
+        logger.debug("pixelpros.mailer: log_sent_pipeline_mail KO : %s", exc)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -463,7 +483,8 @@ def send_paid_mail(intake: dict) -> tuple[bool, str]:
     if not to:
         return False, "Email du client introuvable dans le draft"
     subject, body, body_html = _build_paid_mail(intake)
-    ok = _send_via_smtp(cfg, to=to, subject=subject, body=body, body_html=body_html)
+    ok = _send_via_smtp(cfg, to=to, subject=subject, body=body, body_html=body_html,
+                        source="pixelpros_paid_mail")
     return (True, f"Envoyé à {to}") if ok else (False, "Envoi SMTP a échoué (voir logs)")
 
 
@@ -477,5 +498,6 @@ def send_live_mail(intake: dict) -> tuple[bool, str]:
     if not intake.get("site_url"):
         return False, "site_url manquant sur le draft (build pas terminé ?)"
     subject, body, body_html = _build_live_mail(intake)
-    ok = _send_via_smtp(cfg, to=to, subject=subject, body=body, body_html=body_html)
+    ok = _send_via_smtp(cfg, to=to, subject=subject, body=body, body_html=body_html,
+                        source="pixelpros_live_mail")
     return (True, f"Envoyé à {to}") if ok else (False, "Envoi SMTP a échoué (voir logs)")
