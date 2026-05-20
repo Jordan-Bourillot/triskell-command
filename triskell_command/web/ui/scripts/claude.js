@@ -4,9 +4,72 @@
  * On gère ici l'attention (dot rouge + pulse rapide) et le dialog.
  */
 
+// Injecte les styles du bouton micro et de l'état "écoute"
+(function injectClaudeVoiceStyles() {
+  if (document.getElementById('claude-voice-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'claude-voice-styles';
+  s.textContent = `
+    .claude-mic-btn {
+      display:inline-flex; align-items:center; justify-content:center;
+      width:42px; height:42px;
+      border-radius:12px;
+      background: hsl(var(--surface));
+      border:1px solid hsl(var(--border));
+      color: hsl(var(--text-secondary));
+      cursor:pointer; flex-shrink:0;
+      transition: background .15s, color .15s, border-color .15s, transform .1s;
+      font-size:18px; line-height:1;
+    }
+    .claude-mic-btn:hover {
+      background: hsl(var(--accent) / 0.12);
+      border-color: hsl(var(--accent) / 0.4);
+      color: hsl(var(--accent));
+    }
+    .claude-mic-btn:active { transform: translateY(1px); }
+    .claude-mic-btn.is-listening {
+      background:#ef4444;
+      border-color:#dc2626;
+      color:#fff;
+      animation: claude-mic-pulse 1.2s ease-in-out infinite;
+    }
+    .claude-mic-btn:disabled { opacity:.4; cursor:not-allowed; }
+    @keyframes claude-mic-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.45); }
+      50% { box-shadow: 0 0 0 10px rgba(239,68,68,0); }
+    }
+    .claude-voice-hint {
+      font-size: 11px; color: #ef4444; font-weight:600;
+      margin-top: 6px; display: none;
+    }
+    .claude-voice-hint.is-active { display:block; }
+    .claude-speak-btn {
+      display:inline-flex; align-items:center; gap:6px;
+      padding:6px 12px; margin-left:8px;
+      border-radius:8px;
+      background: hsl(var(--surface));
+      border:1px solid hsl(var(--border));
+      color: hsl(var(--text-secondary));
+      cursor:pointer; font-size:12px; font-weight:600;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .claude-speak-btn:hover {
+      background: hsl(var(--accent) / 0.1);
+      border-color: hsl(var(--accent) / 0.4);
+      color: hsl(var(--accent));
+    }
+    .claude-speak-btn.is-speaking {
+      background:#22c55e; border-color:#16a34a; color:#fff;
+    }
+  `;
+  document.head.appendChild(s);
+})();
+
 const Claude = {
   isAttention: false,
   pendingAdvice: null,
+  _recognition: null,
+  _listening: false,
 
   setAttention(on) {
     this.isAttention = !!on;
@@ -76,6 +139,13 @@ const Claude = {
 
   close(overlay) {
     if (!overlay) return;
+    // Coupe la dictée et la synthèse vocale si elles tournent
+    if (this._recognition) {
+      try { this._recognition.stop(); } catch (e) {}
+    }
+    if (window.speechSynthesis && window.speechSynthesis.speaking) {
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+    }
     overlay.style.opacity = '0';
     setTimeout(() => overlay.remove(), 200);
   },
@@ -116,7 +186,9 @@ const Claude = {
         <!-- Footer (question libre) -->
         <div class="px-5 py-4 sm:px-8 sm:py-5 border-t border-border bg-surface-elevated/50">
           <div class="hero-kicker mb-2">OU POSE UNE QUESTION LIBRE</div>
-          <div class="flex flex-col sm:flex-row gap-2">
+          <div class="flex flex-col sm:flex-row gap-2 items-stretch">
+            <button id="claude-mic-btn" type="button" class="claude-mic-btn"
+                    title="Parler à Claude (dictée vocale)" aria-label="Dicter ma question">🎤</button>
             <input id="claude-question" type="text"
                    class="flex-1 min-w-0 px-4 py-2.5 text-sm rounded-xl bg-surface border border-border
                           focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent
@@ -124,6 +196,7 @@ const Claude = {
                    placeholder="ex: comment booster mes réponses cette semaine ?" />
             <button id="claude-ask-free" class="btn btn-primary w-full sm:w-auto justify-center shrink-0">Demander</button>
           </div>
+          <div id="claude-voice-hint" class="claude-voice-hint">🔴 J'écoute… (parle, ou clique sur ⏹ pour arrêter)</div>
         </div>
       </div>
     `;
@@ -146,7 +219,121 @@ const Claude = {
     overlay.querySelector('#claude-question').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') overlay.querySelector('#claude-ask-free').click();
     });
+
+    // Bouton micro (dictée vocale)
+    const micBtn = overlay.querySelector('#claude-mic-btn');
+    if (micBtn) {
+      if (!this._supportsVoiceInput()) {
+        micBtn.disabled = true;
+        micBtn.title = "Ton navigateur ne supporte pas la dictée vocale (utilise Chrome, Edge ou Safari)";
+      } else {
+        micBtn.onclick = () => this._toggleVoiceInput(overlay);
+      }
+    }
     return overlay;
+  },
+
+  _supportsVoiceInput() {
+    return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  },
+
+  _supportsVoiceOutput() {
+    return !!window.speechSynthesis;
+  },
+
+  _toggleVoiceInput(overlay) {
+    const input = overlay.querySelector('#claude-question');
+    const micBtn = overlay.querySelector('#claude-mic-btn');
+    const hint = overlay.querySelector('#claude-voice-hint');
+
+    // Si déjà en écoute → on stoppe (et on déclenche le submit si du texte)
+    if (this._listening && this._recognition) {
+      try { this._recognition.stop(); } catch (e) {}
+      return;
+    }
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.lang = 'fr-FR';
+    rec.continuous = true;        // on laisse Jordan parler longtemps
+    rec.interimResults = true;    // remplit l'input au fur et à mesure
+
+    this._recognition = rec;
+    this._listening = true;
+    micBtn.classList.add('is-listening');
+    micBtn.textContent = '⏹';
+    micBtn.title = "Arrêter l'écoute";
+    hint.classList.add('is-active');
+    input.value = '';
+
+    let finalText = '';
+    rec.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t;
+        else interim += t;
+      }
+      input.value = (finalText + interim).trim();
+    };
+    rec.onerror = () => { try { rec.stop(); } catch (e) {} };
+    rec.onend = () => {
+      this._listening = false;
+      this._recognition = null;
+      micBtn.classList.remove('is-listening');
+      micBtn.textContent = '🎤';
+      micBtn.title = "Parler à Claude (dictée vocale)";
+      hint.classList.remove('is-active');
+      // Auto-submit si on a quelque chose
+      if (input.value.trim()) {
+        overlay.querySelector('#claude-ask-free').click();
+      }
+    };
+
+    try {
+      rec.start();
+    } catch (e) {
+      this._listening = false;
+      this._recognition = null;
+      micBtn.classList.remove('is-listening');
+      micBtn.textContent = '🎤';
+      hint.classList.remove('is-active');
+      alert("Impossible de démarrer l'écoute. Vérifie que tu as autorisé le micro pour cette page.");
+    }
+  },
+
+  _toggleSpeak(text, btn) {
+    if (!window.speechSynthesis) return;
+    // Si déjà en train de parler → stop
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+      if (btn) {
+        btn.classList.remove('is-speaking');
+        btn.innerHTML = '🔊 Écouter';
+      }
+      return;
+    }
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'fr-FR';
+    u.rate = 1.0;
+    u.pitch = 1.0;
+    // Essaye de choisir une voix française
+    const voices = window.speechSynthesis.getVoices();
+    const fr = voices.find(v => v.lang && v.lang.startsWith('fr'));
+    if (fr) u.voice = fr;
+    u.onend = () => {
+      if (btn) {
+        btn.classList.remove('is-speaking');
+        btn.innerHTML = '🔊 Écouter';
+      }
+    };
+    u.onerror = u.onend;
+    if (btn) {
+      btn.classList.add('is-speaking');
+      btn.innerHTML = '⏹ Stop';
+    }
+    window.speechSynthesis.speak(u);
   },
 
   _renderLoading(overlay) {
@@ -179,12 +366,18 @@ const Claude = {
     const colors = { low: 'text-text-muted', medium: 'text-warning', high: 'text-danger' };
     const u = advice.urgency || 'low';
 
+    const speakable = [advice.headline, advice.advice].filter(Boolean).join('. ');
+    const canSpeak = this._supportsVoiceOutput() && speakable;
+
     body.innerHTML = `
       <div class="animate-fade-in">
-        <span class="inline-block px-3 py-1 rounded-full text-[10px] font-bold tracking-widest
-                     bg-bg ${colors[u]} mb-5">
-          NIVEAU : ${labels[u].toUpperCase()}
-        </span>
+        <div class="flex items-center gap-2 mb-5">
+          <span class="inline-block px-3 py-1 rounded-full text-[10px] font-bold tracking-widest
+                       bg-bg ${colors[u]}">
+            NIVEAU : ${labels[u].toUpperCase()}
+          </span>
+          ${canSpeak ? `<button id="claude-speak-btn" type="button" class="claude-speak-btn" title="Faire lire la réponse à voix haute">🔊 Écouter</button>` : ''}
+        </div>
         ${advice.headline ? `<h3 class="font-sans text-2xl font-bold mb-4 leading-snug tracking-tight">${this._esc(advice.headline)}</h3>` : ''}
         ${advice.advice ? `<div class="text-text-secondary leading-relaxed whitespace-pre-line mb-6">${this._esc(advice.advice)}</div>` : ''}
         ${advice.suggested_view ? `
@@ -195,6 +388,11 @@ const Claude = {
         ` : ''}
       </div>
     `;
+
+    if (canSpeak) {
+      const speakBtn = body.querySelector('#claude-speak-btn');
+      if (speakBtn) speakBtn.onclick = () => this._toggleSpeak(speakable, speakBtn);
+    }
   },
 
   _esc(s) {
