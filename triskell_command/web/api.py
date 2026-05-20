@@ -2806,6 +2806,17 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def pixelpros_mark_paid_manual(self, payload: dict) -> dict:
+        """Override manuel : passe un draft au statut paid sans Stripe."""
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.pixelpros import repo as r
+            ok, msg = r.mark_paid_manual(iid)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ----- Templates mails Pixel Pros (paid / live) -----
     def pixelpros_mail_template_get(self, payload: dict | None = None) -> dict:
         kind = ((payload or {}).get("kind") or "").strip()

@@ -227,6 +227,37 @@ def mark_failed(intake_id: str, *, error_message: str = "") -> bool:
                                  error_message=error_message or "Build échoué")
 
 
+def mark_paid_manual(intake_id: str) -> tuple[bool, str]:
+    """Override manuel : passe un draft directement au statut 'paid' sans
+    attendre le webhook Stripe.
+
+    Utile pour :
+      - tester le pipeline sans payer
+      - encaisser un paiement hors-Stripe (virement, chèque, espèces)
+      - réparer un draft où le webhook Stripe a échoué
+      - faire un geste commercial
+
+    Pose stripe_paid_at = maintenant pour que la timeline reste cohérente.
+    Ne déclenche PAS le mail "paiement reçu" automatiquement — Jordan peut
+    le renvoyer manuellement depuis le détail si besoin.
+    """
+    sb = _sb()
+    if sb is None:
+        return False, "Supabase non configuré."
+    now_iso = datetime.now(timezone.utc).isoformat()
+    patch = {
+        "status": "paid",
+        "stripe_paid_at": now_iso,
+        "updated_at": now_iso,
+    }
+    try:
+        sb.table(TABLE).update(patch).eq("id", intake_id).execute()
+        return True, "Marqué comme payé manuellement."
+    except Exception as exc:
+        logger.warning("pixelpros.mark_paid_manual: %s", exc)
+        return False, str(exc)
+
+
 def delete_intake(intake_id: str) -> tuple[bool, str]:
     """Supprime définitivement un draft Pixel Pros.
 

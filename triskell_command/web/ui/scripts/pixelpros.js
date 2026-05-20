@@ -666,6 +666,12 @@ const PixelPros = {
   _availableActions(intake) {
     const out = [];
     const st = intake.status;
+    // Pour un formulaire pas (encore) payé : override manuel possible
+    // pour tester, encaisser hors-Stripe ou faire un geste commercial.
+    if (st === 'draft') {
+      out.push(`<button data-pp-action="force_build" class="pp-action-btn primary">▶ Lancer la construction tout de suite</button>`);
+      out.push(`<button data-pp-action="mark_paid_manual" class="pp-action-btn secondary">💳 Marquer comme payé (sans construire)</button>`);
+    }
     if (st === 'paid' || st === 'failed' || st === 'building' || st === 'live') {
       const label = st === 'paid'   ? '▶ Lancer la construction'
                   : st === 'failed' ? '↻ Relancer la construction'
@@ -690,6 +696,41 @@ const PixelPros = {
     const id = intake.id;
     let res = null;
     switch (action) {
+      case 'mark_paid_manual': {
+        const data = intake.data || {};
+        const name = data.business_name || data['business-name'] || '(sans nom)';
+        const ok = confirm(
+          `Marquer ce formulaire comme payé manuellement ?\n\n` +
+          `  ${name}\n\n` +
+          `Le client passera dans la colonne "Payés". Aucun mail ne lui sera envoyé automatiquement — ` +
+          `tu pourras le faire à la main depuis le panneau de détail si tu veux.`
+        );
+        if (!ok) return;
+        res = await this._call('pixelpros_mark_paid_manual', { id });
+        this._toast(res?.ok ? `Marqué comme payé : ${res.message || ''}` : `Échec : ${res?.error || res?.message || '?'}`, !res?.ok);
+        break;
+      }
+      case 'force_build': {
+        const data = intake.data || {};
+        const name = data.business_name || data['business-name'] || '(sans nom)';
+        const ok = confirm(
+          `Construire le site MAINTENANT (sans attendre le paiement) ?\n\n` +
+          `  ${name}\n\n` +
+          `Le statut va passer en "Payé" puis "En construction". Le site sera en ligne dans 1-2 min.\n\n` +
+          `À utiliser pour tester, encaisser hors-Stripe ou faire un geste commercial.`
+        );
+        if (!ok) return;
+        // Étape 1 : marquer payé manuellement
+        const r1 = await this._call('pixelpros_mark_paid_manual', { id });
+        if (!r1 || !r1.ok) {
+          this._toast(`Échec marquage payé : ${r1?.error || r1?.message || '?'}`, true);
+          break;
+        }
+        // Étape 2 : lancer le build
+        res = await this._call('pixelpros_dispatch_build', { id });
+        this._toast(res?.ok ? `Build lancé : ${res.message || ''}` : `Échec build : ${res?.error || res?.message || '?'}`, !res?.ok);
+        break;
+      }
       case 'dispatch':
         res = await this._call('pixelpros_dispatch_build', { id });
         this._toast(res?.ok ? `Build lancé : ${res.message || ''}` : `Échec : ${res?.error || res?.message || '?'}`, !res?.ok);
