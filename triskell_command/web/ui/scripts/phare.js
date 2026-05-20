@@ -338,8 +338,22 @@ const Phare = {
           </div>
         </article>`;
     }
+    const isAuto = this._isAuto(a);
+    const badge = isAuto
+      ? `<div class="phare-action-kind phare-action-kind--auto" title="Le robot a déjà préparé la modification. Si tu approuves, elle est publiée automatiquement sur ton site.">
+           <span class="phare-action-kind-ico">🤖</span>
+           <span class="phare-action-kind-lbl">Le robot publie pour toi</span>
+         </div>`
+      : `<div class="phare-action-kind phare-action-kind--manual" title="C'est un conseil à faire toi-même. Approuver ne déclenche rien — ça marque juste la proposition comme lue.">
+           <span class="phare-action-kind-ico">👤</span>
+           <span class="phare-action-kind-lbl">À toi de le faire</span>
+         </div>`;
+    const approveLabel = isAuto
+      ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M5 3l14 9-14 9V3z"/></svg>Publier sur le site`
+      : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>J'ai fait, suivant`;
     return `
-      <article class="phare-action phare-action--todo" data-aid="${this._esc(a.id || '')}">
+      <article class="phare-action phare-action--todo ${isAuto ? 'is-auto' : 'is-manual'}" data-aid="${this._esc(a.id || '')}">
+        ${badge}
         <div class="phare-action-head">
           <div class="phare-action-icon phare-action-icon--todo">${this._actionEmoji(a.agent)}</div>
           <div class="phare-action-body">
@@ -356,31 +370,45 @@ const Phare = {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
             Poubelle
           </button>
+          ${isAuto ? `
           <button class="btn btn-secondary" data-preview="${this._esc(a.id || '')}">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            Aperçu
-          </button>
-          <button class="btn btn-primary" data-approve="${this._esc(a.id || '')}">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>
-            OK, applique
+            Aperçu avant publication
+          </button>` : ''}
+          <button class="btn btn-primary ${isAuto ? 'btn-auto' : 'btn-manual'}" data-approve="${this._esc(a.id || '')}" data-approve-auto="${isAuto ? '1' : '0'}">
+            ${approveLabel}
           </button>
         </footer>
       </article>
     `;
   },
 
+  // Retourne true si l'approbation déclenche une publication automatique
+  // (modif technique préparée par un robot — PR GitHub à merger), false
+  // si c'est juste une recommandation textuelle à appliquer à la main.
+  _isAuto(a) {
+    if (!a) return false;
+    if (a.kind === 'recommandation') return false;
+    if (a.github_pr_url) return true;
+    // Par défaut : si pas explicitement marqué "recommandation", on considère
+    // que c'est une modif automatique (anciens enregistrements sans kind).
+    return a.kind === 'pr_modif' || !!a.github_pr_url;
+  },
+
   _wireActionButtons(root) {
-    const approveHtml = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>OK, applique';
+    const approveHtmlAuto = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M5 3l14 9-14 9V3z"/></svg>Publier sur le site';
+    const approveHtmlManual = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>J\'ai fait, suivant';
     const rejectHtml = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>Poubelle';
     root.querySelectorAll('[data-approve]').forEach(b => {
       b.onclick = async () => {
         const id = b.dataset.approve;
-        b.disabled = true; b.textContent = 'Application…';
-        const restore = () => { b.disabled = false; b.innerHTML = approveHtml; };
+        const isAuto = b.dataset.approveAuto === '1';
+        b.disabled = true; b.textContent = isAuto ? 'Publication…' : 'Enregistrement…';
+        const restore = () => { b.disabled = false; b.innerHTML = isAuto ? approveHtmlAuto : approveHtmlManual; };
         try {
           const res = await App.api.phare_merge_action({ id, force: false });
           if (res && res.ok) {
-            this._toast(res.kind === 'note_only' ? '✓ Marquée comme appliquée' : '✓ Modification publiée');
+            this._toast(res.kind === 'note_only' ? '✓ Marquée comme faite — à toi de jouer' : '✓ Publié sur ton site');
             this._renderSite(document.getElementById('content'));
             return;
           }
@@ -472,11 +500,14 @@ const Phare = {
             </div>
           ` : `
             <div class="phare-preview-section phare-preview-section--empty">
-              <div class="phare-preview-empty-icon">💡</div>
-              <p><strong>Pas d'aperçu visuel pour cette proposition.</strong></p>
-              <p class="phare-preview-empty-sub">${a.kind === 'recommandation'
-                ? "C'est une recommandation : rien à publier, juste à lire et à appliquer toi-même si ça te parle."
-                : "Cette proposition n'a pas encore généré de prévisualisation. Tu peux quand même l'approuver."}</p>
+              <div class="phare-preview-empty-icon">${this._isAuto(a) ? '🤖' : '👤'}</div>
+              ${this._isAuto(a) ? `
+                <p><strong>Modification prête à publier (sans aperçu visuel).</strong></p>
+                <p class="phare-preview-empty-sub">Si tu cliques sur « Publier sur le site », le robot pousse le changement sur ton site en live (avec contrôles automatiques avant).</p>
+              ` : `
+                <p><strong>👤 À toi de le faire — pas de publication automatique.</strong></p>
+                <p class="phare-preview-empty-sub">C'est un conseil à appliquer toi-même. Cliquer sur « J'ai fait, suivant » <em>ne déclenche aucune action sur ton site</em> : ça marque juste la proposition comme lue pour qu'elle disparaisse de la liste.</p>
+              `}
             </div>
           `}
           ${prUrl ? `
@@ -492,9 +523,10 @@ const Phare = {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
             Poubelle
           </button>
-          <button class="btn btn-primary" data-preview-approve="${this._esc(a.id || '')}">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>
-            OK, applique
+          <button class="btn btn-primary ${this._isAuto(a) ? 'btn-auto' : 'btn-manual'}" data-preview-approve="${this._esc(a.id || '')}" data-approve-auto="${this._isAuto(a) ? '1' : '0'}">
+            ${this._isAuto(a)
+              ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M5 3l14 9-14 9V3z"/></svg>Publier sur le site`
+              : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>J'ai fait, suivant`}
           </button>
         </footer>
       </div>

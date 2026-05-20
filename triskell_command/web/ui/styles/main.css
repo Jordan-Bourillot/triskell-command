@@ -2733,9 +2733,55 @@ html, body {
   margin-bottom: 12px;
 }
 .phare-action--todo { border-left: 4px solid hsl(var(--warning)); }
+.phare-action--todo.is-auto   { border-left-color: hsl(var(--success)); }
+.phare-action--todo.is-manual { border-left-color: hsl(var(--warning)); }
 .phare-action--done {
   border-left: 4px solid hsl(var(--success));
   opacity: 0.85;
+}
+
+/* Badge "type d'action" en haut de chaque proposition.
+   Distinction visuelle franche entre :
+     - 🤖 modif publiée automatiquement (vert)
+     - 👤 conseil à faire toi-même (orange) */
+.phare-action-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  cursor: help;
+}
+.phare-action-kind-ico { font-size: 14px; line-height: 1; }
+.phare-action-kind--auto {
+  background: hsl(var(--success) / 0.15);
+  color: hsl(var(--success));
+  border: 1px solid hsl(var(--success) / 0.35);
+}
+.phare-action-kind--manual {
+  background: hsl(var(--warning) / 0.15);
+  color: hsl(var(--warning));
+  border: 1px solid hsl(var(--warning) / 0.35);
+}
+
+/* Bouton d'approbation : vert "appuie sur PUBLIER" pour les modifs
+   automatiques, bleu "ok j'ai noté" pour les conseils manuels. */
+.btn.btn-primary.btn-auto {
+  background: hsl(var(--success)) !important;
+  border-color: hsl(var(--success)) !important;
+  color: #06231a !important;
+}
+.btn.btn-primary.btn-auto:hover {
+  filter: brightness(1.08);
+}
+.btn.btn-primary.btn-manual {
+  background: hsl(var(--accent)) !important;
+  border-color: hsl(var(--accent)) !important;
 }
 .phare-action-head {
   display: flex;
