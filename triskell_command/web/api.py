@@ -422,11 +422,15 @@ class Api:
                             "prospects:prospect_id(name, legal_name, "
                             "emails, city)")
                     .eq("status", "pending")
-                    .neq("body", "")
                     .order("created_at", desc=True)
-                    .limit(self._DRAFTS_LIMIT_PER_SOURCE)
+                    .limit(self._DRAFTS_LIMIT_PER_SOURCE * 4)
                     .execute())
             for r in (res.data or []):
+                subj = (r.get("subject") or "").strip()
+                bod = (r.get("body") or "").strip()
+                # Skip les coquilles vides (en attente de génération IA)
+                if not subj and not bod:
+                    continue
                 p = r.get("prospects") or {}
                 emails = p.get("emails") or []
                 rows.append({
@@ -444,6 +448,8 @@ class Api:
                     "model": r.get("model") or "",
                     "kind": r.get("kind") or "",
                 })
+                if len(rows) >= self._DRAFTS_LIMIT_PER_SOURCE:
+                    break
         except Exception as exc:
             logger.warning("get_drafts: prospect_drafts KO: %s", exc)
 
@@ -455,11 +461,16 @@ class Api:
                             "is_test, created_at, "
                             "convoy_campaigns:campaign_id(name)")
                     .eq("status", "pending")
-                    .neq("body", "")
                     .order("created_at", desc=True)
-                    .limit(self._DRAFTS_LIMIT_PER_SOURCE)
+                    .limit(self._DRAFTS_LIMIT_PER_SOURCE * 4)
                     .execute())
+            convoy_added = 0
             for r in (res.data or []):
+                subj = (r.get("subject") or "").strip()
+                bod = (r.get("body") or "").strip()
+                # Skip les coquilles vides (avant génération IA)
+                if not subj and not bod:
+                    continue
                 p = r.get("prospect") or {}
                 camp = r.get("convoy_campaigns") or {}
                 rows.append({
@@ -481,6 +492,9 @@ class Api:
                     "offer_name": r.get("offer_name") or "",
                     "is_test": bool(r.get("is_test")),
                 })
+                convoy_added += 1
+                if convoy_added >= self._DRAFTS_LIMIT_PER_SOURCE:
+                    break
         except Exception as exc:
             logger.warning("get_drafts: convoy_drafts KO: %s", exc)
 

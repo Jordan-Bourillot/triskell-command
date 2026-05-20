@@ -84,30 +84,43 @@ def _replies_breakdown(client, day_start: str, day_end: str) -> dict[str, int]:
     return out
 
 
-def _count_pending_prospect_drafts(client) -> int:
-    # On exclut les coquilles vides (body == "") : ce ne sont pas des
-    # brouillons à valider mais des prospects en attente de génération IA.
-    # Cohérent avec la vue Brouillons (Api.get_drafts) qui filtre pareil.
+def _count_pending_drafts_with_content(client, table: str) -> int:
+    # On exclut les coquilles vides : statut 'pending' mais aucun contenu
+    # (ni subject ni body). Ce sont des prospects en attente de génération
+    # IA, pas des brouillons à valider.
+    # Cohérent avec la vue Brouillons (Api.get_drafts).
     try:
         sb = client.raw
-        res = (sb.table("prospect_drafts").select("id", count="exact")
-               .eq("status", "pending").neq("body", "")
-               .limit(1).execute())
-        return int(res.count or 0)
+        n = 0
+        page_size = 1000
+        offset = 0
+        while True:
+            res = (sb.table(table).select("id, subject, body")
+                   .eq("status", "pending")
+                   .range(offset, offset + page_size - 1).execute())
+            data = res.data or []
+            if not data:
+                break
+            for r in data:
+                if ((r.get("subject") or "").strip()
+                        or (r.get("body") or "").strip()):
+                    n += 1
+            if len(data) < page_size:
+                break
+            offset += page_size
+            if offset > 50000:  # garde-fou
+                break
+        return n
     except Exception:
         return 0
+
+
+def _count_pending_prospect_drafts(client) -> int:
+    return _count_pending_drafts_with_content(client, "prospect_drafts")
 
 
 def _count_pending_convoy_drafts(client) -> int:
-    # Idem : on ne compte que les drafts qui ont vraiment du contenu.
-    try:
-        sb = client.raw
-        res = (sb.table("convoy_drafts").select("id", count="exact")
-               .eq("status", "pending").neq("body", "")
-               .limit(1).execute())
-        return int(res.count or 0)
-    except Exception:
-        return 0
+    return _count_pending_drafts_with_content(client, "convoy_drafts")
 
 
 def _count_unhandled_replies(client, *, only_interested: bool = False) -> int:
