@@ -2772,6 +2772,16 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def pixelpros_delete_intake(self, payload: dict) -> dict:
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid: return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.pixelpros import repo as r
+            ok, msg = r.delete_intake(iid)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def pixelpros_pipeline_state(self) -> dict:
         try:
             from ..integrations.pixelpros import repo as r

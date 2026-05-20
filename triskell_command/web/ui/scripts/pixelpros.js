@@ -454,6 +454,7 @@ const PixelPros = {
     if (st === 'live') {
       out.push(`<button data-pp-action="resend_live_mail" class="pp-action-btn secondary">📧 Renvoyer mail "site en ligne"</button>`);
     }
+    out.push(`<button data-pp-action="delete" class="pp-action-btn danger">🗑 Supprimer définitivement</button>`);
     return out;
   },
 
@@ -480,6 +481,20 @@ const PixelPros = {
         res = await this._call('pixelpros_resend_live_mail', { id });
         this._toast(res?.ok ? `Mail "site en ligne" envoyé : ${res.message || ''}` : `Échec : ${res?.error || res?.message || '?'}`, !res?.ok);
         break;
+      case 'delete': {
+        const data = intake.data || {};
+        const name = data.business_name || data['business-name'] || '(sans nom)';
+        const status = intake.status || '?';
+        const warn = status === 'live'
+          ? `⚠ Ce formulaire est en statut "en ligne" (site déployé).\nLe supprimer perd l'historique mais NE FERME PAS le site en ligne (à faire séparément).\n\n`
+          : '';
+        const ok = confirm(`${warn}Supprimer définitivement ce formulaire ?\n\n  ${name}\n  Statut : ${status}\n\nCette action est irréversible.`);
+        if (!ok) return;
+        res = await this._call('pixelpros_delete_intake', { id });
+        this._toast(res?.ok ? `Supprimé : ${res.message || ''}` : `Échec : ${res?.error || res?.message || '?'}`, !res?.ok);
+        if (res?.ok) this._closeDetail();
+        break;
+      }
     }
     await this.refresh();
   },
