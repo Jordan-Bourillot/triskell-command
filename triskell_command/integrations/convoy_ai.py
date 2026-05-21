@@ -313,6 +313,201 @@ RÉPONDS AU FORMAT JSON STRICT (pas de markdown, pas de texte autour) :
 
 
 # ---------------------------------------------------------------------------
+# Mode "pioche dans templates" — l'IA choisit un template existant et l'adapte
+# ---------------------------------------------------------------------------
+TEMPLATE_PICK_PROMPT = """Tu es {sender_name}, et tu écris un email de prospection au prospect ci-dessous.
+
+Tu ne dois PAS inventer un mail from scratch : on te fournit une LISTE
+de templates écrits à la main pour ce produit, et tu dois :
+  1) Choisir le template qui correspond le MIEUX à ce prospect précis
+     (regarde sa description, son secteur, sa taille, son contexte).
+     S'il n'y a aucun match parfait, prends le moins pire — tu ne dois
+     JAMAIS refuser ni renvoyer un mail vide.
+  2) Remplir les placeholders du template avec les vraies infos du
+     prospect (les placeholders sont au format {{prenom}}, {{raison_sociale}},
+     {{ville}}, etc.).
+  3) Adapter LÉGÈREMENT le corps si nécessaire :
+     - tu peux ajuster 1 à 2 phrases pour coller au métier ou au
+       contexte particulier de ce prospect ;
+     - tu peux remplacer une accroche générique par une accroche
+       personnalisée ;
+     - tu ne dois PAS réécrire tout le mail, ni changer le sens, ni
+       inventer une nouvelle offre. L'écriture / le ton du template
+       doivent rester reconnaissables.
+
+CONTEXTE DU PROSPECT :
+- Raison sociale : {raison_sociale}
+- Contact : {prenom} {nom}
+- Email : {email}
+- Ville : {ville} ({code_postal})
+- Secteur d'activité / type de chantier : {secteur}
+- Notes : {notes}
+
+TEMPLATES DISPONIBLES (produit : {template_product}) :
+{templates_block}
+
+CONSIGNES STRICTES :
+- VOUVOIEMENT OBLIGATOIRE.
+- Si le template contient un placeholder dont tu n'as PAS la valeur
+  (ex : {{prenom}} alors qu'il n'y a pas de prénom), tu reformules la
+  phrase pour qu'elle reste naturelle sans le placeholder (ex : « Bonjour, »
+  au lieu de « Bonjour {{prenom}}, »). JAMAIS de placeholder qui traîne
+  dans le mail final.
+- Garde toutes les URLs présentes dans le template (lien CTA, démo, etc.).
+- Signature : « {sender_name} » sur la dernière ligne, rien après.
+
+INSTRUCTIONS LIBRES DE L'UTILISATEUR (priorité si conflit) :
+{user_brief}
+
+RÉPONDS AU FORMAT JSON STRICT (pas de markdown, pas de texte autour) :
+{{"template_key": "<clé du template choisi>", "subject": "<objet final>", "body": "<corps final>"}}
+"""
+
+
+def _format_templates_for_prompt(templates: list[dict]) -> str:
+    """Formate la liste des templates pour l'injecter dans le prompt IA.
+    Limite la longueur de chaque template pour ne pas exploser le token count."""
+    if not templates:
+        return "(aucun template — fallback génération libre attendu)"
+    lines: list[str] = []
+    for t in templates:
+        key = (t.get("key") or "").strip() or "(sans clé)"
+        label = (t.get("label") or "").strip()
+        desc = (t.get("description") or "").strip()
+        subj = (t.get("subject") or "").strip()
+        body = (t.get("body_text") or "").strip()
+        # Trim corps à 1500 chars max pour rester raisonnable
+        if len(body) > 1500:
+            body = body[:1500] + "\n[...tronqué...]"
+        head = f"=== TEMPLATE clé=« {key} »"
+        if label:
+            head += f" — {label}"
+        head += " ==="
+        lines.append(head)
+        if desc:
+            lines.append(f"Description / quand l'utiliser : {desc}")
+        lines.append(f"Sujet : {subj}")
+        lines.append("Corps :")
+        lines.append(body)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def generate_message_from_templates(
+    prospect: dict[str, str],
+    *,
+    templates: list[dict],
+    template_product: str,
+    sender_name: str,
+    user_brief: str,
+    provider: str,
+    model: str,
+    api_keys: dict[str, str],
+) -> dict[str, str]:
+    """Pioche dans `templates` et renvoie {subject, body, body_html,
+    template_key, offer_name}. Si la liste est vide, retombe sur le fallback
+    classique (génération libre via generate_message)."""
+    if not templates:
+        # Pas de templates → on ne peut rien piocher, on laisse l'appelant
+        # gérer le fallback (généralement vers generate_message classique).
+        return {"subject": "", "body": "", "body_html": "",
+                "template_key": "", "offer_name": "",
+                "offer_mail_account_id": ""}
+    prompt = TEMPLATE_PICK_PROMPT.format(
+        raison_sociale=prospect.get("raison_sociale", "") or "(non précisé)",
+        prenom=prospect.get("prenom", ""),
+        nom=prospect.get("nom", ""),
+        email=prospect.get("email", ""),
+        ville=prospect.get("ville", "") or "—",
+        code_postal=prospect.get("code_postal", ""),
+        secteur=prospect.get("secteur", "") or "(non précisé)",
+        notes=prospect.get("notes", "") or "(aucune)",
+        template_product=template_product or "(produit)",
+        templates_block=_format_templates_for_prompt(templates),
+        sender_name=sender_name or "L'équipe",
+        user_brief=user_brief.strip() or "(aucune)",
+    )
+    response = _call_ai(prompt, provider=provider, model=model, api_keys=api_keys)
+    data = _parse_json_lenient(response)
+    if not isinstance(data, dict):
+        # Plan B : on prend le 1er template tel quel et on remplit les
+        # placeholders de base. Pas de réécriture IA, mais un mail part.
+        return _fallback_first_template(
+            templates[0], prospect, sender_name, template_product,
+        )
+    template_key = _stringify(data.get("template_key", "")).strip()
+    body_txt = _stringify(data.get("body", "")) or ""
+    subj = _stringify(data.get("subject", "")) or ""
+    if not body_txt.strip():
+        return _fallback_first_template(
+            templates[0], prospect, sender_name, template_product,
+        )
+    # CTA : on récupère l'URL du template choisi si possible (1er lien
+    # http dans le body du template)
+    chosen = next((t for t in templates
+                   if (t.get("key") or "") == template_key), templates[0])
+    primary_url = _first_url_in(chosen.get("body_text", ""))
+    body_html = text_to_email_html(
+        body_txt, sender_name=sender_name,
+        primary_url=primary_url,
+        primary_label="En savoir plus",
+    )
+    return {
+        "subject":               subj or (chosen.get("subject") or "").strip(),
+        "body":                  body_txt,
+        "body_html":             body_html,
+        "template_key":          template_key or (chosen.get("key") or ""),
+        "offer_name":            template_product or "",
+        "offer_mail_account_id": "",
+    }
+
+
+def _first_url_in(text: str) -> str:
+    """Trouve la première URL http(s) dans un texte (sert au CTA)."""
+    if not text:
+        return ""
+    m = _URL_RE.search(text)
+    return m.group(1) if m else ""
+
+
+def _fallback_first_template(template: dict, prospect: dict, sender_name: str,
+                              template_product: str) -> dict[str, str]:
+    """Si l'IA renvoie n'importe quoi, on prend le 1er template, on remplit
+    les placeholders de base et on l'envoie tel quel. Mieux qu'un mail vide."""
+    subj = (template.get("subject") or "").strip()
+    body = (template.get("body_text") or "").strip()
+    # Remplit les placeholders les plus courants
+    replacements = {
+        "{prenom}":         prospect.get("prenom", "") or "",
+        "{nom}":            prospect.get("nom", "") or "",
+        "{raison_sociale}": prospect.get("raison_sociale", "") or "",
+        "{ville}":          prospect.get("ville", "") or "",
+        "{secteur}":        prospect.get("secteur", "") or "",
+        "{email}":          prospect.get("email", "") or "",
+        "{sender_name}":    sender_name or "L'équipe",
+    }
+    for ph, val in replacements.items():
+        subj = subj.replace(ph, val)
+        body = body.replace(ph, val)
+    # Si pas de prénom, "Bonjour ," → "Bonjour ,"  on nettoie un peu
+    body = body.replace("Bonjour ,", "Bonjour,").replace("Bonjour , ", "Bonjour, ")
+    primary_url = _first_url_in(template.get("body_text", ""))
+    body_html = text_to_email_html(
+        body, sender_name=sender_name,
+        primary_url=primary_url,
+        primary_label="En savoir plus",
+    )
+    return {
+        "subject":               subj or "Une idée pour vous",
+        "body":                  body or "(template vide)",
+        "body_html":             body_html,
+        "template_key":          template.get("key") or "",
+        "offer_name":            template_product or "",
+        "offer_mail_account_id": "",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Mise en forme HTML — joli mais sobre, pas de gros visuels qui font fuir
 # ---------------------------------------------------------------------------
 import html as _html_mod

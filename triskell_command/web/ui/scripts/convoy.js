@@ -237,6 +237,7 @@ const Convoy = {
     }
     this.detail = r.campaign;
     await this._loadProducts();
+    await this._loadProspectionProducts();
     this._initComposeState(this.detail);
     this._renderDetail();
   },
@@ -272,6 +273,22 @@ const Convoy = {
       this.mailAccounts = (r && r.ok && Array.isArray(r.accounts)) ? r.accounts : [];
     } catch (e) {
       this.mailAccounts = [];
+    }
+  },
+
+  // Charge les produits qui ont au moins un template de prospection
+  // (alimente le sélecteur "Utiliser tes modèles" dans le wizard).
+  async _loadProspectionProducts(force = false) {
+    if (!force && Array.isArray(this.prospectionProducts)) return;
+    if (!App.api || !App.api.convoy_list_prospection_products) {
+      this.prospectionProducts = [];
+      return;
+    }
+    try {
+      const r = await App.api.convoy_list_prospection_products();
+      this.prospectionProducts = (r && r.ok && Array.isArray(r.products)) ? r.products : [];
+    } catch (e) {
+      this.prospectionProducts = [];
     }
   },
 
@@ -818,6 +835,29 @@ const Convoy = {
                            focus:border-accent focus:outline-none text-sm leading-relaxed
                            resize-y">${this._esc(c.user_brief || '')}</textarea>
         </label>
+
+        <!-- Sélecteur de templates de prospection (optionnel) -->
+        <div class="cv-template-block mb-3">
+          <div class="text-xs font-medium text-text-secondary mb-1.5">
+            Utiliser tes modèles de mails (optionnel)
+          </div>
+          <select id="cv-template-product"
+                  class="w-full px-3 py-2 rounded-lg bg-bg border border-border
+                         focus:border-accent focus:outline-none text-sm">
+            <option value="">Aucun — l'IA rédige librement à partir du brief</option>
+            ${(this.prospectionProducts || []).map(p => `
+              <option value="${this._esc(p.product)}"
+                      ${(c.template_product || '') === p.product ? 'selected' : ''}>
+                ${this._esc(p.label)} (${p.count} modèle${p.count > 1 ? 's' : ''})
+              </option>
+            `).join('')}
+          </select>
+          <div id="cv-template-hint" class="text-[11px] text-text-muted mt-1.5">
+            ${ (c.template_product || '')
+                ? `L'IA piochera dans tes modèles « ${this._esc(c.template_product)} » et les adaptera légèrement à chaque prospect.`
+                : `Choisis un produit pour faire piocher l'IA dans tes modèles écrits à la main (Modèles mails → Prospection).` }
+          </div>
+        </div>
         <div class="flex flex-wrap gap-2">
           <button id="cv-save-compose" class="btn btn-secondary">Enregistrer</button>
           <button id="cv-gen-test"     class="btn btn-secondary">Tester (5)</button>
@@ -859,6 +899,24 @@ const Convoy = {
     if (gt) gt.onclick = () => this._generate(5);
     const ga = document.getElementById('cv-gen-all');
     if (ga) ga.onclick = () => this._generate(null);
+
+    // Sélecteur "Utiliser tes modèles" — met à jour le hint dynamiquement
+    const tpSel = document.getElementById('cv-template-product');
+    const tpHint = document.getElementById('cv-template-hint');
+    if (tpSel && tpHint) {
+      tpSel.addEventListener('change', () => {
+        const v = tpSel.value || '';
+        if (v) {
+          const found = (this.prospectionProducts || []).find(p => p.product === v);
+          const label = found ? found.label : v;
+          tpHint.textContent = `L'IA piochera dans tes modèles « ${label} » `
+            + `(${found ? found.count : '?'} modèle${found && found.count > 1 ? 's' : ''}) `
+            + `et les adaptera légèrement à chaque prospect.`;
+        } else {
+          tpHint.textContent = `Choisis un produit pour faire piocher l'IA dans tes modèles écrits à la main (Modèles mails → Prospection).`;
+        }
+      });
+    }
 
     // Coches produits : update visuel + compteur + état interne
     document.querySelectorAll('.cv-product-check').forEach(cb => {
@@ -976,6 +1034,7 @@ const Convoy = {
 
   _gatherCompose() {
     const brief = (document.getElementById('cv-brief') || {}).value || '';
+    const templateProduct = (document.getElementById('cv-template-product') || {}).value || '';
     const catalog = [];
     // Produits du catalogue central cochés
     for (const pid of this.selectedProductIds) {
@@ -996,17 +1055,25 @@ const Convoy = {
         keywords: o.keywords || '', url: o.url || '',
       });
     }
-    return { user_brief: brief, catalog };
+    return { user_brief: brief, catalog, template_product: templateProduct };
   },
 
   async _saveCompose() {
     const btn = document.getElementById('cv-save-compose');
     if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
-    const { user_brief, catalog } = this._gatherCompose();
+    const { user_brief, catalog, template_product } = this._gatherCompose();
     try {
       await App.api.convoy_save_compose({
         campaign_id: this.detail.id, user_brief, catalog,
       });
+      // template_product est sauvegardé via convoy_save_send_settings
+      // (qui gère déjà tous les champs configurables de la campagne).
+      if (typeof template_product === 'string') {
+        await App.api.convoy_save_send_settings({
+          campaign_id: this.detail.id, template_product,
+        });
+        this.detail.template_product = template_product;
+      }
       if (btn) { btn.textContent = 'Enregistré ✓'; setTimeout(() => { btn.disabled = false; btn.textContent = 'Enregistrer'; }, 1500); }
       this.detail.user_brief = user_brief;
       this.detail.catalog = catalog;

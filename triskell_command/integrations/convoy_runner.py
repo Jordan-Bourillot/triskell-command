@@ -134,6 +134,12 @@ class ConvoyCampaign:
     # Si vide, on retombe sur l'envoi mono-adresse via sender_account_id +
     # cap global (daily_cap) — rétrocompat.
     sender_pool: list[dict] = field(default_factory=list)
+    # NOUVEAU — Pioche dans une liste de templates de prospection écrits
+    # à la main pour un produit donné (table triskell_email_templates,
+    # category='prospection'). Si vide, génération libre (comportement
+    # actuel). Si rempli (ex: 'pixelpros'), l'IA choisit le template le
+    # plus pertinent pour chaque prospect et l'adapte légèrement.
+    template_product: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -173,6 +179,7 @@ class ConvoyCampaign:
             schedule_at=d.get("schedule_at", ""),
             sender_account_id=(d.get("sender_account_id") or "primary"),
             sender_pool=clean_pool,
+            template_product=str(d.get("template_product") or "").strip(),
         )
 
     @property
@@ -302,6 +309,7 @@ def _campaign_to_row(camp: ConvoyCampaign) -> dict[str, Any]:
         "schedule_at": camp.schedule_at or None,
         "sender_account_id": camp.sender_account_id or "primary",
         "sender_pool": camp.sender_pool or [],
+        "template_product": camp.template_product or "",
     }
 
 
@@ -310,7 +318,7 @@ def _campaign_to_row(camp: ConvoyCampaign) -> dict[str, Any]:
 # retire ces champs du payload et on retente — la campagne reste
 # synchronisée, juste sans la nouvelle info, jusqu'à ce que la
 # migration soit jouée.
-_OPTIONAL_CAMPAIGN_COLUMNS = ("sender_account_id", "sender_pool")
+_OPTIONAL_CAMPAIGN_COLUMNS = ("sender_account_id", "sender_pool", "template_product")
 
 
 def _row_to_campaign(row: dict[str, Any]) -> ConvoyCampaign:
@@ -345,6 +353,7 @@ def _row_to_campaign(row: dict[str, Any]) -> ConvoyCampaign:
         schedule_at=str(row.get("schedule_at") or ""),
         sender_account_id=(row.get("sender_account_id") or "primary"),
         sender_pool=clean_pool,
+        template_product=str(row.get("template_product") or "").strip(),
     )
 
 

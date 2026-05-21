@@ -6172,17 +6172,48 @@ class Api:
                         push(f"⏭  {already_skipped} déjà contacté(s) ailleurs "
                               f"dans le cooldown — non régénéré(s).")
                     push(f"Génération de {len(targets)} mail(s)…")
+                    # Mode "pioche dans templates" : si la campagne pointe
+                    # vers un produit, on précharge sa liste de templates
+                    # de prospection. L'IA pioche le plus pertinent par
+                    # prospect au lieu de générer from scratch.
+                    template_product = (getattr(camp, "template_product", "") or "").strip()
+                    templates_pool: list[dict] = []
+                    if template_product:
+                        try:
+                            from ..integrations import prospection_templates as pt
+                            templates_pool = pt.list_prospection_templates(template_product)
+                            push(f"📑 Mode templates : {len(templates_pool)} modèle(s) "
+                                 f"de « {template_product} » chargé(s).")
+                            if not templates_pool:
+                                push("⚠ Aucun template trouvé pour ce produit — "
+                                     "fallback génération libre.")
+                        except Exception as exc:
+                            push(f"⚠ Lecture templates échouée ({exc}) — "
+                                 f"fallback génération libre.")
+                            templates_pool = []
                     for i, draft in enumerate(targets, 1):
                         try:
-                            msg = convoy_ai.generate_message(
-                                draft.prospect,
-                                catalog=camp.catalog,
-                                sender_name=sender,
-                                user_brief=camp.user_brief,
-                                provider=ai_cfg["provider"],
-                                model=ai_cfg["model"],
-                                api_keys=ai_cfg["api_keys"],
-                            )
+                            if templates_pool:
+                                msg = convoy_ai.generate_message_from_templates(
+                                    draft.prospect,
+                                    templates=templates_pool,
+                                    template_product=template_product,
+                                    sender_name=sender,
+                                    user_brief=camp.user_brief,
+                                    provider=ai_cfg["provider"],
+                                    model=ai_cfg["model"],
+                                    api_keys=ai_cfg["api_keys"],
+                                )
+                            else:
+                                msg = convoy_ai.generate_message(
+                                    draft.prospect,
+                                    catalog=camp.catalog,
+                                    sender_name=sender,
+                                    user_brief=camp.user_brief,
+                                    provider=ai_cfg["provider"],
+                                    model=ai_cfg["model"],
+                                    api_keys=ai_cfg["api_keys"],
+                                )
                             draft.subject = msg.get("subject", "")
                             draft.body = msg.get("body", "")
                             draft.body_html = msg.get("body_html", "")
@@ -6234,6 +6265,16 @@ class Api:
             }
 
     # ---- Étape 4 : réglages d'envoi + lancement -----------------------------
+    def convoy_list_prospection_products(self, payload: dict | None = None) -> dict:
+        """Renvoie la liste des produits qui ont au moins un template
+        de prospection activé (pour le sélecteur du wizard Convoi)."""
+        try:
+            from ..integrations import prospection_templates as pt
+            return pt.list_products_with_prospection_templates()
+        except Exception as exc:
+            logger.exception("convoy_list_prospection_products failed")
+            return {"ok": False, "error": str(exc), "products": []}
+
     def convoy_save_send_settings(self, payload: dict | None = None) -> dict:
         p = payload or {}
         cid = (p.get("campaign_id") or "").strip()
@@ -6281,6 +6322,8 @@ class Api:
                         seen_ids.add(aid)
                         cleaned.append({"account_id": aid, "daily_cap": cap})
                 camp.sender_pool = cleaned
+            if "template_product" in p:
+                camp.template_product = str(p.get("template_product") or "").strip()
             camp.save()
             return {"ok": True, "campaign": self._convoy_serialize(camp)}
         except Exception as exc:
