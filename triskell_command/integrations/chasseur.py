@@ -446,8 +446,9 @@ def _score_site_relevance(html: str, nom: str, ville: str) -> tuple[int, list[st
 
     score = 0
     reasons: list[str] = []
+    has_city = bool(ville_l and ville_l in text)
 
-    if ville_l and ville_l in text:
+    if has_city:
         score += 40
         reasons.append(f"ville '{ville_l}'")
 
@@ -462,6 +463,15 @@ def _score_site_relevance(html: str, nom: str, ville: str) -> tuple[int, list[st
     if len(cps) > 8:
         score -= 30
         reasons.append(f"chaîne ? ({len(cps)} CP)")
+
+    # Garde-fou contre les homonymes : si la ville n'apparaît pas, on
+    # ne peut être confiant que si on a AU MOINS 2 tokens distinctifs du
+    # nom matchés. Sinon on plafonne le score sous le seuil de validation.
+    # Exemple : "SNC MICHEL" trouvant `michel.com` (un nom random) — le
+    # nom n'a qu'un seul token, sans ville on ne valide pas.
+    if not has_city and len(found_tokens) < 2:
+        score = min(score, 30)
+        reasons.append("ville absente + nom peu distinctif → non fiable")
 
     return max(0, min(100, score)), reasons
 
@@ -587,7 +597,7 @@ def _discover_site(nom: str, ville: str) -> tuple[str, int, str, str]:
                     best_source = "ddg"
                     best_html = html
 
-    if best_score >= 40:
+    if best_score >= 50:
         return _normalize_site(best_url), best_score, best_source, best_html
     return "", best_score if best_score >= 0 else 0, "", best_html
 
