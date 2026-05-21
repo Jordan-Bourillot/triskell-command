@@ -50,12 +50,30 @@ MAILTO_RX = re.compile(
 SKIP_SUBSTRINGS = [
     "noreply@", "no-reply@", "donotreply@", "do-not-reply@",
     "@example.", "@yourdomain.", "@domain.com", "@email.com",
-    "@sentry.io", "@sentry.wixpress.com", "@wixpress.com",
     "user@", "name@", "your@",
     "@2x.", "@3x.", "@4x.",
     ".png@", ".jpg@", ".jpeg@", ".gif@", ".svg@", ".webp@",
     "@x-default",
 ]
+# Domaines de services tiers (sponsors, analytics, plateformes) qu'on ne veut
+# JAMAIS pitcher : leur email apparaît souvent dans la bio/description ou
+# dans le code des sites qu'on crawle, mais ce n'est pas le bon contact.
+# Match en suffixe : couvre aussi les sous-domaines (o1.ingest.sentry.io).
+SKIP_DOMAIN_SUFFIXES = (
+    "sentry.io", "wixpress.com", "wix.com",
+    "epidemicsound.com", "soundstripe.com", "artlist.io",
+    "patreon.com", "kofi.com", "ko-fi.com", "buymeacoffee.com",
+    "linktr.ee", "beacons.ai", "bio.link",
+    "googlemail.com", "gmail-noreply.google.com",
+    "shopify.com", "myshopify.com",
+    "stripe.com", "paypal.com",
+    "fb.com", "facebookmail.com",
+    "twitter.com", "x.com",
+    "youtube.com", "googleusercontent.com",
+    "discord.com", "discord.gg",
+    "expressvpn.com", "nordvpn.com", "surfshark.com",
+    "squarespace.com", "godaddy.com",
+)
 SKIP_SUFFIXES = (
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
     ".woff", ".woff2", ".ttf", ".eot",
@@ -118,7 +136,7 @@ LINK_AGGREGATORS = {
 # Helpers
 # ---------------------------------------------------------------------------
 def _is_valid_email(email: str) -> bool:
-    """Filtre les faux positifs (images, exemples, noreply…)."""
+    """Filtre les faux positifs (images, exemples, noreply, sponsors…)."""
     if not email or "@" not in email:
         return False
     e = email.lower().strip().strip(".,;:")
@@ -132,6 +150,11 @@ def _is_valid_email(email: str) -> bool:
     # Match strict
     if not EMAIL_RX.fullmatch(e):
         return False
+    # Domaine blacklisté ? (couvre sous-domaines : o1.ingest.sentry.io)
+    domain = e.split("@", 1)[1]
+    for bad in SKIP_DOMAIN_SUFFIXES:
+        if domain == bad or domain.endswith("." + bad):
+            return False
     return True
 
 
@@ -191,6 +214,15 @@ def _deobfuscate(text: str) -> str:
         text.replace("&#64;", "@").replace("&#x40;", "@")
         .replace("&commat;", "@")
         .replace("&#46;", ".").replace("&period;", ".")
+    )
+    # 1bis) Escapes Unicode littéraux (sources JSON inline non-décodées) :
+    # > = > , < = < , & = & , . = . — sinon "u003eemail@x"
+    # ou "&amp;guidelines@x" deviennent des faux positifs collés.
+    out = (
+        out.replace("\\u003e", " ").replace("\\u003c", " ")
+        .replace("\\u0026", " ").replace("\\u002e", ".")
+        .replace("\\n", " ").replace("\\r", " ").replace("\\t", " ")
+        .replace("&gt;", " ").replace("&lt;", " ").replace("&amp;", " ")
     )
     # 2) (at) / [at] / {at} avec ou sans espaces autour
     out = re.sub(
@@ -292,21 +324,33 @@ def _scrape_website(website: str) -> set[str]:
 
 def _scrape_bio_urls(urls: Iterable[str]) -> set[str]:
     """Scanne les URLs en bio. Priorise les agrégateurs (Linktree…)
-    car ils centralisent souvent un mail pro."""
+    car ils centralisent souvent un mail pro.
+
+    Pour les sites « normaux » (non-aggregators), on ne s'arrête pas à la home :
+    on tape aussi /contact, /about, /mentions-legales. Indispensable pour
+    YouTube où les liens sponsors (Sentry, ExpressVPN) apparaissent souvent
+    AVANT le site perso : si on s'arrête à la home sans email, on ne teste
+    jamais le vrai site perso plus loin dans la liste.
+    """
     if not urls:
         return set()
     # Trie : agrégateurs en premier, sites perso ensuite
     sorted_urls = sorted(urls, key=lambda u: 0 if _is_link_aggregator(u) else 1)
     found: set[str] = set()
-    for url in sorted_urls[:5]:  # max 5 URLs par prospect
+    for url in sorted_urls[:6]:  # max 6 URLs par prospect
         clean = _normalize_url(url)
         if not clean or _is_skipped_host(clean):
             continue
-        html = _fetch(clean)
-        if html:
-            found |= _extract_emails_from_text(html)
-            if found:
-                break
+        if _is_link_aggregator(clean):
+            # Linktree & co : la home suffit, tout y est listé
+            html = _fetch(clean)
+            if html:
+                found |= _extract_emails_from_text(html)
+        else:
+            # Site perso : on tente home + pages contact/about
+            found |= _scrape_website(clean)
+        if found:
+            break
     return found
 
 

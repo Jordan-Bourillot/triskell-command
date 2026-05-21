@@ -141,6 +141,19 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
             ucfg["only_unmonetized"] = False
         # mode "all" : on laisse la valeur user existante
 
+        # ⚡ Biais géographique : si l'utilisateur a coché « francophones »
+        # (ou tout autre pays/langue), on dit à YouTube de prioriser cette
+        # zone dès la recherche. Sans ça, les requêtes type « web » remontent
+        # 95% de chaînes US — le post-filtre est trop tolérant pour rattraper.
+        if filters.get("language"):
+            ucfg["search_lang"] = filters["language"]
+        if filters.get("country"):
+            ucfg["search_region"] = filters["country"]
+        # Cas fréquent : Jordan veut du français mais n'a coché que language=fr
+        # → on infère region=FR pour resserrer encore.
+        if filters.get("language") == "fr" and not filters.get("country"):
+            ucfg["search_region"] = "FR"
+
         # Import paresseux pour ne pas alourdir le boot de Command
         try:
             from triskell_core.prospect.creators_pipeline import (
@@ -667,6 +680,47 @@ def _normalize_filters(raw: dict) -> dict:
     }
 
 
+# Mots usuels propres à chaque langue. La détection est volontairement
+# minimaliste : on compte les "tokens marqueurs" qu'on est ~sûr de ne pas
+# trouver dans l'autre langue. Si la balance penche clairement d'un côté,
+# on sait quelle langue c'est. Sinon on renvoie "" (inconnu) et on laisse
+# passer (politique tolérante).
+_FR_MARKERS = {
+    "le", "la", "les", "des", "du", "une", "un", "et", "est", "dans", "pour",
+    "avec", "sur", "qui", "que", "vous", "nous", "notre", "votre", "vidéo",
+    "vidéos", "chaîne", "abonne", "abonnez", "ici", "découvrez", "bienvenue",
+    "voici", "tout", "tous", "tutoriel", "français", "française", "ce", "cette",
+    "où", "ça", "merci", "salut", "bonjour", "semaine", "jour", "moi", "toi",
+    "plus", "très", "aussi", "comme", "mais", "ne", "pas", "ses", "ces",
+}
+_EN_MARKERS = {
+    "the", "and", "of", "to", "for", "with", "this", "that", "video",
+    "videos", "channel", "subscribe", "welcome", "here", "follow", "make",
+    "watch", "every", "week", "day", "join", "us", "about", "more", "your",
+    "you", "we", "our", "tutorial", "english", "is", "are", "what", "how",
+    "be", "do", "have", "from", "by", "or", "an", "they", "their",
+}
+
+
+def _detect_language(text: str) -> str:
+    """Renvoie 'fr', 'en' ou '' selon la balance de marqueurs.
+    Heuristique très grossière mais largement suffisante pour distinguer
+    une bio FR d'une bio EN. Renvoie '' si pas assez de signal."""
+    if not text or len(text) < 30:
+        return ""
+    import re as _re
+    tokens = _re.findall(r"[a-zàâäéèêëïîôöùûüç]+", text.lower())
+    if len(tokens) < 8:
+        return ""
+    fr_hits = sum(1 for t in tokens if t in _FR_MARKERS)
+    en_hits = sum(1 for t in tokens if t in _EN_MARKERS)
+    if fr_hits >= 3 and fr_hits > en_hits * 1.5:
+        return "fr"
+    if en_hits >= 3 and en_hits > fr_hits * 1.5:
+        return "en"
+    return ""
+
+
 def apply_filters(rows: list[dict], filters: dict) -> tuple[list[dict], int]:
     """Filtre une liste de Prospect-dicts selon les critères choisis.
 
@@ -721,6 +775,19 @@ def apply_filters(rows: list[dict], filters: dict) -> tuple[list[dict], int]:
         if language and (r.get("language") or "").lower() != language:
             if r.get("language"):
                 rejected += 1; continue
+            # YouTube ne déclare presque jamais la langue → fallback :
+            # on détecte sur la description / le nom du profil. Si le résultat
+            # est clairement une autre langue, on vire. Si inconnu, on garde
+            # (politique tolérante : mieux vaut un faux positif qu'un trou).
+            else:
+                text_blob = " ".join(filter(None, [
+                    str(r.get("description") or ""),
+                    str(r.get("bio") or ""),
+                    str(r.get("name") or ""),
+                ]))
+                detected = _detect_language(text_blob)
+                if detected and detected != language:
+                    rejected += 1; continue
         if with_email and not (r.get("emails") or []):
             rejected += 1; continue
         kept.append(r)
