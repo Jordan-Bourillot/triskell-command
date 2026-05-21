@@ -1183,8 +1183,16 @@ const Convoy = {
     if (start) start.onclick = () => this._startSend();
     const stop  = document.getElementById('cv-stop-send');
     if (stop)  stop.onclick = () => this._stopSend();
-    const sender = document.getElementById('cv-sender');
-    if (sender) sender.onchange = () => this._refreshSenderPreview();
+    // Multi-adresses : on écoute les changements sur les checkboxes ET
+    // les champs "cap" pour rafraîchir le récapitulatif en temps réel.
+    document.querySelectorAll('.cv-sp-check').forEach(cb => {
+      cb.addEventListener('change', () => this._refreshSenderPreview());
+    });
+    document.querySelectorAll('.cv-sp-cap').forEach(inp => {
+      inp.addEventListener('input', () => this._refreshSenderPreview());
+    });
+    // Récap initial dès le rendu (sinon il reste vide au premier affichage)
+    this._refreshSenderPreview();
     // Si la liste des comptes n'est pas encore chargée, on la charge
     // puis on re-rend cette étape pour afficher les vraies options.
     if (!Array.isArray(this.mailAccounts)) {
@@ -1194,65 +1202,122 @@ const Convoy = {
     }
   },
 
-  // Sélecteur d'adresse expéditrice. Si aucun compte n'est dispo,
-  // affiche un message + lien vers les Réglages.
+  // Sélecteur d'adresses expéditrices — multi-adresses avec cap par compte
+  // sur fenêtre 24h glissantes. Au moment d'envoyer, le moteur tire au
+  // hasard parmi les adresses cochées qui ont encore de la marge.
   _renderSenderSelect(c) {
     const accounts = this.mailAccounts || [];
-    const currentId = (c && c.sender_account_id) || 'primary';
-    const current = this._findAccount(currentId);
     if (accounts.length === 0) {
       return `
         <div class="cv-sender-block">
-          <div class="text-xs font-medium text-text-secondary mb-1.5">Adresse expéditrice</div>
+          <div class="text-xs font-medium text-text-secondary mb-1.5">Adresses expéditrices</div>
           <div class="text-xs text-text-muted px-3 py-2 rounded-lg bg-bg border border-border">
             Aucun compte mail configuré. Va dans Réglages pour ajouter ton compte principal,
             ou un compte secondaire (ex : Lagriffe).
           </div>
         </div>`;
     }
-    const opts = accounts.map(a => {
-      const sel = (a.id === currentId) ? 'selected' : '';
-      const lbl = this._esc(this._accountLabel(a));
-      return `<option value="${this._esc(a.id)}" ${sel}>${lbl}</option>`;
+    // Reconstruit la map id → cap déjà sauvegardée (sender_pool)
+    const savedPool = Array.isArray(c && c.sender_pool) ? c.sender_pool : [];
+    const capById = {};
+    for (const entry of savedPool) {
+      if (entry && entry.account_id) {
+        capById[entry.account_id] = parseInt(entry.daily_cap, 10) || 0;
+      }
+    }
+    // Si rien de sauvegardé, on coche le compte par défaut (sender_account_id)
+    // avec un cap initial raisonnable (= daily_cap de la campagne ou 30).
+    const fallbackId = (c && c.sender_account_id) || 'primary';
+    const fallbackCap = (c && parseInt(c.daily_cap, 10)) || 30;
+    if (savedPool.length === 0 && this._findAccount(fallbackId)) {
+      capById[fallbackId] = fallbackCap;
+    }
+
+    const rows = accounts.map(a => {
+      const checked = (capById[a.id] || 0) > 0;
+      const cap = capById[a.id] || 30;
+      const fromEmail = this._esc(a.from_email || '');
+      const fromName = a.from_name ? ` (${this._esc(a.from_name)})` : '';
+      const lbl = this._esc(a.label || a.from_email || a.id);
+      return `
+        <label class="cv-sender-row" data-account-id="${this._esc(a.id)}"
+               style="display:flex; align-items:center; gap:10px; padding:8px 10px;
+                      border:1px solid hsl(var(--border)); border-radius:8px;
+                      margin-bottom:6px; background: hsl(var(--bg));">
+          <input type="checkbox" class="cv-sp-check" ${checked ? 'checked' : ''}
+                 data-account-id="${this._esc(a.id)}">
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:13px; font-weight:600;">${lbl}</div>
+            <div style="font-size:11px; color: hsl(var(--text-muted));">${fromEmail}${fromName}</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:4px;">
+            <input type="number" class="cv-sp-cap" min="1" max="1000"
+                   value="${cap}" data-account-id="${this._esc(a.id)}"
+                   style="width:64px; padding:6px 8px; border-radius:6px;
+                          background: hsl(var(--card)); color: hsl(var(--text));
+                          border:1px solid hsl(var(--border)); font-size:12px;
+                          text-align:right;">
+            <span style="font-size:11px; color: hsl(var(--text-muted));">/ 24h</span>
+          </div>
+        </label>`;
     }).join('');
-    const previewLine = current
-      ? `Les mails partiront de <b>${this._esc(current.from_email || '')}</b>${current.from_name ? ' (<span>' + this._esc(current.from_name) + '</span>)' : ''}.`
-      : `Compte introuvable — choisis-en un autre.`;
+
     return `
       <div class="cv-sender-block mb-3">
-        <label class="block">
-          <div class="text-xs font-medium text-text-secondary mb-1.5">Adresse expéditrice (tout le convoi partira de ce compte)</div>
-          <select id="cv-sender"
-                  class="w-full px-3 py-2 rounded-lg bg-bg border border-border
-                         focus:border-accent focus:outline-none text-sm">
-            ${opts}
-          </select>
-        </label>
-        <div id="cv-sender-preview" class="text-xs text-text-muted mt-1.5">${previewLine}</div>
+        <div class="text-xs font-medium text-text-secondary mb-1.5">
+          Adresses expéditrices (les mails seront répartis au hasard entre celles cochées)
+        </div>
+        <div id="cv-sender-list">${rows}</div>
+        <div id="cv-sender-summary" class="text-xs text-text-muted mt-2"></div>
       </div>
     `;
   },
 
   _refreshSenderPreview() {
-    const sel = document.getElementById('cv-sender');
-    const out = document.getElementById('cv-sender-preview');
-    if (!sel || !out) return;
-    const acc = this._findAccount(sel.value);
-    if (!acc) { out.innerHTML = 'Compte introuvable.'; return; }
-    out.innerHTML = `Les mails partiront de <b>${this._esc(acc.from_email || '')}</b>${
-      acc.from_name ? ' (<span>' + this._esc(acc.from_name) + '</span>)' : ''
-    }.`;
+    // Met à jour le récap : "X adresses cochées · jusqu'à Y mails / 24h"
+    const summary = document.getElementById('cv-sender-summary');
+    if (!summary) return;
+    const checks = document.querySelectorAll('.cv-sp-check');
+    let nChecked = 0, totalCap = 0;
+    checks.forEach(cb => {
+      if (!cb.checked) return;
+      nChecked += 1;
+      const capInput = document.querySelector(
+        `.cv-sp-cap[data-account-id="${cb.dataset.accountId}"]`
+      );
+      totalCap += parseInt((capInput && capInput.value) || 0, 10) || 0;
+    });
+    if (nChecked === 0) {
+      summary.innerHTML = '<span style="color:#c44;">⚠ Aucune adresse cochée — l\'envoi ne pourra pas démarrer.</span>';
+    } else {
+      summary.textContent = `${nChecked} adresse(s) cochée(s) · jusqu'à ${totalCap} mails / 24h glissantes au total.`;
+    }
   },
 
   _gatherSendSettings() {
-    const sender = (document.getElementById('cv-sender') || {}).value;
+    // Récupère le sender_pool depuis les checkboxes + champs cap
+    const pool = [];
+    document.querySelectorAll('.cv-sp-check').forEach(cb => {
+      if (!cb.checked) return;
+      const id = cb.dataset.accountId;
+      const capInput = document.querySelector(
+        `.cv-sp-cap[data-account-id="${id}"]`
+      );
+      const cap = parseInt((capInput && capInput.value) || 0, 10) || 0;
+      if (id && cap > 0) {
+        pool.push({ account_id: id, daily_cap: cap });
+      }
+    });
+    // Sender par défaut = premier coché (ou primary en fallback)
+    const senderId = (pool[0] && pool[0].account_id) || 'primary';
     return {
       campaign_id: this.detail.id,
       mode: (document.getElementById('cv-mode') || {}).value || 'validation',
       daily_cap: parseInt((document.getElementById('cv-cap') || {}).value, 10) || 40,
       delay_seconds: parseInt((document.getElementById('cv-delay') || {}).value, 10) || 60,
       schedule_at: ((document.getElementById('cv-sched') || {}).value || '').trim(),
-      sender_account_id: (sender || 'primary'),
+      sender_account_id: senderId,
+      sender_pool: pool,
     };
   },
 

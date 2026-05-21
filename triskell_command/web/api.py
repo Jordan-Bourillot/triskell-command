@@ -6259,6 +6259,28 @@ class Api:
             if "sender_account_id" in p:
                 aid = (p.get("sender_account_id") or "primary").strip()
                 camp.sender_account_id = aid or "primary"
+            # Pool multi-adresses : liste [{account_id, daily_cap}]. On
+            # nettoie au passage (id requis, cap > 0, dédoublonnage par id).
+            if "sender_pool" in p:
+                raw_pool = p.get("sender_pool") or []
+                cleaned: list[dict] = []
+                seen_ids: set[str] = set()
+                if isinstance(raw_pool, list):
+                    for entry in raw_pool:
+                        if not isinstance(entry, dict):
+                            continue
+                        aid = str(entry.get("account_id") or "").strip()
+                        if not aid or aid in seen_ids:
+                            continue
+                        try:
+                            cap = int(entry.get("daily_cap") or 0)
+                        except (ValueError, TypeError):
+                            cap = 0
+                        if cap <= 0:
+                            continue
+                        seen_ids.add(aid)
+                        cleaned.append({"account_id": aid, "daily_cap": cap})
+                camp.sender_pool = cleaned
             camp.save()
             return {"ok": True, "campaign": self._convoy_serialize(camp)}
         except Exception as exc:
@@ -6357,11 +6379,17 @@ class Api:
                         f"Le {label} n'est pas configuré ou il manque un "
                         "champ (SMTP/mot de passe). Vérifie les Réglages."}
 
-            # Comptes additionnels potentiels : ceux liés à un produit
-            # via `offer_mail_account_id` sur un draft approuvé.
-            # On résout la config de chacun pour permettre l'envoi
-            # depuis l'adresse du produit pitché.
+            # Comptes additionnels potentiels :
+            # 1) toutes les adresses du sender_pool (mode multi-adresses)
+            # 2) celles liées à un produit via `offer_mail_account_id`
+            #    sur un draft approuvé (override par draft)
             needed_account_ids: set[str] = set()
+            for entry in (getattr(camp, "sender_pool", None) or []):
+                if not isinstance(entry, dict):
+                    continue
+                pid = str(entry.get("account_id") or "").strip()
+                if pid and pid != aid:
+                    needed_account_ids.add(pid)
             for d in camp.drafts:
                 if d.status != "approved":
                     continue

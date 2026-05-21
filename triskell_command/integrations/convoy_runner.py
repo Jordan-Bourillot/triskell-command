@@ -126,9 +126,14 @@ class ConvoyCampaign:
     daily_cap: int = 40
     delay_seconds: int = 60            # délai mini entre 2 envois
     schedule_at: str = ""              # ISO datetime pour démarrer plus tard, "" = maintenant
-    sender_account_id: str = "primary" # id du compte mail expéditeur
+    sender_account_id: str = "primary" # id du compte mail expéditeur "par défaut"
                                        # ("primary" = compte principal,
                                        # sinon id d'un compte secondaire)
+    # NOUVEAU — Multi-adresses : pool d'expéditeurs avec cap par adresse
+    # sur 24h glissantes. Liste de dicts {"account_id": str, "daily_cap": int}.
+    # Si vide, on retombe sur l'envoi mono-adresse via sender_account_id +
+    # cap global (daily_cap) — rétrocompat.
+    sender_pool: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -137,6 +142,23 @@ class ConvoyCampaign:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "ConvoyCampaign":
+        # Normalise sender_pool : tolère valeurs manquantes / mauvais types
+        raw_pool = d.get("sender_pool") or []
+        clean_pool: list[dict] = []
+        if isinstance(raw_pool, list):
+            for entry in raw_pool:
+                if not isinstance(entry, dict):
+                    continue
+                acc = str(entry.get("account_id") or "").strip()
+                if not acc:
+                    continue
+                try:
+                    cap = int(entry.get("daily_cap") or 0)
+                except (ValueError, TypeError):
+                    cap = 0
+                if cap < 0:
+                    cap = 0
+                clean_pool.append({"account_id": acc, "daily_cap": cap})
         return cls(
             id=d.get("id") or uuid.uuid4().hex,
             name=d.get("name", ""),
@@ -150,6 +172,7 @@ class ConvoyCampaign:
             delay_seconds=int(d.get("delay_seconds", 60)),
             schedule_at=d.get("schedule_at", ""),
             sender_account_id=(d.get("sender_account_id") or "primary"),
+            sender_pool=clean_pool,
         )
 
     @property
@@ -278,6 +301,7 @@ def _campaign_to_row(camp: ConvoyCampaign) -> dict[str, Any]:
         "delay_seconds": camp.delay_seconds,
         "schedule_at": camp.schedule_at or None,
         "sender_account_id": camp.sender_account_id or "primary",
+        "sender_pool": camp.sender_pool or [],
     }
 
 
@@ -286,10 +310,27 @@ def _campaign_to_row(camp: ConvoyCampaign) -> dict[str, Any]:
 # retire ces champs du payload et on retente — la campagne reste
 # synchronisée, juste sans la nouvelle info, jusqu'à ce que la
 # migration soit jouée.
-_OPTIONAL_CAMPAIGN_COLUMNS = ("sender_account_id",)
+_OPTIONAL_CAMPAIGN_COLUMNS = ("sender_account_id", "sender_pool")
 
 
 def _row_to_campaign(row: dict[str, Any]) -> ConvoyCampaign:
+    # Normalise sender_pool venant de Supabase (jsonb)
+    raw_pool = row.get("sender_pool") or []
+    clean_pool: list[dict] = []
+    if isinstance(raw_pool, list):
+        for entry in raw_pool:
+            if not isinstance(entry, dict):
+                continue
+            acc = str(entry.get("account_id") or "").strip()
+            if not acc:
+                continue
+            try:
+                cap = int(entry.get("daily_cap") or 0)
+            except (ValueError, TypeError):
+                cap = 0
+            if cap < 0:
+                cap = 0
+            clean_pool.append({"account_id": acc, "daily_cap": cap})
     return ConvoyCampaign(
         id=row["id"],
         name=row.get("name", ""),
@@ -303,6 +344,7 @@ def _row_to_campaign(row: dict[str, Any]) -> ConvoyCampaign:
         delay_seconds=int(row.get("delay_seconds") or 60),
         schedule_at=str(row.get("schedule_at") or ""),
         sender_account_id=(row.get("sender_account_id") or "primary"),
+        sender_pool=clean_pool,
     )
 
 
@@ -587,25 +629,42 @@ def run_campaign_send(
     """Envoie tous les drafts approuvés (en mode auto, on aura déjà passé
     tous les pending → approved en amont).
 
-    - `smtp_cfg` : compte par défaut (celui de la campagne).
-    - `smtp_cfgs_by_account` : optionnel, dict {account_id: smtp_cfg}.
-      Si un draft a un `offer_mail_account_id` non vide qui matche une
-      clé du dict, on utilise CE compte au lieu du compte de campagne.
-      (Permet d'envoyer chaque mail depuis l'adresse du produit pitché —
-      Lagriffe depuis contact@lagriffe-studio.fr, RankUs depuis sa boîte,
-      etc.)
+    Deux modes :
 
-    Renvoie les counts finaux.
+    - **Multi-adresses** (sender_pool non vide) : à chaque mail, tirage
+      aléatoire d'une adresse du pool dont le cap 24h glissantes n'est
+      pas atteint. Si toutes sont saturées, on attend que la première se
+      libère (oldest_send + 24h) puis on reprend.
+      Le cap par adresse est compté sur l'historique global (cross-Convoi).
+      L'override `offer_mail_account_id` du draft prend toujours priorité
+      sur le tirage (un mail Lagriffe doit partir de l'adresse Lagriffe
+      même si elle n'est pas dans le pool).
+
+    - **Mono-adresse** (sender_pool vide) : ancien comportement, cap
+      global `campaign.daily_cap`, expéditeur = `campaign.sender_account_id`.
+
+    smtp_cfgs_by_account : dict {account_id: smtp_cfg} obligatoire en
+    mode multi-adresses (au moins pour les comptes du pool).
     """
     log = progress or (lambda m: None)
     sent = 0
     failed = 0
+    overrides = dict(smtp_cfgs_by_account or {})
+    pool = list(getattr(campaign, "sender_pool", None) or [])
+
+    # ─── Branche MULTI-ADRESSES ──────────────────────────────────────
+    if pool:
+        return _run_multi_sender(
+            campaign, pool=pool,
+            default_cfg=smtp_cfg, smtp_by_account=overrides,
+            log=log, stop_flag=stop_flag,
+        )
+
+    # ─── Branche MONO-ADRESSE (legacy) ───────────────────────────────
     cap_today = max(0, int(campaign.daily_cap) - _load_today_count())
     if cap_today <= 0:
         log("⚠ Cap quotidien atteint avant de commencer — rien envoyé.")
         return campaign.counts()
-
-    overrides = dict(smtp_cfgs_by_account or {})
 
     for i, draft in enumerate(campaign.drafts):
         if stop_flag and stop_flag():
@@ -639,6 +698,121 @@ def run_campaign_send(
 
         # Délai aléatoire entre 2 envois (anti-spam-throttle)
         if sent + failed < len(campaign.drafts):
+            wait = max(5, int(campaign.delay_seconds))
+            for _ in range(wait):
+                if stop_flag and stop_flag():
+                    break
+                time.sleep(1)
+
+    counts = campaign.counts()
+    log(f"=== Fin : {counts['sent']} envoyés, {counts['failed']} échoués, "
+        f"{counts['pending']} en attente, {counts['rejected']} rejetés.")
+    return counts
+
+
+# ---------------------------------------------------------------------------
+# Moteur d'envoi multi-adresses : tirage aléatoire + 24h glissantes
+# ---------------------------------------------------------------------------
+def _run_multi_sender(
+    campaign: ConvoyCampaign,
+    *,
+    pool: list[dict],
+    default_cfg: dict[str, Any],
+    smtp_by_account: dict[str, dict[str, Any]],
+    log: Callable[[str], None],
+    stop_flag: Callable[[], bool] | None,
+) -> dict[str, int]:
+    """Implémente l'envoi multi-adresses avec tirage aléatoire + pause
+    automatique quand toutes les adresses sont à leur cap 24h glissantes."""
+    from . import sender_pool_tracker as tracker
+    from datetime import datetime as _dt, timezone as _tz
+
+    sent = 0
+    failed = 0
+    # Pré-cache des envois 24h en RAM, mis à jour à chaque envoi pour
+    # ne pas re-requêter Supabase pour 50 mails à la suite.
+    pool_ids = [str(p.get("account_id") or "").strip() for p in pool
+                if (p.get("account_id") or "")]
+    counts_24h = tracker.count_sent_24h_by_account(pool_ids)
+    pool_summary = ", ".join(
+        f"{p.get('account_id')} (cap {p.get('daily_cap')}/24h)" for p in pool
+    )
+    log(f"📬 Multi-adresses actif : pool = [{pool_summary}]")
+    log(f"   État de départ 24h glissantes : "
+        f"{ {a: counts_24h.get(a, 0) for a in pool_ids} }")
+
+    pending = [d for d in campaign.drafts if d.status == "approved"]
+    log(f"   {len(pending)} draft(s) à envoyer.")
+    if not pending:
+        return campaign.counts()
+
+    for draft in pending:
+        if stop_flag and stop_flag():
+            log("⏹ Arrêt demandé.")
+            break
+
+        # Override par draft (offer_mail_account_id) reste prioritaire :
+        # un mail Lagriffe doit partir de l'adresse Lagriffe même si elle
+        # n'est pas dans le pool de cette campagne.
+        override_id = (getattr(draft, "offer_mail_account_id", "") or "").strip()
+        if override_id and smtp_by_account.get(override_id):
+            account_id = override_id
+            effective_cfg = smtp_by_account[override_id]
+        else:
+            # Tirage aléatoire dans le pool, en respectant les caps 24h.
+            chosen = tracker.pick_random_available_account(
+                [{"account_id": p["account_id"],
+                  "daily_cap":  max(0, int(p["daily_cap"]) - counts_24h.get(p["account_id"], 0))}
+                 for p in pool]
+            )
+            # Note : on transforme le pool en {cap_restant} pour réutiliser
+            # pick_random_available_account (qui compare au cap brut). Une
+            # adresse à cap_restant ≤ 0 sera ignorée.
+            # ↑ ATTENTION : pick_random_available_account compare counts vs cap.
+            #   Comme on lui file un cap restant et un counts vide, la logique
+            #   tient : si cap_restant > 0 → dispo. Voir tracker.available_accounts.
+            if chosen is None:
+                # Toutes les adresses sont saturées — on attend le réveil.
+                wakeup = tracker.next_free_account_at(pool)
+                if wakeup is None:
+                    log("⚠ Pool saturé sans estimation de réveil — pause "
+                        "indéfinie (recharge manuellement).")
+                    break
+                now = _dt.now(_tz.utc)
+                wait_s = max(60, int((wakeup - now).total_seconds()))
+                log(f"⏸ Toutes les adresses sont à leur cap 24h. "
+                    f"Reprise auto vers {wakeup.isoformat()} "
+                    f"(dans ~{wait_s // 60} min).")
+                # Pause par tranches de 30 s pour respecter stop_flag
+                slept = 0
+                while slept < wait_s:
+                    if stop_flag and stop_flag():
+                        log("⏹ Arrêt demandé pendant la pause.")
+                        return campaign.counts()
+                    time.sleep(min(30, wait_s - slept))
+                    slept += 30
+                # Recharge le compteur depuis Supabase après la sieste
+                counts_24h = tracker.count_sent_24h_by_account(pool_ids)
+                continue  # retry le même draft
+            account_id = chosen["account_id"]
+            effective_cfg = (smtp_by_account.get(account_id)
+                             or default_cfg)
+
+        log(f"→ envoi à {draft.prospect.get('email', '?')} "
+            f"(via {effective_cfg.get('from_email', '?')} / {account_id})…")
+        send_draft(draft, smtp_cfg=effective_cfg)
+        if draft.status == "sent":
+            sent += 1
+            counts_24h[account_id] = counts_24h.get(account_id, 0) + 1
+            log(f"  ✓ envoyé — {account_id}: "
+                f"{counts_24h[account_id]} envois sur 24h.")
+        else:
+            failed += 1
+            log(f"  ✗ {draft.error}")
+        campaign.save()
+
+        # Délai mini entre 2 envois
+        if (sent + failed) < len(pending):
             wait = max(5, int(campaign.delay_seconds))
             for _ in range(wait):
                 if stop_flag and stop_flag():
