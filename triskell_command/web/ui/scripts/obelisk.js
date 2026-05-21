@@ -1199,17 +1199,6 @@ const Obelisk = {
             </label>
           </div>
 
-          <div class="grid grid-cols-2 gap-3 mb-4">
-            <label class="block">
-              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Pays (code ISO)</div>
-              <input id="ob-s-country" type="text" placeholder="ex : FR, US, EN" value="${this._esc(cfg.country || '')}" style="width:100%; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px;">
-            </label>
-            <label class="block">
-              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Langue (code ISO)</div>
-              <input id="ob-s-language" type="text" placeholder="ex : fr, en, es" value="${this._esc(cfg.language || '')}" style="width:100%; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px;">
-            </label>
-          </div>
-
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
             <label class="ob-toggle-row">
               <input id="ob-s-with-email" type="checkbox" ${cfg.only_with_email ? 'checked' : ''}>
@@ -1311,8 +1300,6 @@ const Obelisk = {
     const monetMode = (monetEl && monetEl.value) || 'all';   // all | unmonetized | monetized
     const minSubs = parseInt(document.getElementById('ob-s-min-subs').value, 10) || 0;
     const maxSubs = parseInt(document.getElementById('ob-s-max-subs').value, 10) || 0;
-    const country = document.getElementById('ob-s-country').value.trim();
-    const language = document.getElementById('ob-s-language').value.trim();
     const onlyWithEmail = document.getElementById('ob-s-with-email').checked;
     const onlyUncontacted = document.getElementById('ob-s-uncontacted').checked;
 
@@ -1320,8 +1307,8 @@ const Obelisk = {
       monetized_mode:  monetMode,
       min_subscribers: minSubs,
       max_subscribers: maxSubs,
-      country,
-      language,
+      country:  '',
+      language: 'fr',
       only_with_email:  onlyWithEmail,
       only_uncontacted: onlyUncontacted,
     };
