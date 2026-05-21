@@ -227,11 +227,17 @@ const Thomas = {
     try {
       const res = await App.api.messages_list({ limit: 100 });
       const msgs = (res && res.ok ? res.messages : []) || [];
-      // Évite re-render si pas de changement (compare par dernier id)
+      // Optim : on évite de re-render si on a DÉJÀ affiché ces mêmes
+      // messages. Mais surtout : on rend toujours au moins une fois,
+      // sinon le 1er affichage reste vide quand cachedMessages et
+      // msgs sont tous les deux vides au boot.
+      const el = document.getElementById('thomas-messages');
       const lastA = this.cachedMessages.length
         ? this.cachedMessages[this.cachedMessages.length - 1].id : null;
       const lastB = msgs.length ? msgs[msgs.length - 1].id : null;
-      if (lastA === lastB && this.cachedMessages.length === msgs.length) return;
+      const noChange = lastA === lastB && this.cachedMessages.length === msgs.length;
+      const alreadyRendered = el && el.innerHTML.trim().length > 0;
+      if (noChange && alreadyRendered) return;
       this.cachedMessages = msgs;
       this.renderMessages(msgs);
     } catch (e) { /* silencieux */ }
