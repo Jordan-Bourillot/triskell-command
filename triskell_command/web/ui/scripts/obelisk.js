@@ -563,10 +563,20 @@ const Obelisk = {
           <option value="yes" ${this.state.filters.has_email === 'yes' ? 'selected' : ''}>Avec email</option>
           <option value="no" ${this.state.filters.has_email === 'no' ? 'selected' : ''}>Sans email</option>
         </select>
-        <select id="ob-f-country">
-          <option value="">Pays : tous</option>
-          <option value="FR" ${this.state.filters.country === 'FR' ? 'selected' : ''}>🇫🇷 France uniquement</option>
-          <option value="OTHERS" ${this.state.filters.country === 'OTHERS' ? 'selected' : ''}>🌍 Hors France</option>
+        <select id="ob-f-exported" title="Filtrer les prospects selon qu'ils ont déjà été inclus dans un export Excel/PDF">
+          <option value="">Export : tous</option>
+          <option value="no" ${this.state.filters.exported === 'no' ? 'selected' : ''}>Jamais exportés</option>
+          <option value="yes" ${this.state.filters.exported === 'yes' ? 'selected' : ''}>Déjà exportés</option>
+        </select>
+        <select id="ob-f-contacted" title="Filtrer les prospects selon qu'on leur a déjà écrit un mail">
+          <option value="">Contact : tous</option>
+          <option value="no" ${this.state.filters.contacted === 'no' ? 'selected' : ''}>Jamais contactés</option>
+          <option value="yes" ${this.state.filters.contacted === 'yes' ? 'selected' : ''}>Déjà contactés</option>
+        </select>
+        <select id="ob-f-sort" title="Ordre de tri de la liste">
+          <option value="score" ${(!this.state.filters.sort_by || this.state.filters.sort_by === 'score') ? 'selected' : ''}>Tri : Score</option>
+          <option value="subs_desc" ${this.state.filters.sort_by === 'subs_desc' ? 'selected' : ''}>Tri : Abonnés (+ → -)</option>
+          <option value="subs_asc" ${this.state.filters.sort_by === 'subs_asc' ? 'selected' : ''}>Tri : Abonnés (- → +)</option>
         </select>
         <input id="ob-f-score" class="ob-num" type="number" min="0" max="100" placeholder="Score ≥" value="${this.state.filters.min_score || ''}">
       </div>
@@ -606,8 +616,12 @@ const Obelisk = {
       this.state.filters.platform = document.getElementById('ob-f-platform').value;
       this.state.filters.status   = document.getElementById('ob-f-status').value;
       this.state.filters.has_email= document.getElementById('ob-f-email').value;
-      this.state.filters.country  = document.getElementById('ob-f-country').value;
+      this.state.filters.exported = document.getElementById('ob-f-exported').value;
+      this.state.filters.contacted= document.getElementById('ob-f-contacted').value;
+      this.state.filters.sort_by  = document.getElementById('ob-f-sort').value;
       this.state.filters.min_score= parseInt(document.getElementById('ob-f-score').value, 10) || 0;
+      // Le filtre "pays" reste dans state mais n'est plus exposé dans
+      // l'UI (Obelisk est purement francophone maintenant, voir purge).
       this.state.page = 0;
       this._loadCreators();
     };
@@ -620,8 +634,10 @@ const Obelisk = {
       qTimer = setTimeout(applyFromInputs, 280);
     });
     // Les selects/score filtrent dès le change
-    ['ob-f-platform', 'ob-f-status', 'ob-f-email', 'ob-f-country', 'ob-f-score'].forEach(id => {
-      document.getElementById(id).addEventListener('change', applyFromInputs);
+    ['ob-f-platform', 'ob-f-status', 'ob-f-email', 'ob-f-exported',
+     'ob-f-contacted', 'ob-f-sort', 'ob-f-score'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', applyFromInputs);
     });
 
     // Boutons d'export Excel / PDF — utilisent les filtres en cours
@@ -851,7 +867,7 @@ const Obelisk = {
         <table class="ob-table">
           <thead><tr>
             <th style="width:40px;"><input type="checkbox" id="ob-select-all" title="Tout sélectionner (page)"></th>
-            <th>Créateur</th><th>Plateforme</th><th>Abonnés</th><th>Email</th><th>Score</th><th>Ville</th><th>Statut</th>
+            <th>Créateur</th><th>Plateforme</th><th>Niche</th><th>Abonnés</th><th>Email</th><th>Score</th><th>Ville</th><th>Statut</th>
           </tr></thead>
           <tbody>
             ${this.state.rows.map(p => this._rowHtml(p)).join('')}
@@ -907,6 +923,7 @@ const Obelisk = {
           ${p.handle ? `<div style="font-size: 11.5px; color: hsl(var(--text-muted)); margin-top: 2px;">@${this._esc(p.handle)}</div>` : ''}
         </td>
         <td>${platform ? `<span class="ob-pill">${this._esc(platform)}</span>` : '<span style="color: hsl(var(--text-muted));">—</span>'}</td>
+        <td style="color: hsl(var(--text-muted)); font-size: 12px;">${p.industry ? this._esc(p.industry) : '—'}</td>
         <td style="color: hsl(var(--text)); font-variant-numeric: tabular-nums; white-space: nowrap;">${this._fmtSubs(p.subscribers, p.subs_hidden)}</td>
         <td>${emails[0] ? `<a href="mailto:${this._esc(emails[0])}" style="color: hsl(var(--info));" onclick="event.stopPropagation()">${this._esc(emails[0])}</a>${emails.length > 1 ? ` <span style="color: hsl(var(--text-muted)); font-size: 11.5px;">+${emails.length - 1}</span>` : ''}` : '<span style="color: hsl(var(--text-muted));">—</span>'}</td>
         <td>

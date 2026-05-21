@@ -116,6 +116,9 @@ def list_creators(*,
                   has_email: Optional[bool] = None,
                   country: str = "",
                   job_id: str = "",
+                  exported: str = "",
+                  contacted: str = "",
+                  sort_by: str = "score",
                   limit: int = 100,
                   offset: int = 0) -> dict:
     """Retourne une page de prospects + le count total filtré.
@@ -136,6 +139,13 @@ def list_creators(*,
                      pendant la fenêtre d'exécution du job (started_at →
                      finished_at). Tolère 5 min de buffer pour absorber les
                      décalages d'horloge.
+      - exported   : "yes" → uniquement ceux déjà sortis dans un export ;
+                     "no" → ceux jamais exportés ;
+                     "" (défaut) → tout
+      - contacted  : "yes" → uniquement ceux déjà contactés par mail ;
+                     "no" → ceux jamais contactés ;
+                     "" (défaut) → tout
+      - sort_by    : "score" (défaut, décroissant), "subs_desc", "subs_asc"
     """
     sb = _sb()
     if sb is None:
@@ -146,7 +156,7 @@ def list_creators(*,
                         "city, postal_code, country, industry, description, "
                         "monetized, monetization_reasons, score, score_label, "
                         "subscribers, platform_url, status, tags, notes, "
-                        "last_contact_at, sources, created_at, updated_at",
+                        "last_contact_at, exported_at, sources, created_at, updated_at",
                         count="exact"))
         if job_id:
             jres = get_search_job(job_id)
@@ -193,13 +203,53 @@ def list_creators(*,
             else:
                 # Pays explicite : on filtre dessus
                 qy = qy.eq("country", cu)
-        qy = qy.order("score", desc=True).order("updated_at", desc=True)
+        # Déjà exporté dans une liste ?
+        if exported == "yes":
+            qy = qy.not_.is_("exported_at", "null")
+        elif exported == "no":
+            qy = qy.is_("exported_at", "null")
+        # Déjà contacté par mail ?
+        if contacted == "yes":
+            qy = qy.not_.is_("last_contact_at", "null")
+        elif contacted == "no":
+            qy = qy.is_("last_contact_at", "null")
+        # Ordre : score (défaut), abonnés desc/asc
+        sb_sort = (sort_by or "").strip().lower()
+        if sb_sort == "subs_desc":
+            qy = qy.order("subscribers", desc=True, nullsfirst=False).order("score", desc=True)
+        elif sb_sort == "subs_asc":
+            qy = qy.order("subscribers", desc=False, nullsfirst=False).order("score", desc=True)
+        else:
+            qy = qy.order("score", desc=True).order("updated_at", desc=True)
         qy = qy.range(offset, offset + max(0, limit - 1))
         res = qy.execute()
         return {"ok": True, "rows": res.data or [], "count": getattr(res, "count", None) or len(res.data or [])}
     except Exception as exc:
         logger.warning("obelisk.list_creators: %s", exc)
         return {"ok": False, "error": str(exc), "rows": [], "count": 0}
+
+
+def mark_exported(prospect_ids: list[str]) -> dict:
+    """Marque une liste de prospects comme "exportés à l'instant" en
+    posant `exported_at = now()`. Utilisé par l'API d'export pour qu'on
+    puisse ensuite filtrer "déjà exporté dans une liste" depuis Obelisk."""
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré"}
+    ids = [str(x) for x in (prospect_ids or []) if x]
+    if not ids:
+        return {"ok": True, "updated": 0}
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        res = (sb.table("prospects")
+                 .update({"exported_at": now_iso})
+                 .in_("id", ids)
+                 .execute())
+        return {"ok": True, "updated": len(res.data or [])}
+    except Exception as exc:
+        logger.warning("obelisk.mark_exported: %s", exc)
+        return {"ok": False, "error": str(exc), "updated": 0}
 
 
 def list_creators_for_export(*, limit_max: int = 5000, **filters) -> dict:

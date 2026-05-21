@@ -3521,6 +3521,9 @@ class Api:
                 has_email=has_email,
                 country=str(p.get("country") or "").strip(),
                 job_id=str(p.get("job_id") or "").strip(),
+                exported=str(p.get("exported") or "").strip(),
+                contacted=str(p.get("contacted") or "").strip(),
+                sort_by=str(p.get("sort_by") or "score").strip(),
                 limit=int(p.get("limit") or 100),
                 offset=int(p.get("offset") or 0),
             )
@@ -3678,6 +3681,14 @@ class Api:
             if not res.get("ok"):
                 return res
             rows = res.get("rows") or []
+            # Marque les prospects exportés (exported_at = now) pour qu'on
+            # puisse ensuite filtrer "déjà exporté" depuis l'UI Obelisk.
+            try:
+                ids = [row.get("id") for row in rows if row.get("id")]
+                if ids:
+                    r.mark_exported(ids)
+            except Exception as exc:
+                logger.debug("mark_exported a échoué (non bloquant) : %s", exc)
             from datetime import datetime as _dt
             stamp = _dt.now().strftime("%Y-%m-%d_%Hh%M")
             if fmt == "xlsx":
