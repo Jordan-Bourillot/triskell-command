@@ -55,6 +55,12 @@ const Morning = {
             <svg class="w-4 h-4" style="color:#3b82f6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0114-7.4M21 12a9 9 0 01-14 7.4"/><path d="M21 4v5h-5M3 20v-5h5"/></svg>
             Rafraîchir
           </button>
+          <button id="m-ecosysteme" class="btn btn-secondary" title="Vue d'ensemble de l'écosystème Triskell (interne)">
+            <svg class="w-4 h-4" style="color:#facc15" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2l2.4 6.4L21 9.3l-5 4.5L17.6 21 12 17.5 6.4 21 8 13.8 3 9.3l6.6-.9L12 2z"/>
+            </svg>
+            Écosystème
+          </button>
           <button id="m-compose-mail" class="btn btn-secondary" title="Composer (Ctrl+Shift+M)">
             <svg class="w-4 h-4" style="color:#f59e0b" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/>
@@ -112,6 +118,19 @@ const Morning = {
     };
     document.getElementById('m-allo-claude').onclick = () => Claude.open();
     document.getElementById('m-compose-mail').onclick = () => this._openComposeChoice();
+    document.getElementById('m-ecosysteme').onclick = async () => {
+      const url = 'https://triskell-ecosysteme.netlify.app';
+      try {
+        if (window.app && window.app.api && window.app.api.open_url) {
+          await window.app.api.open_url({ url });
+        } else {
+          window.open(url, '_blank');
+        }
+      } catch (e) {
+        console.warn('open ecosysteme:', e);
+        window.open(url, '_blank');
+      }
+    };
     const focusBtn = document.getElementById('m-focus');
     if (focusBtn) {
       focusBtn.onclick = () => {

@@ -221,21 +221,7 @@ const App = {
       if (typeof Brain !== 'undefined') Brain._openNew();
     });
 
-    // Bind bouton "Écosystème" → carte mentale interne dans le navigateur
-    const ecoBtn = document.getElementById('ecosysteme-trigger');
-    if (ecoBtn) ecoBtn.addEventListener('click', async () => {
-      const url = 'https://triskell-ecosysteme.netlify.app';
-      try {
-        if (this.api && this.api.open_url) {
-          await this.api.open_url({ url });
-        } else {
-          window.open(url, '_blank');
-        }
-      } catch (e) {
-        console.warn('open ecosysteme:', e);
-        window.open(url, '_blank');
-      }
-    });
+    // Bouton "Écosystème" déplacé dans la quickbar de la Cockpit (morning.js).
 
     // Raccourcis clavier
     window.addEventListener('keydown', (e) => {
