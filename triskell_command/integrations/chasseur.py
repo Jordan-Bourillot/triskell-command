@@ -789,19 +789,13 @@ def _evaluate_site_quality(site_root: str, html_home: str) -> tuple[str, list[st
                  r"page\s+en\s+travaux)", html_home, re.IGNORECASE):
         reasons.append("site en construction")
 
-    # Verdict (mode permissif post-feedback Jordan) :
-    #   - "copyright vieux" seul est trop courant pour qualifier un site
-    #     de pourri (beaucoup de PME tip-top oublient juste de toucher au
-    #     footer). On l'accepte uniquement combiné à un autre signal.
-    #   - Les autres signaux faibles (pas HTTPS, pas mobile) suffisent à
-    #     eux seuls car ce sont des défauts qu'on peut vraiment pitcher.
-    if not reasons:
-        return "ok", []
-    only_copyright = (len(reasons) == 1
-                      and reasons[0].startswith("copyright "))
-    if only_copyright:
-        return "ok", reasons
-    return "poor", reasons
+    # Verdict permissif : 1 seul signal suffit pour "poor". Les sites
+    # anglais corporate sont déjà filtrés en amont par _looks_french,
+    # donc un footer "copyright 2018" sur un site FR signale bien une
+    # PME qui ne touche plus à son site = cible légitime pour une refonte.
+    if reasons:
+        return "poor", reasons
+    return "ok", []
 
 
 def _harvest_emails_for_site(site_root: str) -> tuple[str, list[str], str, str]:
