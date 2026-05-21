@@ -107,6 +107,9 @@ def _shift_iso(iso_str: str, *, seconds: int) -> str:
         return iso_str
 
 
+PRO_PLATFORM_URL_PATTERNS = ("openstreetmap", "pubmed")
+
+
 def list_creators(*,
                   platform: str = "",
                   status: str = "",
@@ -119,6 +122,7 @@ def list_creators(*,
                   exported: str = "",
                   contacted: str = "",
                   sort_by: str = "score",
+                  audience: str = "",
                   limit: int = 100,
                   offset: int = 0) -> dict:
     """Retourne une page de prospects + le count total filtré.
@@ -146,6 +150,12 @@ def list_creators(*,
                      "no" → ceux jamais contactés ;
                      "" (défaut) → tout
       - sort_by    : "score" (défaut, décroissant), "subs_desc", "subs_asc"
+      - audience   : "creator" → uniquement créateurs/influenceurs (toutes
+                     plateformes sauf OpenStreetMap & PubMed) ;
+                     "pro" → uniquement pros/entreprises (OSM + PubMed) ;
+                     "" (défaut) → tout, sans filtre d'audience.
+                     Heuristique basée sur platform_url car les prospects
+                     "pro" n'ont pas de notion d'abonnés/monétisation.
     """
     sb = _sb()
     if sb is None:
@@ -194,6 +204,15 @@ def list_creators(*,
             # platform_url contient youtube.com / twitch.tv / etc. selon source
             p = platform.lower()
             qy = qy.ilike("platform_url", f"%{p}%")
+        # Filtre par audience (créateurs vs pros/entreprises)
+        aud = (audience or "").strip().lower()
+        if aud == "pro":
+            qy = qy.or_(",".join(
+                f"platform_url.ilike.%{pat}%" for pat in PRO_PLATFORM_URL_PATTERNS
+            ))
+        elif aud == "creator":
+            for pat in PRO_PLATFORM_URL_PATTERNS:
+                qy = qy.filter("platform_url", "not.ilike", f"%{pat}%")
         if country:
             cu = country.strip().upper()
             if cu == "FR":
@@ -676,7 +695,8 @@ def delete_creators_filtered(*,
                               min_score: int = 0,
                               city: str = "",
                               q: str = "",
-                              has_email: Optional[bool] = None) -> dict:
+                              has_email: Optional[bool] = None,
+                              audience: str = "") -> dict:
     """Supprime tous les créateurs qui matchent les filtres donnés.
     Réutilise list_creators pour récupérer les IDs, puis delete_bulk.
 
@@ -689,7 +709,7 @@ def delete_creators_filtered(*,
     while True:
         page = list_creators(platform=platform, status=status,
                               min_score=min_score, city=city, q=q,
-                              has_email=has_email,
+                              has_email=has_email, audience=audience,
                               limit=page_size, offset=offset)
         rows = (page or {}).get("rows") or []
         if not rows:

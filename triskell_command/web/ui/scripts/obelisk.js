@@ -12,7 +12,7 @@
 const Obelisk = {
   state: {
     tab: 'creators',
-    filters: { platform: '', status: '', min_score: 0, q: '', has_email: '', country: '', job_id: '' },
+    filters: { platform: '', status: '', min_score: 0, q: '', has_email: '', country: '', job_id: '', audience: '' },
     jobFilterInfo: null,    // {id, niche, created_at, status} pour afficher la puce
     page: 0,
     pageSize: 50,
@@ -23,6 +23,45 @@ const Obelisk = {
     config: null,
     jobId: null,
     jobPoll: null,
+    searchAudience: null,   // 'creator' | 'pro' (lazy-init depuis localStorage)
+  },
+
+  _AUDIENCE_KEY: 'obelisk-search-audience',
+  _LIST_AUDIENCE_KEY: 'obelisk-list-audience',
+
+  _getListAudience() {
+    // Renvoie le filtre d'audience persisté pour la liste des prospects.
+    // '' = tous, 'creator', 'pro'.
+    if (this.state.filters.audience !== '') return this.state.filters.audience;
+    let v = '';
+    try { v = localStorage.getItem(this._LIST_AUDIENCE_KEY) || ''; } catch (e) {}
+    if (v !== 'creator' && v !== 'pro') v = '';
+    this.state.filters.audience = v;
+    return v;
+  },
+
+  _setListAudience(aud) {
+    if (aud !== '' && aud !== 'creator' && aud !== 'pro') return;
+    this.state.filters.audience = aud;
+    try { localStorage.setItem(this._LIST_AUDIENCE_KEY, aud); } catch (e) {}
+    this.state.page = 0;
+    this._renderCreators();
+  },
+
+  _getSearchAudience() {
+    if (this.state.searchAudience) return this.state.searchAudience;
+    let v = null;
+    try { v = localStorage.getItem(this._AUDIENCE_KEY); } catch (e) {}
+    if (v !== 'creator' && v !== 'pro') v = 'creator';
+    this.state.searchAudience = v;
+    return v;
+  },
+
+  _setSearchAudience(aud) {
+    if (aud !== 'creator' && aud !== 'pro') return;
+    this.state.searchAudience = aud;
+    try { localStorage.setItem(this._AUDIENCE_KEY, aud); } catch (e) {}
+    this._renderSearch();
   },
 
   PLATFORMS: [
@@ -404,7 +443,56 @@ const Obelisk = {
       .ob-drawer .ob-stat .label { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: hsl(var(--text-muted)); font-weight: 700; }
       .ob-drawer .ob-stat .value { font-size: 24px; font-weight: 700; color: hsl(var(--text)); margin-top: 4px; line-height: 1; }
 
+      /* Liste prospects — toggle Tous / Créateurs / Pros */
+      .ob-audience-toggle {
+        display: inline-flex; gap: 2px; padding: 4px;
+        margin-bottom: 14px;
+        background: hsl(var(--bg));
+        border: 1px solid hsl(var(--border));
+        border-radius: 10px;
+      }
+      .ob-audience-pill {
+        padding: 7px 16px; font-size: 13px; font-weight: 600;
+        color: hsl(var(--text-muted));
+        background: transparent; border: none; border-radius: 7px;
+        cursor: pointer; transition: all 140ms ease;
+      }
+      .ob-audience-pill:hover { color: hsl(var(--text)); }
+      .ob-audience-pill.is-on {
+        background: hsl(var(--accent));
+        color: white;
+        box-shadow: 0 1px 4px hsl(var(--accent) / .35);
+      }
+
       /* Onglet Recherche */
+      .ob-audience-switch {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+        margin-bottom: 22px;
+      }
+      .ob-audience-card {
+        display: flex; flex-direction: column; gap: 4px;
+        padding: 14px 16px; border-radius: 12px; cursor: pointer;
+        background: hsl(var(--bg)); border: 1.5px solid hsl(var(--border));
+        text-align: left; transition: all 160ms ease;
+      }
+      .ob-audience-card:hover {
+        border-color: hsl(var(--accent) / .6);
+        background: hsl(var(--accent) / .04);
+      }
+      .ob-audience-card.is-on {
+        background: hsl(var(--accent) / .12);
+        border-color: hsl(var(--accent));
+        box-shadow: 0 0 0 3px hsl(var(--accent) / .12);
+      }
+      .ob-audience-card-title {
+        font-size: 14px; font-weight: 700; color: hsl(var(--text));
+        display: flex; align-items: center; gap: 8px;
+      }
+      .ob-audience-card.is-on .ob-audience-card-title { color: hsl(var(--accent)); }
+      .ob-audience-card-hint {
+        font-size: 11.5px; color: hsl(var(--text-muted));
+        line-height: 1.4;
+      }
       .ob-platform-grid {
         display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
       }
@@ -557,7 +645,24 @@ const Obelisk = {
       return;
     }
 
+    // Persistance du toggle "Type" (Tous / Créateurs / Pros)
+    const listAud = this._getListAudience();
+
     c.innerHTML = `
+      <div class="ob-audience-toggle" role="tablist" aria-label="Type de prospect">
+        ${[
+          { v: '',        label: 'Tous',         icon: '' },
+          { v: 'creator', label: 'Créateurs',    icon: '🎙️' },
+          { v: 'pro',     label: 'Pros',         icon: '🏢' },
+        ].map(o => `
+          <button type="button" class="ob-audience-pill ${listAud === o.v ? 'is-on' : ''}"
+                  role="tab" aria-selected="${listAud === o.v}"
+                  data-ob-set-list-aud="${o.v}">
+            ${o.icon ? o.icon + ' ' : ''}${this._esc(o.label)}
+          </button>
+        `).join('')}
+      </div>
+
       <div class="ob-filters">
         <div class="ob-search">
           <input id="ob-f-q" placeholder="Rechercher un nom, un handle, un site…" value="${this._esc(this.state.filters.q)}">
@@ -653,6 +758,11 @@ const Obelisk = {
       this.state.page = 0;
       this._loadCreators();
     };
+
+    // Toggle "Type" (Tous / Créateurs / Pros) — recharge la liste filtrée
+    c.querySelectorAll('[data-ob-set-list-aud]').forEach(btn => {
+      btn.addEventListener('click', () => this._setListAudience(btn.dataset.obSetListAud));
+    });
 
     // La recherche libre filtre après une courte pause (debounce)
     const qInput = document.getElementById('ob-f-q');
@@ -858,6 +968,7 @@ const Obelisk = {
         has_email: f.has_email || '',
         country:   f.country   || '',
         job_id:    f.job_id    || '',
+        audience:  f.audience  || '',
       };
       if (limit) payload.limit = limit;
       const res = await this._api('export', payload);
@@ -938,7 +1049,7 @@ const Obelisk = {
     });
     const clr = wrap.querySelector('[data-ob-clearall]');
     if (clr) clr.onclick = () => {
-      this.state.filters = { platform: '', status: '', min_score: 0, q: '', has_email: '', country: '', job_id: '' };
+      this.state.filters = { platform: '', status: '', min_score: 0, q: '', has_email: '', country: '', job_id: '', audience: '' };
       this.state.jobFilterInfo = null;
       this.state.page = 0;
       this._renderCreators();
@@ -1424,46 +1535,60 @@ const Obelisk = {
       if (r && r.ok) this.state.config = r.config;
     }
     const cfg = this.state.config || {};
+    const aud = this._getSearchAudience();
+    const isPro = aud === 'pro';
     // Défauts forcés à chaque ouverture du formulaire (Jordan veut toujours
-    // partir d'une feuille blanche : YouTube seul + Tous monétisés/non).
-    const defaultPlatforms = new Set(['youtube']);
+    // partir d'une feuille blanche). En mode créateur : YouTube seul. En mode
+    // pro : OpenStreetMap seul (mine d'or 100% emails).
+    const defaultPlatforms = isPro ? new Set(['osm']) : new Set(['youtube']);
     const monetMode = 'all';
+    const platsOfAud = this.PLATFORMS.filter(p => p.audience === aud);
+    const headTitle = isPro
+      ? 'Nouvelle recherche — Pros & entreprises'
+      : 'Nouvelle recherche — Créateurs & influenceurs';
+    const headIntro = isPro
+      ? 'Restos, artisans, cabinets, hôtels, chercheurs, labos… Obelisk balaie les annuaires publics, récupère les emails et stocke tout dans ton CRM.'
+      : 'Audience, abonnés, codes promo, partenariats. Obelisk balaie les plateformes activées (YouTube, LinkedIn, Instagram, TikTok…), enrichit les profils et stocke tout dans ton CRM.';
+    const nichePlaceholder = isPro
+      ? 'ex : restaurant, plombier, ostéopathe, avocat, laboratoire santé'
+      : 'ex : entrepreneur, coaching, growth, formation';
     c.innerHTML = `
       <div class="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5">
         <div class="bg-card border border-border rounded-xl p-6">
-          <h3 class="text-lg font-bold mb-1">Nouvelle recherche</h3>
-          <p class="text-sm text-text-muted mb-5">Décris ta cible. Obelisk balaie les plateformes activées (12 dispos, dont LinkedIn / Instagram / TikTok via PhantomBuster), enrichit les profils et stocke tout dans ton CRM.</p>
+          <div class="ob-audience-switch">
+            ${['creator', 'pro'].map(a => {
+              const meta = this.AUDIENCE_LABELS[a];
+              const on = a === aud;
+              const icon = a === 'creator' ? '🎙️' : '🏢';
+              return `<button type="button" class="ob-audience-card ${on ? 'is-on' : ''}" data-ob-set-aud="${a}">
+                <div class="ob-audience-card-title">${icon} ${this._esc(meta.title)}</div>
+                <div class="ob-audience-card-hint">${this._esc(meta.hint)}</div>
+              </button>`;
+            }).join('')}
+          </div>
+
+          <h3 class="text-lg font-bold mb-1">${this._esc(headTitle)}</h3>
+          <p class="text-sm text-text-muted mb-5">${this._esc(headIntro)}</p>
 
           <label class="block mb-4">
             <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Niche(s) — séparées par virgules pour en lancer plusieurs</div>
-            <input id="ob-s-niche" placeholder="ex : entrepreneur, coaching, growth, formation" value="${this._esc(cfg.niche || '')}" style="width:100%; padding:10px 14px; border-radius:8px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 14px;">
+            <input id="ob-s-niche" placeholder="${this._esc(nichePlaceholder)}" value="${this._esc(cfg.niche || '')}" style="width:100%; padding:10px 14px; border-radius:8px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 14px;">
             <div class="text-[11px] text-text-muted mt-1">Une virgule = une recherche supplémentaire. Tout est fusionné dans un seul job, avec dédup automatique.</div>
           </label>
 
           <div class="block mb-4">
             <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Plateformes</div>
-            ${['creator', 'pro'].map(aud => {
-              const meta = this.AUDIENCE_LABELS[aud];
-              const platsOfAud = this.PLATFORMS.filter(p => p.audience === aud);
-              return `
-              <div class="mb-3" data-ob-audience="${aud}">
-                <div class="flex items-baseline justify-between mb-2">
-                  <div class="text-[12px] font-semibold text-text">${this._esc(meta.title)}</div>
-                  <div class="text-[10px] text-text-muted">${this._esc(meta.hint)}</div>
-                </div>
-                <div class="ob-platform-grid">
-                  ${platsOfAud.map(p => `
-                    <label class="ob-platform-chip ${defaultPlatforms.has(p.id) ? 'is-on' : ''}" ${p.tip ? `title="${this._esc(p.tip)}"` : ''}>
-                      <input type="checkbox" data-ob-plat="${p.id}" data-ob-aud="${aud}" ${defaultPlatforms.has(p.id) ? 'checked' : ''} style="margin: 0;">
-                      ${this._esc(p.label)}
-                    </label>
-                  `).join('')}
-                </div>
-              </div>
-              `;
-            }).join('')}
+            <div class="ob-platform-grid">
+              ${platsOfAud.map(p => `
+                <label class="ob-platform-chip ${defaultPlatforms.has(p.id) ? 'is-on' : ''}" ${p.tip ? `title="${this._esc(p.tip)}"` : ''}>
+                  <input type="checkbox" data-ob-plat="${p.id}" data-ob-aud="${aud}" ${defaultPlatforms.has(p.id) ? 'checked' : ''} style="margin: 0;">
+                  ${this._esc(p.label)}
+                </label>
+              `).join('')}
+            </div>
           </div>
 
+          ${isPro ? '' : `
           <div class="block mb-4">
             <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Cible — monétisation</div>
             <div class="ob-radio-grid">
@@ -1496,6 +1621,7 @@ const Obelisk = {
               <input id="ob-s-max-subs" type="number" min="0" placeholder="0 = pas de plafond" value="${cfg.max_subscribers || ''}" style="width:100%; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px;">
             </label>
           </div>
+          `}
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
             <label class="ob-toggle-row">
@@ -1530,6 +1656,10 @@ const Obelisk = {
         </div>
       </div>
     `;
+    // Sélecteur d'audience (créateurs vs pros)
+    c.querySelectorAll('[data-ob-set-aud]').forEach(btn => {
+      btn.addEventListener('click', () => this._setSearchAudience(btn.dataset.obSetAud));
+    });
     // Chip toggle visual
     c.querySelectorAll('[data-ob-plat]').forEach(cb => {
       cb.addEventListener('change', () => {
@@ -1593,11 +1723,13 @@ const Obelisk = {
     if (!niche)             { alert('Renseigne une niche.'); return; }
     if (!platforms.length)  { alert('Coche au moins une plateforme.'); return; }
 
-    // Filtres avancés
+    // Filtres avancés — certains n'existent qu'en mode "créateur"
     const monetEl = document.querySelector('input[name="ob-monet"]:checked');
     const monetMode = (monetEl && monetEl.value) || 'all';   // all | unmonetized | monetized
-    const minSubs = parseInt(document.getElementById('ob-s-min-subs').value, 10) || 0;
-    const maxSubs = parseInt(document.getElementById('ob-s-max-subs').value, 10) || 0;
+    const minSubsEl = document.getElementById('ob-s-min-subs');
+    const maxSubsEl = document.getElementById('ob-s-max-subs');
+    const minSubs = minSubsEl ? (parseInt(minSubsEl.value, 10) || 0) : 0;
+    const maxSubs = maxSubsEl ? (parseInt(maxSubsEl.value, 10) || 0) : 0;
     const onlyWithEmail = document.getElementById('ob-s-with-email').checked;
     const onlyUncontacted = document.getElementById('ob-s-uncontacted').checked;
 
