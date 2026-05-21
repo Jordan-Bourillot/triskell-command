@@ -52,6 +52,36 @@ const Thomas = {
     });
     input.addEventListener('input', () => this.notifyTyping());
 
+    // Coller (Ctrl+V) : si le presse-papier contient une image, on la
+    // traite comme une pièce jointe et on annule le paste texte. Sinon
+    // (texte normal), on laisse le navigateur insérer le texte tout seul.
+    input.addEventListener('paste', (e) => {
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      const imageFiles = [];
+      for (const item of items) {
+        if (item.kind === 'file' && item.type && item.type.startsWith('image/')) {
+          const f = item.getAsFile();
+          if (f) imageFiles.push(f);
+        }
+      }
+      if (imageFiles.length === 0) {
+        return;  // texte ou autre : comportement par défaut du textarea
+      }
+      e.preventDefault();
+      // Renomme les images collées (qui s'appellent souvent "image.png" par
+      // défaut) avec un timestamp pour éviter les conflits si on en colle
+      // plusieurs à la suite.
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      imageFiles.forEach((f, idx) => {
+        const ext = (f.type.split('/')[1] || 'png').split('+')[0];
+        const suffix = imageFiles.length > 1 ? `_${idx + 1}` : '';
+        const renamed = new File([f], `pasted_${stamp}${suffix}.${ext}`, {
+          type: f.type, lastModified: Date.now(),
+        });
+        this._uploadAttachment(renamed);
+      });
+    });
+
     // Pièce jointe : trombone ouvre le picker de fichier
     const attachBtn = document.getElementById('thomas-attach-btn');
     const attachFile = document.getElementById('thomas-attach-file');
