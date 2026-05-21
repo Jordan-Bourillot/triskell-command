@@ -93,6 +93,20 @@ def _sb():
 ALLOWED_STATUSES = ("new", "qualified", "contacted", "replied", "refused", "won", "lost")
 
 
+def _shift_iso(iso_str: str, *, seconds: int) -> str:
+    """Décale un timestamp ISO (de Supabase) de `seconds` secondes.
+    Renvoie l'original si parsing impossible — best-effort."""
+    from datetime import timedelta
+    if not iso_str:
+        return iso_str
+    try:
+        s = iso_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        return (dt + timedelta(seconds=seconds)).isoformat()
+    except Exception:
+        return iso_str
+
+
 def list_creators(*,
                   platform: str = "",
                   status: str = "",
@@ -101,6 +115,7 @@ def list_creators(*,
                   q: str = "",
                   has_email: Optional[bool] = None,
                   country: str = "",
+                  job_id: str = "",
                   limit: int = 100,
                   offset: int = 0) -> dict:
     """Retourne une page de prospects + le count total filtré.
@@ -117,6 +132,10 @@ def list_creators(*,
       - country    : "FR" → uniquement France ;
                      "OTHERS" → tous SAUF France (vide ou autre code) ;
                      "" → pas de filtre
+      - job_id     : UUID d'un obelisk_search_jobs. Limite aux prospects créés
+                     pendant la fenêtre d'exécution du job (started_at →
+                     finished_at). Tolère 5 min de buffer pour absorber les
+                     décalages d'horloge.
     """
     sb = _sb()
     if sb is None:
@@ -129,6 +148,18 @@ def list_creators(*,
                         "subscribers, platform_url, status, tags, notes, "
                         "last_contact_at, sources, created_at, updated_at",
                         count="exact"))
+        if job_id:
+            jres = get_search_job(job_id)
+            if jres.get("ok"):
+                job = jres.get("job") or {}
+                start = job.get("started_at") or job.get("created_at")
+                end = job.get("finished_at")
+                if start:
+                    qy = qy.gte("created_at",
+                                _shift_iso(start, seconds=-300))
+                if end:
+                    qy = qy.lte("created_at",
+                                _shift_iso(end, seconds=300))
         if status and status in ALLOWED_STATUSES:
             qy = qy.eq("status", status)
         if min_score and min_score > 0:

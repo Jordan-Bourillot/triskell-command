@@ -12,7 +12,8 @@
 const Obelisk = {
   state: {
     tab: 'creators',
-    filters: { platform: '', status: '', min_score: 0, q: '', has_email: '' },
+    filters: { platform: '', status: '', min_score: 0, q: '', has_email: '', country: '', job_id: '' },
+    jobFilterInfo: null,    // {id, niche, created_at, status} pour afficher la puce
     page: 0,
     pageSize: 50,
     rows: [],
@@ -271,10 +272,49 @@ const Obelisk = {
         background: hsl(var(--accent) / .1); color: hsl(var(--accent));
         font-weight: 600;
       }
+      .ob-active-filters .chip.is-job {
+        background: hsl(var(--warning) / .14); color: hsl(var(--warning));
+        padding-right: 4px;
+      }
+      .ob-active-filters .chip.is-job button {
+        background: hsl(var(--warning) / .2); color: hsl(var(--warning));
+      }
       .ob-active-filters .chip button {
         width: 18px; height: 18px; border-radius: 50%;
         background: hsl(var(--accent) / .15); color: hsl(var(--accent));
         border: none; cursor: pointer; font-size: 11px; line-height: 1;
+      }
+
+      /* Recherches récentes : lignes cliquables */
+      .ob-job-row {
+        padding: 10px 4px; border-bottom: 1px solid hsl(var(--border) / .6);
+        cursor: pointer; border-radius: 6px;
+        transition: background 120ms, padding 120ms;
+      }
+      .ob-job-row:last-child { border-bottom: none; }
+      .ob-job-row:hover {
+        background: hsl(var(--accent) / .07);
+        padding-left: 10px; padding-right: 10px;
+      }
+      .ob-job-row:hover .ob-job-row-arrow {
+        color: hsl(var(--accent)); transform: translateX(2px);
+      }
+      .ob-job-row-top {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 8px;
+      }
+      .ob-job-row-niche {
+        color: hsl(var(--text)); font-weight: 600; font-size: 12.5px;
+        flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ob-job-row-arrow {
+        font-size: 16px; color: hsl(var(--text-muted));
+        line-height: 1; transition: transform 120ms, color 120ms;
+      }
+      .ob-job-row-meta {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-top: 3px; font-size: 11.5px;
       }
       .ob-active-filters .clear-all {
         font-size: 11.5px; color: hsl(var(--text-muted)); text-decoration: underline;
@@ -490,7 +530,7 @@ const Obelisk = {
   // -------------------------------------------------------------------
   _hasActiveFilters() {
     const f = this.state.filters;
-    return !!(f.q || f.platform || f.status || f.has_email || f.min_score);
+    return !!(f.q || f.platform || f.status || f.has_email || f.min_score || f.country || f.job_id);
   },
 
   async _renderCreators() {
@@ -585,6 +625,12 @@ const Obelisk = {
     if (!wrap) return;
     const f = this.state.filters;
     const chips = [];
+    if (f.job_id && this.state.jobFilterInfo) {
+      const ji = this.state.jobFilterInfo;
+      const when = ji.created_at ? new Date(ji.created_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '';
+      const label = `Recherche : ${ji.niche || '(sans niche)'}${when ? ' · ' + when : ''}`;
+      chips.push(['job_id', label, 'is-job']);
+    }
     if (f.q)         chips.push(['q', `« ${f.q} »`]);
     if (f.platform)  chips.push(['platform', (this.PLATFORMS.find(p => p.id === f.platform) || {}).label || f.platform]);
     if (f.status)    chips.push(['status', this.STATUS_LABELS[f.status] || f.status]);
@@ -593,20 +639,22 @@ const Obelisk = {
     if (f.min_score) chips.push(['min_score', `Score ≥ ${f.min_score}`]);
     if (chips.length === 0) { wrap.className = ''; wrap.innerHTML = ''; return; }
     wrap.className = 'ob-active-filters';
-    wrap.innerHTML = chips.map(([k, l]) =>
-      `<span class="chip">${this._esc(l)}<button data-ob-rmf="${k}" aria-label="Retirer">×</button></span>`
+    wrap.innerHTML = chips.map(([k, l, extra]) =>
+      `<span class="chip ${extra || ''}">${this._esc(l)}<button data-ob-rmf="${k}" aria-label="Retirer">×</button></span>`
     ).join('') + `<button class="clear-all" data-ob-clearall>Tout effacer</button>`;
     wrap.querySelectorAll('[data-ob-rmf]').forEach(b => {
       b.onclick = () => {
         const k = b.dataset.obRmf;
         this.state.filters[k] = (k === 'min_score') ? 0 : '';
+        if (k === 'job_id') this.state.jobFilterInfo = null;
         this.state.page = 0;
         this._renderCreators();
       };
     });
     const clr = wrap.querySelector('[data-ob-clearall]');
     if (clr) clr.onclick = () => {
-      this.state.filters = { platform: '', status: '', min_score: 0, q: '', has_email: '', country: '' };
+      this.state.filters = { platform: '', status: '', min_score: 0, q: '', has_email: '', country: '', job_id: '' };
+      this.state.jobFilterInfo = null;
       this.state.page = 0;
       this._renderCreators();
     };
@@ -631,11 +679,31 @@ const Obelisk = {
     this.state.total = res.count || 0;
 
     if (this.state.rows.length === 0) {
+      const ji = this.state.jobFilterInfo;
+      const jobActive = this.state.filters.job_id && ji;
+      let icon = '🔭';
+      let title = 'Aucun créateur ne correspond.';
+      let sub   = 'Élargis tes filtres ou lance une nouvelle recherche.';
+      if (jobActive) {
+        if (ji.status === 'running' || ji.status === 'pending') {
+          icon = '⏳';
+          title = 'La recherche est encore en cours.';
+          sub   = 'Reviens dans une minute, ou consulte la progression dans l\'onglet « Nouvelle recherche ».';
+        } else if (ji.status === 'failed') {
+          icon = '⚠️';
+          title = 'La recherche a échoué.';
+          sub   = 'Aucun créateur n\'a été inséré. Ouvre l\'onglet « Nouvelle recherche » pour voir le détail.';
+        } else {
+          icon = '🪹';
+          title = 'Cette recherche n\'a remonté aucun créateur.';
+          sub   = 'Soit les plateformes n\'ont rien trouvé, soit tes filtres avancés ont tout écarté.';
+        }
+      }
       wrap.innerHTML = `
         <div style="padding: 56px 24px; text-align: center;">
-          <div style="font-size: 32px; opacity: .5; margin-bottom: 12px;">🔭</div>
-          <div style="font-weight: 600; color: hsl(var(--text)); margin-bottom: 4px; font-size: 15px;">Aucun créateur ne correspond.</div>
-          <div style="font-size: 13px; color: hsl(var(--text-muted));">Élargis tes filtres ou lance une nouvelle recherche.</div>
+          <div style="font-size: 32px; opacity: .5; margin-bottom: 12px;">${icon}</div>
+          <div style="font-weight: 600; color: hsl(var(--text)); margin-bottom: 4px; font-size: 15px;">${this._esc(title)}</div>
+          <div style="font-size: 13px; color: hsl(var(--text-muted)); max-width: 460px; margin: 0 auto;">${this._esc(sub)}</div>
         </div>`;
     } else {
       // Init de la sélection en mémoire si pas déjà fait
@@ -1191,18 +1259,43 @@ const Obelisk = {
     const res = await this._api('list_jobs', { limit: 8 });
     const jobs = (res && res.jobs) || [];
     if (jobs.length === 0) { wrap.innerHTML = '<div class="text-[12px] text-text-muted">Aucune recherche pour l\'instant.</div>'; return; }
+    this._lastJobs = jobs;
     wrap.innerHTML = jobs.map(j => {
       const found = (j.stats && j.stats.found) || 0;
       const statusColor = j.status === 'done' ? 'text-success' : j.status === 'failed' ? 'text-danger' : j.status === 'running' ? 'text-warning' : 'text-text-muted';
       const when = j.created_at ? new Date(j.created_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '';
-      return `<div class="py-2 border-b border-border last:border-0">
-        <div class="text-text font-semibold">${this._esc(j.niche)}</div>
-        <div class="flex justify-between mt-1">
+      return `<div class="ob-job-row" data-ob-job="${this._esc(j.id)}" title="Voir les créateurs trouvés par cette recherche">
+        <div class="ob-job-row-top">
+          <div class="ob-job-row-niche">${this._esc(j.niche)}</div>
+          <span class="ob-job-row-arrow">›</span>
+        </div>
+        <div class="ob-job-row-meta">
           <span class="${statusColor}">${this._esc(j.status)}${found ? ` · ${found} trouvés` : ''}</span>
           <span>${this._esc(when)}</span>
         </div>
       </div>`;
     }).join('');
+    wrap.querySelectorAll('[data-ob-job]').forEach(row => {
+      row.onclick = () => {
+        const jid = row.dataset.obJob;
+        const job = (this._lastJobs || []).find(x => x.id === jid);
+        this._openJobResults(job || { id: jid });
+      };
+    });
+  },
+
+  _openJobResults(job) {
+    if (!job || !job.id) return;
+    this.state.filters.job_id = job.id;
+    this.state.jobFilterInfo = {
+      id:         job.id,
+      niche:      job.niche || '',
+      created_at: job.created_at || '',
+      status:     job.status || '',
+      found:      (job.stats && job.stats.found) || 0,
+    };
+    this.state.page = 0;
+    this.switchTab('creators');
   },
 
   async _launchSearch() {
