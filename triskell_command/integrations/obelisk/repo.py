@@ -240,6 +240,124 @@ def get_creator(prospect_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Audit + purge des prospects non-francophones
+# ---------------------------------------------------------------------------
+def _is_likely_francophone(row: dict) -> tuple[bool, str]:
+    """Renvoie (True, raison) si le prospect est probablement francophone,
+    (False, raison) sinon. La logique reflète apply_filters en mode strict :
+    il faut au moins une source de confirmation FR et aucun conflit.
+    """
+    from .runner import _detect_language
+    declared_lang = (row.get("language") or "").lower()
+    declared_country = (row.get("country") or "").upper()
+    text_blob = " ".join(filter(None, [
+        str(row.get("description") or ""),
+        str(row.get("name") or ""),
+        str(row.get("handle") or ""),
+    ]))
+    detected = _detect_language(text_blob)
+    # Conflit fort : langue déclarée ≠ fr, ou détection ≠ fr
+    if declared_lang and declared_lang != "fr":
+        return False, f"langue déclarée = {declared_lang}"
+    if detected == "en":
+        return False, "anglais détecté dans la description"
+    # Confirmation positive ?
+    if declared_lang == "fr":
+        return True, "langue déclarée = fr"
+    if declared_country == "FR":
+        return True, "pays = FR"
+    if detected == "fr":
+        return True, "français détecté dans la description"
+    # Rien ne confirme FR → on considère pas francophone
+    return False, "aucun signal FR (pas de description / pas de pays / pas de langue déclarée)"
+
+
+def audit_non_francophones(*, limit_scan: int = 5000) -> dict:
+    """Parcourt jusqu'à `limit_scan` prospects et renvoie ceux qui ne
+    sont PAS confirmés francophones. Pour preview avant suppression.
+
+    Renvoie {ok, total_scanned, non_fr_count, ids, examples}.
+    examples = jusqu'à 10 prospects (id + name + reason) pour affichage UI.
+    """
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré"}
+    try:
+        page = 500
+        offset = 0
+        scanned = 0
+        non_fr_ids: list[str] = []
+        examples: list[dict] = []
+        while scanned < limit_scan:
+            res = (sb.table("prospects")
+                     .select("id, name, handle, language, country, description")
+                     .range(offset, offset + page - 1)
+                     .execute())
+            rows = res.data or []
+            if not rows:
+                break
+            for r in rows:
+                scanned += 1
+                is_fr, reason = _is_likely_francophone(r)
+                if not is_fr:
+                    non_fr_ids.append(r["id"])
+                    if len(examples) < 10:
+                        examples.append({
+                            "id":     r.get("id"),
+                            "name":   r.get("name") or r.get("handle") or "?",
+                            "country": r.get("country") or "",
+                            "language": r.get("language") or "",
+                            "reason": reason,
+                        })
+            if len(rows) < page:
+                break
+            offset += page
+        return {
+            "ok": True,
+            "total_scanned": scanned,
+            "non_fr_count":  len(non_fr_ids),
+            "ids":           non_fr_ids,
+            "examples":      examples,
+        }
+    except Exception as exc:
+        logger.exception("obelisk.audit_non_francophones")
+        return {"ok": False, "error": str(exc),
+                "total_scanned": 0, "non_fr_count": 0, "ids": [], "examples": []}
+
+
+def purge_non_francophones(*, confirm: str = "") -> dict:
+    """Supprime tous les prospects non-confirmés francophones.
+    Exige confirm = 'PURGE_NON_FR' pour passer à l'action (sécurité).
+    Sinon, renvoie juste un preview (count + examples).
+    """
+    audit = audit_non_francophones()
+    if not audit.get("ok"):
+        return audit
+    if confirm != "PURGE_NON_FR":
+        return {
+            "ok": True,
+            "preview": True,
+            "non_fr_count": audit["non_fr_count"],
+            "total_scanned": audit["total_scanned"],
+            "examples": audit["examples"],
+        }
+    ids = audit.get("ids") or []
+    if not ids:
+        return {"ok": True, "deleted": 0, "examples": []}
+    # Supprime par batches de 200 (Supabase a une limite sur les "in" filters)
+    sb = _sb()
+    deleted = 0
+    for i in range(0, len(ids), 200):
+        batch = ids[i:i + 200]
+        try:
+            sb.table("prospects").delete().in_("id", batch).execute()
+            deleted += len(batch)
+        except Exception as exc:
+            logger.warning("obelisk.purge_non_francophones batch failed: %s", exc)
+    return {"ok": True, "deleted": deleted, "examples": audit["examples"]}
+
+
+# ---------------------------------------------------------------------------
 # Stats globales pour le bandeau du haut
 # ---------------------------------------------------------------------------
 def stats() -> dict:

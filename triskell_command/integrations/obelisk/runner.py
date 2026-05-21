@@ -480,6 +480,12 @@ def _upload_new_locals_to_supabase(*, before_keys: set[str], niche: str,
                 "country":     raw.get("country") or "",
                 "language":    raw.get("language") or "",
                 "tags":        raw.get("monetization_reasons") or [],
+                # ⚡ Champs texte nécessaires à la mini-détection de langue
+                # (sinon le filtre FR ne détecte rien et tout passe en silence).
+                "name":        raw.get("name") or raw.get("title") or "",
+                "description": raw.get("description") or raw.get("bio")
+                               or raw.get("snippet") or "",
+                "bio":         raw.get("bio") or "",
             }
             kept_one, _ = apply_filters([probe], filters)
             if kept_one:
@@ -680,25 +686,52 @@ def _normalize_filters(raw: dict) -> dict:
     }
 
 
-# Mots usuels propres à chaque langue. La détection est volontairement
-# minimaliste : on compte les "tokens marqueurs" qu'on est ~sûr de ne pas
-# trouver dans l'autre langue. Si la balance penche clairement d'un côté,
-# on sait quelle langue c'est. Sinon on renvoie "" (inconnu) et on laisse
-# passer (politique tolérante).
+# Mots usuels propres à chaque langue. On compte les tokens marqueurs
+# qu'on est ~sûr de ne pas trouver dans l'autre langue.
 _FR_MARKERS = {
-    "le", "la", "les", "des", "du", "une", "un", "et", "est", "dans", "pour",
-    "avec", "sur", "qui", "que", "vous", "nous", "notre", "votre", "vidéo",
-    "vidéos", "chaîne", "abonne", "abonnez", "ici", "découvrez", "bienvenue",
-    "voici", "tout", "tous", "tutoriel", "français", "française", "ce", "cette",
-    "où", "ça", "merci", "salut", "bonjour", "semaine", "jour", "moi", "toi",
-    "plus", "très", "aussi", "comme", "mais", "ne", "pas", "ses", "ces",
+    # Articles / déterminants / petits mots
+    "le", "la", "les", "des", "du", "de", "une", "un", "au", "aux", "et",
+    "ou", "où", "ce", "cette", "ces", "son", "sa", "ses", "mon", "ma", "mes",
+    "ton", "ta", "tes", "notre", "votre", "leur", "leurs", "à",
+    # Verbes / pronoms courants
+    "est", "sont", "ai", "as", "ont", "fait", "faire", "être", "avoir",
+    "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "elles",
+    "qui", "que", "quoi", "dont", "lequel",
+    # Prépositions / adverbes courants
+    "dans", "pour", "avec", "sur", "sous", "vers", "chez", "entre",
+    "plus", "très", "aussi", "comme", "mais", "ne", "pas", "ni",
+    "déjà", "encore", "toujours", "jamais", "bien", "mieux", "moins",
+    # Vocabulaire créateur / YouTube FR
+    "vidéo", "vidéos", "chaîne", "abonne", "abonnez", "abonné", "abonnés",
+    "tutoriel", "tutoriels", "tuto", "ici", "découvrez", "bienvenue",
+    "voici", "tout", "tous", "toute", "toutes", "présente", "partage",
+    "français", "française", "francophone",
+    # Politesse / formules courantes
+    "merci", "salut", "bonjour", "coucou", "bisous",
+    "semaine", "semaines", "jour", "jours", "mois", "année", "années",
+    "ça", "moi", "toi", "lui", "soi",
 }
 _EN_MARKERS = {
-    "the", "and", "of", "to", "for", "with", "this", "that", "video",
-    "videos", "channel", "subscribe", "welcome", "here", "follow", "make",
-    "watch", "every", "week", "day", "join", "us", "about", "more", "your",
-    "you", "we", "our", "tutorial", "english", "is", "are", "what", "how",
-    "be", "do", "have", "from", "by", "or", "an", "they", "their",
+    # Articles / petits mots
+    "the", "and", "of", "to", "for", "with", "this", "that", "these",
+    "those", "an", "or", "but", "not", "no", "yes",
+    "a", "is", "are", "am", "was", "were", "be", "been", "being",
+    "do", "does", "did", "have", "has", "had",
+    # Pronoms
+    "you", "your", "yours", "we", "our", "ours", "they", "their", "theirs",
+    "i", "me", "my", "mine", "he", "she", "it", "its",
+    # Prépositions / adverbes
+    "from", "by", "at", "in", "on", "out", "up", "down", "over", "under",
+    "more", "most", "less", "least", "very", "much", "many", "few",
+    "also", "than", "then", "still", "always", "never", "ever",
+    # Vocabulaire créateur / YouTube EN
+    "video", "videos", "channel", "channels", "subscribe", "subscriber",
+    "subscribers", "welcome", "here", "follow", "follower", "followers",
+    "make", "made", "watch", "watching", "every", "week", "day", "month",
+    "year", "join", "us", "about", "tutorial", "tutorials", "english",
+    "content", "creator", "creators",
+    # Questions
+    "what", "how", "when", "where", "why", "who", "which",
 }
 
 
@@ -706,17 +739,26 @@ def _detect_language(text: str) -> str:
     """Renvoie 'fr', 'en' ou '' selon la balance de marqueurs.
     Heuristique très grossière mais largement suffisante pour distinguer
     une bio FR d'une bio EN. Renvoie '' si pas assez de signal."""
-    if not text or len(text) < 30:
+    if not text or len(text) < 20:
         return ""
     import re as _re
-    tokens = _re.findall(r"[a-zàâäéèêëïîôöùûüç]+", text.lower())
-    if len(tokens) < 8:
+    # Accepte les caractères accentués FR pour ne pas casser les mots
+    tokens = _re.findall(r"[a-zàâäéèêëïîôöùûüçœæ]+", text.lower())
+    if len(tokens) < 5:
         return ""
     fr_hits = sum(1 for t in tokens if t in _FR_MARKERS)
     en_hits = sum(1 for t in tokens if t in _EN_MARKERS)
-    if fr_hits >= 3 and fr_hits > en_hits * 1.5:
+    # Bonus FR : présence d'au moins une lettre accentuée (très rare en EN)
+    has_accent = bool(_re.search(r"[àâäéèêëïîôöùûüçœæ]", text.lower()))
+    if has_accent:
+        fr_hits += 2
+    # Décisions :
+    # - FR clair : ≥ 2 hits FR et plus que l'EN
+    # - EN clair : ≥ 2 hits EN et plus que le FR
+    # - Sinon : inconnu
+    if fr_hits >= 2 and fr_hits > en_hits:
         return "fr"
-    if en_hits >= 3 and en_hits > fr_hits * 1.5:
+    if en_hits >= 2 and en_hits > fr_hits:
         return "en"
     return ""
 
@@ -772,22 +814,36 @@ def apply_filters(rows: list[dict], filters: dict) -> tuple[list[dict], int]:
             # On rejette uniquement si on a une valeur explicite différente.
             if r.get("country"):
                 rejected += 1; continue
-        if language and (r.get("language") or "").lower() != language:
-            if r.get("language"):
+        # ─── Filtre LANGUE — mode strict ────────────────────────────────
+        # Quand l'utilisateur demande une langue, on vire tout ce qui n'est
+        # PAS confirmé dans cette langue. Trois sources de confirmation :
+        #   1. La langue déclarée par la plateforme (YouTube brandingSettings)
+        #   2. Le pays déclaré (FR → on considère français)
+        #   3. La détection sur description/nom (mots-marqueurs FR vs EN)
+        # Si aucune source ne confirme la langue demandée → on rejette.
+        if language:
+            declared_lang = (r.get("language") or "").lower()
+            declared_country = (r.get("country") or "").upper()
+            text_blob = " ".join(filter(None, [
+                str(r.get("description") or ""),
+                str(r.get("bio") or ""),
+                str(r.get("name") or ""),
+                str(r.get("handle") or ""),
+            ]))
+            detected = _detect_language(text_blob)
+            # Confirmations possibles
+            ok_declared = declared_lang == language
+            ok_country  = (language == "fr" and declared_country == "FR")
+            ok_detected = detected == language
+            # Conflits qui doivent virer même si une source dit OK :
+            # (ex: lang=en déclaré mais on veut fr → rejette même si pays FR)
+            conflict_declared = declared_lang and declared_lang != language
+            conflict_detected = detected and detected != language
+            if conflict_declared or conflict_detected:
                 rejected += 1; continue
-            # YouTube ne déclare presque jamais la langue → fallback :
-            # on détecte sur la description / le nom du profil. Si le résultat
-            # est clairement une autre langue, on vire. Si inconnu, on garde
-            # (politique tolérante : mieux vaut un faux positif qu'un trou).
-            else:
-                text_blob = " ".join(filter(None, [
-                    str(r.get("description") or ""),
-                    str(r.get("bio") or ""),
-                    str(r.get("name") or ""),
-                ]))
-                detected = _detect_language(text_blob)
-                if detected and detected != language:
-                    rejected += 1; continue
+            if not (ok_declared or ok_country or ok_detected):
+                # Aucune confirmation positive → rejette
+                rejected += 1; continue
         if with_email and not (r.get("emails") or []):
             rejected += 1; continue
         kept.append(r)
