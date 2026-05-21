@@ -104,13 +104,19 @@ const Thomas = {
     // de 15s) car en mode HTTP le boot peut être lent (workers, vues
     // Supabase, etc.). Si on dépasse, on programme une réessai dans 10s
     // au lieu d'abandonner définitivement.
+    // NOTE : on check `App` (const du scope global du script) et PAS
+    // `window.App` car `const App = ...` dans app.js n'est PAS exposé
+    // sur window (les const top-level d'un script classique restent dans
+    // le script-scope). Avant ce fix, le check `!window.App` était
+    // toujours vrai → bootstrap abandonnait toujours et le chat restait
+    // muet.
     let tries = 0;
     while (tries < 240) {
-      if (window.App && window.App.api && window.App.api.messages_other_user) break;
+      if (typeof App !== 'undefined' && App.api && App.api.messages_other_user) break;
       await new Promise(r => setTimeout(r, 250));
       tries++;
     }
-    if (!window.App || !window.App.api) {
+    if (typeof App === 'undefined' || !App.api) {
       console.warn('Thomas: App.api pas encore disponible — réessai dans 10s');
       setTimeout(() => this.bootstrap(), 10000);
       return;
@@ -171,7 +177,7 @@ const Thomas = {
   },
 
   async pollUnread() {
-    if (!window.App || !App.api) return;
+    if (typeof App === 'undefined' || !App.api) return;
     try {
       const res = await App.api.messages_count_unread();
       this.updateBadge(res && res.ok ? (res.count || 0) : 0);
@@ -223,7 +229,7 @@ const Thomas = {
   },
 
   async refreshMessages() {
-    if (!window.App || !App.api) return;
+    if (typeof App === 'undefined' || !App.api) return;
     try {
       const res = await App.api.messages_list({ limit: 100 });
       const msgs = (res && res.ok ? res.messages : []) || [];
@@ -554,7 +560,7 @@ const Thomas = {
   },
 
   async refreshPeerTyping() {
-    if (!window.App || !App.api) return;
+    if (typeof App === 'undefined' || !App.api) return;
     try {
       const res = await App.api.messages_peer_typing();
       const typing = res && res.ok && res.typing;
