@@ -1111,6 +1111,16 @@ def _run_hunt(hunt: Hunt, target: int, with_email_only: bool,
             if progress_cb:
                 try: progress_cb(hunt)
                 except Exception: pass
+        # Log de progression toutes les 25 boîtes — sinon Jordan voit
+        # juste "0 retenus" sans savoir où ça coince (site introuvable ?
+        # email introuvable ? filtre poor_sites trop strict ?).
+        if (i + 1) % 25 == 0 or (i + 1) == len(raw):
+            n_with_site = sum(1 for p in kept if p.site_web) + sources_count.get("guess", 0) + sources_count.get("mojeek", 0) + sources_count.get("ddg", 0)
+            n_with_mail_so_far = sum(1 for x in kept if x.email)
+            n_poor = sum(1 for x in kept if x.site_quality == "poor")
+            log(f"  [{i+1}/{len(raw)}] sites trouvés (guess={sources_count.get('guess',0)} "
+                f"mojeek={sources_count.get('mojeek',0)} ddg={sources_count.get('ddg',0)}), "
+                f"retenus={len(kept)} (dont {n_with_mail_so_far} avec mail, {n_poor} sites pourris)")
         # Throttle gentil — on est poli avec les serveurs cibles
         time.sleep(0.2)
 
