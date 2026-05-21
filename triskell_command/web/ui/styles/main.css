@@ -1310,6 +1310,10 @@ html, body {
 .cockpit-quickbar .btn {
   font-size: 12.5px;
   padding: 9px 13px;
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 /* Responsive cockpit */
