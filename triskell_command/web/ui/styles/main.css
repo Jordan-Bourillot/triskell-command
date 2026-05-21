@@ -398,7 +398,10 @@ html, body {
    Petit bouton ↩ au bord de chaque bulle, citation rendue en haut d'une
    bulle qui répond, et bannière au-dessus du composer pendant qu'on
    prépare la réponse. */
-.thomas-reply-btn {
+.thomas-reply-btn,
+.thomas-edit-btn,
+.thomas-react-btn,
+.thomas-delete-btn {
   width: 26px;
   height: 26px;
   flex-shrink: 0;
@@ -411,18 +414,227 @@ html, body {
   opacity: 0;
   transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
   cursor: pointer;
+  margin-top: 4px;
 }
-.thomas-reply-btn svg { width: 14px; height: 14px; }
+.thomas-reply-btn svg,
+.thomas-edit-btn svg,
+.thomas-react-btn svg,
+.thomas-delete-btn svg { width: 14px; height: 14px; }
 .thomas-msg-row:hover .thomas-reply-btn,
-.thomas-reply-btn:focus-visible { opacity: 1; }
-.thomas-reply-btn:hover {
+.thomas-msg-row:hover .thomas-edit-btn,
+.thomas-msg-row:hover .thomas-react-btn,
+.thomas-msg-row:hover .thomas-delete-btn,
+.thomas-reply-btn:focus-visible,
+.thomas-edit-btn:focus-visible,
+.thomas-react-btn:focus-visible,
+.thomas-delete-btn:focus-visible { opacity: 1; }
+.thomas-reply-btn:hover,
+.thomas-edit-btn:hover,
+.thomas-react-btn:hover {
   background: hsl(var(--bg-secondary));
   color: hsl(var(--text-primary));
+}
+.thomas-delete-btn:hover {
+  background: hsl(var(--danger) / 0.15);
+  color: hsl(var(--danger));
 }
 /* Tactile : pas de hover fiable → on garde le bouton toujours visible
    (à faible opacité) pour qu'il reste découvrable. */
 @media (hover: none) {
-  .thomas-reply-btn { opacity: 0.45; }
+  .thomas-reply-btn,
+  .thomas-edit-btn,
+  .thomas-react-btn,
+  .thomas-delete-btn { opacity: 0.45; }
+}
+
+/* Wrapper bulle + ses réactions empilées dessous. */
+.thomas-bubble-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: inherit;  /* hérite du flex parent (justify-end/start) */
+  min-width: 0;
+}
+/* Pastilles de réactions (chips) sous la bulle. */
+.thomas-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 0 4px;
+}
+.thomas-reaction-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: hsl(var(--bg-secondary));
+  border: 1px solid hsl(var(--border));
+  font-size: 12px;
+  color: hsl(var(--text));
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  line-height: 1.2;
+}
+.thomas-reaction-chip:hover {
+  background: hsl(var(--surface-elevated));
+}
+.thomas-reaction-chip:active { transform: scale(0.95); }
+.thomas-reaction-chip.is-mine {
+  background: hsl(var(--accent) / 0.15);
+  border-color: hsl(var(--accent) / 0.55);
+  color: hsl(var(--text));
+}
+.thomas-reaction-emoji { font-size: 14px; line-height: 1; }
+.thomas-reaction-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+/* Picker emoji rapide (popup au-dessus du bouton "Réagir"). */
+.thomas-reaction-picker {
+  position: fixed;
+  z-index: 90;
+  display: flex;
+  gap: 2px;
+  padding: 6px;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  animation: thomas-picker-pop 0.12s ease-out;
+}
+@keyframes thomas-picker-pop {
+  from { opacity: 0; transform: translateY(4px) scale(0.92); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.thomas-reaction-pick {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 18px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.12s ease, transform 0.12s ease;
+}
+.thomas-reaction-pick:hover {
+  background: hsl(var(--bg-secondary));
+  transform: scale(1.15);
+}
+
+/* ─── Modale picker GIF (Giphy) ─── */
+.thomas-gif-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.thomas-gif-modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: 75vh;
+  display: flex;
+  flex-direction: column;
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+.thomas-gif-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.thomas-gif-search-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: hsl(var(--bg));
+  border: 1px solid hsl(var(--border));
+  font-size: 13px;
+  color: hsl(var(--text));
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.thomas-gif-search-input:focus { border-color: hsl(var(--accent)); }
+.thomas-gif-search-input::placeholder { color: hsl(var(--text-muted)); }
+.thomas-gif-close-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  line-height: 1;
+  color: hsl(var(--text-muted));
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.thomas-gif-close-btn:hover {
+  background: hsl(var(--bg-secondary));
+  color: hsl(var(--text));
+}
+.thomas-gif-grid {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 10px;
+}
+@media (max-width: 480px) {
+  .thomas-gif-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.thomas-gif-thumb {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: hsl(var(--bg-secondary));
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  aspect-ratio: 1 / 1;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.thomas-gif-thumb:hover {
+  transform: scale(1.03);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.thomas-gif-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.thomas-gif-loading,
+.thomas-gif-empty {
+  grid-column: 1 / -1;
+  padding: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: hsl(var(--text-muted));
+}
+.thomas-gif-attrib {
+  padding: 6px 12px 8px;
+  text-align: right;
+  font-size: 10px;
+  color: hsl(var(--text-muted));
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 /* Citation rendue en haut d'une bulle qui est une réponse */

@@ -86,12 +86,16 @@ def other_user() -> Optional[dict[str, Any]]:
 
 _MSG_COLUMNS = ("id, sender_id, recipient_id, body, created_at, read_at, "
                 "attachment_url, attachment_name, attachment_type, attachment_size, "
-                "reply_to_id")
+                "reply_to_id, edited_at, deleted_at")
 
 
 def list_messages(limit: int = 100) -> list[dict[str, Any]]:
     """Renvoie les `limit` derniers messages échangés avec l'autre user,
-    ordre chronologique ascendant (plus ancien d'abord)."""
+    ordre chronologique ascendant (plus ancien d'abord).
+
+    Chaque message est enrichi d'un champ `reactions` (liste de
+    {user_id, emoji}) — vide s'il n'y en a pas. Les réactions sont
+    chargées en UNE seule requête pour tous les messages affichés."""
     me = _me()
     other = _opposite(me)
     c = _supabase()
@@ -112,10 +116,65 @@ def list_messages(limit: int = 100) -> list[dict[str, Any]]:
         merged.sort(key=lambda m: m.get("created_at") or "")
         if len(merged) > limit:
             merged = merged[-limit:]
+        # Enrichit avec les réactions (1 requête pour tous les messages).
+        ids = [m.get("id") for m in merged if m.get("id")]
+        if ids:
+            try:
+                rx = (c.raw.table("message_reactions")
+                      .select("message_id, user_id, emoji")
+                      .in_("message_id", ids).execute())
+                by_msg: dict[str, list[dict]] = {}
+                for r in (rx.data or []):
+                    by_msg.setdefault(r["message_id"], []).append({
+                        "user_id": r.get("user_id"),
+                        "emoji":   r.get("emoji"),
+                    })
+                for m in merged:
+                    m["reactions"] = by_msg.get(m.get("id"), [])
+            except Exception as exc:
+                logger.debug("list_messages reactions: %s", exc)
+                for m in merged:
+                    m.setdefault("reactions", [])
+        else:
+            for m in merged:
+                m["reactions"] = []
         return merged
     except Exception as exc:
         logger.debug("list_messages: %s", exc)
         return []
+
+
+def toggle_reaction(message_id: str, emoji: str) -> Optional[dict[str, Any]]:
+    """Pose ou retire une réaction sur un message.
+
+    Logique "toggle" : si l'utilisateur courant a déjà ce même emoji sur
+    ce message, on le retire ; sinon on l'ajoute.
+    Renvoie {action: 'added'|'removed', emoji: '…'} ou None en erreur."""
+    me = _me()
+    c = _supabase()
+    emoji = (emoji or "").strip()
+    if c is None or not me or not message_id or not emoji:
+        return None
+    try:
+        existing = (c.raw.table("message_reactions")
+                    .select("id")
+                    .eq("message_id", message_id)
+                    .eq("user_id", me)
+                    .eq("emoji", emoji)
+                    .limit(1).execute())
+        if existing.data:
+            # Déjà posée → on retire (toggle off)
+            (c.raw.table("message_reactions")
+             .delete().eq("id", existing.data[0]["id"]).execute())
+            return {"action": "removed", "emoji": emoji}
+        # Pas encore posée → on ajoute
+        (c.raw.table("message_reactions")
+         .insert({"message_id": message_id, "user_id": me, "emoji": emoji})
+         .execute())
+        return {"action": "added", "emoji": emoji}
+    except Exception as exc:
+        logger.warning("toggle_reaction: %s", exc)
+        return None
 
 
 def send_message(
@@ -158,6 +217,59 @@ def send_message(
         return data[0] if data else None
     except Exception as exc:
         logger.warning("send_message: %s", exc)
+        return None
+
+
+def edit_message(message_id: str, new_body: str) -> Optional[dict[str, Any]]:
+    """Modifie le texte d'un message DÉJÀ envoyé.
+
+    Sécurité : on ne peut éditer QUE ses propres messages (filtré côté
+    serveur via `sender_id == _me()`).
+    Renvoie la ligne mise à jour, ou None si rien n'a changé (pas
+    autorisé, message introuvable, body vide…)."""
+    me = _me()
+    c = _supabase()
+    if c is None or not me or not message_id:
+        return None
+    new_body = (new_body or "").strip()
+    if not new_body:
+        return None
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        res = (c.raw.table("messages")
+               .update({"body": new_body, "edited_at": now_iso})
+               .eq("id", message_id).eq("sender_id", me)
+               .execute())
+        data = res.data or []
+        return data[0] if data else None
+    except Exception as exc:
+        logger.warning("edit_message: %s", exc)
+        return None
+
+
+def delete_message(message_id: str) -> Optional[dict[str, Any]]:
+    """Soft-delete : pose `deleted_at = now()` sur un message.
+
+    Sécurité : seul l'expéditeur peut supprimer son propre message.
+    On garde la ligne en base (les réactions et réponses qui pointent
+    dessus restent cohérentes) — l'UI affichera "Message supprimé".
+    Renvoie la ligne mise à jour, ou None si pas autorisé."""
+    me = _me()
+    c = _supabase()
+    if c is None or not me or not message_id:
+        return None
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        res = (c.raw.table("messages")
+               .update({"deleted_at": now_iso})
+               .eq("id", message_id).eq("sender_id", me)
+               .execute())
+        data = res.data or []
+        return data[0] if data else None
+    except Exception as exc:
+        logger.warning("delete_message: %s", exc)
         return None
 
 

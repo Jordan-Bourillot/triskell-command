@@ -25,6 +25,7 @@ const Thomas = {
   cachedById: {},             // {id → msg} pour résoudre les "répondre à"
   pendingAttachment: null,    // {url, name, type, size} entre upload et envoi
   pendingReplyTo: null,       // message auquel on est en train de répondre
+  pendingEdit: null,          // message que l'on est en train de modifier
 
   init() {
     const fab = document.getElementById('thomas-fab');
@@ -100,6 +101,10 @@ const Thomas = {
     const colorBtn = document.getElementById('thomas-color-btn');
     if (colorBtn) colorBtn.addEventListener('click', () => this._openColorPicker());
 
+    // Bouton GIF : ouvre la modale de recherche Giphy
+    const gifBtn = document.getElementById('thomas-gif-btn');
+    if (gifBtn) gifBtn.addEventListener('click', () => this._openGifPicker());
+
     // Lightbox : clic sur fond ou bouton × ferme
     const lightbox = document.getElementById('thomas-lightbox');
     const lightboxClose = document.getElementById('thomas-lightbox-close');
@@ -123,7 +128,12 @@ const Thomas = {
           this._closeLightbox();
           return;
         }
-        // Aperçu "répondre à" en cours : on l'annule sans fermer le chat
+        // Modification ou aperçu "répondre à" en cours : on annule
+        // sans fermer le chat.
+        if (this.open && this.pendingEdit) {
+          this._clearEditMode();
+          return;
+        }
         if (this.open && this.pendingReplyTo) {
           this._clearReplyTo();
           return;
@@ -262,9 +272,10 @@ const Thomas = {
       this.typingIdleTimeout = null;
     }
     try { App.api.messages_set_typing({ active: false }); } catch(e){}
-    // Réinitialise l'état "en train de répondre" : si on rouvre, c'est
-    // un nouveau contexte (on n'avait juste pas envoyé).
+    // Réinitialise l'état "en train de répondre / modifier" : si on
+    // rouvre, c'est un nouveau contexte (on n'avait juste pas envoyé).
     this._clearReplyTo();
+    this._clearEditMode();
     this.startPolling();
   },
 
@@ -273,20 +284,30 @@ const Thomas = {
     try {
       const res = await App.api.messages_list({ limit: 100 });
       const msgs = (res && res.ok ? res.messages : []) || [];
-      // Optim : on évite de re-render si on a DÉJÀ affiché ces mêmes
-      // messages. Mais surtout : on rend toujours au moins une fois,
-      // sinon le 1er affichage reste vide quand cachedMessages et
-      // msgs sont tous les deux vides au boot.
+      // Optim : on évite de re-render si rien n'a changé (même nb de
+      // messages, mêmes IDs, mêmes réactions, mêmes éditions). Sinon
+      // le 1er affichage resterait vide quand cache + msgs sont vides
+      // au boot, donc on re-rend toujours au moins une fois.
       const el = document.getElementById('thomas-messages');
-      const lastA = this.cachedMessages.length
-        ? this.cachedMessages[this.cachedMessages.length - 1].id : null;
-      const lastB = msgs.length ? msgs[msgs.length - 1].id : null;
-      const noChange = lastA === lastB && this.cachedMessages.length === msgs.length;
+      const sigA = this._messagesSignature(this.cachedMessages);
+      const sigB = this._messagesSignature(msgs);
       const alreadyRendered = el && el.innerHTML.trim().length > 0;
-      if (noChange && alreadyRendered) return;
+      if (sigA === sigB && alreadyRendered) return;
       this.cachedMessages = msgs;
       this.renderMessages(msgs);
     } catch (e) { /* silencieux */ }
+  },
+
+  /** Signature légère utilisée pour détecter qu'un message a bougé
+   *  (nouveau, édité, supprimé, ou réactions changées) — sans hasher
+   *  tout le body. */
+  _messagesSignature(arr) {
+    if (!arr || !arr.length) return '0';
+    const parts = [String(arr.length)];
+    for (const m of arr) {
+      parts.push(`${m.id}:${(m.reactions || []).length}:${m.edited_at || ''}:${m.deleted_at || ''}`);
+    }
+    return parts.join('|');
   },
 
   renderMessages(msgs) {
@@ -302,24 +323,33 @@ const Thomas = {
 
     const html = msgs.map(m => {
       const isFromMe = this._isFromMe(m);
+      const isDeleted = !!m.deleted_at;
       const align = isFromMe ? 'justify-end' : 'justify-start';
       // Couleur de fond = couleur perso de l'expéditeur (moi ou l'autre).
       // Texte blanc systématiquement — toutes les couleurs de la palette
-      // sont assez saturées pour garantir le contraste.
-      const bgColor = isFromMe ? this.myColor : this.otherColor;
+      // sont assez saturées pour garantir le contraste. Pour un message
+      // supprimé, on neutralise avec un fond grisé discret.
+      const bgColor = isDeleted ? '#3a3a44'
+        : (isFromMe ? this.myColor : this.otherColor);
       const corner = isFromMe ? 'rounded-br-sm' : 'rounded-bl-sm';
       const time = this._fmtTime(m.created_at);
-      const bodyHtml = m.body
-        ? `<div class="text-sm whitespace-pre-wrap break-words">${this._escape(m.body)}</div>`
-        : '';
-      const attachHtml = m.attachment_url
+      // Si supprimé : on ignore body/attachment/reply/réactions et on
+      // remplace par un placeholder italique.
+      const bodyHtml = isDeleted
+        ? `<div class="text-sm italic opacity-70">Message supprimé</div>`
+        : (m.body
+            ? `<div class="text-sm whitespace-pre-wrap break-words">${this._escape(m.body)}</div>`
+            : '');
+      const attachHtml = (!isDeleted && m.attachment_url)
         ? this._renderAttachment(m)
         : '';
-      const quoteHtml = m.reply_to_id
+      const quoteHtml = (!isDeleted && m.reply_to_id)
         ? this._renderQuotedParent(m.reply_to_id)
         : '';
 
-      const replyBtn = `
+      // Sur un message supprimé, on masque toutes les actions (répondre,
+      // réagir, modifier, supprimer) — il n'y a plus rien à faire dessus.
+      const replyBtn = isDeleted ? '' : `
         <button type="button" class="thomas-reply-btn" data-reply-id="${this._escape(m.id || '')}"
                 title="Répondre" aria-label="Répondre à ce message">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -329,21 +359,77 @@ const Thomas = {
           </svg>
         </button>`;
 
+      const reactBtn = isDeleted ? '' : `
+        <button type="button" class="thomas-react-btn" data-react-id="${this._escape(m.id || '')}"
+                title="Réagir" aria-label="Réagir à ce message">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+            <line x1="9" y1="9" x2="9.01" y2="9"/>
+            <line x1="15" y1="9" x2="15.01" y2="9"/>
+          </svg>
+        </button>`;
+
+      // Bouton "Modifier" uniquement sur mes propres messages avec du
+      // texte. (Pas de sens de modifier une pièce jointe seule ni un
+      // message supprimé.)
+      const canEdit = isFromMe && m.body && !isDeleted;
+      const editBtn = canEdit ? `
+        <button type="button" class="thomas-edit-btn" data-edit-id="${this._escape(m.id || '')}"
+                title="Modifier" aria-label="Modifier ce message">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"/>
+            <path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+        </button>` : '';
+
+      // Bouton "Supprimer" — uniquement sur mes propres messages encore
+      // actifs (un message supprimé ne propose plus la corbeille).
+      const canDelete = isFromMe && !isDeleted;
+      const deleteBtn = canDelete ? `
+        <button type="button" class="thomas-delete-btn" data-delete-id="${this._escape(m.id || '')}"
+                title="Supprimer" aria-label="Supprimer ce message">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            <path d="M10 11v6M14 11v6"/>
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+          </svg>
+        </button>` : '';
+
+      // Marque "(modifié)" affichée à côté de l'heure pour les messages
+      // édités — mais pas s'ils sont supprimés.
+      const editedTag = (m.edited_at && !isDeleted)
+        ? `<span class="opacity-70" title="Modifié le ${this._escape(this._fmtTime(m.edited_at))}"> · modifié</span>`
+        : '';
+
+      // Pastilles de réactions rendues sous la bulle (groupées par emoji)
+      // — masquées pour un message supprimé.
+      const reactionsHtml = isDeleted ? '' : this._renderReactionChips(m);
+
       const bubble = `
-        <div class="max-w-[75%] px-3 py-2 rounded-2xl ${corner} text-white"
-             data-msg-id="${this._escape(m.id || '')}"
-             style="background:${this._escape(bgColor)};">
-          ${quoteHtml}
-          ${attachHtml}
-          ${bodyHtml}
-          <div class="text-[10px] opacity-70 mt-1 text-right">${time}</div>
+        <div class="thomas-bubble-wrap">
+          <div class="max-w-[75%] px-3 py-2 rounded-2xl ${corner} text-white"
+               data-msg-id="${this._escape(m.id || '')}"
+               style="background:${this._escape(bgColor)};">
+            ${quoteHtml}
+            ${attachHtml}
+            ${bodyHtml}
+            <div class="text-[10px] opacity-70 mt-1 text-right">${time}${editedTag}</div>
+          </div>
+          ${reactionsHtml}
         </div>`;
 
-      // Pour mes bulles (droite), le bouton ↩ est avant ; pour celles de
-      // l'autre (gauche), il est après — il reste toujours du côté
-      // "extérieur" de la bulle.
-      const inner = isFromMe ? `${replyBtn}${bubble}` : `${bubble}${replyBtn}`;
-      return `<div class="flex ${align} items-center gap-1.5 thomas-msg-row">${inner}</div>`;
+      // Pour mes bulles (droite), les boutons 🗑 ✎ 😊 ↩ sont avant ;
+      // pour celles de l'autre (gauche), 😊 ↩ après — les actions
+      // restent toujours du côté "extérieur" de la bulle.
+      const inner = isFromMe
+        ? `${deleteBtn}${editBtn}${reactBtn}${replyBtn}${bubble}`
+        : `${bubble}${reactBtn}${replyBtn}`;
+      return `<div class="flex ${align} items-start gap-1.5 thomas-msg-row">${inner}</div>`;
     }).join('');
 
     el.innerHTML = html || `
@@ -369,6 +455,44 @@ const Thomas = {
       });
     });
 
+    // Bind les boutons "Modifier" sur mes messages
+    el.querySelectorAll('.thomas-edit-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-edit-id');
+        const msg = this.cachedById[id];
+        if (msg) this._setEditMode(msg);
+      });
+    });
+
+    // Bind les boutons "Réagir" (smiley) → ouvre le picker emoji
+    el.querySelectorAll('.thomas-react-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-react-id');
+        if (id) this._openReactionPicker(id, btn);
+      });
+    });
+
+    // Bind les pastilles de réactions sous chaque bulle → toggle
+    el.querySelectorAll('.thomas-reaction-chip').forEach(chip => {
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = chip.getAttribute('data-msg-id');
+        const emoji = chip.getAttribute('data-emoji');
+        if (id && emoji) this._toggleReaction(id, emoji);
+      });
+    });
+
+    // Bind les boutons "Supprimer" (corbeille) sur mes messages
+    el.querySelectorAll('.thomas-delete-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-delete-id');
+        if (id) this._deleteMessage(id);
+      });
+    });
+
     // Bind les citations cliquables → scroll vers l'original
     el.querySelectorAll('[data-quote-target]').forEach(quote => {
       quote.addEventListener('click', (e) => {
@@ -391,7 +515,9 @@ const Thomas = {
       authorName = fromMe ? 'Toi' : (
         document.getElementById('thomas-dialog-name')?.textContent || 'Lui'
       );
-      excerpt = this._messageExcerpt(parent);
+      // Si le message d'origine a été supprimé entre-temps, on ne
+      // restitue pas son contenu — on indique juste qu'il est parti.
+      excerpt = parent.deleted_at ? 'Message supprimé' : this._messageExcerpt(parent);
     } else {
       // Message parent hors de la fenêtre chargée (>100 messages d'écart).
       accent = 'rgba(255,255,255,0.4)';
@@ -404,6 +530,29 @@ const Thomas = {
         <div class="thomas-quote-author">${this._escape(authorName)}</div>
         <div class="thomas-quote-body">${this._escape(excerpt)}</div>
       </div>`;
+  },
+
+  /** Confirme puis supprime (soft) un message à moi. */
+  async _deleteMessage(messageId) {
+    if (typeof App === 'undefined' || !App.api) return;
+    const ok = window.confirm('Supprimer ce message ? Cette action est définitive.');
+    if (!ok) return;
+    try {
+      const res = await App.api.messages_delete({ id: messageId });
+      if (res && res.ok) {
+        // Si on était en train de modifier/répondre à ce même message,
+        // on quitte ces modes (ils n'ont plus de sens).
+        if (this.pendingEdit && this.pendingEdit.id === messageId) this._clearEditMode();
+        if (this.pendingReplyTo && this.pendingReplyTo.id === messageId) this._clearReplyTo();
+        // Force un re-render
+        this.cachedMessages = [];
+        await this.refreshMessages();
+      } else {
+        console.warn('messages_delete:', res);
+      }
+    } catch (e) {
+      console.warn('deleteMessage:', e);
+    }
   },
 
   /** Texte court d'un message pour l'aperçu (citation, banner répondre). */
@@ -429,6 +578,9 @@ const Thomas = {
   },
 
   _setReplyTo(msg) {
+    // "Répondre à" et "modifier" sont mutuellement exclusifs : si on
+    // commence à répondre, on quitte le mode édition (et inversement).
+    if (this.pendingEdit) this._clearEditMode();
     this.pendingReplyTo = msg;
     this._renderReplyPreview();
     const input = document.getElementById('thomas-input');
@@ -471,6 +623,293 @@ const Thomas = {
       </div>`;
     const cancel = document.getElementById('thomas-reply-cancel');
     if (cancel) cancel.addEventListener('click', () => this._clearReplyTo());
+  },
+
+  _setEditMode(msg) {
+    // Mutuellement exclusif avec "répondre à".
+    if (this.pendingReplyTo) this._clearReplyTo();
+    this.pendingEdit = msg;
+    const input = document.getElementById('thomas-input');
+    if (input) {
+      input.value = msg.body || '';
+      input.focus();
+      // Place le curseur en fin de texte (plus naturel pour modifier).
+      try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) {}
+    }
+    this._renderEditPreview();
+  },
+
+  _clearEditMode() {
+    const wasEditing = !!this.pendingEdit;
+    this.pendingEdit = null;
+    const el = document.getElementById('thomas-edit-preview');
+    if (el) {
+      el.classList.add('hidden');
+      el.innerHTML = '';
+    }
+    // Si on annule sans sauvegarder, on vide le composer (sinon le texte
+    // de l'ancien message resterait coincé dans le champ — déroutant).
+    if (wasEditing) {
+      const input = document.getElementById('thomas-input');
+      if (input) input.value = '';
+    }
+  },
+
+  _renderEditPreview() {
+    const el = document.getElementById('thomas-edit-preview');
+    if (!el || !this.pendingEdit) return;
+    const m = this.pendingEdit;
+    const accent = this.myColor;
+    el.classList.remove('hidden');
+    el.innerHTML = `
+      <div class="thomas-reply-banner" style="border-left-color:${this._escape(accent)};">
+        <svg class="w-4 h-4 shrink-0 text-text-muted" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 20h9"/>
+          <path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/>
+        </svg>
+        <div class="flex-1 min-w-0">
+          <div class="text-[11px] font-semibold text-text">Modification du message</div>
+          <div class="text-xs text-text-muted truncate">${this._escape(this._messageExcerpt(m, 120))}</div>
+        </div>
+        <button id="thomas-edit-cancel" type="button"
+                class="w-7 h-7 rounded-full text-text-muted hover:text-danger hover:bg-bg
+                       transition-colors flex items-center justify-center text-lg leading-none"
+                title="Annuler la modification (Échap)">×</button>
+      </div>`;
+    const cancel = document.getElementById('thomas-edit-cancel');
+    if (cancel) cancel.addEventListener('click', () => this._clearEditMode());
+  },
+
+  // ───────────────────────── Réactions emoji ─────────────────────────
+  /** Emojis proposés dans le picker rapide. Couvre les usages courants
+   *  (cœur, like, rire, surprise, tristesse, merci, feu, validé). */
+  _quickEmojis: ['❤️', '👍', '😂', '😮', '😢', '🙏', '🔥', '✅'],
+
+  /** Rendu des pastilles de réactions sous une bulle. Groupe par emoji,
+   *  affiche le compteur et met en évidence celles où je suis dedans. */
+  _renderReactionChips(m) {
+    const list = Array.isArray(m.reactions) ? m.reactions : [];
+    if (!list.length) return '';
+    const byEmoji = {};
+    for (const r of list) {
+      if (!r || !r.emoji) continue;
+      if (!byEmoji[r.emoji]) byEmoji[r.emoji] = { count: 0, mine: false };
+      byEmoji[r.emoji].count += 1;
+      if (r.user_id === this.myUserId) byEmoji[r.emoji].mine = true;
+    }
+    const chips = Object.keys(byEmoji).map(emoji => {
+      const { count, mine } = byEmoji[emoji];
+      return `
+        <button type="button" class="thomas-reaction-chip ${mine ? 'is-mine' : ''}"
+                data-msg-id="${this._escape(m.id || '')}"
+                data-emoji="${this._escape(emoji)}"
+                title="${mine ? 'Retirer ta réaction' : 'Ajouter ta réaction'}">
+          <span class="thomas-reaction-emoji">${this._escape(emoji)}</span>
+          <span class="thomas-reaction-count">${count}</span>
+        </button>`;
+    }).join('');
+    return `<div class="thomas-reactions">${chips}</div>`;
+  },
+
+  /** Ouvre un petit picker emoji ancré sur le bouton "Réagir". */
+  _openReactionPicker(messageId, anchorEl) {
+    // Si déjà ouvert, on referme (toggle).
+    const existing = document.getElementById('thomas-reaction-picker');
+    if (existing) {
+      existing.remove();
+      return;
+    }
+    const picker = document.createElement('div');
+    picker.id = 'thomas-reaction-picker';
+    picker.className = 'thomas-reaction-picker';
+    picker.innerHTML = this._quickEmojis.map(e => `
+      <button type="button" class="thomas-reaction-pick" data-emoji="${this._escape(e)}"
+              aria-label="Réagir avec ${this._escape(e)}">${this._escape(e)}</button>
+    `).join('');
+    document.body.appendChild(picker);
+
+    // Positionnement : au-dessus du bouton si possible, sinon en-dessous.
+    const rect = anchorEl.getBoundingClientRect();
+    const pickRect = picker.getBoundingClientRect();
+    const margin = 6;
+    let top = rect.top - pickRect.height - margin;
+    if (top < 8) top = rect.bottom + margin;
+    let left = rect.left + (rect.width / 2) - (pickRect.width / 2);
+    left = Math.max(8, Math.min(left, window.innerWidth - pickRect.width - 8));
+    picker.style.top  = `${top}px`;
+    picker.style.left = `${left}px`;
+
+    const close = () => {
+      picker.remove();
+      document.removeEventListener('click', onDocClick, true);
+      window.removeEventListener('keydown', onEsc, true);
+    };
+    const onDocClick = (e) => {
+      if (!picker.contains(e.target)) close();
+    };
+    const onEsc = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); close(); }
+    };
+    // setTimeout pour ne pas attraper le clic qui vient d'ouvrir le picker.
+    setTimeout(() => {
+      document.addEventListener('click', onDocClick, true);
+      window.addEventListener('keydown', onEsc, true);
+    }, 0);
+
+    picker.querySelectorAll('.thomas-reaction-pick').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const emoji = btn.getAttribute('data-emoji');
+        close();
+        if (emoji) await this._toggleReaction(messageId, emoji);
+      });
+    });
+  },
+
+  /** Appelle l'API toggle puis rafraîchit la liste. */
+  async _toggleReaction(messageId, emoji) {
+    if (typeof App === 'undefined' || !App.api) return;
+    try {
+      await App.api.messages_react({ id: messageId, emoji });
+      // Force un re-render : on vide la signature pour bypasser le cache.
+      this.cachedMessages = [];
+      await this.refreshMessages();
+    } catch (e) {
+      console.warn('toggleReaction:', e);
+    }
+  },
+
+  // ───────────────────────── Picker GIF (Giphy) ─────────────────────────
+  /** Clé Giphy publique "bêta" — fonctionne pour démarrer (rate-limitée).
+   *  Pour la prod, créer une clé applicative sur developers.giphy.com et
+   *  la remplacer ici. */
+  _giphyKey: 'dc6zaTOxFJmzC',
+  _gifSearchTimer: null,
+  _gifAbortCtrl: null,
+
+  _openGifPicker() {
+    // Toggle : si déjà ouverte, on referme.
+    const existing = document.getElementById('thomas-gif-overlay');
+    if (existing) { this._closeGifPicker(); return; }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'thomas-gif-overlay';
+    overlay.className = 'thomas-gif-overlay';
+    overlay.innerHTML = `
+      <div class="thomas-gif-modal" role="dialog" aria-label="Choisir un GIF">
+        <div class="thomas-gif-header">
+          <input id="thomas-gif-search" type="text" autocomplete="off"
+                 placeholder="Rechercher un GIF…"
+                 class="thomas-gif-search-input"/>
+          <button id="thomas-gif-close" type="button"
+                  class="thomas-gif-close-btn" aria-label="Fermer">×</button>
+        </div>
+        <div id="thomas-gif-grid" class="thomas-gif-grid"></div>
+        <div class="thomas-gif-attrib">Powered by GIPHY</div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) this._closeGifPicker();
+    });
+    overlay.querySelector('#thomas-gif-close')
+      .addEventListener('click', () => this._closeGifPicker());
+
+    const search = overlay.querySelector('#thomas-gif-search');
+    search.addEventListener('input', () => {
+      const q = search.value.trim();
+      if (this._gifSearchTimer) clearTimeout(this._gifSearchTimer);
+      this._gifSearchTimer = setTimeout(() => this._searchGifs(q), 280);
+    });
+    search.focus();
+
+    // Trending au démarrage
+    this._searchGifs('');
+  },
+
+  _closeGifPicker() {
+    if (this._gifAbortCtrl) {
+      try { this._gifAbortCtrl.abort(); } catch (e) {}
+      this._gifAbortCtrl = null;
+    }
+    if (this._gifSearchTimer) {
+      clearTimeout(this._gifSearchTimer);
+      this._gifSearchTimer = null;
+    }
+    const overlay = document.getElementById('thomas-gif-overlay');
+    if (overlay) overlay.remove();
+  },
+
+  /** Charge les GIFs depuis Giphy. Si query vide → trending, sinon search. */
+  async _searchGifs(query) {
+    const grid = document.getElementById('thomas-gif-grid');
+    if (!grid) return;
+    grid.innerHTML = `<div class="thomas-gif-loading">Chargement…</div>`;
+
+    // Annule la requête précédente s'il y en a une en cours
+    if (this._gifAbortCtrl) {
+      try { this._gifAbortCtrl.abort(); } catch (e) {}
+    }
+    this._gifAbortCtrl = new AbortController();
+
+    const base = query
+      ? `https://api.giphy.com/v1/gifs/search?q=${encodeURIComponent(query)}&limit=24&rating=pg-13`
+      : `https://api.giphy.com/v1/gifs/trending?limit=24&rating=pg-13`;
+    const url = `${base}&api_key=${encodeURIComponent(this._giphyKey)}`;
+
+    try {
+      const r = await fetch(url, { signal: this._gifAbortCtrl.signal });
+      const j = await r.json();
+      const items = (j && j.data) || [];
+      if (!items.length) {
+        grid.innerHTML = `<div class="thomas-gif-empty">Aucun GIF trouvé.</div>`;
+        return;
+      }
+      grid.innerHTML = items.map(g => {
+        const thumb = (g.images && (g.images.fixed_height_small || g.images.fixed_height));
+        const full  = (g.images && (g.images.original || g.images.fixed_height));
+        if (!thumb || !full) return '';
+        // On stocke l'URL haute déf à envoyer dans un attribut data.
+        return `
+          <button type="button" class="thomas-gif-thumb"
+                  data-gif-url="${this._escape(full.url)}"
+                  data-gif-name="${this._escape(g.title || g.id || 'gif')}"
+                  data-gif-w="${this._escape(full.width || '')}"
+                  data-gif-h="${this._escape(full.height || '')}">
+            <img src="${this._escape(thumb.url)}" alt="${this._escape(g.title || 'GIF')}"
+                 loading="lazy"/>
+          </button>`;
+      }).join('');
+
+      grid.querySelectorAll('.thomas-gif-thumb').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this._sendGif({
+            url:  btn.getAttribute('data-gif-url'),
+            name: btn.getAttribute('data-gif-name') + '.gif',
+          });
+        });
+      });
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      console.warn('searchGifs:', e);
+      grid.innerHTML = `<div class="thomas-gif-empty">Erreur de chargement.</div>`;
+    }
+  },
+
+  /** Envoie un GIF en tant que pièce jointe externe (URL Giphy directe).
+   *  Réutilise le flux d'envoi existant : on pose pendingAttachment puis
+   *  on appelle send() — comme pour une image uploadée. */
+  async _sendGif(gif) {
+    if (!gif || !gif.url) return;
+    this.pendingAttachment = {
+      url:  gif.url,
+      name: gif.name || 'gif',
+      type: 'image/gif',
+      size: 0,
+    };
+    this._closeGifPicker();
+    await this.send();
   },
 
   /** Rendu HTML d'une pièce jointe. Images : <img> clicable (lightbox).
@@ -537,6 +976,31 @@ const Thomas = {
     const sendBtn = document.getElementById('thomas-send');
     const body = (input.value || '').trim();
     const attachment = this.pendingAttachment;
+
+    // Mode édition : on ne crée pas un nouveau message, on modifie celui
+    // qui est en cours d'édition. Pas de pièce jointe à ajouter ici (on
+    // n'édite que le texte, pas l'attachement existant).
+    if (this.pendingEdit && this.pendingEdit.id) {
+      if (!body) return;  // body vide : on n'autorise pas d'effacer en édition
+      sendBtn.disabled = true;
+      try {
+        const res = await App.api.messages_edit({ id: this.pendingEdit.id, body });
+        if (res && res.ok && res.message) {
+          input.value = '';
+          this._clearEditMode();
+          await this.refreshMessages();
+        } else {
+          console.warn('messages_edit:', res);
+        }
+      } catch (e) {
+        console.warn('edit:', e);
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
+      }
+      return;
+    }
+
     if (!body && !attachment) return;  // ni texte ni pj → rien à envoyer
 
     sendBtn.disabled = true;

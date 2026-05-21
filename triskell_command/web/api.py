@@ -5627,6 +5627,53 @@ class Api:
             logger.warning("messages_send: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def messages_delete(self, payload: dict) -> dict:
+        """Supprime (soft-delete) un message envoyé par l'utilisateur
+        courant. Payload : { id }. Le serveur impose que sender_id ==
+        utilisateur courant ; renvoie {ok: False} si pas autorisé.
+        """
+        try:
+            from ..integrations.messages import delete_message
+            msg_id = (payload or {}).get("id")
+            msg = delete_message(msg_id)
+            return {"ok": bool(msg), "message": msg}
+        except Exception as exc:
+            logger.warning("messages_delete: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def messages_react(self, payload: dict) -> dict:
+        """Pose/retire une réaction emoji sur un message (toggle).
+        Payload :
+            - id    : ID du message
+            - emoji : caractère emoji (ex: '❤️', '👍', '😂')
+        """
+        try:
+            from ..integrations.messages import toggle_reaction
+            msg_id = (payload or {}).get("id")
+            emoji = (payload or {}).get("emoji")
+            res = toggle_reaction(msg_id, emoji)
+            return {"ok": bool(res), "result": res}
+        except Exception as exc:
+            logger.warning("messages_react: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def messages_edit(self, payload: dict) -> dict:
+        """Modifie le texte d'un message déjà envoyé. Payload :
+            - id   : ID du message à modifier
+            - body : nouveau texte (non vide).
+        Le backend impose que sender_id == utilisateur courant ;
+        renvoie {ok: False} si pas autorisé / message introuvable.
+        """
+        try:
+            from ..integrations.messages import edit_message
+            msg_id = (payload or {}).get("id")
+            body = (payload or {}).get("body", "")
+            msg = edit_message(msg_id, body)
+            return {"ok": bool(msg), "message": msg}
+        except Exception as exc:
+            logger.warning("messages_edit: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def messages_mark_read(self) -> dict:
         """Marque tous les messages reçus non-lus comme lus."""
         try:

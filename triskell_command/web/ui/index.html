@@ -487,6 +487,10 @@
       <div id="thomas-reply-preview"
            class="hidden px-3 pt-2 border-t border-border bg-surface"></div>
 
+      <!-- Aperçu "modification du message" (cliquer ✎ sur ma bulle). -->
+      <div id="thomas-edit-preview"
+           class="hidden px-3 pt-2 border-t border-border bg-surface"></div>
+
       <!-- Aperçu de la pièce jointe sélectionnée (avant envoi). -->
       <div id="thomas-attach-preview"
            class="hidden px-3 pt-2 border-t border-border bg-surface"></div>
@@ -504,6 +508,17 @@
           </svg>
         </button>
         <input id="thomas-attach-file" type="file" class="hidden"/>
+
+        <!-- Bouton "GIF" : ouvre la modale de recherche Giphy -->
+        <button id="thomas-gif-btn" type="button"
+                class="h-9 px-2 shrink-0 rounded-lg flex items-center justify-center
+                       text-[11px] font-bold tracking-wide
+                       text-text-muted hover:text-text hover:bg-bg
+                       border border-border
+                       transition-colors"
+                title="Envoyer un GIF">
+          GIF
+        </button>
 
         <input id="thomas-input" type="text"
                placeholder="Écris un message à Thomas…"
