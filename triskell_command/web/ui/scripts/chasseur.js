@@ -389,9 +389,13 @@ const Chasseur = {
           <div class="flex items-center gap-2">
             ${this._statusBadge(h.status, isRunning)}
             ${isDone && withMail > 0 ? `
-              <button id="ch-export" class="btn btn-primary">
+              <button id="ch-push" class="btn btn-primary" title="Envoie tous les prospects à l'Auto-Pilote : il s'occupera d'enrichir + rédiger + envoyer la nuit.">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12l14-7-3 14-4-6-7-1z"/></svg>
+                Envoyer à l'Auto-Pilote
+              </button>
+              <button id="ch-export" class="btn btn-secondary" title="Télécharge un CSV à glisser dans Le Convoi.">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Exporter CSV
+                CSV
               </button>` : ''}
             <button id="ch-delete" class="btn btn-secondary text-xs">Supprimer</button>
           </div>
@@ -496,6 +500,8 @@ const Chasseur = {
 
     const exportBtn = document.getElementById('ch-export');
     if (exportBtn) exportBtn.onclick = () => this._exportCsv();
+    const pushBtn = document.getElementById('ch-push');
+    if (pushBtn) pushBtn.onclick = () => this._pushToAutopilot();
     const delBtn = document.getElementById('ch-delete');
     if (delBtn) delBtn.onclick = () => this._deleteHunt();
   },
@@ -508,6 +514,42 @@ const Chasseur = {
         <div class="text-lg font-bold ${color}">${value}</div>
       </div>
     `;
+  },
+
+  async _pushToAutopilot() {
+    if (!this.state.currentId) return;
+    const h = this.state.currentHunt;
+    const withMail = (h?.stats?.avec_mail) || 0;
+    if (!withMail) {
+      this._toast('Aucun prospect avec mail à envoyer.', 'danger');
+      return;
+    }
+    const ok = confirm(
+      `Envoyer ${withMail} prospect${withMail > 1 ? 's' : ''} à l'Auto-Pilote ?\n\n` +
+      `L'Auto-Pilote viendra les ramasser la nuit pour rédiger et envoyer ` +
+      `les mails automatiquement. Tu pourras suivre l'avancée dans l'onglet ` +
+      `Auto-Pilote.`
+    );
+    if (!ok) return;
+    const btn = document.getElementById('ch-push');
+    if (btn) { btn.disabled = true; btn.textContent = 'Envoi…'; }
+    const r = await this._api('push_to_autopilot', {hunt_id: this.state.currentId});
+    if (btn) btn.disabled = false;
+    if (!r || !r.ok) {
+      this._toast((r && r.error) || 'Envoi impossible', 'danger');
+      // Redraw pour réafficher le bouton normal
+      this._renderDetail();
+      return;
+    }
+    const where = r.backend === 'remote'
+      ? "la base partagée (Auto-Pilote nocturne)"
+      : "la base locale";
+    this._toast(
+      `${r.pushed} prospects envoyés vers ${where} — ` +
+      `${r.created} nouveaux, ${r.merged} fusionnés.`,
+      'success'
+    );
+    this._renderDetail();
   },
 
   async _exportCsv() {

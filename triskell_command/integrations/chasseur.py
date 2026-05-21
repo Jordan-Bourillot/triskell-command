@@ -1,14 +1,22 @@
 """Le Chasseur — découvre des PME françaises et récupère leurs mails publics.
 
 Pipeline :
-  1. Filtre par secteur (libellé ou code NAF) + zone (département / région / ville)
-     via l'API publique `recherche-entreprises.api.gouv.fr` (officiel data.gouv,
-     gratuit, sans clé). Retourne nom, SIREN, adresse, code NAF…
-  2. Pour chaque boîte trouvée, tente de découvrir son site web :
-       a. Champ `site_internet` quand l'API le donne (rare mais top quand dispo)
-       b. Recherche DuckDuckGo HTML "{nom} {ville} site officiel" sinon
-  3. Crawle le site (home + /contact + /mentions-legales + /a-propos) et
-     extrait les adresses mail publiques par regex, en filtrant le bruit
+  1. Filtre par secteur (libellé ou code NAF) + zone (département / code postal
+     / commune) via l'API publique `recherche-entreprises.api.gouv.fr`
+     (officiel data.gouv, gratuit, sans clé). Cette API ne renvoie ni site ni
+     mail, juste les infos administratives. Quand une zone est précisée, on
+     préfère l'établissement local plutôt que le siège (qui peut être à Paris
+     pour une chaîne ayant un resto dans le 22).
+  2. Pour chaque boîte, tente de découvrir son site web dans cet ordre :
+       a. Devinage à partir du nom + ville : on construit `nom-boite.fr`,
+          `nom-boite-ville.fr` etc., on teste le DNS puis on charge le site
+          et on calcule un score de pertinence (le nom et la ville doivent
+          apparaître dans le HTML).
+       b. Mojeek HTML (moteur indépendant gratuit, sans clé) en backup.
+       c. DuckDuckGo HTML en dernier recours (souvent KO en environnement
+          serveur à cause de leur anti-bot — gardé "au cas où").
+  3. Crawle le site validé (home + /contact + /mentions-legales + /a-propos)
+     et extrait les adresses mail publiques par regex, en filtrant le bruit
      (no-reply, exemples génériques, plateformes tierces…).
   4. Persiste en local (JSON par chasse) et exporte en CSV importable par Le
      Convoi.
@@ -26,8 +34,10 @@ import csv
 import json
 import logging
 import re
+import socket
 import threading
 import time
+import unicodedata
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -152,8 +162,14 @@ SECTOR_PRESETS: dict[str, dict] = {
 
 
 def _search_page(filters: dict, page: int) -> dict:
-    """Un appel paginé à l'API officielle. 25 résultats max par page."""
-    params: dict = {"page": page, "per_page": 25, "minimal": "true",
+    """Un appel paginé à l'API officielle. 25 résultats max par page.
+
+    NB : on n'utilise PAS `minimal=true` car ce flag supprime les champs
+    `siege.site_internet` / `siege.courriel` qui sont notre meilleure source
+    pour récupérer le site et le mail sans avoir à passer par DuckDuckGo
+    (souvent bloqué par CAPTCHA en environnement serveur).
+    """
+    params: dict = {"page": page, "per_page": 25,
                     "etat_administratif": "A"}
     # On veut surtout les sociétés actives, mais l'API renvoie aussi les
     # entreprises individuelles utiles (artisans). Pas de filtre `est_societe`
@@ -180,25 +196,82 @@ def _search_page(filters: dict, page: int) -> dict:
         return {}
 
 
-def _prospect_from_api(result: dict) -> Prospect:
-    """Mappe un résultat de recherche-entreprises vers notre modèle Prospect."""
+def _prospect_from_api(result: dict, zone_filter: dict | None = None) -> Prospect:
+    """Mappe un résultat de recherche-entreprises vers notre modèle Prospect.
+
+    Important : quand l'utilisateur filtre par département / code postal /
+    commune, l'API renvoie quand même le SIÈGE de l'entreprise — qui peut
+    être à Paris alors que l'établissement ciblé est dans le 22. Donc on
+    privilégie un `matching_etablissements` qui colle à la zone filtrée,
+    et on ne retombe sur le siège que si rien ne match.
+
+    L'API recherche-entreprises ne renvoie ni le site web ni le mail — ces
+    champs sont remplis dans une étape ultérieure (devinage de domaine,
+    Mojeek, crawl).
+    """
     siege = result.get("siege") or {}
+    matching = result.get("matching_etablissements") or []
     nom = (result.get("nom_complet")
            or result.get("nom_raison_sociale")
            or result.get("denomination")
            or "")
+
+    # Choix de l'établissement à utiliser : on préfère un matching_etablissements
+    # qui colle à la zone, sinon le siège.
+    etab = _pick_local_etab(matching, siege, zone_filter or {})
+
     return Prospect(
         siren=str(result.get("siren") or ""),
         nom=nom.strip(),
         naf=str(result.get("activite_principale") or ""),
         naf_libelle=str(result.get("section_activite_principale") or ""),
-        adresse=(siege.get("adresse") or "").strip(),
-        code_postal=(siege.get("code_postal") or "").strip(),
-        ville=(siege.get("libelle_commune") or "").strip(),
+        adresse=(etab.get("adresse") or "").strip(),
+        code_postal=(etab.get("code_postal") or "").strip(),
+        ville=(etab.get("libelle_commune") or "").strip(),
         site_web="",
         email="",
         telephone="",
     )
+
+
+def _pick_local_etab(matching: list[dict], siege: dict, zone: dict) -> dict:
+    """Sélectionne l'établissement de l'entreprise le plus pertinent pour
+    la zone demandée. Renvoie un dict compatible siege (adresse / code_postal
+    / libelle_commune).
+
+    Stratégie :
+      - Si la zone précise une commune ou un CP : on cherche un matching_etab
+        qui colle exactement.
+      - Si la zone précise un département : on prend le premier matching_etab
+        actif dans ce département.
+      - Sinon : on retombe sur le siège.
+    """
+    dept = (zone.get("departement") or "").strip()
+    cp = (zone.get("code_postal") or "").strip()
+    commune = (zone.get("commune") or "").strip()
+    actifs = [e for e in matching if (e.get("etat_administratif") == "A")]
+
+    if cp:
+        for e in actifs:
+            if (e.get("code_postal") or "").strip() == cp:
+                return e
+    if commune:
+        for e in actifs:
+            if (e.get("commune") or "").strip() == commune:
+                return e
+    if dept:
+        for e in actifs:
+            ecp = (e.get("code_postal") or "").strip()
+            if ecp.startswith(dept[:2]) and len(ecp) == 5:
+                # match dept (ex : "22" → CP commence par 22)
+                # Note : pour les CP < 10 (Corse...) il faudrait gérer le zéro
+                if dept in ("2A", "2B"):
+                    # Corse : CP 20xxx — pas de filtre fin ici
+                    return e
+                if ecp[:2] == dept.zfill(2):
+                    return e
+    # Aucun match : retour au siège (peut être hors-zone, on signale en aval)
+    return siege or {}
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +332,267 @@ def _ddg_first_real_result(query: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Source 2bis — devinage de domaine + Mojeek HTML
+# ---------------------------------------------------------------------------
+# DuckDuckGo HTML renvoie status 202 + page vide en environnement serveur
+# (anti-bot). On garde l'appel DDG comme fallback "au cas où" mais on s'appuie
+# en priorité sur :
+#   a. Devinage du domaine à partir du nom de la boîte + ville (le pattern
+#      très courant chez les PME locales : `nom-boite.fr`)
+#   b. Mojeek (moteur indépendant qui répond encore aux scrapers HTTP)
+#
+# Pour chaque candidat trouvé, on calcule un score de pertinence en mesurant
+# si le nom + la ville apparaissent dans le HTML du site. Ça évite de garder
+# le site d'une chaîne nationale ou d'un homonyme.
+
+_JURIDICAL_WORDS = re.compile(
+    r"\b(sarl|sas|sasu|sa|eurl|ei|eirl|sci|scp|snc|scop|scea|gie|ets|ge)\b\.?",
+    re.IGNORECASE,
+)
+_FRENCH_STOPWORDS = re.compile(
+    r"\b(le|la|les|de|du|des|et|aux|au|d|l|en|sur|sous|pour|chez)\b",
+    re.IGNORECASE,
+)
+# Mots-clés génériques de métier qui à eux seuls ne valident pas le match
+# (sinon "Boulangerie X" → site `boulangerie.fr` validerait à tort).
+_GENERIC_TRADE_WORDS = {
+    "restaurant", "restaurants", "garage", "boulangerie", "patisserie",
+    "coiffeur", "coiffure", "pharmacie", "hotel", "hotels", "salon",
+    "auto", "ecole", "optique", "opticien", "pizzeria", "magasin",
+    "boutique", "centre", "agence", "cabinet", "societe", "entreprise",
+    "atelier", "maison", "service", "services", "studio", "fleuriste",
+    "menuiserie", "plomberie", "electricite", "elec", "transport",
+    "taxi", "bar", "cafe", "brasserie",
+}
+
+
+def _deaccent(s: str) -> str:
+    s = unicodedata.normalize("NFD", s or "")
+    return "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
+
+
+def _slug_company(s: str) -> str:
+    """Slugifie un nom d'entreprise pour deviner son domaine.
+
+    - Retire les formes juridiques (SARL, SAS, EURL…)
+    - Retire les mots vides (le, la, de…)
+    - Décomposes les accents
+    - Garde uniquement [a-z0-9-]
+    """
+    s = (s or "").lower()
+    s = _JURIDICAL_WORDS.sub(" ", s)
+    s = _FRENCH_STOPWORDS.sub(" ", s)
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    s = re.sub(r"['`’]", "", s)
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s
+
+
+def _domain_candidates(nom: str, ville: str) -> list[str]:
+    """Génère une liste ordonnée de domaines à tester pour cette boîte."""
+    n = _slug_company(nom)
+    v = _slug_company(ville)
+    if not n:
+        return []
+    n_compact = n.replace("-", "")
+    cands: list[str] = [
+        f"{n}.fr", f"{n}.com",
+        f"{n_compact}.fr", f"{n_compact}.com",
+    ]
+    if v:
+        v_compact = v.replace("-", "")
+        cands += [f"{n}-{v}.fr", f"{n_compact}{v_compact}.fr"]
+    # Deux premiers mots (cas où le nom officiel a un suffixe parasite)
+    parts = n.split("-")
+    if len(parts) >= 2:
+        two = "-".join(parts[:2])
+        if two != n:
+            cands += [f"{two}.fr", f"{two}.com"]
+    # Dédup en gardant l'ordre
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in cands:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def _dns_resolves(domain: str) -> bool:
+    try:
+        socket.gethostbyname(domain)
+        return True
+    except Exception:
+        return False
+
+
+def _score_site_relevance(html: str, nom: str, ville: str) -> tuple[int, list[str]]:
+    """Note (0-100) la pertinence d'un site pour la boîte (nom, ville)."""
+    if not html:
+        return 0, ["no html"]
+    text = _deaccent(re.sub(r"<[^>]+>", " ", html))
+    text = re.sub(r"\s+", " ", text)
+
+    nom_l = _deaccent(nom)
+    ville_l = _deaccent(ville)
+    # Tokens significatifs du nom : > 3 caractères et hors métier générique
+    tokens = [t for t in re.split(r"\W+", nom_l)
+              if len(t) >= 4 and t not in _GENERIC_TRADE_WORDS]
+    if not tokens:
+        # Le nom est uniquement composé de mots génériques — on ne peut
+        # quasiment rien dire de fiable.
+        tokens = [t for t in re.split(r"\W+", nom_l) if len(t) >= 4]
+
+    score = 0
+    reasons: list[str] = []
+
+    if ville_l and ville_l in text:
+        score += 40
+        reasons.append(f"ville '{ville_l}'")
+
+    found_tokens = [t for t in tokens if t in text]
+    if found_tokens:
+        per = 40 // max(1, len(tokens))
+        score += per * len(found_tokens)
+        reasons.append(f"nom {found_tokens}")
+
+    # Pénalité multi-CP (signe d'une chaîne nationale qui liste ses 200 magasins)
+    cps = set(re.findall(r"\b(\d{5})\b", text))
+    if len(cps) > 8:
+        score -= 30
+        reasons.append(f"chaîne ? ({len(cps)} CP)")
+
+    return max(0, min(100, score)), reasons
+
+
+# Moteurs additionnels — par ordre de tentative
+_MOJEEK_BLACKLIST_EXTRA = {
+    # En plus de BLACKLIST_DOMAINS — sites qui pourrissent souvent les
+    # premiers résultats de Mojeek pour des boîtes locales.
+    "annuaire-mairie.fr", "cylex-france.fr", "118712.fr", "118000.fr",
+    "118218.fr", "mappy.com", "leparisien.fr", "ouest-france.fr",
+    "actulegales.fr", "meilleurscoiffeurs.fr", "citymalin.com",
+    "chambresdhotes.org", "winamax.fr", "marchesonline.com",
+    "lannion-emplois.com", "uacb.athle.fr", "dinard.com",
+    "importation-auto.fr", "mojeek.com",
+}
+
+
+def _mojeek_first_results(query: str, limit: int = 5) -> list[str]:
+    """Lance une recherche Mojeek HTML (gratuit, sans clé) et retourne les
+    premières URL hors blacklist. Renvoie [] si rate-limit ou erreur."""
+    try:
+        r = requests.get(
+            "https://www.mojeek.com/search",
+            params={"q": query},
+            headers={"User-Agent": UA, "Accept-Language": "fr-FR,fr;q=0.9"},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return []
+        text = r.text or ""
+    except Exception:
+        return []
+    # Pattern principal : <a class="ob" href="...">
+    links = re.findall(r'<a[^>]+class="ob"[^>]+href="(https?://[^"]+)"', text)
+    if not links:
+        links = re.findall(r'<h2[^>]*>\s*<a[^>]+href="(https?://[^"]+)"', text)
+    blacklist = BLACKLIST_DOMAINS | _MOJEEK_BLACKLIST_EXTRA
+    out: list[str] = []
+    for url in links:
+        host = (urlparse(url).hostname or "").lower()
+        host = host[4:] if host.startswith("www.") else host
+        if any(host == bad or host.endswith("." + bad) for bad in blacklist):
+            continue
+        if url not in out:
+            out.append(url)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _discover_site(nom: str, ville: str) -> tuple[str, int, str, str]:
+    """Trouve le meilleur site pour cette boîte.
+
+    Renvoie (site_root, score, source, html_home).
+      source ∈ {"guess", "mojeek", "ddg", ""}.
+      score < 40 = pas de match validé (le site_root sera "" dans ce cas).
+    """
+    best_url = ""
+    best_score = -1
+    best_source = ""
+    best_html = ""
+
+    # ─── Voie 1 : devinage de domaine + DNS + fetch ───
+    for domain in _domain_candidates(nom, ville):
+        if not _dns_resolves(domain):
+            continue
+        for scheme in ("https", "http"):
+            html = _fetch(f"{scheme}://{domain}")
+            if not html:
+                continue
+            if not _looks_french(html):
+                # On veut UNIQUEMENT du francophone. Un site anglais
+                # appartenant peut-être à la bonne boîte mais on ne sait
+                # pas le démarcher en FR — skip.
+                break
+            score, _ = _score_site_relevance(html, nom, ville)
+            if score > best_score:
+                best_score = score
+                best_url = f"{scheme}://{domain}"
+                best_source = "guess"
+                best_html = html
+            break   # passe au candidat suivant
+
+    if best_score >= 60:
+        # Match fort par devinage — pas besoin d'appeler un moteur
+        return _normalize_site(best_url), best_score, best_source, best_html
+
+    # ─── Voie 2 : Mojeek HTML ───
+    query = f"{nom} {ville}".strip()
+    for url in _mojeek_first_results(query, limit=3):
+        site_root = _normalize_site(url)
+        if not site_root:
+            continue
+        html = _fetch(site_root)
+        if not html:
+            continue
+        if not _looks_french(html):
+            continue
+        score, _ = _score_site_relevance(html, nom, ville)
+        if score > best_score:
+            best_score = score
+            best_url = site_root
+            best_source = "mojeek"
+            best_html = html
+        if best_score >= 60:
+            break
+        time.sleep(0.3)
+
+    if best_score >= 60:
+        return _normalize_site(best_url), best_score, best_source, best_html
+
+    # ─── Voie 3 : DDG en dernier recours (souvent KO en serveur) ───
+    ddg_url = _ddg_first_real_result(f"{nom} {ville} site officiel")
+    if ddg_url:
+        site_root = _normalize_site(ddg_url)
+        if site_root:
+            html = _fetch(site_root)
+            if html and _looks_french(html):
+                score, _ = _score_site_relevance(html, nom, ville)
+                if score > best_score:
+                    best_score = score
+                    best_url = site_root
+                    best_source = "ddg"
+                    best_html = html
+
+    if best_score >= 40:
+        return _normalize_site(best_url), best_score, best_source, best_html
+    return "", best_score if best_score >= 0 else 0, "", best_html
+
+
+# ---------------------------------------------------------------------------
 # Source 3 — extraction d'emails depuis le site
 # ---------------------------------------------------------------------------
 EMAIL_RE = re.compile(
@@ -274,13 +608,11 @@ EMAIL_NOISE = re.compile(
 )
 
 CONTACT_PATHS = (
-    "", "/contact", "/contact/", "/nous-contacter", "/nous-contacter/",
-    "/mentions-legales", "/mentions-legales/", "/legal", "/legal/",
-    "/a-propos", "/a-propos/", "/qui-sommes-nous", "/qui-sommes-nous/",
+    "", "/contact", "/mentions-legales", "/nous-contacter",
 )
 
 
-def _fetch(url: str, timeout: int = 12) -> str:
+def _fetch(url: str, timeout: int = 6) -> str:
     try:
         r = requests.get(
             url,
@@ -353,6 +685,42 @@ FREE_PLATFORM_HOSTS = (
 )
 
 
+def _looks_french(html: str) -> bool:
+    """Vérifie qu'un site est principalement en français.
+
+    On part de `<html lang>` quand c'est renseigné, sinon on compte les
+    mots français vs anglais les plus communs dans le texte visible.
+    Tolérant : en cas de doute on accepte (on rejette uniquement quand
+    le site est clairement anglais).
+    """
+    if not html:
+        return True
+    m = re.search(r'<html[^>]+lang=["\']([^"\'\s>]+)', html, re.IGNORECASE)
+    if m:
+        lang = m.group(1).lower()
+        if lang.startswith("fr"):
+            return True
+        # Liste blanche des codes proches du FR (multilingue)
+        if lang in ("c", ""):
+            pass  # ambiguë → on continue avec le texte
+        else:
+            # Toute autre langue déclarée explicitement → reject
+            return False
+    text = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.IGNORECASE)
+    text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text).lower()
+    fr_markers = ("contact", "accueil", "horaires", "mentions",
+                  "boutique", "réservation", "à propos", "nos services",
+                  "notre équipe", "bienvenue", "actualités")
+    en_markers = ("about us", "contact us", "opening hours", "home page",
+                  "our services", "our team", "welcome to", "news")
+    fr_hits = sum(1 for w in fr_markers if w in text)
+    en_hits = sum(1 for w in en_markers if w in text)
+    if fr_hits + en_hits == 0:
+        return True   # tolérant
+    return fr_hits >= en_hits
+
+
 def _evaluate_site_quality(site_root: str, html_home: str) -> tuple[str, list[str]]:
     """Évalue la qualité visible d'un site.
 
@@ -411,15 +779,19 @@ def _evaluate_site_quality(site_root: str, html_home: str) -> tuple[str, list[st
                  r"page\s+en\s+travaux)", html_home, re.IGNORECASE):
         reasons.append("site en construction")
 
-    # Verdict : 2 signaux faibles OU 1 signal fort suffisent pour "poor"
-    strong_signals = {"site en construction", "contenu maigre / site placeholder"}
-    has_strong = any(r in strong_signals for r in reasons)
-    if has_strong or len(reasons) >= 2:
-        return "poor", reasons
-    if reasons:
-        # Un seul signal faible isolé → site qu'on garde pas en cible upgrade
+    # Verdict (mode permissif post-feedback Jordan) :
+    #   - "copyright vieux" seul est trop courant pour qualifier un site
+    #     de pourri (beaucoup de PME tip-top oublient juste de toucher au
+    #     footer). On l'accepte uniquement combiné à un autre signal.
+    #   - Les autres signaux faibles (pas HTTPS, pas mobile) suffisent à
+    #     eux seuls car ce sont des défauts qu'on peut vraiment pitcher.
+    if not reasons:
+        return "ok", []
+    only_copyright = (len(reasons) == 1
+                      and reasons[0].startswith("copyright "))
+    if only_copyright:
         return "ok", reasons
-    return "ok", []
+    return "poor", reasons
 
 
 def _harvest_emails_for_site(site_root: str) -> tuple[str, list[str], str, str]:
@@ -616,15 +988,26 @@ def _run_hunt(hunt: Hunt, target: int, with_email_only: bool,
     # une grande partie des sites trouvés seront "ok" (donc rejetés).
     overshoot = 6 if mode == "poor_sites" else 3
     cap_candidates = max(target * overshoot, 50)
+    zone_filter = {k: hunt.filters.get(k) for k in
+                   ("departement", "code_postal", "commune")
+                   if hunt.filters.get(k)}
     while len(raw) < cap_candidates:
         data = _search_page(hunt.filters, page)
         results = data.get("results") or []
         if not results:
             break
         for r in results:
-            p = _prospect_from_api(r)
+            p = _prospect_from_api(r, zone_filter=zone_filter)
             if not p.siren or not p.nom:
                 continue
+            # Si l'utilisateur a précisé une zone, on rejette les boîtes
+            # dont aucun établissement n'est dans cette zone (ça arrive quand
+            # le seul matching est fermé ou hors-zone). On détecte ça si
+            # le code postal final ne colle pas du tout au département demandé.
+            if zone_filter.get("departement"):
+                dept = zone_filter["departement"]
+                if p.code_postal and not p.code_postal.startswith(dept[:2]):
+                    continue
             raw.append(p)
             if len(raw) >= cap_candidates:
                 break
@@ -646,29 +1029,42 @@ def _run_hunt(hunt: Hunt, target: int, with_email_only: bool,
         log("Aucun résultat — élargis les filtres.")
         return
 
-    log(f"{len(raw)} candidats remontés. Recherche des sites + mails…")
+    log(f"{len(raw)} candidats remontés. Recherche du site web "
+        f"(devinage de domaine + Mojeek) puis extraction du mail…")
     hunt.status = "enriching"
     hunt.save()
 
     # ---- Étape 2 : pour chaque boîte, trouver site + extraire mails ----
     kept: list[Prospect] = []
     seen_emails: set[str] = set()
+    sources_count = {"guess": 0, "mojeek": 0, "ddg": 0}
     for i, prospect in enumerate(raw):
         if len(kept) >= target:
             break
         try:
-            # Cherche le site officiel
-            query = f"{prospect.nom} {prospect.ville} site officiel"
-            site_url = _ddg_first_real_result(query)
-            site_root = _normalize_site(site_url)
+            # 1) Découverte du site : devinage de domaine → Mojeek → DDG
+            site_root, score, source, html_home = _discover_site(
+                prospect.nom, prospect.ville,
+            )
             prospect.site_web = site_root
+            if source:
+                sources_count[source] = sources_count.get(source, 0) + 1
 
-            html_home = ""
+            # 2) Crawl des pages contact pour récupérer un mail public.
+            #    On garde le html_home (page d'accueil) déjà chargé pour
+            #    éviter une 2e requête sur la home pendant l'évaluation.
             if site_root:
-                email, extra, source, html_home = _harvest_emails_for_site(site_root)
+                email, extra, source_mail, html_contact = (
+                    _harvest_emails_for_site(site_root)
+                )
                 prospect.email = email
                 prospect.emails_extra = extra
-                prospect.source_mail = source
+                prospect.source_mail = source_mail
+                # Si _harvest a rechargé la home (cas où elle a renvoyé un
+                # html), on garde celui-là (plus complet). Sinon on garde
+                # celui obtenu lors de la découverte.
+                if html_contact:
+                    html_home = html_contact
 
             # Évaluation qualité du site (déterministe, pas d'IA)
             quality, reasons = _evaluate_site_quality(site_root, html_home)
@@ -711,8 +1107,8 @@ def _run_hunt(hunt: Hunt, target: int, with_email_only: bool,
             if progress_cb:
                 try: progress_cb(hunt)
                 except Exception: pass
-        # Throttle gentil — DDG + serveurs cibles
-        time.sleep(0.5)
+        # Throttle gentil — on est poli avec les serveurs cibles
+        time.sleep(0.2)
 
     # ---- Finalisation ----
     hunt.prospects = [p.to_dict() for p in kept]
@@ -727,7 +1123,10 @@ def _run_hunt(hunt: Hunt, target: int, with_email_only: bool,
     }
     hunt.save()
     log(f"Chasse terminée : {len(kept)} retenus, "
-        f"{hunt.stats['avec_mail']} avec mail.")
+        f"{hunt.stats['avec_mail']} avec mail. "
+        f"Sites trouvés via : devinage={sources_count.get('guess', 0)}, "
+        f"mojeek={sources_count.get('mojeek', 0)}, "
+        f"ddg={sources_count.get('ddg', 0)}.")
 
 
 def export_csv(hunt_id: str) -> dict:
@@ -766,6 +1165,93 @@ def export_csv(hunt_id: str) -> dict:
                 "site_quality_reasons": "; ".join(reasons) if isinstance(reasons, list) else "",
             })
     return {"ok": True, "path": str(path), "rows": sum(1 for r in rows if r.get("email"))}
+
+
+def push_to_autopilot(hunt_id: str) -> dict:
+    """Convertit les prospects d'une chasse en `Prospect` cœur et les pousse
+    dans la base partagée — d'où l'Auto-Pilote viendra les ramasser la nuit
+    pour enrichir + rédiger + envoyer.
+
+    Renvoie {ok, created, merged, total, error, backend}.
+      - backend = "remote" → Supabase (partagé Jordan/Thomas, auto-pilote nocturne)
+      - backend = "local"  → fallback JSON (l'Auto-Pilote local pourra le voir
+                              s'il tourne sur la même machine)
+    """
+    h = Hunt.load(hunt_id)
+    if not h:
+        return {"ok": False, "error": "chasse introuvable"}
+    if not h.prospects:
+        return {"ok": False, "error": "aucun prospect à pousser"}
+
+    # Lazy imports — triskell_core n'est pas forcément dispo en dev sans le pkg
+    try:
+        from triskell_core.prospect.core.crm import get_crm
+        from triskell_core.prospect.core.prospect import Prospect as CoreProspect, Source
+    except ImportError as exc:
+        return {"ok": False, "error":
+                f"triskell_core absent — impossible de pousser ({exc})"}
+
+    # Détecte le backend (Supabase si auth, sinon JSON local)
+    try:
+        crm = get_crm()
+    except Exception as exc:
+        return {"ok": False, "error": f"connexion CRM impossible : {exc}"}
+    backend = "remote" if crm.__class__.__name__ == "RemoteCRM" else "local"
+
+    mode = (h.filters or {}).get("mode") or "all"
+    sector = (h.filters or {}).get("sector_input") or ""
+
+    core_prospects: list[CoreProspect] = []
+    for p in h.prospects:
+        email = (p.get("email") or "").strip()
+        if not email:
+            continue   # Auto-Pilote ne peut rien faire sans mail
+        # Tag spécifique au mode pour reconnaître la cohorte côté CRM
+        tag_mode = "chasseur:sites_pourris" if mode == "poor_sites" else "chasseur:large"
+        reasons = p.get("site_quality_reasons") or []
+        cp = CoreProspect(
+            name=(p.get("nom") or "").strip(),
+            legal_name=(p.get("nom") or "").strip(),
+            siren=(p.get("siren") or "").strip(),
+            emails=[email] + [e for e in (p.get("emails_extra") or []) if e],
+            website=(p.get("site_web") or "").strip(),
+            address=(p.get("adresse") or "").strip(),
+            city=(p.get("ville") or "").strip(),
+            postal_code=(p.get("code_postal") or "").strip(),
+            country="FR",
+            naf_code=(p.get("naf") or "").strip(),
+            industry=sector,
+            language="fr",
+            tags=[tag_mode] + (["site_pourri"] if p.get("site_quality") == "poor" else []),
+            notes=" · ".join(reasons) if reasons else "",
+            sources=[Source(
+                name="chasseur",
+                source_id=(p.get("siren") or "").strip(),
+                url=(p.get("site_web") or "").strip(),
+            )],
+            status="new",
+        )
+        core_prospects.append(cp)
+
+    if not core_prospects:
+        return {"ok": False, "error":
+                "aucun prospect avec mail à pousser (cible auto-pilote = mail requis)"}
+
+    try:
+        result = crm.upsert_many(core_prospects)
+        if hasattr(crm, "save"):
+            try: crm.save()
+            except Exception: pass
+        return {
+            "ok": True,
+            "backend":  backend,
+            "created":  int(result.get("created") or 0),
+            "merged":   int(result.get("merged") or 0),
+            "total":    int(result.get("total") or 0),
+            "pushed":   len(core_prospects),
+        }
+    except Exception as exc:
+        return {"ok": False, "error": f"upsert échoué : {exc}"}
 
 
 def delete_hunt(hunt_id: str) -> dict:
