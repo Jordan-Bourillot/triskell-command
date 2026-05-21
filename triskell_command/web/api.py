@@ -3520,6 +3520,7 @@ class Api:
                 q=str(p.get("q") or "").strip(),
                 has_email=has_email,
                 country=str(p.get("country") or "").strip(),
+                job_id=str(p.get("job_id") or "").strip(),
                 limit=int(p.get("limit") or 100),
                 offset=int(p.get("offset") or 0),
             )
@@ -5327,27 +5328,69 @@ class Api:
     # ------------------------------------------------------------------
     def messages_me(self) -> dict:
         """Renvoie mon identité locale (jordan/thomas) pour aligner les bulles côté UI.
-        Jordan & Thomas partagent un même compte Supabase, donc on s'appuie sur
-        le cookie de session local (voir web/auth.py) plutôt que sur le user_id
-        Supabase qui serait identique pour les deux."""
+        Inclut aussi la couleur de chat que JE ai choisie (visible dans les
+        bulles que j'envoie, chez moi ET chez l'autre user)."""
         try:
-            from .auth import get_current_local_user, get_display_name
+            from .auth import get_current_local_user, get_display_name, get_chat_color
             uid = get_current_local_user()
             if not uid:
                 return {"ok": False, "error": "not_logged_in", "user_id": None}
-            return {"ok": True, "user_id": uid, "display_name": get_display_name(uid)}
+            return {
+                "ok": True,
+                "user_id": uid,
+                "display_name": get_display_name(uid),
+                "color": get_chat_color(uid),
+            }
         except Exception as exc:
             logger.debug("messages_me: %s", exc)
             return {"ok": False, "error": str(exc), "user_id": None}
 
     def messages_other_user(self) -> dict:
-        """Renvoie le profil de l'autre user (Jordan voit Thomas, etc.)."""
+        """Renvoie le profil de l'autre user (Jordan voit Thomas, etc.).
+        La couleur est celle CHOISIE par l'autre user — appliquée à ses bulles."""
         try:
             from ..integrations.messages import other_user
-            return {"ok": True, "other": other_user()}
+            from .auth import get_chat_color
+            other = other_user()
+            if other and other.get("user_id"):
+                other = {**other, "color": get_chat_color(other["user_id"])}
+            return {"ok": True, "other": other}
         except Exception as exc:
             logger.debug("messages_other_user: %s", exc)
             return {"ok": False, "error": str(exc)}
+
+    def messages_set_color(self, payload: dict) -> dict:
+        """L'utilisateur courant change SA couleur de chat. La nouvelle
+        couleur s'applique aux bulles qu'il envoie (vu chez lui et chez l'autre)."""
+        try:
+            from .auth import get_current_local_user, set_chat_color, get_chat_color
+            uid = get_current_local_user()
+            if not uid:
+                return {"ok": False, "error": "not_logged_in"}
+            color = (payload or {}).get("color", "")
+            if not set_chat_color(uid, color):
+                return {"ok": False, "error": "Couleur invalide. Format attendu : #RRGGBB"}
+            return {"ok": True, "color": get_chat_color(uid)}
+        except Exception as exc:
+            logger.warning("messages_set_color: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def messages_color_palette(self) -> dict:
+        """Renvoie la palette de couleurs proposée dans le sélecteur + la
+        couleur courante de l'utilisateur."""
+        try:
+            from .auth import (
+                get_current_local_user, get_chat_color, CHAT_COLOR_PALETTE,
+            )
+            uid = get_current_local_user()
+            return {
+                "ok": True,
+                "palette": list(CHAT_COLOR_PALETTE),
+                "current": get_chat_color(uid) if uid else None,
+            }
+        except Exception as exc:
+            logger.debug("messages_color_palette: %s", exc)
+            return {"ok": False, "error": str(exc), "palette": [], "current": None}
 
     def messages_list(self, payload: dict | None = None) -> dict:
         """Renvoie la liste des derniers messages échangés (chronologique)."""
@@ -5360,11 +5403,16 @@ class Api:
             return {"ok": False, "error": str(exc), "messages": []}
 
     def messages_send(self, payload: dict) -> dict:
-        """Envoie un message à l'autre user."""
+        """Envoie un message à l'autre user. Le payload accepte :
+            - body : texte du message (optionnel si attachment)
+            - attachment : dict {url, name, type, size} (optionnel si body)
+              produit par /api/chat_attachment.
+        """
         try:
             from ..integrations.messages import send_message
             body = (payload or {}).get("body", "")
-            msg = send_message(body)
+            attachment = (payload or {}).get("attachment") or None
+            msg = send_message(body, attachment)
             return {"ok": bool(msg), "message": msg}
         except Exception as exc:
             logger.warning("messages_send: %s", exc)

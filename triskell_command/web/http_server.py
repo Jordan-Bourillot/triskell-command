@@ -347,6 +347,75 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Pas de photo")
         return FileResponse(str(p))
 
+    # ---------------- Pièces jointes du chat ----------------
+    # Stockées dans ~/.triskell-command/chat-attachments/{aid}/{filename}.
+    # `aid` est un UUID v4 généré côté serveur — fait office de "secret" pour
+    # éviter qu'on devine les URLs des pièces jointes des autres conversations.
+    # 10 Mo max, tous types autorisés (le chat est privé Jordan ↔ Thomas).
+
+    CHAT_ATTACH_DIR = Path.home() / ".triskell-command" / "chat-attachments"
+    MAX_CHAT_ATTACH_SIZE = 10 * 1024 * 1024  # 10 Mo
+
+    def _sanitize_filename(name: str) -> str:
+        """Nettoie le nom de fichier : enlève les sous-dossiers, garde
+        seulement le basename et limite la longueur."""
+        import os.path
+        base = os.path.basename(name or "").strip()
+        # Remplace les caractères chelous par "_"
+        safe = "".join(c if c.isalnum() or c in "._- ()[]" else "_" for c in base)
+        safe = safe.strip(". ") or "fichier"
+        return safe[:120]
+
+    @app.post("/api/chat_attachment")
+    async def upload_chat_attachment(
+        request: Request,
+        file: UploadFile = File(...),
+    ) -> JSONResponse:
+        user_id = getattr(request.state, "user_id", None)
+        if not user_id:
+            return JSONResponse(status_code=401, content={"ok": False, "error": "auth_required"})
+        data = await file.read()
+        if len(data) == 0:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "Fichier vide."})
+        if len(data) > MAX_CHAT_ATTACH_SIZE:
+            return JSONResponse(status_code=400, content={
+                "ok": False,
+                "error": "Fichier trop lourd (max 10 Mo).",
+            })
+        # Identifiant unique pour le sous-dossier — fait aussi office d'URL.
+        import uuid
+        aid = uuid.uuid4().hex
+        safe_name = _sanitize_filename(file.filename or "fichier")
+        target_dir = CHAT_ATTACH_DIR / aid
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / safe_name
+        target.write_bytes(data)
+        url = f"/api/chat_attachment/{aid}/{safe_name}"
+        return JSONResponse(content={
+            "ok": True,
+            "url": url,
+            "name": safe_name,
+            "type": file.content_type or "application/octet-stream",
+            "size": len(data),
+        })
+
+    @app.get("/api/chat_attachment/{aid}/{name}")
+    async def get_chat_attachment(request: Request, aid: str, name: str) -> FileResponse:
+        # Auth requise — seul un user loggé voit les pièces jointes du chat.
+        # (Le chat est privé Jordan ↔ Thomas, pas public comme les avatars.)
+        cookie = request.cookies.get(tcauth.COOKIE_NAME)
+        if not tcauth.read_session_cookie(cookie):
+            raise HTTPException(status_code=401, detail="auth_required")
+        # Garde-fou : on n'autorise que des `aid` hex (UUID) pour empêcher
+        # l'évasion de répertoire (../../etc/passwd, etc.).
+        if not aid.isalnum() or len(aid) > 64:
+            raise HTTPException(status_code=400, detail="aid invalide")
+        safe_name = _sanitize_filename(name)
+        p = CHAT_ATTACH_DIR / aid / safe_name
+        if not p.is_file():
+            raise HTTPException(status_code=404, detail="Pièce jointe introuvable")
+        return FileResponse(str(p))
+
     # ---------------- Facturation SaaS (Stripe) ----------------
     # Routes minimales pour brancher l'abonnement. Aucune ne nécessite
     # le SDK Stripe d'être installé tant qu'on ne les appelle pas — elles

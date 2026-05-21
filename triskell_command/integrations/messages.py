@@ -84,6 +84,10 @@ def other_user() -> Optional[dict[str, Any]]:
     }
 
 
+_MSG_COLUMNS = ("id, sender_id, recipient_id, body, created_at, read_at, "
+                "attachment_url, attachment_name, attachment_type, attachment_size")
+
+
 def list_messages(limit: int = 100) -> list[dict[str, Any]]:
     """Renvoie les `limit` derniers messages échangés avec l'autre user,
     ordre chronologique ascendant (plus ancien d'abord)."""
@@ -96,11 +100,11 @@ def list_messages(limit: int = 100) -> list[dict[str, Any]]:
         # supabase-py n'a pas d'OR sur 2 paires (sender,recipient) — on fait
         # 2 requêtes (sens aller + retour) et on merge côté client.
         sent = (c.raw.table("messages")
-                .select("id, sender_id, recipient_id, body, created_at, read_at")
+                .select(_MSG_COLUMNS)
                 .eq("sender_id", me).eq("recipient_id", other)
                 .order("created_at", desc=True).limit(limit).execute())
         recv = (c.raw.table("messages")
-                .select("id, sender_id, recipient_id, body, created_at, read_at")
+                .select(_MSG_COLUMNS)
                 .eq("sender_id", other).eq("recipient_id", me)
                 .order("created_at", desc=True).limit(limit).execute())
         merged = (sent.data or []) + (recv.data or [])
@@ -113,23 +117,38 @@ def list_messages(limit: int = 100) -> list[dict[str, Any]]:
         return []
 
 
-def send_message(body: str) -> Optional[dict[str, Any]]:
-    """Envoie un message à l'autre user. Renvoie la ligne insérée ou None."""
+def send_message(
+    body: str,
+    attachment: Optional[dict[str, Any]] = None,
+) -> Optional[dict[str, Any]]:
+    """Envoie un message à l'autre user. Renvoie la ligne insérée ou None.
+
+    `attachment`, si fourni, est un dict {url, name, type, size} produit
+    par l'endpoint d'upload (POST /api/chat_attachment).
+    Le message doit avoir AU MOINS un body OU une pièce jointe."""
     body = (body or "").strip()
-    if not body:
+    has_attachment = bool(attachment and attachment.get("url"))
+    if not body and not has_attachment:
         return None
     me = _me()
     other = _opposite(me)
     c = _supabase()
     if c is None or not me or not other:
         return None
+    row: dict[str, Any] = {
+        "sender_id": me,
+        "recipient_id": other,
+        "body": body if body else None,
+    }
+    if has_attachment:
+        row["attachment_url"]  = attachment.get("url")
+        row["attachment_name"] = attachment.get("name") or None
+        row["attachment_type"] = attachment.get("type") or None
+        size = attachment.get("size")
+        if isinstance(size, int) and size > 0:
+            row["attachment_size"] = size
     try:
-        res = (c.raw.table("messages")
-               .insert({
-                   "sender_id": me,
-                   "recipient_id": other,
-                   "body": body,
-               }).execute())
+        res = c.raw.table("messages").insert(row).execute()
         data = res.data or []
         return data[0] if data else None
     except Exception as exc:
@@ -174,7 +193,9 @@ def count_unread() -> int:
 
 def last_message_preview() -> Optional[dict]:
     """Renvoie le dernier message échangé avec l'autre user, sous la forme
-    {body, created_at, is_from_me}. None si pas dispo."""
+    {body, created_at, is_from_me}. Si le message est une pièce jointe
+    seule (pas de texte), on remplace par un libellé "📎 …" lisible.
+    None si pas dispo."""
     me = _me()
     other = _opposite(me)
     c = _supabase()
@@ -182,11 +203,11 @@ def last_message_preview() -> Optional[dict]:
         return None
     try:
         sent = (c.raw.table("messages")
-                .select("body, created_at, sender_id")
+                .select("body, created_at, sender_id, attachment_url, attachment_type")
                 .eq("sender_id", me).eq("recipient_id", other)
                 .order("created_at", desc=True).limit(1).execute())
         recv = (c.raw.table("messages")
-                .select("body, created_at, sender_id")
+                .select("body, created_at, sender_id, attachment_url, attachment_type")
                 .eq("sender_id", other).eq("recipient_id", me)
                 .order("created_at", desc=True).limit(1).execute())
         candidates = (sent.data or []) + (recv.data or [])
@@ -194,8 +215,12 @@ def last_message_preview() -> Optional[dict]:
             return None
         candidates.sort(key=lambda m: m.get("created_at") or "", reverse=True)
         m = candidates[0]
+        body = (m.get("body") or "").strip()
+        if not body and m.get("attachment_url"):
+            mime = (m.get("attachment_type") or "").lower()
+            body = "📎 Photo" if mime.startswith("image/") else "📎 Fichier"
         return {
-            "body": m.get("body") or "",
+            "body": body,
             "created_at": m.get("created_at") or "",
             "is_from_me": m.get("sender_id") == me,
         }

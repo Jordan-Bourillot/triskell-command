@@ -215,3 +215,87 @@ def set_display_name(user_id: str, name: str) -> bool:
     custom = _load_custom_names()
     custom[user_id] = name
     return _save_custom_names(custom)
+
+
+# ---------------------------------------------------------------------------
+# Couleur de chat personnelle (Jordan / Thomas choisissent chacun la couleur
+# dans laquelle leurs propres bulles s'affichent — pour eux-mêmes ET pour
+# l'autre). Stockage : ~/.triskell-command/user_chat_colors.json
+# Forme : {"jordan": "#7C7FE9", "thomas": "#10b981"}
+# ---------------------------------------------------------------------------
+
+# Palette par défaut si l'user n'a jamais choisi (matching les défauts UI).
+DEFAULT_CHAT_COLORS = {
+    "jordan": "#7C7FE9",  # violet accent
+    "thomas": "#10b981",  # vert
+}
+
+# Palette proposée dans le sélecteur de couleur côté front.
+CHAT_COLOR_PALETTE = [
+    "#7C7FE9",  # violet
+    "#10b981",  # vert émeraude
+    "#3b82f6",  # bleu
+    "#f59e0b",  # orange
+    "#ef4444",  # rouge
+    "#ec4899",  # rose
+    "#06b6d4",  # cyan
+    "#a855f7",  # violet vif
+]
+
+
+def _chat_colors_file() -> Path:
+    base = Path.home() / ".triskell-command"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        logger.debug("Création %s impossible : %s", base, exc)
+    return base / "user_chat_colors.json"
+
+
+def _load_chat_colors() -> dict:
+    path = _chat_colors_file()
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        logger.warning("Lecture %s impossible : %s", path, exc)
+        return {}
+
+
+def _save_chat_colors(colors: dict) -> bool:
+    path = _chat_colors_file()
+    try:
+        path.write_text(json.dumps(colors, ensure_ascii=False, indent=2),
+                        encoding="utf-8")
+        return True
+    except Exception as exc:
+        logger.warning("Écriture %s impossible : %s", path, exc)
+        return False
+
+
+def get_chat_color(user_id: str) -> str:
+    """Renvoie la couleur de chat d'un user (hex #RRGGBB). Préférence
+    personnalisée si définie, sinon couleur par défaut."""
+    custom = _load_chat_colors()
+    val = (custom.get(user_id) or "").strip()
+    if val and val.startswith("#") and len(val) in (4, 7):
+        return val
+    return DEFAULT_CHAT_COLORS.get(user_id, "#7C7FE9")
+
+
+def set_chat_color(user_id: str, color: str) -> bool:
+    """Enregistre la couleur de chat d'un user. Valide le format #RRGGBB."""
+    if user_id not in KNOWN_USERS:
+        return False
+    color = (color or "").strip()
+    if not color.startswith("#") or len(color) not in (4, 7):
+        return False
+    # Valide les caractères (hex)
+    try:
+        int(color[1:], 16)
+    except ValueError:
+        return False
+    custom = _load_chat_colors()
+    custom[user_id] = color
+    return _save_chat_colors(custom)

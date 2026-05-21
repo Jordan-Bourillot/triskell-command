@@ -472,10 +472,27 @@
                  class="text-[11px] text-text-muted">Chat 1-à-1</div>
           </div>
         </div>
-        <button id="thomas-dialog-close"
-                class="w-8 h-8 rounded-lg flex items-center justify-center
-                       text-text-muted hover:text-text hover:bg-bg
-                       transition-colors text-xl leading-none">×</button>
+        <div class="flex items-center gap-1">
+          <!-- Sélecteur de couleur perso : ouvre une mini-palette pour
+               choisir la couleur des bulles que J'envoie. -->
+          <button id="thomas-color-btn" type="button"
+                  class="w-8 h-8 rounded-lg flex items-center justify-center
+                         text-text-muted hover:text-text hover:bg-bg
+                         transition-colors"
+                  title="Couleur de mes bulles">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="13.5" cy="6.5" r="2.5"/>
+              <circle cx="17.5" cy="10.5" r="2.5"/>
+              <circle cx="8.5" cy="7.5" r="2.5"/>
+              <circle cx="6.5" cy="12.5" r="2.5"/>
+              <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125 0-.939.755-1.687 1.688-1.687h1.997c3.104 0 5.625-2.521 5.625-5.625C22 6.704 17.522 2 12 2z"/>
+            </svg>
+          </button>
+          <button id="thomas-dialog-close"
+                  class="w-8 h-8 rounded-lg flex items-center justify-center
+                         text-text-muted hover:text-text hover:bg-bg
+                         transition-colors text-xl leading-none">×</button>
+        </div>
       </div>
 
       <!-- Liste des messages -->
@@ -488,8 +505,24 @@
         Thomas écrit…
       </div>
 
+      <!-- Aperçu de la pièce jointe sélectionnée (avant envoi). -->
+      <div id="thomas-attach-preview"
+           class="hidden px-3 pt-2 border-t border-border bg-surface"></div>
+
       <!-- Composer -->
-      <div class="p-3 border-t border-border bg-surface flex gap-2">
+      <div class="p-3 border-t border-border bg-surface flex items-center gap-2">
+        <!-- Trombone : ouvre le picker de fichier -->
+        <button id="thomas-attach-btn" type="button"
+                class="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center
+                       text-text-muted hover:text-text hover:bg-bg
+                       transition-colors"
+                title="Joindre un fichier (10 Mo max)">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+          </svg>
+        </button>
+        <input id="thomas-attach-file" type="file" class="hidden"/>
+
         <input id="thomas-input" type="text"
                placeholder="Écris un message à Thomas…"
                autocomplete="off"
@@ -509,6 +542,17 @@
         </button>
       </div>
     </div>
+  </div>
+
+  <!-- ===================== Lightbox image (zoom sur photos du chat) ===================== -->
+  <div id="thomas-lightbox"
+       class="fixed inset-0 z-[70] bg-black/85 hidden items-center justify-center p-4 cursor-zoom-out">
+    <img id="thomas-lightbox-img" src="" alt=""
+         class="max-w-full max-h-full object-contain rounded-lg shadow-hero"/>
+    <button id="thomas-lightbox-close" type="button"
+            class="absolute top-4 right-4 w-10 h-10 rounded-full
+                   bg-black/60 hover:bg-black/80 text-white text-2xl leading-none
+                   flex items-center justify-center transition-colors">×</button>
   </div>
 
   <!-- Bouton flottant Allô Claude supprimé — accessible via l'item sidebar. -->
