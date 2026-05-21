@@ -64,15 +64,19 @@ const Thomas = {
   },
 
   async bootstrap() {
-    // Attend que App.api soit prêt
+    // Attend que App.api soit prêt — plus tolérant qu'avant (60s au lieu
+    // de 15s) car en mode HTTP le boot peut être lent (workers, vues
+    // Supabase, etc.). Si on dépasse, on programme une réessai dans 10s
+    // au lieu d'abandonner définitivement.
     let tries = 0;
-    while (tries < 60) {
+    while (tries < 240) {
       if (window.App && window.App.api && window.App.api.messages_other_user) break;
       await new Promise(r => setTimeout(r, 250));
       tries++;
     }
     if (!window.App || !window.App.api) {
-      console.warn('Thomas: App.api non disponible (mode standalone preview ?)');
+      console.warn('Thomas: App.api pas encore disponible — réessai dans 10s');
+      setTimeout(() => this.bootstrap(), 10000);
       return;
     }
 
@@ -132,13 +136,20 @@ const Thomas = {
   },
 
   updateBadge(n) {
-    const badge = document.getElementById('thomas-fab-badge');
-    if (!badge) return;
-    if (n > 0) {
-      badge.textContent = n > 99 ? '99+' : String(n);
-      badge.classList.remove('hidden');
-    } else {
-      badge.classList.add('hidden');
+    // Met à jour les deux pastilles : l'ancienne du FAB (désormais caché)
+    // et la nouvelle du bouton "Chat" intégré dans la barre du Cockpit.
+    const targets = [
+      document.getElementById('thomas-fab-badge'),
+      document.getElementById('m-chat-thomas-badge'),
+    ];
+    for (const badge of targets) {
+      if (!badge) continue;
+      if (n > 0) {
+        badge.textContent = n > 99 ? '99+' : String(n);
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
     }
   },
 

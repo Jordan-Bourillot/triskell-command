@@ -285,26 +285,11 @@ const MusicPlayer = {
       @media (max-width: 767px) {
         .music-player { left: 12px; bottom: max(12px, env(safe-area-inset-bottom, 12px)); }
       }
-      .music-player-toggle {
-        width: 44px;
-        height: 44px;
-        border-radius: 50%;
-        background: hsl(var(--accent));
-        color: white;
-        border: 0;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 4px 14px hsl(var(--accent) / 0.4);
-        transition: transform 120ms, box-shadow 120ms;
-      }
-      .music-player-toggle:hover {
-        transform: scale(1.06);
-        box-shadow: 0 6px 18px hsl(var(--accent) / 0.55);
-      }
-      .music-player-toggle svg { width: 20px; height: 20px; }
-      .music-player.is-expanded .music-player-toggle { display: none; }
+      /* Le rond flottant est désactivé — c'est maintenant le bouton
+         "Musique" de la barre du Cockpit qui ouvre le panneau (voir
+         morning.js). On garde le markup pour la cohérence du JS mais
+         on n'affiche jamais le toggle. */
+      .music-player-toggle { display: none; }
       .music-player-panel {
         display: none;
         width: 320px;
