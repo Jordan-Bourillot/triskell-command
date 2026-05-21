@@ -5627,6 +5627,66 @@ class Api:
             logger.warning("messages_send: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def gif_search(self, payload: dict | None = None) -> dict:
+        """Cherche des GIFs via Giphy (proxy serveur).
+
+        La clé API Giphy est lue depuis la variable d'env GIPHY_API_KEY
+        (à configurer côté Coolify ou dans l'environnement du serveur).
+        Si vide ou non défini → fallback sur la clé éventuellement stockée
+        dans les settings locaux à `apis.giphy_key`. Sinon erreur claire.
+
+        Payload : { q?: string, limit?: int }. Si q vide → trending.
+        Réponse : { ok, items: [{ id, title, thumb_url, full_url }] }.
+        """
+        try:
+            import os, urllib.request, urllib.parse, json as _json
+            key = (os.environ.get("GIPHY_API_KEY") or "").strip()
+            if not key:
+                # Fallback : settings locaux apis.giphy_key
+                try:
+                    key = (self._app_state.get("apis", "giphy_key") or "").strip()
+                except Exception:
+                    key = ""
+            if not key:
+                return {"ok": False, "error": "no_giphy_key",
+                        "items": [],
+                        "message": ("Clé Giphy manquante. Crée-la (gratuit) "
+                                    "sur developers.giphy.com puis ajoute "
+                                    "GIPHY_API_KEY dans Coolify.")}
+            q = ((payload or {}).get("q") or "").strip()
+            limit = int((payload or {}).get("limit") or 24)
+            params = {"api_key": key, "limit": str(limit), "rating": "pg-13"}
+            if q:
+                params["q"] = q
+                url = "https://api.giphy.com/v1/gifs/search?" + urllib.parse.urlencode(params)
+            else:
+                url = "https://api.giphy.com/v1/gifs/trending?" + urllib.parse.urlencode(params)
+            req = urllib.request.Request(url, headers={"User-Agent": "Triskell-Command"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                raw = r.read()
+            data = _json.loads(raw.decode("utf-8")) if raw else {}
+            items = []
+            for g in (data.get("data") or []):
+                images = g.get("images") or {}
+                thumb = (images.get("fixed_height_small")
+                         or images.get("fixed_height") or {})
+                full  = (images.get("original")
+                         or images.get("fixed_height") or {})
+                if not thumb.get("url") or not full.get("url"):
+                    continue
+                items.append({
+                    "id":        g.get("id") or "",
+                    "title":     g.get("title") or "gif",
+                    "thumb_url": thumb.get("url"),
+                    "full_url":  full.get("url"),
+                    "width":     full.get("width"),
+                    "height":    full.get("height"),
+                })
+            return {"ok": True, "items": items}
+        except Exception as exc:
+            logger.warning("gif_search: %s", exc)
+            return {"ok": False, "error": str(exc), "items": []}
+
     def messages_delete(self, payload: dict) -> dict:
         """Supprime (soft-delete) un message envoyé par l'utilisateur
         courant. Payload : { id }. Le serveur impose que sender_id ==

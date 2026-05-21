@@ -781,12 +781,10 @@ const Thomas = {
   },
 
   // ───────────────────────── Picker GIF (Giphy) ─────────────────────────
-  /** Clé Giphy publique "bêta" — fonctionne pour démarrer (rate-limitée).
-   *  Pour la prod, créer une clé applicative sur developers.giphy.com et
-   *  la remplacer ici. */
-  _giphyKey: 'dc6zaTOxFJmzC',
+  /** La recherche passe par /api/gif_search côté serveur — la clé Giphy
+   *  est stockée dans la variable d'env GIPHY_API_KEY (Coolify) et ne
+   *  quitte jamais le serveur. Plus de clé en dur dans le code. */
   _gifSearchTimer: null,
-  _gifAbortCtrl: null,
 
   _openGifPicker() {
     // Toggle : si déjà ouverte, on referme.
@@ -829,10 +827,6 @@ const Thomas = {
   },
 
   _closeGifPicker() {
-    if (this._gifAbortCtrl) {
-      try { this._gifAbortCtrl.abort(); } catch (e) {}
-      this._gifAbortCtrl = null;
-    }
     if (this._gifSearchTimer) {
       clearTimeout(this._gifSearchTimer);
       this._gifSearchTimer = null;
@@ -841,46 +835,37 @@ const Thomas = {
     if (overlay) overlay.remove();
   },
 
-  /** Charge les GIFs depuis Giphy. Si query vide → trending, sinon search. */
+  /** Charge les GIFs via le proxy serveur (qui détient la clé Giphy).
+   *  Si query vide → trending. Sinon search. */
   async _searchGifs(query) {
     const grid = document.getElementById('thomas-gif-grid');
     if (!grid) return;
     grid.innerHTML = `<div class="thomas-gif-loading">Chargement…</div>`;
 
-    // Annule la requête précédente s'il y en a une en cours
-    if (this._gifAbortCtrl) {
-      try { this._gifAbortCtrl.abort(); } catch (e) {}
+    if (typeof App === 'undefined' || !App.api) {
+      grid.innerHTML = `<div class="thomas-gif-empty">Service indisponible.</div>`;
+      return;
     }
-    this._gifAbortCtrl = new AbortController();
-
-    const base = query
-      ? `https://api.giphy.com/v1/gifs/search?q=${encodeURIComponent(query)}&limit=24&rating=pg-13`
-      : `https://api.giphy.com/v1/gifs/trending?limit=24&rating=pg-13`;
-    const url = `${base}&api_key=${encodeURIComponent(this._giphyKey)}`;
-
     try {
-      const r = await fetch(url, { signal: this._gifAbortCtrl.signal });
-      const j = await r.json();
-      const items = (j && j.data) || [];
+      const res = await App.api.gif_search({ q: query, limit: 24 });
+      if (!res || !res.ok) {
+        const msg = (res && res.message) || 'Erreur de chargement.';
+        grid.innerHTML = `<div class="thomas-gif-empty">${this._escape(msg)}</div>`;
+        return;
+      }
+      const items = res.items || [];
       if (!items.length) {
         grid.innerHTML = `<div class="thomas-gif-empty">Aucun GIF trouvé.</div>`;
         return;
       }
-      grid.innerHTML = items.map(g => {
-        const thumb = (g.images && (g.images.fixed_height_small || g.images.fixed_height));
-        const full  = (g.images && (g.images.original || g.images.fixed_height));
-        if (!thumb || !full) return '';
-        // On stocke l'URL haute déf à envoyer dans un attribut data.
-        return `
-          <button type="button" class="thomas-gif-thumb"
-                  data-gif-url="${this._escape(full.url)}"
-                  data-gif-name="${this._escape(g.title || g.id || 'gif')}"
-                  data-gif-w="${this._escape(full.width || '')}"
-                  data-gif-h="${this._escape(full.height || '')}">
-            <img src="${this._escape(thumb.url)}" alt="${this._escape(g.title || 'GIF')}"
-                 loading="lazy"/>
-          </button>`;
-      }).join('');
+      grid.innerHTML = items.map(g => `
+        <button type="button" class="thomas-gif-thumb"
+                data-gif-url="${this._escape(g.full_url || '')}"
+                data-gif-name="${this._escape(g.title || g.id || 'gif')}">
+          <img src="${this._escape(g.thumb_url || '')}"
+               alt="${this._escape(g.title || 'GIF')}"
+               loading="lazy"/>
+        </button>`).join('');
 
       grid.querySelectorAll('.thomas-gif-thumb').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -891,7 +876,6 @@ const Thomas = {
         });
       });
     } catch (e) {
-      if (e.name === 'AbortError') return;
       console.warn('searchGifs:', e);
       grid.innerHTML = `<div class="thomas-gif-empty">Erreur de chargement.</div>`;
     }
