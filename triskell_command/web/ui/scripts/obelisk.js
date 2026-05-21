@@ -573,6 +573,19 @@ const Obelisk = {
 
       <div id="ob-active-filters"></div>
 
+      <div class="ob-export-bar" style="display:flex; justify-content:flex-end; gap:8px; margin: 6px 0 10px;">
+        <button id="ob-export-xlsx" class="btn btn-ghost" title="Télécharger la liste filtrée en Excel"
+                style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/><line x1="9" y1="18" x2="15" y2="18"/></svg>
+          Excel
+        </button>
+        <button id="ob-export-pdf" class="btn btn-ghost" title="Télécharger la liste filtrée en PDF"
+                style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg>
+          PDF
+        </button>
+      </div>
+
       <div id="ob-table-wrap" class="ob-table-card"></div>
       <div id="ob-pager" class="ob-pager"></div>
     `;
@@ -600,7 +613,62 @@ const Obelisk = {
       document.getElementById(id).addEventListener('change', applyFromInputs);
     });
 
+    // Boutons d'export Excel / PDF — utilisent les filtres en cours
+    const btnXlsx = document.getElementById('ob-export-xlsx');
+    const btnPdf  = document.getElementById('ob-export-pdf');
+    if (btnXlsx) btnXlsx.addEventListener('click', () => this._exportList('xlsx'));
+    if (btnPdf)  btnPdf .addEventListener('click', () => this._exportList('pdf'));
+
     await this._loadCreators();
+  },
+
+  // ── Export Excel / PDF (depuis les filtres en cours) ──────────────
+  async _exportList(format) {
+    const btn = document.getElementById(format === 'xlsx' ? 'ob-export-xlsx' : 'ob-export-pdf');
+    const originalLabel = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = format === 'xlsx' ? 'Excel…' : 'PDF…';
+    }
+    try {
+      const f = this.state.filters || {};
+      const payload = {
+        format,
+        platform:  f.platform  || '',
+        status:    f.status    || '',
+        min_score: f.min_score || 0,
+        city:      f.city      || '',
+        q:         f.q         || '',
+        has_email: f.has_email || '',
+        country:   f.country   || '',
+        job_id:    f.job_id    || '',
+      };
+      const res = await this._api('export', payload);
+      if (!res || !res.ok) {
+        alert("Export impossible : " + ((res && res.error) || 'erreur inconnue'));
+        return;
+      }
+      // Décode le base64 et déclenche le download
+      const bin = atob(res.b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: res.mime || 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = res.filename || ('obelisk_export.' + format);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      alert("Export en erreur : " + (err && err.message || err));
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalLabel;
+      }
+    }
   },
 
   _emptyHeroHtml() {

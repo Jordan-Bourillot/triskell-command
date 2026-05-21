@@ -3613,6 +3613,64 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "stats": {}}
 
+    def obelisk_export(self, payload: dict | None = None) -> dict:
+        """Exporte la liste filtrée de prospects en xlsx ou pdf.
+
+        Payload accepté :
+            { "format": "xlsx" | "pdf",
+              "platform": "", "status": "", "min_score": 0, "city": "",
+              "q": "", "has_email": "yes"|"no"|"", "country": "",
+              "job_id": "" }
+
+        Renvoie {ok, filename, mime, b64, count}. Le front décode le b64 et
+        déclenche un téléchargement.
+        """
+        p = payload or {}
+        fmt = (p.get("format") or "xlsx").lower().strip()
+        if fmt not in ("xlsx", "pdf"):
+            return {"ok": False, "error": "format invalide (xlsx ou pdf)"}
+        try:
+            from ..integrations.obelisk import repo as r, export as ex
+            has_email = p.get("has_email")
+            if has_email == "yes":   has_email = True
+            elif has_email == "no":  has_email = False
+            else:                    has_email = None
+            res = r.list_creators_for_export(
+                platform=str(p.get("platform") or "").strip(),
+                status=str(p.get("status") or "").strip(),
+                min_score=int(p.get("min_score") or 0),
+                city=str(p.get("city") or "").strip(),
+                q=str(p.get("q") or "").strip(),
+                has_email=has_email,
+                country=str(p.get("country") or "").strip(),
+                job_id=str(p.get("job_id") or "").strip(),
+            )
+            if not res.get("ok"):
+                return res
+            rows = res.get("rows") or []
+            from datetime import datetime as _dt
+            stamp = _dt.now().strftime("%Y-%m-%d_%Hh%M")
+            if fmt == "xlsx":
+                data = ex.to_xlsx(rows, title=f"Prospects Obelisk — {stamp}")
+                mime = ("application/vnd.openxmlformats-officedocument"
+                        ".spreadsheetml.sheet")
+                filename = f"obelisk_prospects_{stamp}.xlsx"
+            else:
+                data = ex.to_pdf(rows, title=f"Prospects Obelisk — {stamp}")
+                mime = "application/pdf"
+                filename = f"obelisk_prospects_{stamp}.pdf"
+            import base64
+            return {
+                "ok": True,
+                "filename": filename,
+                "mime": mime,
+                "b64": base64.b64encode(data).decode("ascii"),
+                "count": len(rows),
+            }
+        except Exception as exc:
+            logger.exception("obelisk_export failed")
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
     def obelisk_get_config(self, payload: dict | None = None) -> dict:
         try:
             from ..integrations.obelisk import repo as r
@@ -3717,6 +3775,75 @@ class Api:
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc), "count": 0, "jobs": []}
+
+    # ------------------------------------------------------------------
+    # Activité agrégée des 4 pipelines sites (Lagriffe / RankUs / WoW /
+    # Pixel Pros) — utilisée par la sidebar (badge "il a bougé X trucs
+    # depuis ta dernière visite") et le bloc Cockpit.
+    # ------------------------------------------------------------------
+    def pipelines_activity(self, payload: dict | None = None) -> dict:
+        """Renvoie pour chaque pipeline les 20 derniers intakes triés par
+        date de dernier changement (max(updated_at, last_attempt_at,
+        created_at)). Le front compare ces timestamps à sa date locale
+        "dernière visite" pour calculer le compteur de nouveautés.
+
+        Payload optionnel : {limit: int} (par défaut 20).
+        """
+        try:
+            limit = int((payload or {}).get("limit") or 20)
+        except (TypeError, ValueError):
+            limit = 20
+
+        def _change_at(it: dict) -> str:
+            return (it.get("updated_at")
+                    or it.get("last_attempt_at")
+                    or it.get("created_at")
+                    or "")
+
+        def _display_name(it: dict) -> str:
+            company = (it.get("company_name") or "").strip()
+            first = (it.get("client_first_name") or it.get("first_name") or "").strip()
+            last = (it.get("client_last_name") or it.get("last_name") or "").strip()
+            full = (first + " " + last).strip()
+            if company and full:
+                return f"{company} · {full}"
+            return company or full or (it.get("client_email") or it.get("email") or "—")
+
+        def _shape(prefix: str, intakes: list[dict]) -> dict:
+            shaped = []
+            for it in intakes or []:
+                shaped.append({
+                    "id":     it.get("id") or "",
+                    "name":   _display_name(it),
+                    "status": it.get("status") or "",
+                    "at":     _change_at(it),
+                })
+            shaped.sort(key=lambda x: x["at"] or "", reverse=True)
+            latest = shaped[0]["at"] if shaped else ""
+            return {"prefix": prefix, "recent": shaped, "latest_change_at": latest}
+
+        out: dict[str, dict] = {}
+        try:
+            from ..integrations.wow import repo as _wow
+            out["wow"] = _shape("wow", _wow.list_intakes(limit=limit))
+        except Exception as exc:
+            out["wow"] = {"prefix": "wow", "recent": [], "latest_change_at": "", "error": str(exc)}
+        try:
+            from ..integrations.rankus import repo as _rank
+            out["rankus"] = _shape("rankus", _rank.list_intakes(limit=limit))
+        except Exception as exc:
+            out["rankus"] = {"prefix": "rankus", "recent": [], "latest_change_at": "", "error": str(exc)}
+        try:
+            from ..integrations.lagriffe import repo as _lag
+            out["lagriffe"] = _shape("lagriffe", _lag.list_intakes(limit=limit))
+        except Exception as exc:
+            out["lagriffe"] = {"prefix": "lagriffe", "recent": [], "latest_change_at": "", "error": str(exc)}
+        try:
+            from ..integrations.pixelpros import repo as _pp
+            out["pixelpros"] = _shape("pixelpros", _pp.list_intakes(limit=limit))
+        except Exception as exc:
+            out["pixelpros"] = {"prefix": "pixelpros", "recent": [], "latest_change_at": "", "error": str(exc)}
+        return {"ok": True, "pipelines": out}
 
     def _safe_user_email(self) -> str:
         """Récupère l'email user de manière défensive (les méthodes

@@ -202,6 +202,28 @@ def list_creators(*,
         return {"ok": False, "error": str(exc), "rows": [], "count": 0}
 
 
+def list_creators_for_export(*, limit_max: int = 5000, **filters) -> dict:
+    """Récupère TOUTES les lignes qui matchent les filtres, sans pagination
+    (cap à limit_max pour ne pas exploser la mémoire). Réutilise list_creators
+    par pages de 500. Renvoie {"ok": True, "rows": [...]}.
+
+    Les paramètres acceptés sont les mêmes que list_creators sauf limit/offset.
+    """
+    page_size = 500
+    all_rows: list[dict] = []
+    offset = 0
+    while True:
+        res = list_creators(limit=page_size, offset=offset, **filters)
+        if not res.get("ok"):
+            return res
+        chunk = res.get("rows") or []
+        all_rows.extend(chunk)
+        if len(chunk) < page_size or len(all_rows) >= limit_max:
+            break
+        offset += page_size
+    return {"ok": True, "rows": all_rows[:limit_max], "count": len(all_rows[:limit_max])}
+
+
 def get_creator(prospect_id: str) -> dict:
     sb = _sb()
     if sb is None:
