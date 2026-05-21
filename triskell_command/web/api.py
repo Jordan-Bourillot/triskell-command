@@ -5079,6 +5079,125 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
+    # Log d'une prospection manuelle — crée/upserte un prospect et le
+    # marque comme contacté. Utilisé par les campagnes hors-Convoy où
+    # les destinataires n'existent pas encore en base (prospection au
+    # fil de l'eau, mails de partenariat, etc.).
+    # ------------------------------------------------------------------
+    def prospect_log_outreach(self, payload: dict) -> dict:
+        """Crée (ou met à jour) un prospect et le marque comme contacté.
+
+        Si un prospect existe déjà avec cet email, on met seulement à jour
+        son statut, last_contact_at, et on concatène les notes. Sinon on
+        l'insère.
+
+        payload = {
+            name:     str (requis) — nom de l'organisation/contact
+            email:    str (requis) — adresse mail principale
+            website:  str (optionnel)
+            city:     str (optionnel)
+            industry: str (optionnel) — secteur d'activité
+            status:   str (défaut 'contacted')
+            notes:    str (optionnel)
+            tags:     list[str] (optionnel)
+        }
+        """
+        p = payload or {}
+        name = (p.get("name") or "").strip()
+        email = (p.get("email") or "").strip().lower()
+        website = (p.get("website") or "").strip()
+        city = (p.get("city") or "").strip()
+        industry = (p.get("industry") or "").strip()
+        status = (p.get("status") or "contacted").strip() or "contacted"
+        notes = (p.get("notes") or "").strip()
+        tags = p.get("tags") or []
+        if not isinstance(tags, list):
+            tags = []
+
+        if not name or not email:
+            return {"ok": False, "error": "name et email requis"}
+        if "@" not in email:
+            return {"ok": False, "error": "Email invalide"}
+
+        client = self._supabase()
+        if not client:
+            return {"ok": False, "error": "Base partagée non connectée"}
+        sb = client.raw
+        now_iso = self._iso_now()
+
+        ws_id = None
+        try:
+            ws_id = client._current_workspace_id()
+        except Exception:
+            pass
+
+        # Cherche un prospect existant par email (jsonb contains)
+        existing: list = []
+        try:
+            res = (sb.table("prospects")
+                   .select("id, status, notes, tags")
+                   .contains("emails", [email])
+                   .limit(1)
+                   .execute())
+            existing = res.data or []
+        except Exception as exc:
+            logger.debug("prospect_log_outreach lookup KO: %s", exc)
+
+        if existing:
+            pid = existing[0]["id"]
+            old_notes = (existing[0].get("notes") or "").strip()
+            merged_notes = old_notes
+            if notes:
+                stamp = now_iso[:10]
+                merged_notes = (old_notes
+                                + ("\n" if old_notes else "")
+                                + f"[{stamp}] {notes}").strip()
+            old_tags = existing[0].get("tags") or []
+            if isinstance(old_tags, str):
+                try:
+                    old_tags = json.loads(old_tags)
+                except Exception:
+                    old_tags = []
+            merged_tags = list({*(old_tags or []), *tags})
+            update_row = {
+                "status": status,
+                "last_contact_at": now_iso,
+            }
+            if merged_notes:
+                update_row["notes"] = merged_notes
+            if merged_tags:
+                update_row["tags"] = merged_tags
+            try:
+                sb.table("prospects").update(update_row).eq("id", pid).execute()
+                return {"ok": True, "prospect_id": pid, "action": "updated"}
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+
+        # Insert nouveau prospect
+        row = {
+            "name": name,
+            "emails": [email],
+            "website": website,
+            "city": city,
+            "industry": industry,
+            "status": status,
+            "last_contact_at": now_iso,
+            "notes": notes,
+            "tags": tags,
+        }
+        if ws_id:
+            row["workspace_id"] = ws_id
+        try:
+            res = sb.table("prospects").insert(row).execute()
+            new_id = ""
+            if res.data:
+                first = res.data[0] or {}
+                new_id = first.get("id", "")
+            return {"ok": True, "prospect_id": new_id, "action": "created"}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
     # Timeline d'un prospect — agrégation de tout son parcours
     # ------------------------------------------------------------------
     def prospect_timeline(self, payload: dict) -> dict:
