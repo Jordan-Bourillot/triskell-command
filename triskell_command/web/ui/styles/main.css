@@ -372,6 +372,24 @@ html, body {
    display:flex via JS quand il devient actif. */
 #thomas-fab { display: none !important; }
 
+/* ─── Pastille "messages non lus" sur le bouton Chat du Cockpit ───
+   Quand y a des messages en attente, on fait pulser la pastille rouge
+   ET on ajoute un halo rouge subtil autour du bouton pour qu'on capte
+   tout de suite qu'il se passe un truc, même quand on regarde ailleurs. */
+#m-chat-thomas-badge:not(.hidden) {
+  animation: chat-badge-pulse 1.4s ease-in-out infinite;
+  box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55);
+}
+#m-chat-thomas:has(#m-chat-thomas-badge:not(.hidden)) {
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.5),
+              0 0 14px rgba(239, 68, 68, 0.25);
+}
+@keyframes chat-badge-pulse {
+  0%   { box-shadow: 0 0 0 0   rgba(239, 68, 68, 0.55); }
+  70%  { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0   rgba(239, 68, 68, 0); }
+}
+
 @media (max-width: 767px) {
   #claude-fab-wrap { display: none !important; }
 }
