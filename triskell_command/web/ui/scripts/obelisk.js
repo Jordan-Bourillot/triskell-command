@@ -1576,6 +1576,14 @@ const Obelisk = {
             <div class="text-[11px] text-text-muted mt-1">Une virgule = une recherche supplémentaire. Tout est fusionné dans un seul job, avec dédup automatique.</div>
           </label>
 
+          ${isPro ? `
+          <label class="block mb-4">
+            <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Zone géographique</div>
+            <input id="ob-s-osm-area" placeholder="ex : Rennes, Bretagne, Île-de-France, France" value="${this._esc(cfg.osm_area || 'France')}" style="width:100%; padding:10px 14px; border-radius:8px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 14px;">
+            <div class="text-[11px] text-text-muted mt-1">Nom exact tel qu'il est sur OpenStreetMap (commune, département, région, pays). Plus la zone est petite, plus la recherche est rapide et ciblée.</div>
+          </label>
+          ` : ''}
+
           <div class="block mb-4">
             <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Plateformes</div>
             <div class="ob-platform-grid">
@@ -1733,6 +1741,9 @@ const Obelisk = {
     const onlyWithEmail = document.getElementById('ob-s-with-email').checked;
     const onlyUncontacted = document.getElementById('ob-s-uncontacted').checked;
 
+    const osmAreaEl = document.getElementById('ob-s-osm-area');
+    const osmArea = osmAreaEl ? osmAreaEl.value.trim() : '';
+
     const filters = {
       monetized_mode:  monetMode,
       min_subscribers: minSubs,
@@ -1741,6 +1752,7 @@ const Obelisk = {
       language: 'fr',
       only_with_email:  onlyWithEmail,
       only_uncontacted: onlyUncontacted,
+      osm_area:         osmArea,
     };
 
     const btn = document.getElementById('ob-s-launch');

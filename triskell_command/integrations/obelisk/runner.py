@@ -32,6 +32,147 @@ logger = logging.getLogger(__name__)
 # sont gérées par run_creators_pipeline (sources natives : YouTube etc.).
 PHANTOM_PLATFORMS = ("linkedin", "instagram", "tiktok")
 
+
+# Dictionnaire FR → tag OpenStreetMap. Permet à l'utilisateur de taper un
+# métier en langage courant et qu'on traduise vers le bon tag Overpass.
+# Soit une clé de openstreetmap.CATEGORIES, soit un tag direct "key=value".
+# La normalisation côté lookup retire les accents et met en minuscules.
+_NICHE_TO_OSM: dict[str, str] = {
+    # Restauration (la catégorie "restaurants" couvre déjà café/bar/fast_food)
+    "restaurant": "restaurants", "restaurants": "restaurants",
+    "resto": "restaurants", "restos": "restaurants",
+    "cafe": "amenity=cafe", "cafes": "amenity=cafe",
+    "bar": "amenity=bar", "bars": "amenity=bar",
+    "fast food": "amenity=fast_food", "fast-food": "amenity=fast_food",
+    "pub": "amenity=pub",
+    # Métiers de bouche
+    "boulanger": "shop=bakery", "boulangerie": "shop=bakery",
+    "boulangeries": "shop=bakery",
+    "patissier": "shop=pastry", "patisserie": "shop=pastry",
+    "boucher": "shop=butcher", "boucherie": "shop=butcher",
+    "boucheries": "shop=butcher",
+    "fromager": "shop=cheese", "fromagerie": "shop=cheese",
+    "epicerie": "shop=convenience", "epiceries": "shop=convenience",
+    "caviste": "shop=wine", "vin": "shop=wine",
+    "primeur": "shop=greengrocer",
+    "chocolatier": "shop=chocolate", "chocolaterie": "shop=chocolate",
+    "traiteur": "shop=deli",
+    # Beauté / soin
+    "coiffeur": "shop=hairdresser", "coiffeurs": "shop=hairdresser",
+    "coiffeuse": "shop=hairdresser", "salon de coiffure": "shop=hairdresser",
+    "barbier": "shop=hairdresser",
+    "estheticienne": "shop=beauty", "salon de beaute": "shop=beauty",
+    "institut de beaute": "shop=beauty",
+    "tatoueur": "shop=tattoo", "tatouage": "shop=tattoo",
+    "ongles": "shop=beauty", "manucure": "shop=beauty",
+    # Santé
+    "pharmacie": "amenity=pharmacy", "pharmacies": "amenity=pharmacy",
+    "medecin": "amenity=doctors", "medecins": "amenity=doctors",
+    "docteur": "amenity=doctors", "cabinet medical": "amenity=doctors",
+    "dentiste": "amenity=dentist", "dentistes": "amenity=dentist",
+    "veterinaire": "amenity=veterinary", "veto": "amenity=veterinary",
+    "kine": "healthcare=physiotherapist",
+    "kinesitherapeute": "healthcare=physiotherapist",
+    "osteopathe": "healthcare=alternative",
+    "psychologue": "healthcare=psychotherapist",
+    "psy": "healthcare=psychotherapist",
+    "opticien": "shop=optician", "opticiens": "shop=optician",
+    # Bureaux / services pro
+    "avocat": "office=lawyer", "avocats": "office=lawyer",
+    "notaire": "office=notary", "notaires": "office=notary",
+    "comptable": "office=accountant",
+    "expert comptable": "office=accountant",
+    "expert-comptable": "office=accountant",
+    "immobilier": "office=estate_agent",
+    "agence immobiliere": "office=estate_agent",
+    "agent immobilier": "office=estate_agent",
+    "assurance": "office=insurance", "assureur": "office=insurance",
+    "architecte": "office=architect", "architectes": "office=architect",
+    "banque": "amenity=bank",
+    # Hébergement
+    "hotel": "tourism=hotel", "hotels": "tourism=hotel",
+    "chambre d hote": "tourism=guest_house",
+    "chambres d hotes": "tourism=guest_house",
+    "gite": "tourism=guest_house", "gites": "tourism=guest_house",
+    "camping": "tourism=camp_site",
+    # Auto / moto
+    "garage": "shop=car_repair", "garagiste": "shop=car_repair",
+    "mecanicien": "shop=car_repair",
+    "concessionnaire": "shop=car",
+    "carrosserie": "shop=car_repair",
+    "moto": "shop=motorcycle",
+    "auto ecole": "amenity=driving_school",
+    "auto-ecole": "amenity=driving_school",
+    # Commerces divers
+    "fleuriste": "shop=florist", "fleuristes": "shop=florist",
+    "bijoutier": "shop=jewelry", "bijouterie": "shop=jewelry",
+    "librairie": "shop=books", "libraire": "shop=books",
+    "vetements": "shop=clothes", "habillement": "shop=clothes",
+    "chaussures": "shop=shoes", "chausseur": "shop=shoes",
+    "informatique": "shop=computer",
+    "telephone": "shop=mobile_phone", "telephonie": "shop=mobile_phone",
+    "meubles": "shop=furniture", "ameublement": "shop=furniture",
+    "decoration": "shop=interior_decoration",
+    "jardinerie": "shop=garden_centre",
+    "bricolage": "shop=hardware",
+    "animalerie": "shop=pet",
+    "vape": "shop=e-cigarette", "cigarette electronique": "shop=e-cigarette",
+    # Sport / loisirs
+    "salle de sport": "leisure=fitness_centre",
+    "fitness": "leisure=fitness_centre",
+    "gym": "leisure=fitness_centre",
+    "yoga": "leisure=fitness_centre",
+    # Artisanat
+    "menuisier": "craft=carpenter", "menuiserie": "craft=carpenter",
+    "plombier": "craft=plumber", "plomberie": "craft=plumber",
+    "electricien": "craft=electrician",
+    "peintre": "craft=painter", "peinture": "craft=painter",
+    "macon": "craft=builder", "maconnerie": "craft=builder",
+    "couvreur": "craft=roofer",
+    "carreleur": "craft=tiler",
+    "serrurier": "craft=locksmith",
+    # Éducation
+    "ecole": "amenity=school",
+    "ecole de musique": "amenity=music_school",
+    "ecole de langues": "amenity=language_school",
+    "creche": "amenity=kindergarten",
+    # Tout un secteur (générique)
+    "commerce": "commerces", "commerces": "commerces",
+    "artisan": "artisans", "artisans": "artisans",
+    "bureau": "bureaux", "bureaux": "bureaux",
+    "sante": "sante",
+    "education": "education",
+    "tourisme": "tourisme",
+    "service": "services", "services": "services",
+    "association": "associations", "associations": "associations",
+}
+
+
+def _normalize_for_lookup(s: str) -> str:
+    """Met en minuscules, enlève les accents et les apostrophes/traits."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s.strip().lower())
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return s.replace("'", " ").replace("-", " ").replace("  ", " ").strip()
+
+
+def _map_niche_to_osm(niche: str) -> str | None:
+    """Traduit la niche tapée par l'utilisateur en catégorie/tag OSM.
+    Retourne None si la niche n'est pas reconnue (l'appelant peut alors
+    soit fallback sur le défaut, soit prévenir l'utilisateur)."""
+    key = _normalize_for_lookup(niche or "")
+    if not key:
+        return None
+    # match exact
+    if key in _NICHE_TO_OSM:
+        return _NICHE_TO_OSM[key]
+    # match partiel : si la niche contient un mot-clé connu (ex : "boulanger
+    # artisanal à Rennes" → "boulanger")
+    for word, tag in _NICHE_TO_OSM.items():
+        if word in key:
+            return tag
+    return None
+
 # job_id → Thread (pour pouvoir savoir si une recherche tourne encore localement)
 _RUNNING: dict[str, threading.Thread] = {}
 
@@ -181,6 +322,11 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
             cfg.platforms = platforms
             cfg.max_per_platform = max_per_platform
 
+        # Triskell Command : on ne génère pas les mails ici. La recherche
+        # collecte + enrichit + uploade dans la liste prospects ; l'écriture
+        # des mails se fait à la main depuis l'UI sur les fiches.
+        cfg.skip_ai = True
+
         # Sépare plateformes natives (creators_pipeline) vs PhantomBuster.
         native_platforms = [p for p in platforms if p not in PHANTOM_PLATFORMS]
         phantom_platforms = [p for p in platforms if p in PHANTOM_PLATFORMS]
@@ -200,6 +346,15 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
         if not niche_list:
             niche_list = [niche or ""]
 
+        # Zone géographique demandée par l'utilisateur (UI Obelisk). Pilote
+        # osm_area pour les recherches OpenStreetMap. Défaut "France" si rien
+        # n'est précisé.
+        osm_area_override = (
+            (overrides.get("osm_area") or "").strip()
+            or (filters.get("osm_area") or "").strip()
+            or ""
+        )
+
         # 1) Pipeline natif (YouTube, Twitch, Reddit, etc.)
         if native_platforms:
             cfg.platforms = native_platforms
@@ -208,6 +363,23 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
                     log(f"════════ NICHE {idx}/{len(niche_list)} : "
                         f"« {sub_niche} » ════════")
                 cfg.niche = sub_niche
+
+                # OSM : on traduit la niche FR ("boulanger", "coiffeur"...) en
+                # tag Overpass. Sans ça, OSM cherche toujours "restaurants en
+                # France" peu importe ce que l'utilisateur tape.
+                if "osm" in native_platforms:
+                    mapped = _map_niche_to_osm(sub_niche)
+                    if mapped:
+                        cfg.osm_category = mapped
+                    else:
+                        log(f"⚠ OSM : niche « {sub_niche} » non reconnue — "
+                            f"recherche sur « {cfg.osm_category} » par défaut. "
+                            f"Essaie : boulanger, coiffeur, dentiste, "
+                            f"plombier, garage, hôtel, fleuriste…")
+                    if osm_area_override:
+                        cfg.osm_area = osm_area_override
+                    log(f"  OSM ciblé : {cfg.osm_category} @ {cfg.osm_area}")
+
                 log(f"Démarrage recherche natives '{sub_niche}' sur "
                     f"{', '.join(native_platforms)}…")
                 # Snapshot des match_keys connues AVANT le run pour détecter
@@ -692,6 +864,9 @@ def _normalize_filters(raw: dict) -> dict:
         "language":         language,
         "only_with_email":  bool(raw.get("only_with_email")),
         "only_uncontacted": bool(raw.get("only_uncontacted")),
+        # Zone OSM saisie côté UI (ex : "Rennes", "Bretagne", "France").
+        # Vide = on garde le défaut du pipeline (cfg.osm_area = "France").
+        "osm_area":         _s(raw.get("osm_area")),
     }
 
 
