@@ -169,7 +169,8 @@ const Chasseur = {
       };
     });
 
-    // Styles spécifiques aux boutons de mode (actif vs inactif)
+    // Styles spécifiques aux boutons de mode (actif vs inactif) + inputs
+    // lisibles dans les 3 thèmes (clair / mid / sombre).
     if (!document.getElementById('ch-mode-styles')) {
       const s = document.createElement('style');
       s.id = 'ch-mode-styles';
@@ -185,6 +186,39 @@ const Chasseur = {
           background: hsl(var(--accent) / 0.10);
           border-color: hsl(var(--accent));
           color: hsl(var(--accent));
+        }
+        /* Inputs / selects du formulaire Chasseur — contraste forcé pour
+           que le texte reste lisible dans les 3 thèmes. */
+        #ch-form .input,
+        #ch-form input[type="text"],
+        #ch-form select {
+          width: 100%;
+          padding: 8px 12px;
+          background: hsl(var(--surface));
+          color: hsl(var(--text));
+          border: 1px solid hsl(var(--border-strong));
+          border-radius: 8px;
+          font-size: 13px;
+          transition: border-color 160ms, box-shadow 160ms;
+        }
+        #ch-form select {
+          appearance: none;
+          background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+          background-repeat: no-repeat;
+          background-position: right 10px center;
+          padding-right: 32px;
+        }
+        #ch-form .input:focus,
+        #ch-form input[type="text"]:focus,
+        #ch-form select:focus {
+          outline: none;
+          border-color: hsl(var(--accent));
+          box-shadow: 0 0 0 3px hsl(var(--accent) / 0.15);
+        }
+        #ch-form input::placeholder { color: hsl(var(--text-muted)); }
+        #ch-form select option {
+          background: hsl(var(--surface));
+          color: hsl(var(--text));
         }
       `;
       document.head.appendChild(s);
