@@ -3613,6 +3613,27 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "stats": {}}
 
+    def obelisk_audit_non_french(self, payload: dict | None = None) -> dict:
+        """Scan de la base → renvoie le nombre de prospects non-francophones
+        et 10 exemples. Sert au preview avant suppression."""
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.audit_non_francophones()
+        except Exception as exc:
+            logger.exception("obelisk_audit_non_french failed")
+            return {"ok": False, "error": str(exc)}
+
+    def obelisk_purge_non_french(self, payload: dict | None = None) -> dict:
+        """Supprime les non-francophones de la base.
+        Exige payload.confirm == 'PURGE_NON_FR'."""
+        confirm = (payload or {}).get("confirm") or ""
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.purge_non_francophones(confirm=confirm)
+        except Exception as exc:
+            logger.exception("obelisk_purge_non_french failed")
+            return {"ok": False, "error": str(exc)}
+
     def obelisk_export(self, payload: dict | None = None) -> dict:
         """Exporte la liste filtrée de prospects en xlsx ou pdf.
 
@@ -3635,7 +3656,16 @@ class Api:
             if has_email == "yes":   has_email = True
             elif has_email == "no":  has_email = False
             else:                    has_email = None
+            # Limite optionnelle : si l'user veut un sous-ensemble (ex. 50 premiers).
+            # Capé à 5000 côté repo pour éviter d'exploser la mémoire.
+            user_limit = p.get("limit")
+            try:
+                user_limit = int(user_limit) if user_limit is not None else None
+            except (ValueError, TypeError):
+                user_limit = None
+            limit_max = max(1, min(user_limit, 5000)) if (user_limit and user_limit > 0) else 5000
             res = r.list_creators_for_export(
+                limit_max=limit_max,
                 platform=str(p.get("platform") or "").strip(),
                 status=str(p.get("status") or "").strip(),
                 min_score=int(p.get("min_score") or 0),

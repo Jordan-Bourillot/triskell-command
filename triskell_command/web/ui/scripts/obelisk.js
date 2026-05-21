@@ -574,6 +574,17 @@ const Obelisk = {
       <div id="ob-active-filters"></div>
 
       <div class="ob-export-bar" style="display:flex; justify-content:flex-end; gap:8px; margin: 6px 0 10px;">
+        <button id="ob-purge-nonfr" class="btn btn-ghost" title="Supprimer définitivement les prospects non-francophones"
+                style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px; color:#c44; border-color:rgba(196,68,68,0.4);">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+          Nettoyer non-francophones
+        </button>
+        <div style="display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid hsl(var(--border)); border-radius:8px; font-size:12px; color:hsl(var(--text-muted));">
+          <span>Combien :</span>
+          <input id="ob-export-count" type="number" min="1" max="5000" placeholder="tous"
+                 title="Nombre max de prospects à inclure dans l'export (laisse vide pour tout exporter)"
+                 style="width:70px; padding:3px 6px; border:1px solid hsl(var(--border)); border-radius:6px; background:transparent; color:hsl(var(--text)); font-size:12px; text-align:center;"/>
+        </div>
         <button id="ob-export-xlsx" class="btn btn-ghost" title="Télécharger la liste filtrée en Excel"
                 style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/><line x1="9" y1="18" x2="15" y2="18"/></svg>
@@ -619,7 +630,58 @@ const Obelisk = {
     if (btnXlsx) btnXlsx.addEventListener('click', () => this._exportList('xlsx'));
     if (btnPdf)  btnPdf .addEventListener('click', () => this._exportList('pdf'));
 
+    // Bouton "Nettoyer non-francophones" (preview + confirmation)
+    const btnPurge = document.getElementById('ob-purge-nonfr');
+    if (btnPurge) btnPurge.addEventListener('click', () => this._purgeNonFrench());
+
     await this._loadCreators();
+  },
+
+  // ── Purge des non-francophones (preview puis confirmation) ────────
+  async _purgeNonFrench() {
+    const btn = document.getElementById('ob-purge-nonfr');
+    const originalLabel = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = 'Scan…'; }
+    try {
+      // 1) Preview
+      const audit = await this._api('audit_non_french');
+      if (!audit || !audit.ok) {
+        alert("Impossible de scanner la base : " + ((audit && audit.error) || 'erreur inconnue'));
+        return;
+      }
+      const count = audit.non_fr_count || 0;
+      const total = audit.total_scanned || 0;
+      if (count === 0) {
+        alert(`Aucun non-francophone détecté sur les ${total} prospects scannés. Rien à supprimer.`);
+        return;
+      }
+      // Exemples lisibles
+      const exLines = (audit.examples || []).map(e =>
+        `  • ${e.name} ${e.country ? '('+e.country+') ' : ''}— ${e.reason}`
+      ).join('\n');
+      const msg =
+        `Sur ${total} prospects scannés, ${count} ne sont PAS confirmés francophones.\n\n` +
+        `Exemples :\n${exLines}\n\n` +
+        `Veux-tu vraiment les SUPPRIMER définitivement de la base ?\n` +
+        `(action irréversible)`;
+      if (!window.confirm(msg)) {
+        return;
+      }
+      // 2) Purge réelle
+      if (btn) btn.innerHTML = `Suppression de ${count}…`;
+      const res = await this._api('purge_non_french', { confirm: 'PURGE_NON_FR' });
+      if (!res || !res.ok) {
+        alert("Suppression échouée : " + ((res && res.error) || 'erreur inconnue'));
+        return;
+      }
+      alert(`✅ ${res.deleted || 0} prospect(s) non-francophones supprimés.`);
+      // Recharge la liste
+      await this._loadCreators();
+    } catch (err) {
+      alert("Erreur : " + (err && err.message || err));
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = originalLabel; }
+    }
   },
 
   // ── Export Excel / PDF (depuis les filtres en cours) ──────────────
@@ -632,6 +694,11 @@ const Obelisk = {
     }
     try {
       const f = this.state.filters || {};
+      // Limite optionnelle saisie par l'utilisateur (vide = tous, capé
+      // côté backend à 5000 pour éviter d'exploser la mémoire).
+      const countInput = document.getElementById('ob-export-count');
+      const rawCount = countInput && countInput.value ? countInput.value.trim() : '';
+      const limit = rawCount ? Math.max(1, parseInt(rawCount, 10) || 0) : null;
       const payload = {
         format,
         platform:  f.platform  || '',
@@ -643,6 +710,7 @@ const Obelisk = {
         country:   f.country   || '',
         job_id:    f.job_id    || '',
       };
+      if (limit) payload.limit = limit;
       const res = await this._api('export', payload);
       if (!res || !res.ok) {
         alert("Export impossible : " + ((res && res.error) || 'erreur inconnue'));
