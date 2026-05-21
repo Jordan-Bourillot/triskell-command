@@ -314,7 +314,18 @@ def _wait_for_completion(
         end_at = last_status.get("endedAt") or last_status.get("endDate")
         if (status_str in _TERMINAL_STATUSES) or (not running and end_at):
             if progress:
-                progress(f"Container terminé (status={status_str or 'finished'})")
+                # On expose le lastEndStatus séparément : il indique
+                # success / error / etc. côté PhantomBuster, alors que
+                # `status` peut juste dire "finished" même si le job a planté.
+                end_status = (last_status.get("lastEndStatus") or "").lower()
+                exit_code = last_status.get("exitCode")
+                msg = f"Container terminé (status={status_str or 'finished'}"
+                if end_status and end_status != status_str:
+                    msg += f", lastEndStatus={end_status}"
+                if exit_code not in (None, 0):
+                    msg += f", exitCode={exit_code}"
+                msg += ")"
+                progress(msg)
             return last_status
         if progress:
             elapsed = int(time.time() - start)
@@ -417,27 +428,48 @@ def discover_profiles(
     # Le résultat peut être inline (resultObject = liste) ou via URL S3
     raw_rows: list[dict] = []
     inline = result.get("resultObject") if isinstance(result, dict) else None
+    source_kind = ""
+    download_url = ""
     if isinstance(inline, list):
         raw_rows = [d for d in inline if isinstance(d, dict)]
+        source_kind = "resultObject (liste inline)"
     elif isinstance(inline, str):
         raw_rows = pb.parse_result_payload(inline.encode("utf-8"))
+        source_kind = "resultObject (string inline)"
     else:
-        # Cherche une URL de fichier (csvUrl, jsonUrl, etc.)
-        url = ""
         for key in ("csvUrl", "jsonUrl", "resultUrl", "outputUrl", "url"):
             if isinstance(result, dict) and result.get(key):
-                url = str(result[key])
+                download_url = str(result[key])
+                source_kind = f"téléchargement {key}"
                 break
-        if url:
-            log(f"📄 téléchargement résultat : {url[:80]}…")
+        if download_url:
+            log(f"📄 téléchargement résultat : {download_url[:80]}…")
             try:
-                blob = pb.download_result_file(url)
+                blob = pb.download_result_file(download_url)
                 raw_rows = pb.parse_result_payload(blob)
             except Exception as exc:
                 return {"ok": False, "error": f"download_result: {exc}",
                         "container_id": container_id}
 
-    log(f"🔎 {len(raw_rows)} profils bruts récupérés")
+    if not raw_rows:
+        # Diagnostic : on ne sait pas si c'est PhantomBuster qui a renvoyé
+        # vide, ou si on a pas su lire la forme de sa réponse. On expose
+        # les clés top-level + un extrait du resultObject pour que Jordan
+        # voie d'un coup d'œil ce qui se passe.
+        if isinstance(result, dict):
+            top_keys = sorted(result.keys())
+            log(f"🔬 résultat vide — clés disponibles côté PhantomBuster : "
+                f"{', '.join(top_keys) or '(aucune)'}")
+            if isinstance(inline, str) and inline.strip():
+                snippet = inline.strip()[:200].replace("\n", " ")
+                log(f"   resultObject (texte) : {snippet}…")
+            elif inline is None and not download_url:
+                log("   → ni resultObject ni URL CSV/JSON : le Phantom n'a "
+                    "rien produit (vérifie côté PhantomBuster : "
+                    "exécution réussie ? hashtags valides ? cookie de "
+                    "session encore frais ?)")
+    log(f"🔎 {len(raw_rows)} profils bruts récupérés"
+        + (f" (source : {source_kind})" if raw_rows and source_kind else ""))
 
     prospects = []
     for raw in raw_rows:
@@ -445,6 +477,13 @@ def discover_profiles(
         if p is not None:
             prospects.append(p)
     log(f"✔ {len(prospects)} profils valides après mapping")
+    if raw_rows and not prospects:
+        # On a reçu des lignes mais aucune n'est mappable : presque toujours
+        # un Phantom qui renvoie des colonnes inattendues. On affiche les
+        # clés du premier brut pour qu'on puisse ajouter le mapping.
+        sample_keys = sorted(raw_rows[0].keys())[:20]
+        log(f"⚠ Aucun profil mappable. Clés du 1er brut : "
+            f"{', '.join(sample_keys)}")
 
     # === ENRICHISSEMENT EMAIL ===
     # PhantomBuster ne donne quasi jamais d'email côté hashtag/keyword

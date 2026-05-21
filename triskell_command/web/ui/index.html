@@ -291,8 +291,12 @@
           <div class="px-3 text-[10px] font-bold tracking-widest text-lime-400 mb-2">PROSPECTION</div>
           <button data-view="obelisk" class="nav-item">
             <img src="assets/apps/obelisk.png" class="nav-item-logo" alt="" />
-            <span>Prospects · fichier</span>
+            <span>Obelisk</span>
             <span id="nav-obelisk-badge" class="nav-item-badge" hidden></span>
+          </button>
+          <button data-view="chasseur" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2l3 6 6 1-4.5 4 1 6L12 16l-5.5 3 1-6L3 9l6-1z"/></svg>
+            <span>Le Chasseur</span>
           </button>
         </div>
         <div>
@@ -327,18 +331,22 @@
           <button data-view="lagriffe" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
             <span>Lagriffe · pipeline</span>
+            <span id="nav-lagriffe-badge" class="nav-item-badge" hidden></span>
           </button>
           <button data-view="rankus" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
             <span>RankUs · pipeline</span>
+            <span id="nav-rankus-badge" class="nav-item-badge" hidden></span>
           </button>
           <button data-view="wow" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M3 6c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M3 18c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/></svg>
             <span>WoW · pipeline</span>
+            <span id="nav-wow-badge" class="nav-item-badge" hidden></span>
           </button>
           <button data-view="pixelpros" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9 16.5 14 18 22 12 18 6 22 7.5 14 2 9 9 9 12 2"/></svg>
             <span>Pixel Pros · pipeline</span>
+            <span id="nav-pixelpros-badge" class="nav-item-badge" hidden></span>
           </button>
           <button data-view="pixelpros-affiliates" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M3 21v-1a6 6 0 0 1 12 0v1"/><circle cx="17" cy="11" r="3"/><path d="M22 21v-1a4 4 0 0 0-4-4"/></svg>
@@ -564,6 +572,7 @@
   <script src="scripts/lagriffe.js"></script>
   <script src="scripts/pixelpros.js"></script>
   <script src="scripts/pixelpros-affiliates.js"></script>
+  <script src="scripts/pipelines_activity.js"></script>
   <script src="scripts/mail_templates.js"></script>
   <script src="scripts/obelisk.js"></script>
   <script src="scripts/catalogue.js"></script>
@@ -571,6 +580,7 @@
   <script src="scripts/teddy.js"></script>
   <script src="scripts/autopilot.js"></script>
   <script src="scripts/convoy.js"></script>
+  <script src="scripts/chasseur.js"></script>
   <script src="scripts/delivery.js"></script>
   <script src="scripts/health.js"></script>
   <script src="scripts/abtest.js"></script>

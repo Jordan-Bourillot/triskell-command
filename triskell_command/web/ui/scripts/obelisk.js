@@ -26,19 +26,31 @@ const Obelisk = {
   },
 
   PLATFORMS: [
-    { id: 'linkedin',  label: 'LinkedIn',  source: 'phantombuster' },
-    { id: 'instagram', label: 'Instagram', source: 'phantombuster' },
-    { id: 'tiktok',    label: 'TikTok',    source: 'phantombuster' },
-    { id: 'youtube',   label: 'YouTube' },
-    { id: 'twitch',    label: 'Twitch' },
-    { id: 'reddit',    label: 'Reddit' },
-    { id: 'bluesky',   label: 'Bluesky' },
-    { id: 'mastodon',  label: 'Mastodon' },
-    { id: 'podcasts',  label: 'Apple Podcasts' },
-    { id: 'dailymotion', label: 'Dailymotion' },
-    { id: 'kick',      label: 'Kick' },
-    { id: 'github',    label: 'GitHub' },
+    // ── Créateurs & influenceurs ──
+    { id: 'linkedin',  label: 'LinkedIn',  source: 'phantombuster', audience: 'creator' },
+    { id: 'instagram', label: 'Instagram', source: 'phantombuster', audience: 'creator' },
+    { id: 'tiktok',    label: 'TikTok',    source: 'phantombuster', audience: 'creator' },
+    { id: 'youtube',   label: 'YouTube',                              audience: 'creator' },
+    { id: 'twitch',    label: 'Twitch',                               audience: 'creator' },
+    { id: 'reddit',    label: 'Reddit',                               audience: 'creator' },
+    { id: 'bluesky',   label: 'Bluesky',                              audience: 'creator' },
+    { id: 'mastodon',  label: 'Mastodon',                             audience: 'creator' },
+    { id: 'podcasts',  label: 'Apple Podcasts', tip: '70-90% emails — mine d’or', audience: 'creator' },
+    { id: 'dailymotion', label: 'Dailymotion',                        audience: 'creator' },
+    { id: 'kick',      label: 'Kick',                                 audience: 'creator' },
+    { id: 'github',    label: 'GitHub',                               audience: 'creator' },
+    { id: 'pypi',      label: 'PyPI', tip: '70-90% emails — devs IA / outils / automatisation', audience: 'creator' },
+    // ── Pros & entreprises ──
+    { id: 'osm',       label: 'OpenStreetMap', tip: '100% emails (filtré) — restos, artisans, cabinets, hôtels', audience: 'pro' },
+    { id: 'pubmed',    label: 'PubMed', tip: '60-80% emails — chercheurs, labos, biotech, santé', audience: 'pro' },
   ],
+
+  AUDIENCE_LABELS: {
+    creator: { title: 'Créateurs & influenceurs',
+               hint: 'Audience, abonnés, partenariats, codes promo, commissions' },
+    pro:     { title: 'Pros & entreprises',
+               hint: 'Clients directs : commerces locaux, artisans, cabinets, chercheurs' },
+  },
 
   STATUS_LABELS: {
     new: 'Nouveau', qualified: 'Qualifié', contacted: 'Contacté',
@@ -589,6 +601,11 @@ const Obelisk = {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
           Nettoyer non-francophones
         </button>
+        <button id="ob-purge-guessed" class="btn btn-ghost" title="Supprimer définitivement les prospects dont tous les emails sont génériques (contact@, info@, hello@, …) — donc devinés à partir du domaine et jamais lus en vrai"
+                style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px; color:#c44; border-color:rgba(196,68,68,0.4);">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+          Supprimer mails devinés
+        </button>
         <div style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px 5px 10px; border:1px solid rgba(196,68,68,0.4); border-radius:8px; font-size:12px; color:#c44;">
           <span>Supprimer si &lt;</span>
           <input id="ob-purge-min-subs" type="number" min="1" placeholder="ex: 500"
@@ -661,6 +678,10 @@ const Obelisk = {
     const btnPurge = document.getElementById('ob-purge-nonfr');
     if (btnPurge) btnPurge.addEventListener('click', () => this._purgeNonFrench());
 
+    // Bouton "Supprimer mails devinés" (preview + confirmation)
+    const btnPurgeGuessed = document.getElementById('ob-purge-guessed');
+    if (btnPurgeGuessed) btnPurgeGuessed.addEventListener('click', () => this._purgeGuessedEmails());
+
     // Bouton "Supprimer si < X abonnés" (preview + confirmation)
     const btnPurgeSubs = document.getElementById('ob-purge-subs');
     if (btnPurgeSubs) btnPurgeSubs.addEventListener('click', () => this._purgeBelowSubs());
@@ -707,6 +728,50 @@ const Obelisk = {
       }
       alert(`✅ ${res.deleted || 0} prospect(s) non-francophones supprimés.`);
       // Recharge la liste
+      await this._loadCreators();
+    } catch (err) {
+      alert("Erreur : " + (err && err.message || err));
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = originalLabel; }
+    }
+  },
+
+  // ── Purge des prospects à mails uniquement génériques (devinés) ───
+  async _purgeGuessedEmails() {
+    const btn = document.getElementById('ob-purge-guessed');
+    const originalLabel = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = 'Scan…'; }
+    try {
+      // 1) Preview
+      const audit = await this._api('audit_guessed_emails');
+      if (!audit || !audit.ok) {
+        alert("Impossible de scanner la base : " + ((audit && audit.error) || 'erreur inconnue'));
+        return;
+      }
+      const count = audit.count || 0;
+      const total = audit.total_scanned || 0;
+      if (count === 0) {
+        alert(`Aucun prospect avec uniquement des mails devinés sur les ${total} scannés. Rien à supprimer.`);
+        return;
+      }
+      const exLines = (audit.examples || []).map(e =>
+        `  • ${e.name} — ${e.email}`
+      ).join('\n');
+      const msg =
+        `Sur ${total} prospects scannés, ${count} n'ont que des mails génériques (contact@, info@, hello@, …).\n` +
+        `Ces mails ont été devinés à partir du domaine, ils n'ont jamais été lus en vrai.\n\n` +
+        `Exemples :\n${exLines}\n\n` +
+        `Veux-tu vraiment les SUPPRIMER définitivement de la base ?\n` +
+        `(action irréversible)`;
+      if (!window.confirm(msg)) return;
+      // 2) Purge réelle
+      if (btn) btn.innerHTML = `Suppression de ${count}…`;
+      const res = await this._api('purge_guessed_emails', { confirm: 'PURGE_GUESSED' });
+      if (!res || !res.ok) {
+        alert("Suppression échouée : " + ((res && res.error) || 'erreur inconnue'));
+        return;
+      }
+      alert(`✅ ${res.deleted || 0} prospect(s) à mails devinés supprimés.`);
       await this._loadCreators();
     } catch (err) {
       alert("Erreur : " + (err && err.message || err));
@@ -1377,14 +1442,26 @@ const Obelisk = {
 
           <div class="block mb-4">
             <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Plateformes</div>
-            <div class="ob-platform-grid">
-              ${this.PLATFORMS.map(p => `
-                <label class="ob-platform-chip ${defaultPlatforms.has(p.id) ? 'is-on' : ''}">
-                  <input type="checkbox" data-ob-plat="${p.id}" ${defaultPlatforms.has(p.id) ? 'checked' : ''} style="margin: 0;">
-                  ${this._esc(p.label)}
-                </label>
-              `).join('')}
-            </div>
+            ${['creator', 'pro'].map(aud => {
+              const meta = this.AUDIENCE_LABELS[aud];
+              const platsOfAud = this.PLATFORMS.filter(p => p.audience === aud);
+              return `
+              <div class="mb-3" data-ob-audience="${aud}">
+                <div class="flex items-baseline justify-between mb-2">
+                  <div class="text-[12px] font-semibold text-text">${this._esc(meta.title)}</div>
+                  <div class="text-[10px] text-text-muted">${this._esc(meta.hint)}</div>
+                </div>
+                <div class="ob-platform-grid">
+                  ${platsOfAud.map(p => `
+                    <label class="ob-platform-chip ${defaultPlatforms.has(p.id) ? 'is-on' : ''}" ${p.tip ? `title="${this._esc(p.tip)}"` : ''}>
+                      <input type="checkbox" data-ob-plat="${p.id}" data-ob-aud="${aud}" ${defaultPlatforms.has(p.id) ? 'checked' : ''} style="margin: 0;">
+                      ${this._esc(p.label)}
+                    </label>
+                  `).join('')}
+                </div>
+              </div>
+              `;
+            }).join('')}
           </div>
 
           <div class="block mb-4">

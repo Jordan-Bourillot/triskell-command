@@ -18,6 +18,39 @@ from typing import Iterable
 logger = logging.getLogger(__name__)
 
 
+# Préfixes locaux génériques. Si un email a un de ces préfixes, on considère
+# qu'il a probablement été deviné à partir du domaine du site et non scrapé
+# depuis une vraie page (où on aurait plus souvent un mail nominal).
+_GENERIC_LOCAL_PARTS = frozenset({
+    "contact", "hello", "info", "infos", "sales", "booking",
+    "support", "help", "press", "media", "partenariats", "partnerships",
+    "collab", "collabs", "office", "team", "admin", "service",
+    "accueil", "ventes", "commercial",
+})
+
+
+def _email_confidence(email: str) -> str:
+    """'confirme' si le mail a un local-part nominal (jordan@, j.dupont@, etc.)
+    'devine' si c'est un générique (contact@, hello@, ...) — probablement
+    inféré par le pipeline à partir du domaine du site."""
+    if not email or "@" not in email:
+        return ""
+    local = email.split("@", 1)[0].lower().strip()
+    return "devine" if local in _GENERIC_LOCAL_PARTS else "confirme"
+
+
+def _row_confidence(row: dict) -> str:
+    """Renvoie 'confirme' si AU MOINS un mail est nominal, sinon 'devine'.
+    Vide si pas de mail."""
+    emails = row.get("emails") or []
+    if not emails:
+        return ""
+    for e in emails:
+        if _email_confidence(str(e)) == "confirme":
+            return "confirme"
+    return "devine"
+
+
 # ---------------------------------------------------------------------------
 # Helpers communs
 # ---------------------------------------------------------------------------
@@ -27,6 +60,7 @@ COLUMNS = [
     ("handle",       "Pseudo",         20, 22),
     ("platform",     "Plateforme",     14, 18),
     ("emails",       "Email",          34, 50),
+    ("confidence",   "Confiance",      12, 14),
     ("phones",       "Téléphone",      18, 22),
     ("website",      "Site web",       38, 45),
     ("subscribers",  "Abonnés",        12, 14),
@@ -72,6 +106,13 @@ def _platform_of(row: dict) -> str:
 def _value_for(row: dict, key: str) -> str:
     if key == "platform":
         return _platform_of(row)
+    if key == "confidence":
+        c = _row_confidence(row)
+        if c == "confirme":
+            return "Confirmé"
+        if c == "devine":
+            return "Deviné"
+        return ""
     if key in ("emails", "phones"):
         return _join_list(row.get(key))
     v = row.get(key)
@@ -111,14 +152,29 @@ def to_xlsx(rows: Iterable[dict], *, title: str = "Prospects Obelisk") -> bytes:
         ws.column_dimensions[get_column_letter(col_idx)].width = width
     ws.row_dimensions[1].height = 22
 
-    # Données
+    # Données — chaque ligne reçoit un léger surlignage selon la confiance email
     body_align = Alignment(vertical="top", wrap_text=True)
+    fill_confirmed = PatternFill("solid", fgColor="EAF7E5")   # vert très pâle
+    fill_guessed = PatternFill("solid", fgColor="FFF3D6")      # orange très pâle
+    confidence_col_idx = next(
+        (i + 1 for i, (k, *_) in enumerate(COLUMNS) if k == "confidence"),
+        None,
+    )
     for r_idx, row in enumerate(rows, start=2):
+        conf = _row_confidence(row)
+        row_fill = None
+        if conf == "confirme":
+            row_fill = fill_confirmed
+        elif conf == "devine":
+            row_fill = fill_guessed
         for c_idx, (key, _, _, _) in enumerate(COLUMNS, start=1):
             v = _value_for(row, key)
             cell = ws.cell(row=r_idx, column=c_idx, value=v)
             cell.alignment = body_align
             cell.border = border
+            if row_fill is not None and c_idx == confidence_col_idx:
+                cell.fill = row_fill
+                cell.font = Font(bold=True)
 
     # Fige la première ligne
     ws.freeze_panes = "A2"
@@ -200,10 +256,11 @@ def to_pdf(rows: list[dict], *, title: str = "Prospects Obelisk") -> bytes:
         ("handle",       "Pseudo",       22 * mm),
         ("platform",     "Plateforme",   18 * mm),
         ("emails",       "Email",        50 * mm),
+        ("confidence",   "Confiance",    18 * mm),
         ("subscribers",  "Abonnés",      18 * mm),
         ("country",      "Pays",         12 * mm),
-        ("website",      "Site web",     46 * mm),
-        ("status",       "Statut",       18 * mm),
+        ("website",      "Site web",     40 * mm),
+        ("status",       "Statut",       16 * mm),
         ("created_at",   "Trouvé le",    22 * mm),
     ]
     col_widths = [w for _, _, w in pdf_cols]

@@ -23,6 +23,7 @@ const MailTemplates = {
     catalogProspection: null, // mode prospection : groupé par produit du catalogue
     senderFilter: '', // adresse mail filtrée en mode transactionnel ('' = toutes)
     productFilter: '',// produit filtré en mode prospection ('' = tous)
+    audienceFilter: 'all', // sous-filtre prospection : 'all' | 'creator' | 'pro'
     categoryMode: 'transactionnel', // 'transactionnel' | 'prospection'
     catalogueProducts: [], // produits du catalogue Triskell, chargés à la demande pour la prospection
   },
@@ -305,6 +306,11 @@ const MailTemplates = {
           <select id="mt-product-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm" aria-label="Filtrer par produit">
             <option value="">— Tous les produits —</option>
           </select>
+          <div class="mt-aud-toggle" role="tablist" aria-label="Audience">
+            <button class="mt-aud-btn is-active" data-mt-aud="all" role="tab">Tous</button>
+            <button class="mt-aud-btn" data-mt-aud="creator" role="tab" title="Démarchage de créateurs / influenceurs (partenariats, codes promo, commissions)">Créateurs</button>
+            <button class="mt-aud-btn" data-mt-aud="pro" role="tab" title="Démarchage B2B local (commerces, artisans, cabinets) — vente directe">Pros</button>
+          </div>
           <button id="mt-new-prosp" class="btn btn-primary text-sm">+ Nouveau modèle</button>
           <span id="mt-count-prosp" class="text-[11px] text-text-muted ml-auto"></span>
         </div>
@@ -337,6 +343,9 @@ const MailTemplates = {
     document.querySelectorAll('[data-mt-cat]').forEach(btn => {
       btn.onclick = () => this._switchCategory(btn.dataset.mtCat);
     });
+    document.querySelectorAll('[data-mt-aud]').forEach(btn => {
+      btn.onclick = () => this._switchAudience(btn.dataset.mtAud);
+    });
     await this.refresh();
   },
 
@@ -361,6 +370,16 @@ const MailTemplates = {
     }
     if (target) this.openTemplate(target.product, target.key);
     else this._renderEmptyEditor();
+  },
+
+  _switchAudience(aud) {
+    if (!['all', 'creator', 'pro'].includes(aud)) return;
+    if (this._state.audienceFilter === aud) return;
+    this._state.audienceFilter = aud;
+    document.querySelectorAll('[data-mt-aud]').forEach(b => {
+      b.classList.toggle('is-active', b.dataset.mtAud === aud);
+    });
+    this._renderList();
   },
 
   _injectStyles() {
@@ -475,6 +494,42 @@ const MailTemplates = {
       .mt-cat-btn.is-active .mt-cat-sub { color: hsl(var(--accent) / .75); }
       /* Boutons d'onglets compacts : icône + titre alignés en ligne */
       .mt-cat-btn { flex-direction: row !important; align-items: center !important; gap: 8px !important; padding: 7px 14px !important; }
+
+      /* === Toggle Audience (sous-filtre prospection) === */
+      .mt-aud-toggle {
+        display: inline-flex;
+        background: hsl(var(--bg));
+        border: 1px solid hsl(var(--border));
+        border-radius: 8px;
+        padding: 2px;
+      }
+      .mt-aud-btn {
+        background: transparent;
+        border: 0;
+        padding: 4px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        color: hsl(var(--text-muted));
+        cursor: pointer;
+        transition: background .15s, color .15s;
+      }
+      .mt-aud-btn:hover { color: hsl(var(--text)); }
+      .mt-aud-btn.is-active {
+        background: hsl(var(--card));
+        color: hsl(var(--text));
+        box-shadow: 0 1px 2px hsl(0 0% 0% / .08);
+      }
+
+      /* === Pills audience dans la liste === */
+      .mt-pill-aud-creator {
+        background: hsl(265 70% 60% / .15);
+        color: hsl(265 60% 50%);
+      }
+      .mt-pill-aud-pro {
+        background: hsl(35 85% 55% / .18);
+        color: hsl(28 80% 42%);
+      }
 
       /* === Chips contextuelles (en haut de l'éditeur) === */
       .mt-chip {
@@ -873,46 +928,57 @@ const MailTemplates = {
     const list = document.getElementById('mt-list');
     const cat = this._state.catalogProspection || {};
     const filter = (this._state.productFilter || '').trim();
+    const audFilter = this._state.audienceFilter || 'all';
     let html = '';
     let visibleCount = 0;
     let totalCount = 0;
     let visibleProducts = 0;
     for (const [pid, info] of Object.entries(cat)) {
       const tpls = info.templates || [];
-      totalCount += tpls.length;
+      // Filtre audience : un template sans audience est compté comme 'creator'
+      // (les 5 templates pixel-pros historiques migrés par la 34_).
+      const filteredTpls = (audFilter === 'all')
+        ? tpls
+        : tpls.filter(t => (t.audience || 'creator') === audFilter);
+      totalCount += filteredTpls.length;
       if (filter && pid !== filter) continue;
+      if (filteredTpls.length === 0 && audFilter !== 'all') continue;
       visibleProducts++;
       html += `
         <div class="mt-prod-h">
           <span class="mt-prod-name">${this._esc(info.label || pid)}</span>
-          <span class="mt-prod-count">${tpls.length} modèle${tpls.length > 1 ? 's' : ''}</span>
+          <span class="mt-prod-count">${filteredTpls.length} modèle${filteredTpls.length > 1 ? 's' : ''}</span>
         </div>`;
-      if (tpls.length === 0) {
+      if (filteredTpls.length === 0) {
         html += `<div class="px-3 py-3 text-[12px] text-text-muted italic">
           Aucun mail de prospection. Clique sur <strong>+ Nouveau modèle</strong> pour en créer un.
         </div>`;
         continue;
       }
-      for (const t of tpls) {
+      for (const t of filteredTpls) {
         visibleCount++;
         const isActive = this._state.selected
           && this._state.selected.product === t.product
           && this._state.selected.key === t.key;
         const label = t._label || t.label || this._humanKey(t.key);
+        const aud = t.audience || 'creator';
+        const audPill = (aud === 'pro')
+          ? '<span class="mt-pill mt-pill-aud-pro" title="Démarchage B2B local — vente directe">Pros</span>'
+          : '<span class="mt-pill mt-pill-aud-creator" title="Démarchage créateur — partenariat">Créateurs</span>';
         const pill = (t.enabled === false)
           ? '<span class="mt-pill mt-pill-off">Off</span>'
           : '<span class="mt-pill mt-pill-on">Actif</span>';
         html += `
           <button class="mt-row ${isActive ? 'is-active' : ''}"
                   data-mt-open="${this._esc(t.product)}::${this._esc(t.key)}">
-            <div>${this._esc(label)}${pill}</div>
+            <div>${this._esc(label)}${audPill}${pill}</div>
             <div class="mt-row-sub">${this._esc(t.subject || '').slice(0, 80)}</div>
           </button>
         `;
       }
     }
     if (visibleProducts === 0) {
-      html = '<div class="p-4 text-[12px] text-text-muted">Aucun produit ne correspond à ce filtre.</div>';
+      html = '<div class="p-4 text-[12px] text-text-muted">Aucun modèle ne correspond à ce filtre.</div>';
     }
     list.innerHTML = html;
     list.querySelectorAll('[data-mt-open]').forEach(btn => {

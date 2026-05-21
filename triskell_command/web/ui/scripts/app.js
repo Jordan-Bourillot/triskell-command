@@ -402,6 +402,10 @@ const App = {
     document.querySelectorAll('[data-view]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.view === viewId);
     });
+    // Si on entre dans un pipeline surveillé, on remet son badge à 0
+    if (window.PipelinesActivity && PipelinesActivity.PREFIXES.includes(viewId)) {
+      PipelinesActivity.markSeen(viewId);
+    }
     // Render
     const target = document.getElementById('content');
     target.innerHTML = '';
@@ -431,6 +435,7 @@ const App = {
       case 'tutorial':  return Tutorial.render(target);
       case 'autopilot': return Autopilot.render(target);
       case 'convoy':    return Convoy.render(target);
+      case 'chasseur':  return Chasseur.render(target);
       case 'delivery':  return Delivery.render(target);
       case 'health':    return Health.render(target);
       case 'abtest':    return ABTest.render(target);

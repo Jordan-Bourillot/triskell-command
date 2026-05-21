@@ -1,0 +1,37 @@
+# Configuration Netlify pour la landing publique de Triskell Command.
+# Site séparé du serveur d'application (qui tourne sur command.triskell-studio.fr).
+# Domaine cible : triskell-command.fr (à pointer en DNS chez IONOS).
+
+[build]
+  publish = "."
+
+# Sécurité de base — en-têtes recommandés
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options       = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy        = "strict-origin-when-cross-origin"
+    Permissions-Policy     = "geolocation=(), microphone=(), camera=()"
+
+# Cache long pour les assets statiques
+[[headers]]
+  for = "/styles/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/scripts/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Redirection vers l'app authentifiée pour /app
+[[redirects]]
+  from   = "/app"
+  to     = "https://command.triskell-studio.fr/"
+  status = 302
+
+[[redirects]]
+  from   = "/login"
+  to     = "https://command.triskell-studio.fr/login.html"
+  status = 302

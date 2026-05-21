@@ -217,6 +217,7 @@ const Morning = {
 
     slot.innerHTML = `<div id="m-setup-slot"></div>`
                    + this._renderHero(digest)
+                   + `<div id="m-pipelines-slot"></div>`
                    + `<div id="m-obelisk-slot"></div>`
                    + `<div id="m-modes-slot"></div>`
                    + this._renderKpiGrid(digest)
@@ -224,6 +225,7 @@ const Morning = {
                    + `<div id="m-linkedin-slot"></div>`;
 
     this._loadSetup();
+    this._loadPipelinesActivity();
     this._loadObeliskNotifs();
     this._loadModes();
     this._loadLinkedinActions();
@@ -414,6 +416,16 @@ const Morning = {
     } else if (existingAlert) {
       existingAlert.remove();
     }
+  },
+
+  // -------- Bloc PIPELINES — mouvements depuis la dernière visite --------
+  async _loadPipelinesActivity() {
+    const slot = document.getElementById('m-pipelines-slot');
+    if (!slot) return;
+    if (typeof PipelinesActivity === 'undefined') return;
+    // Force un check immédiat pour avoir des données fraîches au load
+    await PipelinesActivity.checkAll();
+    PipelinesActivity.renderCockpitPanel(slot);
   },
 
   // -------- Bloc OBELISK — notifs de fin de recherche --------

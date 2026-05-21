@@ -438,6 +438,91 @@ def purge_below_subscribers(*, threshold: int, confirm: str = "") -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+def audit_guessed_emails(*, limit_scan: int = 10000) -> dict:
+    """Scan la base et renvoie les prospects dont TOUS les emails sont
+    des local-parts génériques (contact@, info@, hello@, ...), donc
+    devinés à partir du domaine et jamais lus en vrai sur une page.
+
+    Renvoie {ok, total_scanned, count, ids, examples}.
+    examples = jusqu'à 10 prospects (id + name + email) pour preview UI.
+    """
+    from .export import _row_confidence
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré"}
+    try:
+        page = 500
+        offset = 0
+        scanned = 0
+        guessed_ids: list[str] = []
+        examples: list[dict] = []
+        while scanned < limit_scan:
+            res = (sb.table("prospects")
+                     .select("id, name, handle, emails")
+                     .neq("emails", "[]")
+                     .range(offset, offset + page - 1)
+                     .execute())
+            rows = res.data or []
+            if not rows:
+                break
+            for r in rows:
+                scanned += 1
+                if _row_confidence(r) == "devine":
+                    guessed_ids.append(r["id"])
+                    if len(examples) < 10:
+                        ems = r.get("emails") or []
+                        first = str(ems[0]) if ems else ""
+                        examples.append({
+                            "id":    r.get("id"),
+                            "name":  r.get("name") or r.get("handle") or "?",
+                            "email": first,
+                        })
+            if len(rows) < page:
+                break
+            offset += page
+        return {
+            "ok":            True,
+            "total_scanned": scanned,
+            "count":         len(guessed_ids),
+            "ids":           guessed_ids,
+            "examples":      examples,
+        }
+    except Exception as exc:
+        logger.exception("obelisk.audit_guessed_emails")
+        return {"ok": False, "error": str(exc),
+                "total_scanned": 0, "count": 0, "ids": [], "examples": []}
+
+
+def purge_guessed_emails(*, confirm: str = "") -> dict:
+    """Supprime tous les prospects dont les emails sont uniquement
+    génériques (contact@, info@, ...). Exige confirm = 'PURGE_GUESSED'
+    pour passer à l'action. Sinon renvoie un preview."""
+    audit = audit_guessed_emails()
+    if not audit.get("ok"):
+        return audit
+    if confirm != "PURGE_GUESSED":
+        return {
+            "ok":            True,
+            "preview":       True,
+            "count":         audit["count"],
+            "total_scanned": audit["total_scanned"],
+            "examples":      audit["examples"],
+        }
+    ids = audit.get("ids") or []
+    if not ids:
+        return {"ok": True, "deleted": 0, "examples": []}
+    sb = _sb()
+    deleted = 0
+    for i in range(0, len(ids), 200):
+        batch = ids[i:i + 200]
+        try:
+            sb.table("prospects").delete().in_("id", batch).execute()
+            deleted += len(batch)
+        except Exception as exc:
+            logger.warning("obelisk.purge_guessed_emails batch failed: %s", exc)
+    return {"ok": True, "deleted": deleted, "examples": audit["examples"]}
+
+
 def purge_non_francophones(*, confirm: str = "") -> dict:
     """Supprime tous les prospects non-confirmés francophones.
     Exige confirm = 'PURGE_NON_FR' pour passer à l'action (sécurité).

@@ -3637,6 +3637,27 @@ class Api:
             logger.exception("obelisk_purge_non_french failed")
             return {"ok": False, "error": str(exc)}
 
+    def obelisk_audit_guessed_emails(self, payload: dict | None = None) -> dict:
+        """Scan de la base → renvoie le nombre de prospects dont tous les
+        emails sont génériques (contact@, info@, ...) + 10 exemples."""
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.audit_guessed_emails()
+        except Exception as exc:
+            logger.exception("obelisk_audit_guessed_emails failed")
+            return {"ok": False, "error": str(exc)}
+
+    def obelisk_purge_guessed_emails(self, payload: dict | None = None) -> dict:
+        """Supprime tous les prospects dont les emails sont uniquement
+        devinés (contact@, info@, ...). Exige payload.confirm == 'PURGE_GUESSED'."""
+        confirm = (payload or {}).get("confirm") or ""
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.purge_guessed_emails(confirm=confirm)
+        except Exception as exc:
+            logger.exception("obelisk_purge_guessed_emails failed")
+            return {"ok": False, "error": str(exc)}
+
     def obelisk_purge_below_subs(self, payload: dict | None = None) -> dict:
         """Supprime les prospects avec moins de N abonnés (les sans-valeur
         sont préservés, on ne peut pas savoir s'ils sont petits ou juste
@@ -6553,3 +6574,145 @@ class Api:
         with self._convoy_lock:
             rt["send_stop_flag"] = True
         return {"ok": True}
+
+    # ------------------------------------------------------------------
+    # Le Chasseur — découverte de PME et extraction de mails publics
+    # ------------------------------------------------------------------
+    def chasseur_presets(self, payload: dict | None = None) -> dict:
+        """Renvoie la liste des secteurs préconfigurés (clé → libellé NAF)."""
+        try:
+            from ..integrations import chasseur
+            return {
+                "ok": True,
+                "presets": [
+                    {"id": k, "label": _PRESET_LABELS.get(k, k),
+                     "naf": v.get("activite_principale", "")}
+                    for k, v in chasseur.SECTOR_PRESETS.items()
+                ],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "presets": []}
+
+    def chasseur_list_hunts(self, payload: dict | None = None) -> dict:
+        try:
+            from ..integrations import chasseur
+            limit = int((payload or {}).get("limit") or 20)
+            return {"ok": True, "hunts": chasseur.list_hunts(limit=limit)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "hunts": []}
+
+    def chasseur_get_hunt(self, payload: dict) -> dict:
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import chasseur
+            h = chasseur.Hunt.load(hid)
+            if not h:
+                return {"ok": False, "error": "chasse introuvable"}
+            return {
+                "ok": True,
+                "hunt": {
+                    "id":         h.id,
+                    "label":      h.label,
+                    "created_at": h.created_at,
+                    "status":     h.status,
+                    "progress":   h.progress,
+                    "stats":      h.stats,
+                    "filters":    h.filters,
+                    "error":      h.error,
+                    "log_tail":   h.log[-30:],
+                    "prospects":  h.prospects,
+                    "running":    chasseur.is_running(hid),
+                },
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def chasseur_start_hunt(self, payload: dict) -> dict:
+        """Lance une chasse en arrière-plan.
+
+        payload = {
+            sector: str (clé preset OU code NAF OU mot-clé),
+            zone:   {departement?, code_postal?, commune?},
+            target: int (volume max retenu, par défaut 200),
+            with_email_only: bool (par défaut True),
+            mode:   "all" | "poor_sites" (par défaut "all" — toutes les
+                     boîtes avec un mail trouvé. "poor_sites" filtre pour
+                     ne garder que les sites visiblement obsolètes / amateurs.)
+        }
+        """
+        p = payload or {}
+        sector = (p.get("sector") or "").strip()
+        zone = p.get("zone") or {}
+        if not isinstance(zone, dict):
+            zone = {}
+        try:
+            target = int(p.get("target") or 200)
+        except (TypeError, ValueError):
+            target = 200
+        with_email_only = bool(p.get("with_email_only", True))
+        mode = (p.get("mode") or "all").strip()
+        if mode not in ("all", "poor_sites"):
+            mode = "all"
+        if not sector and not (zone.get("departement") or zone.get("code_postal")
+                                or zone.get("commune")):
+            return {"ok": False, "error":
+                    "Précise au moins un secteur ou une zone géo."}
+        try:
+            from ..integrations import chasseur
+            hunt = chasseur.start_hunt(
+                sector=sector, zone=zone, target=target,
+                with_email_only=with_email_only, mode=mode,
+            )
+            return {"ok": True, "hunt_id": hunt.id, "label": hunt.label}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def chasseur_export_csv(self, payload: dict) -> dict:
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import chasseur
+            return chasseur.export_csv(hid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def chasseur_delete_hunt(self, payload: dict) -> dict:
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import chasseur
+            return chasseur.delete_hunt(hid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+
+# Libellés humains pour les presets (séparés pour ne pas alourdir le module
+# intégration qui doit rester pur code métier).
+_PRESET_LABELS = {
+    "restaurant":  "Restaurants",
+    "boulangerie": "Boulangeries",
+    "coiffeur":    "Coiffeurs",
+    "garage":      "Garages auto",
+    "plombier":    "Plombiers",
+    "electricien": "Électriciens",
+    "maconnerie":  "Maçons",
+    "menuiserie":  "Menuisiers",
+    "fleuriste":   "Fleuristes",
+    "opticien":    "Opticiens",
+    "pharmacie":   "Pharmacies",
+    "hotel":       "Hôtels",
+    "agence_immo": "Agences immo",
+    "architecte":  "Architectes",
+    "comptable":   "Experts-comptables",
+    "avocat":      "Avocats",
+    "auto_ecole":  "Auto-écoles",
+    "salle_sport": "Salles de sport",
+    "esthetique":  "Instituts beauté",
+    "taxi":        "Taxis & VTC",
+    "menage":      "Sociétés de ménage",
+    "paysagiste":  "Paysagistes",
+}
