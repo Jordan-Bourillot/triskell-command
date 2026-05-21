@@ -666,7 +666,12 @@ def _sync_keys_to_ledenicheur(ucfg: dict, log) -> None:
 # ---------------------------------------------------------------------------
 def _normalize_filters(raw: dict) -> dict:
     """Extrait + normalise les filtres avancés depuis les overrides UI.
-    Tolère les clés manquantes ou aux mauvais types."""
+    Tolère les clés manquantes ou aux mauvais types.
+
+    ⚠ FRANCOPHONES UNIQUEMENT — règle métier figée : Obelisk ne cherche
+    QUE des créateurs francophones, point. La case "Langue" a été retirée
+    de l'UI. Si language n'est pas fourni dans raw, on force "fr".
+    """
     def _i(v, default=0):
         try: return int(v)
         except Exception: return default
@@ -675,12 +680,16 @@ def _normalize_filters(raw: dict) -> dict:
     mode = _s(raw.get("monetized_mode")).lower()
     if mode not in ("all", "unmonetized", "monetized"):
         mode = "all"
+    # Langue : toujours "fr" sauf si quelqu'un override explicitement avec
+    # une autre valeur valide (utile pour tests / clients SaaS futurs).
+    lang_in = _s(raw.get("language")).lower()
+    language = lang_in if lang_in else "fr"
     return {
         "monetized_mode":   mode,
         "min_subscribers":  max(0, _i(raw.get("min_subscribers"), 0)),
         "max_subscribers":  max(0, _i(raw.get("max_subscribers"), 0)),
         "country":          _s(raw.get("country")).upper(),
-        "language":         _s(raw.get("language")).lower(),
+        "language":         language,
         "only_with_email":  bool(raw.get("only_with_email")),
         "only_uncontacted": bool(raw.get("only_uncontacted")),
     }
