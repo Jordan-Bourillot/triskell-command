@@ -394,6 +394,83 @@ html, body {
   #claude-fab-wrap { display: none !important; }
 }
 
+/* ─── Chat — citation "Répondre à un message" ───
+   Petit bouton ↩ au bord de chaque bulle, citation rendue en haut d'une
+   bulle qui répond, et bannière au-dessus du composer pendant qu'on
+   prépare la réponse. */
+.thomas-reply-btn {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: hsl(var(--text-secondary));
+  background: transparent;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  cursor: pointer;
+}
+.thomas-reply-btn svg { width: 14px; height: 14px; }
+.thomas-msg-row:hover .thomas-reply-btn,
+.thomas-reply-btn:focus-visible { opacity: 1; }
+.thomas-reply-btn:hover {
+  background: hsl(var(--bg-secondary));
+  color: hsl(var(--text-primary));
+}
+/* Tactile : pas de hover fiable → on garde le bouton toujours visible
+   (à faible opacité) pour qu'il reste découvrable. */
+@media (hover: none) {
+  .thomas-reply-btn { opacity: 0.45; }
+}
+
+/* Citation rendue en haut d'une bulle qui est une réponse */
+.thomas-quote {
+  display: block;
+  padding: 6px 9px;
+  margin-bottom: 6px;
+  border-left: 3px solid rgba(255, 255, 255, 0.55);
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.thomas-quote:hover { background: rgba(0, 0, 0, 0.28); }
+.thomas-quote-author {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.9;
+  margin-bottom: 1px;
+}
+.thomas-quote-body {
+  font-size: 12px;
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Flash visuel quand on clique une citation pour retrouver l'original */
+@keyframes thomas-msg-flash {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+  30%  { box-shadow: 0 0 0 4px rgba(124, 127, 233, 0.55); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+}
+.thomas-msg-flash { animation: thomas-msg-flash 1.4s ease-out 1; }
+
+/* Bannière "Réponse à …" au-dessus du composer */
+.thomas-reply-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid hsl(var(--text-secondary));
+  background: hsl(var(--bg-secondary));
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+
 /* Responsive : tailles réduites sur mobile (<640px) */
 @media (max-width: 640px) {
   .hero-title { font-size: 28px; }
@@ -1331,6 +1408,12 @@ html, body {
   .cockpit-kpi-label { font-size: 9.5px; }
   .cockpit-status-bar { font-size: 11px; padding: 10px 12px; gap: 12px; }
   .cockpit-status-bar .cockpit-sep { display: none; }
+  .cockpit-quickbar { gap: 6px; }
+  .cockpit-quickbar .btn {
+    flex: 1 1 calc(50% - 6px);
+    font-size: 12px;
+    padding: 9px 10px;
+  }
 }
 
 /* ============================
@@ -1996,6 +2079,29 @@ html, body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+}
+/* Variante 2 lignes pour les mails envoyés : destinataire + "depuis …" */
+.mail-row-from.is-stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.25;
+}
+.mail-row-from-main {
+  font-weight: 600;
+  color: hsl(var(--text));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mail-row-from-sub {
+  font-size: 11px;
+  font-weight: 400;
+  color: hsl(var(--text-muted));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mail-row-main {
   min-width: 0;

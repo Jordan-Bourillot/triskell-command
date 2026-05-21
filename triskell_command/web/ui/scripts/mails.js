@@ -441,18 +441,34 @@ const Mails = {
     // Si format "Nom <email>", on prend le nom ; sinon on garde l'adresse.
     const senderMatch = senderRaw.match(/^([^<]+?)\s*<.+>$/);
     const senderName = senderMatch ? senderMatch[1].trim() : senderRaw;
+    // Pour les mails envoyés : on affiche AUSSI l'adresse d'expédition
+    // (le compte mail qui a envoyé), en sous-ligne discrète sous le
+    // destinataire — utile quand on a plusieurs comptes mails.
+    let sentFromEmail = '';
+    if (isSent) {
+      const accountFrom = (this.state.accounts.find(a => a.id === accountId) || {}).from_email || '';
+      const fromMatch = fromAddr.match(/<([^>]+)>/);
+      const fromEmailOnly = fromMatch ? fromMatch[1].trim() : fromAddr;
+      sentFromEmail = (accountFrom || fromEmailOnly || '').trim();
+    }
     const snippet = (bodyExcerpt || '').replace(/\s+/g, ' ').trim();
     const idStr = String(m.id);
     const isRead = this._isRead(idStr);
     const isSelected = this.state.selectedIds && this.state.selectedIds.has(idStr);
     const stateClass = `${isRead ? 'is-read' : 'is-unread'}${isSelected ? ' is-selected' : ''}`;
+    const fromCellInner = sentFromEmail
+      ? `
+        <span class="mail-row-from-main">${this._escape(senderName || '—')}</span>
+        <span class="mail-row-from-sub" title="${this._escape(sentFromEmail)}">depuis ${this._escape(sentFromEmail)}</span>`
+      : this._escape(senderName || '—');
+    const fromCellClass = sentFromEmail ? 'mail-row-from is-stacked' : 'mail-row-from';
     return `
       <div class="mail-row ${stateClass}" data-mail-open="${this._escape(m.id)}">
         <label class="mail-row-checkbox-wrap flex items-center" onclick="event.stopPropagation()">
           <input type="checkbox" class="mail-row-checkbox" data-mail-check="${this._escape(m.id)}" ${isSelected ? 'checked' : ''}>
         </label>
         <span class="mail-row-dot" style="background: hsl(var(--${dotColor}))" title="${dotTitle}"></span>
-        <div class="mail-row-from" title="${this._escape(senderRaw)}">${this._escape(senderName || '—')}</div>
+        <div class="${fromCellClass}" title="${this._escape(senderRaw)}">${fromCellInner}</div>
         <div class="mail-row-main">
           <span class="mail-row-subject">${this._escape(subject)}</span>
           ${snippet ? `<span class="mail-row-snippet"> — ${this._escape(snippet.slice(0, 160))}</span>` : ''}

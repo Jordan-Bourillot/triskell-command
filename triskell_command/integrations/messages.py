@@ -85,7 +85,8 @@ def other_user() -> Optional[dict[str, Any]]:
 
 
 _MSG_COLUMNS = ("id, sender_id, recipient_id, body, created_at, read_at, "
-                "attachment_url, attachment_name, attachment_type, attachment_size")
+                "attachment_url, attachment_name, attachment_type, attachment_size, "
+                "reply_to_id")
 
 
 def list_messages(limit: int = 100) -> list[dict[str, Any]]:
@@ -120,11 +121,13 @@ def list_messages(limit: int = 100) -> list[dict[str, Any]]:
 def send_message(
     body: str,
     attachment: Optional[dict[str, Any]] = None,
+    reply_to_id: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """Envoie un message à l'autre user. Renvoie la ligne insérée ou None.
 
     `attachment`, si fourni, est un dict {url, name, type, size} produit
     par l'endpoint d'upload (POST /api/chat_attachment).
+    `reply_to_id`, si fourni, référence l'ID du message auquel on répond.
     Le message doit avoir AU MOINS un body OU une pièce jointe."""
     body = (body or "").strip()
     has_attachment = bool(attachment and attachment.get("url"))
@@ -147,6 +150,8 @@ def send_message(
         size = attachment.get("size")
         if isinstance(size, int) and size > 0:
             row["attachment_size"] = size
+    if reply_to_id:
+        row["reply_to_id"] = str(reply_to_id)
     try:
         res = c.raw.table("messages").insert(row).execute()
         data = res.data or []

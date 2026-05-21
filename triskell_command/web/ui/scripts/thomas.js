@@ -22,7 +22,9 @@ const Thomas = {
   myColor: '#7C7FE9',         // couleur de mes bulles (rechargée depuis l'API)
   otherColor: '#10b981',      // couleur des bulles de l'autre
   cachedMessages: [],
+  cachedById: {},             // {id → msg} pour résoudre les "répondre à"
   pendingAttachment: null,    // {url, name, type, size} entre upload et envoi
+  pendingReplyTo: null,       // message auquel on est en train de répondre
 
   init() {
     const fab = document.getElementById('thomas-fab');
@@ -119,6 +121,11 @@ const Thomas = {
         const lb = document.getElementById('thomas-lightbox');
         if (lb && !lb.classList.contains('hidden')) {
           this._closeLightbox();
+          return;
+        }
+        // Aperçu "répondre à" en cours : on l'annule sans fermer le chat
+        if (this.open && this.pendingReplyTo) {
+          this._clearReplyTo();
           return;
         }
         if (this.open) this.closeDialog();
@@ -255,6 +262,9 @@ const Thomas = {
       this.typingIdleTimeout = null;
     }
     try { App.api.messages_set_typing({ active: false }); } catch(e){}
+    // Réinitialise l'état "en train de répondre" : si on rouvre, c'est
+    // un nouveau contexte (on n'avait juste pas envoyé).
+    this._clearReplyTo();
     this.startPolling();
   },
 
@@ -283,6 +293,13 @@ const Thomas = {
     const el = document.getElementById('thomas-messages');
     if (!el) return;
 
+    // Index par id : sert à résoudre `reply_to_id` lors du rendu et à
+    // retrouver l'original quand on clique sur une citation.
+    this.cachedById = {};
+    for (const m of msgs) {
+      if (m && m.id) this.cachedById[m.id] = m;
+    }
+
     const html = msgs.map(m => {
       const isFromMe = this._isFromMe(m);
       const align = isFromMe ? 'justify-end' : 'justify-start';
@@ -298,15 +315,35 @@ const Thomas = {
       const attachHtml = m.attachment_url
         ? this._renderAttachment(m)
         : '';
-      return `
-        <div class="flex ${align}">
-          <div class="max-w-[75%] px-3 py-2 rounded-2xl ${corner} text-white"
-               style="background:${this._escape(bgColor)};">
-            ${attachHtml}
-            ${bodyHtml}
-            <div class="text-[10px] opacity-70 mt-1 text-right">${time}</div>
-          </div>
+      const quoteHtml = m.reply_to_id
+        ? this._renderQuotedParent(m.reply_to_id)
+        : '';
+
+      const replyBtn = `
+        <button type="button" class="thomas-reply-btn" data-reply-id="${this._escape(m.id || '')}"
+                title="Répondre" aria-label="Répondre à ce message">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 17 4 12 9 7"/>
+            <path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
+          </svg>
+        </button>`;
+
+      const bubble = `
+        <div class="max-w-[75%] px-3 py-2 rounded-2xl ${corner} text-white"
+             data-msg-id="${this._escape(m.id || '')}"
+             style="background:${this._escape(bgColor)};">
+          ${quoteHtml}
+          ${attachHtml}
+          ${bodyHtml}
+          <div class="text-[10px] opacity-70 mt-1 text-right">${time}</div>
         </div>`;
+
+      // Pour mes bulles (droite), le bouton ↩ est avant ; pour celles de
+      // l'autre (gauche), il est après — il reste toujours du côté
+      // "extérieur" de la bulle.
+      const inner = isFromMe ? `${replyBtn}${bubble}` : `${bubble}${replyBtn}`;
+      return `<div class="flex ${align} items-center gap-1.5 thomas-msg-row">${inner}</div>`;
     }).join('');
 
     el.innerHTML = html || `
@@ -322,8 +359,118 @@ const Thomas = {
       });
     });
 
+    // Bind les boutons "Répondre" de chaque bulle
+    el.querySelectorAll('.thomas-reply-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-reply-id');
+        const msg = this.cachedById[id];
+        if (msg) this._setReplyTo(msg);
+      });
+    });
+
+    // Bind les citations cliquables → scroll vers l'original
+    el.querySelectorAll('[data-quote-target]').forEach(quote => {
+      quote.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._scrollToMessage(quote.getAttribute('data-quote-target'));
+      });
+    });
+
     // Scroll en bas
     el.scrollTop = el.scrollHeight;
+  },
+
+  /** Rendu de la citation affichée en haut d'une bulle qui est une réponse. */
+  _renderQuotedParent(parentId) {
+    const parent = this.cachedById[parentId];
+    let authorName, excerpt, accent;
+    if (parent) {
+      const fromMe = this._isFromMe(parent);
+      accent = fromMe ? this.myColor : this.otherColor;
+      authorName = fromMe ? 'Toi' : (
+        document.getElementById('thomas-dialog-name')?.textContent || 'Lui'
+      );
+      excerpt = this._messageExcerpt(parent);
+    } else {
+      // Message parent hors de la fenêtre chargée (>100 messages d'écart).
+      accent = 'rgba(255,255,255,0.4)';
+      authorName = '…';
+      excerpt = 'Message original';
+    }
+    return `
+      <div class="thomas-quote" data-quote-target="${this._escape(parentId)}"
+           style="border-left-color:${this._escape(accent)};">
+        <div class="thomas-quote-author">${this._escape(authorName)}</div>
+        <div class="thomas-quote-body">${this._escape(excerpt)}</div>
+      </div>`;
+  },
+
+  /** Texte court d'un message pour l'aperçu (citation, banner répondre). */
+  _messageExcerpt(msg, max = 80) {
+    if (!msg) return '';
+    let txt = (msg.body || '').trim();
+    if (!txt && msg.attachment_url) {
+      const t = String(msg.attachment_type || '').toLowerCase();
+      txt = t.startsWith('image/') ? '📎 Photo' : '📎 Fichier';
+    }
+    if (txt.length > max) txt = txt.slice(0, max - 1) + '…';
+    return txt;
+  },
+
+  /** Scroll vers une bulle existante + petit flash visuel. */
+  _scrollToMessage(id) {
+    const el = document.querySelector(`[data-msg-id="${CSS.escape(id)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove('thomas-msg-flash');
+    void el.offsetWidth;  // force reflow pour relancer l'animation
+    el.classList.add('thomas-msg-flash');
+  },
+
+  _setReplyTo(msg) {
+    this.pendingReplyTo = msg;
+    this._renderReplyPreview();
+    const input = document.getElementById('thomas-input');
+    if (input) input.focus();
+  },
+
+  _clearReplyTo() {
+    this.pendingReplyTo = null;
+    const el = document.getElementById('thomas-reply-preview');
+    if (el) {
+      el.classList.add('hidden');
+      el.innerHTML = '';
+    }
+  },
+
+  _renderReplyPreview() {
+    const el = document.getElementById('thomas-reply-preview');
+    if (!el || !this.pendingReplyTo) return;
+    const m = this.pendingReplyTo;
+    const fromMe = this._isFromMe(m);
+    const accent = fromMe ? this.myColor : this.otherColor;
+    const author = fromMe ? 'toi-même' : (
+      document.getElementById('thomas-dialog-name')?.textContent || 'lui'
+    );
+    el.classList.remove('hidden');
+    el.innerHTML = `
+      <div class="thomas-reply-banner" style="border-left-color:${this._escape(accent)};">
+        <svg class="w-4 h-4 shrink-0 text-text-muted" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 17 4 12 9 7"/>
+          <path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
+        </svg>
+        <div class="flex-1 min-w-0">
+          <div class="text-[11px] font-semibold text-text">Réponse à ${this._escape(author)}</div>
+          <div class="text-xs text-text-muted truncate">${this._escape(this._messageExcerpt(m, 120))}</div>
+        </div>
+        <button id="thomas-reply-cancel" type="button"
+                class="w-7 h-7 rounded-full text-text-muted hover:text-danger hover:bg-bg
+                       transition-colors flex items-center justify-center text-lg leading-none">×</button>
+      </div>`;
+    const cancel = document.getElementById('thomas-reply-cancel');
+    if (cancel) cancel.addEventListener('click', () => this._clearReplyTo());
   },
 
   /** Rendu HTML d'une pièce jointe. Images : <img> clicable (lightbox).
@@ -396,12 +543,16 @@ const Thomas = {
     try {
       const payload = { body };
       if (attachment) payload.attachment = attachment;
+      if (this.pendingReplyTo && this.pendingReplyTo.id) {
+        payload.reply_to_id = this.pendingReplyTo.id;
+      }
       const res = await App.api.messages_send(payload);
       if (res && res.ok && res.message) {
         // Cache mon user_id pour bien aligner les bulles
         this.myUserId = res.message.sender_id;
         input.value = '';
         this._clearPendingAttachment();
+        this._clearReplyTo();
         await this.refreshMessages();
         try { await App.api.messages_set_typing({ active: false }); } catch(e){}
       } else {

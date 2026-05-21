@@ -3524,6 +3524,7 @@ class Api:
                 exported=str(p.get("exported") or "").strip(),
                 contacted=str(p.get("contacted") or "").strip(),
                 sort_by=str(p.get("sort_by") or "score").strip(),
+                audience=str(p.get("audience") or "").strip(),
                 limit=int(p.get("limit") or 100),
                 offset=int(p.get("offset") or 0),
             )
@@ -3591,6 +3592,7 @@ class Api:
                 city=str(p.get("city") or "").strip(),
                 q=str(p.get("q") or "").strip(),
                 has_email=has_email,
+                audience=str(p.get("audience") or "").strip(),
             )
         except Exception as exc:
             return {"ok": False, "error": str(exc), "deleted": 0}
@@ -3713,6 +3715,7 @@ class Api:
                 has_email=has_email,
                 country=str(p.get("country") or "").strip(),
                 job_id=str(p.get("job_id") or "").strip(),
+                audience=str(p.get("audience") or "").strip(),
             )
             if not res.get("ok"):
                 return res
@@ -5611,12 +5614,14 @@ class Api:
             - body : texte du message (optionnel si attachment)
             - attachment : dict {url, name, type, size} (optionnel si body)
               produit par /api/chat_attachment.
+            - reply_to_id : ID d'un message auquel on répond (optionnel).
         """
         try:
             from ..integrations.messages import send_message
             body = (payload or {}).get("body", "")
             attachment = (payload or {}).get("attachment") or None
-            msg = send_message(body, attachment)
+            reply_to_id = (payload or {}).get("reply_to_id") or None
+            msg = send_message(body, attachment, reply_to_id=reply_to_id)
             return {"ok": bool(msg), "message": msg}
         except Exception as exc:
             logger.warning("messages_send: %s", exc)
@@ -6676,6 +6681,22 @@ class Api:
         try:
             from ..integrations import chasseur
             return chasseur.export_csv(hid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def chasseur_push_to_autopilot(self, payload: dict) -> dict:
+        """Envoie les prospects d'une chasse dans la base partagée pour que
+        l'Auto-Pilote les ramasse la nuit (enrich + rédige + envoie).
+
+        payload = {hunt_id}
+        Renvoie {ok, backend ("remote"/"local"), pushed, created, merged}.
+        """
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import chasseur
+            return chasseur.push_to_autopilot(hid)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
