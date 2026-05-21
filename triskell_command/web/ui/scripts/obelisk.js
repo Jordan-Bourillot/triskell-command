@@ -589,6 +589,17 @@ const Obelisk = {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
           Nettoyer non-francophones
         </button>
+        <div style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px 5px 10px; border:1px solid rgba(196,68,68,0.4); border-radius:8px; font-size:12px; color:#c44;">
+          <span>Supprimer si &lt;</span>
+          <input id="ob-purge-min-subs" type="number" min="1" placeholder="ex: 500"
+                 title="Tous les prospects avec moins de cette valeur d'abonnés seront supprimés (les prospects sans nombre d'abonnés mesuré sont préservés)"
+                 style="width:80px; padding:3px 6px; border:1px solid hsl(var(--border)); border-radius:6px; background:transparent; color:hsl(var(--text)); font-size:12px; text-align:center;"/>
+          <span>abonnés</span>
+          <button id="ob-purge-subs" type="button" title="Lance la suppression (avec preview + confirmation)"
+                  style="margin-left:4px; padding:3px 8px; border:1px solid rgba(196,68,68,0.4); border-radius:6px; background:transparent; color:#c44; font-size:12px; cursor:pointer;">
+            Go
+          </button>
+        </div>
         <div style="display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid hsl(var(--border)); border-radius:8px; font-size:12px; color:hsl(var(--text-muted));">
           <span>Combien :</span>
           <input id="ob-export-count" type="number" min="1" max="5000" placeholder="tous"
@@ -650,6 +661,10 @@ const Obelisk = {
     const btnPurge = document.getElementById('ob-purge-nonfr');
     if (btnPurge) btnPurge.addEventListener('click', () => this._purgeNonFrench());
 
+    // Bouton "Supprimer si < X abonnés" (preview + confirmation)
+    const btnPurgeSubs = document.getElementById('ob-purge-subs');
+    if (btnPurgeSubs) btnPurgeSubs.addEventListener('click', () => this._purgeBelowSubs());
+
     await this._loadCreators();
   },
 
@@ -692,6 +707,59 @@ const Obelisk = {
       }
       alert(`✅ ${res.deleted || 0} prospect(s) non-francophones supprimés.`);
       // Recharge la liste
+      await this._loadCreators();
+    } catch (err) {
+      alert("Erreur : " + (err && err.message || err));
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = originalLabel; }
+    }
+  },
+
+  // ── Suppression des prospects en dessous d'un seuil d'abonnés ─────
+  async _purgeBelowSubs() {
+    const input = document.getElementById('ob-purge-min-subs');
+    const btn = document.getElementById('ob-purge-subs');
+    const threshold = input ? parseInt(input.value, 10) : 0;
+    if (!threshold || threshold <= 0) {
+      alert("Entre un nombre d'abonnés minimum (ex: 500).");
+      input?.focus();
+      return;
+    }
+    const originalLabel = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = 'Scan…'; }
+    try {
+      // 1) Preview
+      const pre = await this._api('purge_below_subs', { threshold });
+      if (!pre || !pre.ok) {
+        alert("Impossible de scanner : " + ((pre && pre.error) || 'erreur inconnue'));
+        return;
+      }
+      const count = pre.count || 0;
+      if (count === 0) {
+        alert(`Aucun prospect avec moins de ${threshold.toLocaleString('fr-FR')} abonnés. Rien à supprimer.`);
+        return;
+      }
+      const exLines = (pre.examples || []).map(e =>
+        `  • ${e.name} — ${Number(e.subscribers || 0).toLocaleString('fr-FR')} abonnés`
+      ).join('\n');
+      const msg =
+        `${count.toLocaleString('fr-FR')} prospects ont moins de ${threshold.toLocaleString('fr-FR')} abonnés.\n\n` +
+        `Exemples :\n${exLines}\n\n` +
+        `Confirmer la SUPPRESSION définitive de ces ${count} prospects ?\n` +
+        `(action irréversible)`;
+      if (!window.confirm(msg)) return;
+      // 2) Suppression réelle
+      if (btn) btn.innerHTML = `Suppression de ${count}…`;
+      const res = await this._api('purge_below_subs', {
+        threshold,
+        confirm: 'PURGE_BELOW_SUBS',
+      });
+      if (!res || !res.ok) {
+        alert("Suppression échouée : " + ((res && res.error) || 'erreur inconnue'));
+        return;
+      }
+      alert(`✅ ${res.deleted || 0} prospect(s) supprimés.`);
+      if (input) input.value = '';
       await this._loadCreators();
     } catch (err) {
       alert("Erreur : " + (err && err.message || err));

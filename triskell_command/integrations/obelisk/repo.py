@@ -375,6 +375,69 @@ def audit_non_francophones(*, limit_scan: int = 5000) -> dict:
                 "total_scanned": 0, "non_fr_count": 0, "ids": [], "examples": []}
 
 
+def purge_below_subscribers(*, threshold: int, confirm: str = "") -> dict:
+    """Supprime les prospects qui ont MOINS de `threshold` abonnés
+    (prospects sans valeur d'abonnés ne sont PAS supprimés — on ne sait pas
+    s'ils sont petits ou juste pas mesurés).
+    Exige confirm = 'PURGE_BELOW_SUBS' pour passer à l'action.
+    Sans confirm, renvoie un preview (count + 5 exemples)."""
+    try:
+        threshold = int(threshold)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "threshold invalide"}
+    if threshold <= 0:
+        return {"ok": False, "error": "threshold doit être > 0"}
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré"}
+    try:
+        # Récupère les prospects à supprimer (count + exemples + ids)
+        page_size = 500
+        all_rows: list[dict] = []
+        offset = 0
+        while True:
+            res = (sb.table("prospects")
+                     .select("id, name, handle, subscribers, platform_url")
+                     .not_.is_("subscribers", "null")
+                     .lt("subscribers", threshold)
+                     .range(offset, offset + page_size - 1)
+                     .execute())
+            chunk = res.data or []
+            all_rows.extend(chunk)
+            if len(chunk) < page_size:
+                break
+            offset += page_size
+        ids = [r["id"] for r in all_rows if r.get("id")]
+        examples = []
+        for r in all_rows[:5]:
+            examples.append({
+                "name": r.get("name") or r.get("handle") or "(sans nom)",
+                "subscribers": r.get("subscribers"),
+            })
+        if confirm != "PURGE_BELOW_SUBS":
+            return {
+                "ok": True,
+                "preview": True,
+                "threshold": threshold,
+                "count": len(ids),
+                "examples": examples,
+            }
+        if not ids:
+            return {"ok": True, "deleted": 0, "examples": []}
+        deleted = 0
+        for i in range(0, len(ids), 200):
+            batch = ids[i:i + 200]
+            try:
+                sb.table("prospects").delete().in_("id", batch).execute()
+                deleted += len(batch)
+            except Exception as exc:
+                logger.warning("obelisk.purge_below_subs batch: %s", exc)
+        return {"ok": True, "deleted": deleted, "examples": examples}
+    except Exception as exc:
+        logger.warning("obelisk.purge_below_subscribers: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
 def purge_non_francophones(*, confirm: str = "") -> dict:
     """Supprime tous les prospects non-confirmés francophones.
     Exige confirm = 'PURGE_NON_FR' pour passer à l'action (sécurité).

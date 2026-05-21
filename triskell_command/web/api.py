@@ -3637,6 +3637,21 @@ class Api:
             logger.exception("obelisk_purge_non_french failed")
             return {"ok": False, "error": str(exc)}
 
+    def obelisk_purge_below_subs(self, payload: dict | None = None) -> dict:
+        """Supprime les prospects avec moins de N abonnés (les sans-valeur
+        sont préservés, on ne peut pas savoir s'ils sont petits ou juste
+        non mesurés). Sans confirm, renvoie un preview avec le compte +
+        exemples. Avec confirm == 'PURGE_BELOW_SUBS', supprime pour de bon."""
+        p = payload or {}
+        threshold = p.get("threshold")
+        confirm = p.get("confirm") or ""
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.purge_below_subscribers(threshold=threshold, confirm=confirm)
+        except Exception as exc:
+            logger.exception("obelisk_purge_below_subs failed")
+            return {"ok": False, "error": str(exc)}
+
     def obelisk_export(self, payload: dict | None = None) -> dict:
         """Exporte la liste filtrée de prospects en xlsx ou pdf.
 
