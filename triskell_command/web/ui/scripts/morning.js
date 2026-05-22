@@ -495,19 +495,13 @@ const Morning = {
     return `
       <div class="cockpit-modes">
         <div class="cockpit-modes-head">
-          <span class="cockpit-modes-title">TES 2 MODES</span>
+          <span class="cockpit-modes-title">RÉPONSES AUTO</span>
           <span class="cockpit-modes-sub">Bascule en 1 clic — l'app applique tout de suite</span>
         </div>
         <div class="cockpit-modes-grid">
           ${this._modeCard({
-            kind: 'prospection',
-            title: 'Prospection',
-            sub: 'Les mails que l’IA prépare pour les nouveaux contacts',
-            current: m.prospection,
-          })}
-          ${this._modeCard({
             kind: 'reponses',
-            title: 'Réponses',
+            title: 'Réponses aux mails reçus',
             sub: 'Les réponses que l’IA prépare aux gens qui t’ont écrit',
             current: m.reponses,
           })}
@@ -554,9 +548,7 @@ const Morning = {
           const target = btn.dataset.mode;
           if (card.dataset.current === target) return;
           if (target === 'direct') {
-            const confirmMsg = kind === 'prospection'
-              ? "Passer en envoi DIRECT pour la prospection ?\n\nL'IA enverra chaque mail sans te demander. Tu peux revenir à « Je valide » à tout moment."
-              : "Passer en envoi DIRECT pour les réponses ?\n\nL'IA répondra toute seule aux mails reçus. Tu peux revenir à « Je valide » à tout moment.";
+            const confirmMsg = "Passer en envoi DIRECT pour les réponses ?\n\nL'IA répondra toute seule aux mails reçus. Tu peux revenir à « Je valide » à tout moment.";
             if (!confirm(confirmMsg)) return;
           }
           card.querySelectorAll('.cockpit-mode-opt').forEach(b => {
