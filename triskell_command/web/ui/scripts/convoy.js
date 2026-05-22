@@ -1461,15 +1461,92 @@ const Convoy = {
       clearInterval(this.sendPoll); this.sendPoll = null;
       const stopBtn = document.getElementById('cv-stop-send');
       if (stopBtn) stopBtn.classList.add('hidden');
+      // Bandeau de fin : résumé clair, visible, qui dit ce qui s'est
+      // passé sans avoir à lire le journal. Posé une seule fois.
+      if (r.summary && !this._sendSummaryShown) {
+        this._sendSummaryShown = true;
+        this._renderSendSummary(r.summary);
+      }
       try {
         const c2 = await App.api.convoy_get_campaign({ campaign_id: this.detail.id });
         if (c2 && c2.ok) {
           this.detail = c2.campaign;
+          // Avant de redessiner, on garde le bandeau pour qu'il survive
+          // au re-render — il sera réinjecté par _stepSend (qui lira
+          // this._lastSendSummary).
           this._renderDetail();
           await this._loadList();
         }
       } catch (e) {}
     }
+  },
+
+  _renderSendSummary(s) {
+    if (!s) return;
+    this._lastSendSummary = s;     // pour survie au re-render
+
+    // Choix d'humeur du bandeau : tout envoyé OK → vert,
+    // au moins 1 échec → orange, stop manuel → bleu, rien envoyé → gris.
+    let kind = 'success';
+    let title = 'Convoi terminé';
+    if (s.stopped_by_user) {
+      kind = 'info';
+      title = 'Convoi arrêté';
+    } else if (s.failed > 0) {
+      kind = 'warning';
+      title = 'Convoi terminé avec des échecs';
+    } else if (s.sent === 0) {
+      kind = 'info';
+      title = 'Convoi terminé — aucun envoi';
+    }
+
+    const mins = Math.floor((s.duration_s || 0) / 60);
+    const secs = (s.duration_s || 0) % 60;
+    const dur  = mins > 0 ? `${mins} min ${secs} s` : `${secs} s`;
+
+    // Phrase humaine de récap, à la première personne du Convoi.
+    let phrase;
+    if (s.stopped_by_user) {
+      phrase = `Tu m'as demandé d'arrêter. J'ai envoyé <b>${s.sent}</b> mail`
+             + `${s.sent > 1 ? 's' : ''} sur les <b>${s.planned}</b> prévus.`;
+    } else if (s.sent > 0 && s.failed === 0) {
+      phrase = `J'ai bien envoyé tes <b>${s.sent}</b> mail`
+             + `${s.sent > 1 ? 's' : ''} en <b>${dur}</b>. Tout est parti sans souci.`;
+    } else if (s.sent > 0 && s.failed > 0) {
+      phrase = `J'ai envoyé <b>${s.sent}</b> mail${s.sent > 1 ? 's' : ''} `
+             + `et <b>${s.failed}</b> n'${s.failed > 1 ? 'ont' : 'a'} pas pu partir. `
+             + `Durée totale : <b>${dur}</b>.`;
+    } else if (s.failed > 0) {
+      phrase = `Aucun mail n'a pu partir. <b>${s.failed}</b> tentative`
+             + `${s.failed > 1 ? 's' : ''} en échec sur ${s.planned} prévue`
+             + `${s.planned > 1 ? 's' : ''}.`;
+    } else {
+      phrase = `Il n'y avait rien à envoyer pour cette campagne.`;
+    }
+
+    // Détail compteurs : seulement les non-nuls pour rester propre.
+    const bits = [];
+    if (s.sent)     bits.push(`<span class="cv-summary-stat cv-summary-stat-ok">✓ ${s.sent} envoyé${s.sent > 1 ? 's' : ''}</span>`);
+    if (s.failed)   bits.push(`<span class="cv-summary-stat cv-summary-stat-ko">✗ ${s.failed} échec${s.failed > 1 ? 's' : ''}</span>`);
+    if (s.pending)  bits.push(`<span class="cv-summary-stat">… ${s.pending} en attente</span>`);
+    if (s.rejected) bits.push(`<span class="cv-summary-stat">↷ ${s.rejected} rejeté${s.rejected > 1 ? 's' : ''}</span>`);
+
+    const html = `
+      <div class="cv-end-banner cv-end-banner-${kind} mb-4"
+           id="cv-end-banner">
+        <div class="cv-end-banner-title">${title}</div>
+        <div class="cv-end-banner-body">${phrase}</div>
+        ${bits.length ? `<div class="cv-end-banner-stats">${bits.join('')}</div>` : ''}
+      </div>
+    `;
+
+    // Insère le bandeau juste au-dessus du journal d'envoi.
+    const wrap = document.getElementById('cv-send-log-wrap');
+    if (!wrap) return;
+    const old = document.getElementById('cv-end-banner');
+    if (old) old.remove();
+    wrap.insertAdjacentHTML('beforebegin', html);
+    wrap.previousElementSibling.scrollIntoView({ behavior: 'smooth', block: 'center' });
   },
 
   // ---- Étape 5 : Résultats / drafts --------------------------------

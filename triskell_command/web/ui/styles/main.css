@@ -1560,6 +1560,77 @@ html, body {
 }
 .cv-test-banner b { font-weight: 700; color: hsl(38 92% 35%); }
 
+/* ───── Bandeau de fin d'envoi du Convoi ─────────────────────────────
+   Apparait quand l'envoi est terminé (succès, échec ou arrêt manuel).
+   But : un message clair et synthétique au-dessus du journal, pour
+   ne pas avoir à lire les lignes une par une.
+
+   4 humeurs : success (tout OK), warning (au moins 1 échec),
+   info (arrêt manuel ou rien à envoyer).
+*/
+.cv-end-banner {
+  border-radius: 14px;
+  padding: 16px 18px;
+  border: 1px solid;
+  display: flex; flex-direction: column; gap: 8px;
+  transition: background 200ms, border-color 200ms, color 200ms;
+}
+.cv-end-banner-title {
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+.cv-end-banner-body {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: hsl(var(--text-primary));
+}
+.cv-end-banner-body b { font-weight: 700; }
+.cv-end-banner-stats {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-top: 4px;
+}
+.cv-summary-stat {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px;
+  font-size: 12px; font-weight: 600;
+  background: hsl(var(--bg) / 0.5);
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  color: hsl(var(--text-secondary));
+}
+.cv-summary-stat-ok {
+  background: hsl(142 71% 45% / 0.12);
+  border-color: hsl(142 71% 45% / 0.35);
+  color: hsl(142 71% 30%);
+}
+.cv-summary-stat-ko {
+  background: hsl(0 84% 60% / 0.12);
+  border-color: hsl(0 84% 60% / 0.35);
+  color: hsl(0 84% 45%);
+}
+
+/* Humeur succès — vert apaisé */
+.cv-end-banner-success {
+  background: hsl(142 71% 45% / 0.08);
+  border-color: hsl(142 71% 45% / 0.3);
+}
+.cv-end-banner-success .cv-end-banner-title { color: hsl(142 71% 30%); }
+
+/* Humeur warning — ambre */
+.cv-end-banner-warning {
+  background: hsl(38 92% 50% / 0.10);
+  border-color: hsl(38 92% 50% / 0.35);
+}
+.cv-end-banner-warning .cv-end-banner-title { color: hsl(38 92% 35%); }
+
+/* Humeur info — bleu doux (arrêt manuel, rien à envoyer) */
+.cv-end-banner-info {
+  background: hsl(210 85% 60% / 0.08);
+  border-color: hsl(210 85% 60% / 0.3);
+}
+.cv-end-banner-info .cv-end-banner-title { color: hsl(210 85% 40%); }
+
 /* Liseré ambré sur les cartes de mail test pour les repérer au scroll */
 .cv-draft-test {
   border-left: 3px solid hsl(38 92% 50%);

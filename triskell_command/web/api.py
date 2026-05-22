@@ -1120,6 +1120,20 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def phare_archive_action(self, payload: dict) -> dict:
+        """Cache une action 'merged' de la liste 'Ce qui a été fait'.
+
+        Payload : { id: str }
+        """
+        aid = ((payload or {}).get("id") or "").strip()
+        if not aid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.phare import orchestrator
+            return orchestrator.archive_action(aid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def phare_home(self, payload: dict | None = None) -> dict:
         """Vue d'accueil 1-minute : 1 carte par site avec son état global.
 
