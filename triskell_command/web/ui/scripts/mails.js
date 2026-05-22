@@ -734,32 +734,43 @@ const Mails = {
         status.className = 'text-xs text-danger text-right flex-1';
         return;
       }
-      sendBtn.disabled = true;
-      sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-9-9"/></svg>Envoi…';
-      status.textContent = '';
-      try {
-        const r = await App.api.mail_send_reply({
-          account_id, to, subject: subj, body: bodyVal,
-          in_reply_to: inReplyTo || '',
-        });
-        if (r && r.ok) {
-          if (window.MailAddressBook) window.MailAddressBook.record(to);
-          status.textContent = '✓ Envoyé !';
-          status.className = 'text-xs text-success text-right flex-1';
-          sendBtn.innerHTML = '✓ Envoyé';
-          setTimeout(close, 1200);
-        } else {
-          status.textContent = `✗ ${(r && r.error) || 'Erreur inconnue'}`;
-          status.className = 'text-xs text-danger text-right flex-1';
-          sendBtn.disabled = false;
-          sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>Envoyer la réponse';
-        }
-      } catch (e) {
-        status.textContent = `✗ ${e}`;
-        status.className = 'text-xs text-danger text-right flex-1';
+      const replyBtnDefaultHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>Envoyer la réponse';
+      const resetReplyBtn = () => {
         sendBtn.disabled = false;
-        sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>Envoyer la réponse';
-      }
+        sendBtn.innerHTML = replyBtnDefaultHTML;
+      };
+      const doReplySend = async (force) => {
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-9-9"/></svg>Envoi…';
+        status.textContent = '';
+        try {
+          const r = await App.api.mail_send_reply({
+            account_id, to, subject: subj, body: bodyVal,
+            in_reply_to: inReplyTo || '',
+            force: !!force,
+          });
+          if (r && r.ok) {
+            if (window.MailAddressBook) window.MailAddressBook.record(to);
+            status.textContent = '✓ Envoyé !';
+            status.className = 'text-xs text-success text-right flex-1';
+            sendBtn.innerHTML = '✓ Envoyé';
+            setTimeout(close, 1200);
+          } else if (r && r.warnings && r.warnings.length) {
+            resetReplyBtn();
+            Mails._renderSendWarnings(status, r.warnings,
+              () => doReplySend(true), resetReplyBtn);
+          } else {
+            status.textContent = `✗ ${(r && r.error) || 'Erreur inconnue'}`;
+            status.className = 'text-xs text-danger text-right flex-1';
+            resetReplyBtn();
+          }
+        } catch (e) {
+          status.textContent = `✗ ${e}`;
+          status.className = 'text-xs text-danger text-right flex-1';
+          resetReplyBtn();
+        }
+      };
+      doReplySend(false);
     };
   },
 
@@ -769,6 +780,43 @@ const Mails = {
       const d = new Date(iso);
       return d.toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
     } catch { return iso; }
+  },
+
+  /**
+   * Affiche une bannière d'alerte non bloquante quand l'API renvoie un
+   * payload {warnings: [...]} sur un envoi manuel (adresse déjà contactée
+   * ou présente dans la base clients). L'utilisateur peut forcer ou annuler.
+   *
+   * @param {HTMLElement} statusEl  Le node où injecter la bannière (en
+   *                                général le #cmp-status du composer)
+   * @param {Array} warnings        La liste renvoyée par l'API
+   * @param {Function} onForce      Callback appelé si "Envoyer quand même"
+   * @param {Function} onCancel     Callback appelé si "Annuler"
+   */
+  _renderSendWarnings(statusEl, warnings, onForce, onCancel) {
+    if (!statusEl) return;
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+    const msgs = (warnings || []).map(w => {
+      const addr = w && w.email ? ` (${esc(w.email)})` : '';
+      return `<li>${esc(w.message || '')}${addr}</li>`;
+    }).join('');
+    statusEl.className = '';
+    statusEl.innerHTML = `
+      <div class="mt-2 p-3 rounded-lg border border-amber-400/40 bg-amber-50 dark:bg-amber-900/20 text-sm">
+        <div class="font-semibold text-amber-700 dark:text-amber-300 mb-1">⚠ À vérifier avant d'envoyer</div>
+        <ul class="list-disc list-inside text-amber-800 dark:text-amber-200 mb-2">${msgs}</ul>
+        <div class="flex gap-2 justify-end">
+          <button type="button" data-warn-act="cancel" class="btn btn-secondary btn-sm">Annuler</button>
+          <button type="button" data-warn-act="force" class="btn btn-primary btn-sm">Envoyer quand même</button>
+        </div>
+      </div>
+    `;
+    const fBtn = statusEl.querySelector('[data-warn-act="force"]');
+    const cBtn = statusEl.querySelector('[data-warn-act="cancel"]');
+    if (fBtn) fBtn.onclick = () => { statusEl.innerHTML = ''; if (onForce) onForce(); };
+    if (cBtn) cBtn.onclick = () => { statusEl.innerHTML = ''; if (onCancel) onCancel(); };
   },
 
   // ----------------------------------------------------------------------
@@ -2807,45 +2855,56 @@ const Mails = {
           return;
         }
         this._openScheduleDialog(async (scheduledAtISO, prettyDate) => {
-          scheduleBtn.disabled = true;
-          scheduleBtn.innerHTML = 'Programmation…';
-          try {
-            const r = await App.api.mail_schedule({
-              account_id: p.account_id,
-              to: p.to,
-              cc: p.ccList,
-              bcc: p.bccList,
-              subject: p.subj,
-              body: p.body,
-              body_html: p.body_html,
-              in_reply_to: opts.inReplyTo || '',
-              scheduled_at: scheduledAtISO,
-              attachments: p.cleanAttachments.map(a => ({
-                filename: a.filename, content_b64: a.content_b64,
-                content_type: a.content_type,
-                inline: !!a.inline, cid: a.cid || '',
-              })),
-            });
-            if (r && r.ok) {
-              if (window.MailAddressBook) {
-                window.MailAddressBook.record([].concat(p.to || [], p.ccList || [], p.bccList || []));
-              }
-              status.textContent = `✓ Mail programmé pour ${prettyDate}`;
-              status.className = 'text-xs text-success';
-              try { localStorage.removeItem('tc-mail-draft'); } catch (e) {}
-              setTimeout(close, 1200);
-            } else {
-              status.textContent = `✗ ${(r && r.error) || 'Erreur inconnue'}`;
-              status.className = 'text-xs text-danger';
-              scheduleBtn.disabled = false;
-              scheduleBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Plus tard';
-            }
-          } catch (e) {
-            status.textContent = `✗ ${e.message || e}`;
-            status.className = 'text-xs text-danger';
+          const schedBtnDefaultHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Plus tard';
+          const resetSchedBtn = () => {
             scheduleBtn.disabled = false;
-            scheduleBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Plus tard';
-          }
+            scheduleBtn.innerHTML = schedBtnDefaultHTML;
+          };
+          const doSchedule = async (force) => {
+            scheduleBtn.disabled = true;
+            scheduleBtn.innerHTML = 'Programmation…';
+            try {
+              const r = await App.api.mail_schedule({
+                account_id: p.account_id,
+                to: p.to,
+                cc: p.ccList,
+                bcc: p.bccList,
+                subject: p.subj,
+                body: p.body,
+                body_html: p.body_html,
+                in_reply_to: opts.inReplyTo || '',
+                scheduled_at: scheduledAtISO,
+                force: !!force,
+                attachments: p.cleanAttachments.map(a => ({
+                  filename: a.filename, content_b64: a.content_b64,
+                  content_type: a.content_type,
+                  inline: !!a.inline, cid: a.cid || '',
+                })),
+              });
+              if (r && r.ok) {
+                if (window.MailAddressBook) {
+                  window.MailAddressBook.record([].concat(p.to || [], p.ccList || [], p.bccList || []));
+                }
+                status.textContent = `✓ Mail programmé pour ${prettyDate}`;
+                status.className = 'text-xs text-success';
+                try { localStorage.removeItem('tc-mail-draft'); } catch (e) {}
+                setTimeout(close, 1200);
+              } else if (r && r.warnings && r.warnings.length) {
+                resetSchedBtn();
+                Mails._renderSendWarnings(status, r.warnings,
+                  () => doSchedule(true), resetSchedBtn);
+              } else {
+                status.textContent = `✗ ${(r && r.error) || 'Erreur inconnue'}`;
+                status.className = 'text-xs text-danger';
+                resetSchedBtn();
+              }
+            } catch (e) {
+              status.textContent = `✗ ${e.message || e}`;
+              status.className = 'text-xs text-danger';
+              resetSchedBtn();
+            }
+          };
+          doSchedule(false);
         });
       };
     }
@@ -2984,44 +3043,57 @@ const Mails = {
         status.className = 'text-xs text-danger';
         return;
       }
-      sendBtn.disabled = true;
-      sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-9-9"/></svg>Envoi…';
-      status.textContent = '';
-      try {
-        const r = await App.api.mail_send({
-          account_id, to, cc: ccList, bcc: bccList,
-          subject: subj, body, body_html,
-          in_reply_to: opts.inReplyTo || '',
-          attachments: cleanAttachments.map(a => ({
-            filename: a.filename,
-            content_b64: a.content_b64,
-            content_type: a.content_type,
-            inline: !!a.inline,
-            cid: a.cid || '',
-          })),
-        });
-        if (r && r.ok) {
-          if (window.MailAddressBook) {
-            window.MailAddressBook.record([].concat(to || [], ccList || [], bccList || []));
-          }
-          status.textContent = '✓ Envoyé !';
-          status.className = 'text-xs text-success';
-          sendBtn.innerHTML = '✓ Envoyé';
-          // Le brouillon n'a plus de raison d'être après envoi
-          try { localStorage.removeItem('tc-mail-draft'); } catch (e) {}
-          setTimeout(() => { close(); this._load(); }, 1200);
-        } else {
-          status.textContent = `✗ ${(r && r.error) || 'Erreur inconnue'}`;
-          status.className = 'text-xs text-danger';
-          sendBtn.disabled = false;
-          sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>Envoyer';
-        }
-      } catch (e) {
-        status.textContent = `✗ ${e}`;
-        status.className = 'text-xs text-danger';
+      const sendBtnDefaultHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>Envoyer';
+      const resetSendBtn = () => {
         sendBtn.disabled = false;
-        sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>Envoyer';
-      }
+        sendBtn.innerHTML = sendBtnDefaultHTML;
+      };
+      const doSend = async (force) => {
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-9-9"/></svg>Envoi…';
+        status.textContent = '';
+        try {
+          const r = await App.api.mail_send({
+            account_id, to, cc: ccList, bcc: bccList,
+            subject: subj, body, body_html,
+            in_reply_to: opts.inReplyTo || '',
+            force: !!force,
+            attachments: cleanAttachments.map(a => ({
+              filename: a.filename,
+              content_b64: a.content_b64,
+              content_type: a.content_type,
+              inline: !!a.inline,
+              cid: a.cid || '',
+            })),
+          });
+          if (r && r.ok) {
+            if (window.MailAddressBook) {
+              window.MailAddressBook.record([].concat(to || [], ccList || [], bccList || []));
+            }
+            status.textContent = '✓ Envoyé !';
+            status.className = 'text-xs text-success';
+            sendBtn.innerHTML = '✓ Envoyé';
+            // Le brouillon n'a plus de raison d'être après envoi
+            try { localStorage.removeItem('tc-mail-draft'); } catch (e) {}
+            setTimeout(() => { close(); this._load(); }, 1200);
+          } else if (r && r.warnings && r.warnings.length) {
+            // Adresse déjà contactée et/ou présente en clients : on propose
+            // de re-poster avec force=true (Envoyer quand même).
+            resetSendBtn();
+            Mails._renderSendWarnings(status, r.warnings,
+              () => doSend(true), resetSendBtn);
+          } else {
+            status.textContent = `✗ ${(r && r.error) || 'Erreur inconnue'}`;
+            status.className = 'text-xs text-danger';
+            resetSendBtn();
+          }
+        } catch (e) {
+          status.textContent = `✗ ${e}`;
+          status.className = 'text-xs text-danger';
+          resetSendBtn();
+        }
+      };
+      doSend(false);
     };
   },
 

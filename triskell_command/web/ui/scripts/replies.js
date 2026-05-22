@@ -238,7 +238,10 @@ const Replies = {
         try {
           if (act === 'handle')  await App.api.reply_mark_handled({ id });
           if (act === 'cancel')  await App.api.reply_cancel({ id });
-          if (act === 'send')    await App.api.reply_send_now({ id });
+          if (act === 'send') {
+            await this._sendReplyDraft(id, false);
+            return;
+          }
           if (act === 'convert') {
             const original = btn.textContent;
             btn.textContent = 'Création…';
@@ -257,6 +260,65 @@ const Replies = {
         } catch (e) { console.warn(e); }
       };
     });
+  },
+
+  /**
+   * Envoie un brouillon de réponse. Si l'API renvoie des warnings (adresse
+   * déjà contactée / déjà client), on affiche une alerte douce au-dessus
+   * de la liste avec un bouton "Envoyer quand même".
+   */
+  async _sendReplyDraft(id, force) {
+    try {
+      const r = await App.api.reply_send_now({ id, force: !!force });
+      if (r && r.ok) {
+        this._clearWarningBanner();
+        await this.refresh();
+        return;
+      }
+      if (r && r.warnings && r.warnings.length) {
+        this._showWarningBanner(r.warnings,
+          () => this._sendReplyDraft(id, true));
+        return;
+      }
+      alert('Envoi impossible : ' + ((r && r.error) || 'erreur'));
+    } catch (e) {
+      console.warn(e);
+      alert('Envoi impossible : ' + e);
+    }
+  },
+
+  _clearWarningBanner() {
+    const old = document.getElementById('r-warn-banner');
+    if (old) old.remove();
+  },
+
+  _showWarningBanner(warnings, onForce) {
+    this._clearWarningBanner();
+    const list = document.getElementById('r-list');
+    if (!list) return;
+    const esc = this._esc.bind(this);
+    const msgs = (warnings || []).map(w => {
+      const addr = w && w.email ? ` (${esc(w.email)})` : '';
+      return `<li>${esc(w.message || '')}${addr}</li>`;
+    }).join('');
+    const banner = document.createElement('div');
+    banner.id = 'r-warn-banner';
+    banner.className = 'mb-3 p-3 rounded-lg border border-amber-400/40 bg-amber-50 dark:bg-amber-900/20 text-sm';
+    banner.innerHTML = `
+      <div class="font-semibold text-amber-700 dark:text-amber-300 mb-1">⚠ À vérifier avant d'envoyer</div>
+      <ul class="list-disc list-inside text-amber-800 dark:text-amber-200 mb-2">${msgs}</ul>
+      <div class="flex gap-2 justify-end">
+        <button type="button" data-warn-act="cancel" class="btn btn-secondary btn-sm">Annuler</button>
+        <button type="button" data-warn-act="force" class="btn btn-primary btn-sm">Envoyer quand même</button>
+      </div>
+    `;
+    list.insertBefore(banner, list.firstChild);
+    banner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    banner.querySelector('[data-warn-act="cancel"]').onclick = () => this._clearWarningBanner();
+    banner.querySelector('[data-warn-act="force"]').onclick = () => {
+      this._clearWarningBanner();
+      if (onForce) onForce();
+    };
   },
 
   async pollNow() {

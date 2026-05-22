@@ -547,8 +547,15 @@ def _do_one_cycle(app_state) -> dict:
     return counters
 
 
-def send_now(client, app_state, history_row_id: str) -> dict:
-    """Force l'envoi d'un draft suggéré (depuis l'UI). Renvoie {success, error, message_id}."""
+def send_now(client, app_state, history_row_id: str,
+              *, force: bool = False) -> dict:
+    """Force l'envoi d'un draft suggéré (depuis l'UI). Renvoie {success, error, message_id}.
+
+    Si force=False (défaut), vérifie d'abord si le destinataire a déjà été
+    contacté et/ou est dans la table clients. Si oui, renvoie
+    {"success": False, "warnings": [...]} sans envoyer. L'UI affiche
+    l'alerte et re-poste avec force=True si Jordan valide.
+    """
     try:
         res = (client.raw.table("email_history").select("*")
                .eq("id", history_row_id).limit(1).execute())
@@ -578,6 +585,16 @@ def send_now(client, app_state, history_row_id: str) -> dict:
             to = str(emails[0]).strip()
         if not to:
             return {"success": False, "error": "no_recipient"}
+
+        # Warnings doux : adresse déjà contactée et/ou dans clients ?
+        if not force:
+            try:
+                from . import prospect_status as PS
+                warns = PS.check_manual_send_warnings(client, to)
+                if warns:
+                    return {"success": False, "warnings": warns}
+            except Exception as exc:
+                logger.debug("reply send_now warnings KO: %s", exc)
 
         from triskell_core.prospect.outreach.smtp_sender import send_email
         in_reply_to = sr.get("in_reply_to") or extra.get("in_reply_to") or ""

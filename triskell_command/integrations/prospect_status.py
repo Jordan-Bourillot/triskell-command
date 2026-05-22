@@ -314,19 +314,48 @@ def _read_cooldown_hours(client) -> int:
 
 
 def has_recent_send(client, *, prospect_id: str = "", email: str = "",
-                     hours: int | None = None) -> dict:
+                     hours: int | None = None,
+                     forever: bool = False,
+                     check_clients: bool = False) -> dict:
     """Renvoie {"recent": bool, "last_ts": str, "last_kind": str}.
 
     Considere TOUS les envois (campagnes, drip, dormant, manuels, reponses
     auto) — si un mail est parti vers ce prospect/email dans les `hours`
     dernieres heures, on bloque tout nouvel envoi automatique.
+
+    forever=True : ignore le param `hours` et cherche dans TOUT l'historique
+        (memoire a vie). Usage : prospection automatique stricte (Auto-pilote
+        v2, convoy_runner, drip_runner) — jamais 2x le meme mail, quelle que
+        soit la date du premier envoi.
+
+    check_clients=True : verifie en plus que l'email n'est pas deja dans la
+        table `clients`. Si trouve, renvoie recent=True avec last_kind="client".
+        Filet applicatif en complement du trigger BDD #40.
     """
     if not (prospect_id or email):
         return {"recent": False, "last_ts": "", "last_kind": ""}
-    if hours is None:
-        hours = _read_cooldown_hours(client)
     sb = client.raw
-    threshold = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+    # Check croise clients (court-circuit rapide via clients_email_lower_idx)
+    if check_clients and email:
+        _e = email.lower().strip()
+        if _e:
+            try:
+                r = (sb.table("clients").select("id, email")
+                     .ilike("email", _e).limit(1).execute())
+                if r.data:
+                    return {"recent": True, "last_ts": "",
+                            "last_kind": "client"}
+            except Exception as exc:
+                logger.debug("has_recent_send: client check KO (%s)", exc)
+
+    if forever:
+        # Pas de fenetre : on considere tout l'historique
+        threshold = "1970-01-01T00:00:00+00:00"
+    else:
+        if hours is None:
+            hours = _read_cooldown_hours(client)
+        threshold = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     try:
         if prospect_id:
             # Query rapide quand on a l'id : on peut limiter à 1.
@@ -446,3 +475,113 @@ def mail_is_safe_to_send(subject: str, body: str) -> dict:
     Ne PAS envoyer si unrendered non vide."""
     bad = find_unrendered_vars(subject or "", body or "")
     return {"ok": not bad, "unrendered": bad}
+
+
+# =============================================================================
+# Warnings doux pour les envois MANUELS
+# =============================================================================
+# Pourquoi : la prospection automatique (autopilote v2, convoy, drip) bloque
+# DUR ces deux cas via should_contact() + has_recent_send(check_clients=True).
+# Les envois manuels (composer, programmé, reply_send_now depuis l'UI Réponses)
+# eux ne doivent PAS bloquer — Jordan veut juste être prévenu pour ne pas faire
+# d'erreur, mais reste libre de forcer.
+def check_manual_send_warnings(client, *emails: str) -> list[dict]:
+    """Renvoie une liste de warnings pour les destinataires donnés :
+    - {"code": "already_contacted", "email": "x@y.fr",
+       "message": "...", "last_sent_at": "YYYY-MM-DDTHH:MM:SS"}
+    - {"code": "in_clients", "email": "x@y.fr",
+       "message": "...", "client_name": "Prénom Nom"}
+
+    Liste vide = rien à signaler.
+    Best-effort : si la BDD répond mal, on renvoie [] (on ne bloque jamais
+    un envoi pour une erreur de check).
+    """
+    if client is None:
+        return []
+    out: list[dict] = []
+    sb = client.raw
+    # Dédoublonne et nettoie
+    clean: list[str] = []
+    seen: set[str] = set()
+    for e in emails:
+        if not e:
+            continue
+        v = (e or "").strip().lower()
+        if not v or "@" not in v or v in seen:
+            continue
+        seen.add(v)
+        clean.append(v)
+    if not clean:
+        return out
+
+    for email_low in clean:
+        # 1) Présent dans clients ? (court-circuit : c'est le warning
+        # le plus fort, on saute le check email_history pour cette adresse)
+        try:
+            r = (sb.table("clients")
+                 .select("id, email, first_name, last_name, company_name")
+                 .ilike("email", email_low).limit(1).execute())
+            row = (r.data or [None])[0]
+            if row:
+                name = " ".join(filter(None, [
+                    (row.get("first_name") or "").strip(),
+                    (row.get("last_name") or "").strip(),
+                ])).strip()
+                if not name:
+                    name = (row.get("company_name") or "").strip()
+                if not name:
+                    name = row.get("email") or email_low
+                out.append({
+                    "code": "in_clients",
+                    "email": email_low,
+                    "client_name": name,
+                    "message": f"Cette adresse est dans ta base clients ({name}).",
+                })
+                continue
+        except Exception as exc:
+            logger.debug("check_manual_send_warnings: clients KO (%s)", exc)
+
+        # 2) A déjà reçu un mail (n'importe quand) ?
+        try:
+            # Tentative serveur-side via index JSONB sur extra->>to
+            q = (sb.table("email_history").select("ts,extra")
+                 .eq("kind", "email_sent")
+                 .eq("extra->>to", email_low)
+                 .order("ts", desc=True).limit(1))
+            res = q.execute()
+            rows = res.data or []
+            last_ts = ""
+            if rows:
+                last_ts = rows[0].get("ts") or ""
+            else:
+                # Fallback client-side (ramène les 500 derniers, filtre py)
+                q2 = (sb.table("email_history").select("ts,extra")
+                      .eq("kind", "email_sent")
+                      .order("ts", desc=True).limit(500))
+                res2 = q2.execute()
+                for r2 in (res2.data or []):
+                    extra = r2.get("extra") or {}
+                    if isinstance(extra, str):
+                        try:
+                            import json as _json
+                            extra = _json.loads(extra)
+                        except Exception:
+                            extra = {}
+                    tos = extra.get("to") or extra.get("recipients") or []
+                    if isinstance(tos, str):
+                        tos = [tos]
+                    if any((t or "").lower() == email_low for t in tos):
+                        last_ts = r2.get("ts") or ""
+                        break
+            if last_ts:
+                pretty = last_ts[:10] if len(last_ts) >= 10 else last_ts
+                out.append({
+                    "code": "already_contacted",
+                    "email": email_low,
+                    "last_sent_at": last_ts,
+                    "message": f"Cette adresse a déjà été contactée le {pretty}.",
+                })
+        except Exception as exc:
+            logger.debug("check_manual_send_warnings: history KO (%s)", exc)
+
+    return out

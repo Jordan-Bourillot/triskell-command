@@ -241,14 +241,27 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     def reply_send_now(self, payload: dict) -> dict:
-        """Force l'envoi d'un brouillon de réponse suggéré."""
-        rid = (payload or {}).get("id") or ""
+        """Force l'envoi d'un brouillon de réponse suggéré.
+
+        Si payload.force != True et que le destinataire est déjà client ou a
+        déjà été contacté, renvoie {"ok": False, "warnings": [...]} pour
+        permettre à l'UI d'afficher l'alerte douce.
+        """
+        p = payload or {}
+        rid = p.get("id") or ""
+        force = bool(p.get("force"))
         client = self._supabase()
         if client is None:
             return {"ok": False, "error": "not_connected"}
         try:
             from ..integrations import reply_responder
-            return reply_responder.send_now(client, self._app_state, rid)
+            r = reply_responder.send_now(client, self._app_state, rid,
+                                          force=force) or {}
+            # Normalise la sortie (le module interne utilise "success")
+            out = dict(r)
+            if "ok" not in out:
+                out["ok"] = bool(out.get("success"))
+            return out
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -2085,6 +2098,22 @@ class Api:
         except Exception as exc:
             logger.debug("mail safety check skipped: %s", exc)
 
+        # Warnings doux pour envoi manuel : adresse déjà contactée et/ou
+        # présente dans la base clients. Pas de blocage dur — si l'UI re-poste
+        # avec force=true, on ignore.
+        if not bool(p.get("force")):
+            try:
+                from ..integrations import prospect_status as PS
+                _client_for_check = self._supabase()
+                all_addrs = [a.strip() for a in (to or "").split(",")
+                             if a.strip()] + list(cc) + list(bcc)
+                warns = PS.check_manual_send_warnings(
+                    _client_for_check, *all_addrs)
+                if warns:
+                    return {"ok": False, "warnings": warns}
+            except Exception as exc:
+                logger.debug("manual send warnings KO: %s", exc)
+
         # Tracking d'ouvertures (pixel) — si l'utilisateur l'a active.
         # On injecte un <img> invisible dans le HTML du mail ; quand le
         # destinataire ouvre le mail, l'image hit la Netlify Function qui
@@ -2364,6 +2393,21 @@ class Api:
                 return {"ok": False, "error": "La date doit être dans le futur."}
         except Exception:
             return {"ok": False, "error": "Date d'envoi invalide (format ISO 8601 attendu)."}
+
+        # Warnings doux pour envoi manuel programmé (même règles que mail_send).
+        # Si l'UI re-poste avec force=true, on ignore.
+        if not bool(p.get("force")):
+            try:
+                from ..integrations import prospect_status as PS
+                _client_for_check = self._supabase()
+                all_addrs = [a.strip() for a in (to or "").split(",")
+                             if a.strip()] + list(cc) + list(bcc)
+                warns = PS.check_manual_send_warnings(
+                    _client_for_check, *all_addrs)
+                if warns:
+                    return {"ok": False, "warnings": warns}
+            except Exception as exc:
+                logger.debug("manual schedule warnings KO: %s", exc)
 
         entry = {
             "account_id":   (p.get("account_id") or "primary").strip(),
@@ -6762,8 +6806,13 @@ class Api:
                         del rt["send_log"][: len(rt["send_log"]) - 500]
 
             def worker():
+                import time as _time
+                start_ts = _time.time()
+                start_iso = datetime.now().isoformat(timespec="seconds")
+                planned = len(approved)
+                stopped = False
                 try:
-                    push(f"Envoi de {len(approved)} mail(s)…")
+                    push(f"Envoi de {planned} mail(s)…")
                     if smtp_cfgs_by_account:
                         push("Comptes additionnels (par produit) : "
                              + ", ".join(sorted(smtp_cfgs_by_account.keys())))
@@ -6777,15 +6826,41 @@ class Api:
                         progress=push,
                         stop_flag=lambda: bool(rt.get("send_stop_flag")),
                     )
+                    stopped = bool(rt.get("send_stop_flag"))
                     push("Terminé.")
                 except Exception as exc:
                     with self._convoy_lock:
                         rt["send_error"] = str(exc)
                     push(f"✗ {exc}")
                 finally:
+                    # Calcule un résumé de fin destiné à l'UI : compteurs
+                    # post-envoi + durée. Le front l'affichera en encart.
+                    summary: dict = {}
+                    try:
+                        camp_after = convoy_runner.load_campaign(cid)
+                        counts = camp_after.counts() if camp_after else {}
+                        dur = max(0, int(_time.time() - start_ts))
+                        summary = {
+                            "planned": planned,
+                            "sent": int(counts.get("sent", 0)),
+                            "failed": int(counts.get("failed", 0)),
+                            "pending": int(counts.get("pending", 0)),
+                            "rejected": int(counts.get("rejected", 0)),
+                            "duration_s": dur,
+                            "started_at": start_iso,
+                            "ended_at": datetime.now()
+                                                 .isoformat(timespec="seconds"),
+                            "stopped_by_user": stopped,
+                            "campaign_name": (camp_after.name
+                                              if camp_after else camp.name),
+                        }
+                    except Exception:
+                        pass
                     with self._convoy_lock:
                         rt["send_running"] = False
                         rt["send_stop_flag"] = False
+                        if summary:
+                            rt["send_summary"] = summary
 
             threading.Thread(
                 target=worker, daemon=True, name=f"ConvoySend-{cid[:8]}",
@@ -6864,12 +6939,17 @@ class Api:
         rt = self._convoy_runtime_get(cid)
         with self._convoy_lock:
             log = rt.get("send_log") or []
+            summary = rt.get("send_summary")
             out = {
                 "ok": True,
                 "running": bool(rt.get("send_running")),
                 "error": rt.get("send_error") or "",
                 "log": log[since:],
                 "log_len": len(log),
+                # send_summary est rempli quand le worker termine (succès,
+                # échec ou stop). L'UI l'utilise pour afficher un bandeau
+                # clair "Convoi terminé" avec durée et compteurs.
+                "summary": dict(summary) if isinstance(summary, dict) else None,
             }
         # Renvoie aussi un snapshot des compteurs (utile à l'UI)
         try:
