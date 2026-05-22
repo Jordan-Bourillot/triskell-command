@@ -164,15 +164,31 @@ const Autopilot = {
           </div>
         </details>
 
-        <div class="mt-10">
-          <div class="section-label">Journal du run</div>
-          <div id="ap-log" class="card p-5 font-mono text-xs leading-relaxed
-                                  text-text-secondary whitespace-pre-wrap
-                                  min-h-[180px] max-h-[420px] overflow-y-auto">
-            (en attente d'un run…)
+        <!-- Journal technique : replié par défaut, pour debug -->
+        <details class="mt-8 card p-0 group">
+          <summary class="cursor-pointer px-5 py-3 flex items-center justify-between gap-3
+                          hover:bg-bg/40 rounded-2xl">
+            <div>
+              <div class="font-semibold text-sm">Détails techniques du run</div>
+              <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
+                Journal brut avec timestamps — utile pour comprendre un bug.
+              </div>
+            </div>
+            <svg class="w-5 h-5 text-text-muted transition-transform group-open:rotate-180"
+                 fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </summary>
+          <div class="px-5 pb-5 pt-1">
+            <div id="ap-log" class="font-mono text-xs leading-relaxed
+                                    text-text-secondary whitespace-pre-wrap
+                                    bg-bg/40 rounded-xl p-3
+                                    min-h-[120px] max-h-[420px] overflow-y-auto">
+              (en attente d'un run…)
+            </div>
+            <div id="ap-stats" class="mt-4 hidden"></div>
           </div>
-          <div id="ap-stats" class="mt-4 hidden"></div>
-        </div>
+        </details>
       </section>
     `;
 
@@ -312,6 +328,17 @@ const Autopilot = {
         </div>
       </div>
 
+      <!-- Bandeau d'activité courante : phrase vivante pendant un run -->
+      <div id="ap-current-activity"
+           class="hidden mb-3 px-4 py-3 rounded-xl bg-accent/5 border border-accent/30
+                  flex items-center gap-3">
+        <span class="inline-block w-4 h-4 rounded-full border-2 border-accent/30
+                     border-t-accent animate-spin flex-shrink-0"></span>
+        <span id="ap-current-activity-text"
+              class="text-sm text-text flex-1"
+              style="text-wrap: pretty">…</span>
+      </div>
+
       <!-- La chaîne des 5 maillons -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         ${this._STAGES.map((stage, i) => this._renderStage(stage, i)).join('')}
@@ -324,6 +351,9 @@ const Autopilot = {
           En attente de chiffres…
         </span>
       </div>
+
+      <!-- Récap final : apparait quand un run vient de finir -->
+      <div id="ap-recap" class="hidden mt-6"></div>
     `;
   },
 
@@ -332,16 +362,22 @@ const Autopilot = {
     const isAuto = mode === 'auto';
     const isLast = index === this._STAGES.length - 1;
     return `
-      <div class="card p-4 relative flex flex-col" data-stage="${stage.key}">
-        <!-- Numéro + titre -->
-        <div class="flex items-center gap-2 mb-2">
+      <div class="card p-4 relative flex flex-col overflow-hidden transition-colors"
+           data-stage="${stage.key}">
+        <!-- Bandeau d'état (4px en haut) : change de couleur selon idle/running/done/error -->
+        <div class="ap-stage-statusbar absolute top-0 left-0 right-0 h-1
+                    bg-border transition-colors"></div>
+
+        <!-- Numéro + titre + petit indicateur d'état (spinner / check / croix) -->
+        <div class="flex items-center gap-2 mb-2 mt-1">
           <div class="w-7 h-7 rounded-lg bg-accent/10 text-accent flex items-center
                       justify-center text-sm font-bold flex-shrink-0">
             ${stage.n}
           </div>
-          <div class="font-semibold text-base">${this._esc(stage.title)}</div>
+          <div class="font-semibold text-base flex-1">${this._esc(stage.title)}</div>
+          <span class="ap-stage-state-icon flex-shrink-0"></span>
           ${!isLast ? `
-            <svg class="w-4 h-4 text-text-muted ml-auto hidden lg:block flex-shrink-0"
+            <svg class="w-4 h-4 text-text-muted hidden lg:block flex-shrink-0"
                  fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
               <polyline points="9 18 15 12 9 6"/>
             </svg>` : ''}
@@ -353,9 +389,14 @@ const Autopilot = {
           ${this._esc(stage.sources)}
         </div>
 
-        <!-- Description -->
-        <div class="text-xs text-text-secondary flex-1" style="text-wrap: pretty">
+        <!-- Description (par défaut) / Message live (pendant un run) -->
+        <div class="text-xs text-text-secondary flex-1 ap-stage-desc"
+             style="text-wrap: pretty">
           ${this._esc(stage.desc)}
+        </div>
+        <div class="hidden ap-stage-live mt-1 flex-1">
+          <div class="text-xs ap-stage-live-message" style="text-wrap: pretty">…</div>
+          <div class="text-[11px] text-text-muted mt-1 ap-stage-live-count"></div>
         </div>
 
         <!-- Interrupteur Auto / Manuel -->
@@ -369,13 +410,80 @@ const Autopilot = {
           </div>
         </div>
 
-        <!-- Compteur -->
+        <!-- Compteur dernier run (24h) -->
         <div class="mt-2 text-center text-text-muted text-[11px]">
           <span class="ap-stage-counter font-mono text-text-secondary">—</span>
           <span> au dernier run</span>
         </div>
       </div>
     `;
+  },
+
+  // ------------------------------------------------------------------
+  // Visu temps réel : applique l'état d'un stage à sa carte
+  // ------------------------------------------------------------------
+  _applyStageState(stageKey, info) {
+    const el = document.querySelector(`[data-stage="${stageKey}"]`);
+    if (!el) return;
+    const state    = (info && info.state) || 'idle';
+    const message  = (info && info.message) || '';
+    const count    = (info && info.count) || 0;
+
+    // Bandeau de couleur en haut de carte
+    const bar = el.querySelector('.ap-stage-statusbar');
+    if (bar) {
+      bar.classList.remove('bg-border', 'bg-accent', 'bg-success', 'bg-danger');
+      bar.classList.add({
+        idle:    'bg-border',
+        running: 'bg-accent',
+        done:    'bg-success',
+        error:   'bg-danger',
+      }[state] || 'bg-border');
+    }
+
+    // Petit indicateur à côté du titre (spinner / check / croix)
+    const icon = el.querySelector('.ap-stage-state-icon');
+    if (icon) {
+      if (state === 'running') {
+        icon.innerHTML = `<span class="inline-block w-4 h-4 rounded-full
+          border-2 border-accent/30 border-t-accent animate-spin"></span>`;
+      } else if (state === 'done') {
+        icon.innerHTML = `<svg class="w-5 h-5 text-success" fill="none"
+          stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
+          <polyline points="20 6 9 17 4 12"/></svg>`;
+      } else if (state === 'error') {
+        icon.innerHTML = `<svg class="w-5 h-5 text-danger" fill="none"
+          stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
+          <line x1="6" y1="6" x2="18" y2="18"/>
+          <line x1="6" y1="18" x2="18" y2="6"/></svg>`;
+      } else {
+        icon.innerHTML = '';
+      }
+    }
+
+    // Description par défaut OU message live (alterné)
+    const desc = el.querySelector('.ap-stage-desc');
+    const live = el.querySelector('.ap-stage-live');
+    if (state === 'idle') {
+      desc?.classList.remove('hidden');
+      live?.classList.add('hidden');
+    } else {
+      desc?.classList.add('hidden');
+      live?.classList.remove('hidden');
+      const msgEl = el.querySelector('.ap-stage-live-message');
+      const cntEl = el.querySelector('.ap-stage-live-count');
+      if (msgEl) msgEl.textContent = message || '…';
+      if (cntEl) {
+        if (state === 'done')      cntEl.textContent = `${count} au total`;
+        else if (state === 'running' && count > 0) cntEl.textContent = `${count} déjà traité(s)`;
+        else if (state === 'error') cntEl.textContent = 'Erreur';
+        else                       cntEl.textContent = '';
+      }
+    }
+  },
+
+  _resetStagesUI() {
+    this._STAGES.forEach(s => this._applyStageState(s.key, { state: 'idle' }));
   },
 
   _bindStageToggles() {
@@ -626,9 +734,15 @@ const Autopilot = {
     btn.innerHTML = `<span class="inline-block w-4 h-4 mr-2 rounded-full border-2 border-white/40 border-t-white animate-spin"></span>En cours…`;
     document.getElementById('ap-log').textContent = '';
     document.getElementById('ap-stats').classList.add('hidden');
+    // Reset visu temps reel : 5 boites en idle, recap cache, activite vide
+    this._resetStagesUI();
+    const recap = document.getElementById('ap-recap');
+    if (recap) { recap.classList.add('hidden'); recap.innerHTML = ''; }
+    const activityBox = document.getElementById('ap-current-activity');
+    if (activityBox) activityBox.classList.add('hidden');
     this.logSeen = 0;
     try {
-      const r = await App.api.autopilot_run({ config, stages: ['imap', 'send', 'follow_up'] });
+      const r = await App.api.autopilot_run({ config });
       if (!r || !r.ok) {
         this._appendLog((r && r.error) || 'Lancement impossible.');
         this._stopRun();
@@ -657,6 +771,22 @@ const Autopilot = {
       r.log.forEach(line => this._appendLog(line));
       this.logSeen = r.log_len;
     }
+
+    // Visu temps réel : applique l'état des 5 maillons + l'activité courante
+    if (r.stages) {
+      Object.entries(r.stages).forEach(([k, info]) => this._applyStageState(k, info));
+    }
+    const activityBox = document.getElementById('ap-current-activity');
+    const activityTxt = document.getElementById('ap-current-activity-text');
+    if (activityBox && activityTxt) {
+      if (r.running && r.current_activity) {
+        activityTxt.textContent = r.current_activity;
+        activityBox.classList.remove('hidden');
+      } else {
+        activityBox.classList.add('hidden');
+      }
+    }
+
     if (r.running) {
       // run en cours, on continue à poller
       if (!this.pollTimer) this._startPolling();
@@ -668,7 +798,8 @@ const Autopilot = {
       this.pollTimer = null;
     }
     if (!silent) this._stopRun();
-    if (r.stats) this._renderStats(r.stats);
+    // Récap final : remplace l'ancien bloc stats par une vue plus riche
+    if (r.stats) this._renderRecap(r.stats, r.touched_prospects || [], r.error || '');
     if (r.error) this._appendLog('✗ ' + r.error);
   },
 
@@ -690,6 +821,8 @@ const Autopilot = {
   },
 
   _renderStats(s) {
+    // Conserve l'ancien rendu KPI seul (utilisé nulle part en interne mais
+    // gardé pour rétrocompat éventuelle).
     const wrap = document.getElementById('ap-stats');
     if (!wrap) return;
     wrap.classList.remove('hidden');
@@ -703,15 +836,113 @@ const Autopilot = {
         ${this._kpi('Erreurs', (s.errors || []).length,
           ((s.errors || []).length > 0) ? 'danger' : '')}
       </div>
-      ${(s.errors || []).length ? `
-        <details class="card p-4 mt-3 text-xs">
-          <summary class="cursor-pointer font-semibold text-danger">
-            Voir le détail des erreurs
-          </summary>
-          <ul class="mt-2 space-y-1 text-text-secondary">
-            ${s.errors.map(e => `<li>• ${this._esc(e)}</li>`).join('')}
-          </ul>
-        </details>` : ''}
+    `;
+  },
+
+  // ------------------------------------------------------------------
+  // Récap final : grand bloc visuel sous le tableau de commande,
+  // remplace l'ancien bloc stats minimaliste.
+  // ------------------------------------------------------------------
+  _renderRecap(stats, touched, errorTop) {
+    const wrap = document.getElementById('ap-recap');
+    if (!wrap) return;
+    const s = stats || {};
+    const sent     = s.drafts_sent     || 0;
+    const pending  = s.drafts_pending  || 0;
+    const replies  = s.replies_detected || 0;
+    const searched = s.searched        || 0;
+    const enriched = s.enriched        || 0;
+    const errors   = s.errors || [];
+
+    const sentList = touched.filter(p => p.action === 'sent');
+    const draftList = touched.filter(p => p.action === 'draft');
+    const skippedList = touched.filter(p => p.action === 'skipped');
+
+    const nothingHappened = sent === 0 && pending === 0 && searched === 0
+      && enriched === 0 && replies === 0;
+
+    wrap.classList.remove('hidden');
+    wrap.innerHTML = `
+      <div class="card p-5">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-10 h-10 rounded-full bg-success/15 text-success flex items-center
+                      justify-center flex-shrink-0">
+            ${errors.length || errorTop ? `
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/>
+                <line x1="12" y1="16" x2="12" y2="16"/>
+              </svg>` : `
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>`}
+          </div>
+          <div>
+            <div class="font-bold text-lg" style="text-wrap: balance">Voici ce qui s'est passé</div>
+            <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
+              ${nothingHappened
+                ? 'Rien à faire cette fois — la base est à jour ou les interrupteurs étaient en manuel.'
+                : 'Récap du run qui vient de finir.'}
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          ${this._kpi('Prospects ajoutés', searched, searched > 0 ? 'accent' : '')}
+          ${this._kpi('Mails envoyés', sent, sent > 0 ? 'success' : '')}
+          ${this._kpi('Brouillons posés', pending, pending > 0 ? 'accent' : '')}
+          ${this._kpi('Réponses reçues', replies, replies > 0 ? 'success' : '')}
+        </div>
+
+        ${sentList.length ? `
+          <details class="mt-3 rounded-xl border border-border bg-bg/40 p-3" open>
+            <summary class="cursor-pointer text-sm font-semibold text-success">
+              ${sentList.length} prospect(s) contacté(s)
+            </summary>
+            <ul class="mt-2 space-y-1 text-xs text-text-secondary">
+              ${sentList.map(p => `
+                <li>• <span class="font-medium text-text">${this._esc(p.name)}</span>
+                  ${p.reason ? `<span class="text-text-muted"> — ${this._esc(p.reason)}</span>` : ''}
+                </li>`).join('')}
+            </ul>
+          </details>` : ''}
+
+        ${draftList.length ? `
+          <details class="mt-2 rounded-xl border border-border bg-bg/40 p-3">
+            <summary class="cursor-pointer text-sm font-semibold text-accent">
+              ${draftList.length} brouillon(s) à valider
+            </summary>
+            <ul class="mt-2 space-y-1 text-xs text-text-secondary">
+              ${draftList.map(p => `
+                <li>• <span class="font-medium text-text">${this._esc(p.name)}</span>
+                  ${p.reason ? `<span class="text-text-muted"> — ${this._esc(p.reason)}</span>` : ''}
+                </li>`).join('')}
+            </ul>
+          </details>` : ''}
+
+        ${skippedList.length ? `
+          <details class="mt-2 rounded-xl border border-border bg-bg/40 p-3">
+            <summary class="cursor-pointer text-sm font-semibold text-text-muted">
+              ${skippedList.length} prospect(s) écarté(s)
+            </summary>
+            <ul class="mt-2 space-y-1 text-xs text-text-secondary">
+              ${skippedList.map(p => `
+                <li>• <span class="font-medium text-text">${this._esc(p.name)}</span>
+                  ${p.reason ? `<span class="text-text-muted"> — ${this._esc(p.reason)}</span>` : ''}
+                </li>`).join('')}
+            </ul>
+          </details>` : ''}
+
+        ${(errors.length || errorTop) ? `
+          <details class="mt-3 rounded-xl border border-danger/40 bg-danger/5 p-3" open>
+            <summary class="cursor-pointer text-sm font-semibold text-danger">
+              ${errors.length + (errorTop ? 1 : 0)} erreur(s) — détail
+            </summary>
+            <ul class="mt-2 space-y-1 text-xs text-text-secondary">
+              ${errorTop ? `<li>• ${this._esc(errorTop)}</li>` : ''}
+              ${errors.map(e => `<li>• ${this._esc(e)}</li>`).join('')}
+            </ul>
+          </details>` : ''}
+      </div>
     `;
   },
 

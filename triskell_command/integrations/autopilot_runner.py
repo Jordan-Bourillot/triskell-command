@@ -118,6 +118,62 @@ def _read_stage_modes() -> dict:
 
 
 # ---------------------------------------------------------------------------
+def run_pipeline_with_ui_modes(cfg, progress):
+    """Lance la chaine complete en respectant les interrupteurs UI.
+
+    Logique commune entre le worker horaire (_do_one_tick) et le bouton
+    'Lancer maintenant' (autopilot_run cote api.py), pour que les deux
+    declenchements fassent exactement la meme chose.
+    """
+    from triskell_core.prospect.pipeline import run_full_pipeline
+
+    # Verifie que le produit configure est toujours actif dans le catalogue.
+    if getattr(cfg, "autopilot_product", "").strip():
+        try:
+            from .catalog_overrides import get_disabled_ids
+            disabled = {d.lower() for d in get_disabled_ids()}
+            if cfg.autopilot_product.lower() in disabled:
+                progress(
+                    f"[WARN] produit '{cfg.autopilot_product}' desactive "
+                    f"dans le catalogue -> fallback IA libre pour ce run."
+                )
+                cfg.autopilot_product = ""
+        except Exception as exc:
+            logger.debug("catalog check KO: %s", exc)
+
+    # Lit les modes UI Auto/Manuel par maillon (poses par le tableau de
+    # commande) et applique-les au pipeline.
+    stage_modes = _read_stage_modes()
+    do_search = stage_modes["search"] == "auto"
+    # write=manual -> on ne genere pas de mails (donc do_send pipeline=False)
+    do_send_stage = stage_modes["write"] == "auto"
+    # send=manual -> on force mode validation (drafts au lieu d'envoi)
+    if stage_modes["send"] == "manual" and cfg.mode == "auto":
+        cfg.mode = "validation"
+        progress(
+            "Interrupteur Envoie=Manuel : mode pipeline force a "
+            "'validation' (drafts au lieu d'envoi direct)."
+        )
+    # Relit=manual -> on desactive la 2e IA de relecture
+    if stage_modes["review"] == "manual":
+        cfg.autopilot_review_min_score = 0
+        progress("Interrupteur Relit=Manuel : 2e IA de relecture desactivee.")
+
+    progress(
+        f"Lancement -- Cherche={stage_modes['search']} "
+        f"Trie={stage_modes['sort']} Redige={stage_modes['write']} "
+        f"Relit={stage_modes['review']} Envoie={stage_modes['send']} "
+        f"(mode pipeline {cfg.mode}, produit "
+        f"'{cfg.autopilot_product or '(libre)'}')..."
+    )
+    return run_full_pipeline(
+        cfg, progress=progress,
+        do_search=do_search,
+        do_send=do_send_stage,
+    )
+
+
+# ---------------------------------------------------------------------------
 def start_worker(app_state) -> bool:
     global _WORKER_THREAD
     with _WORKER_LOCK:
@@ -230,58 +286,12 @@ def _do_one_tick(app_state) -> None:
     try:
         if interrupted:
             _progress(
-                "REPRISE d'un run interrompu (Coolify redemarre pendant la "
-                "nuit ?). Le pipeline est idempotent : pas de double envoi "
+                "REPRISE d'un run interrompu (Coolify redemarre pendant le "
+                "run ?). Le pipeline est idempotent : pas de double envoi "
                 "grace au filet anti-doublon Supabase."
             )
 
-        # Verifie que le produit configure est toujours actif dans le
-        # catalogue. Si Jordan a desactive le produit entre temps, on
-        # bascule en mode IA libre plutot que de continuer a pousser un
-        # produit qui n'est plus a vendre.
-        if getattr(cfg, "autopilot_product", "").strip():
-            try:
-                from .catalog_overrides import get_disabled_ids
-                disabled = {d.lower() for d in get_disabled_ids()}
-                if cfg.autopilot_product.lower() in disabled:
-                    _progress(
-                        f"[WARN] produit '{cfg.autopilot_product}' desactive "
-                        f"dans le catalogue -> fallback IA libre pour ce run."
-                    )
-                    cfg.autopilot_product = ""
-            except Exception as exc:
-                logger.debug("catalog check KO: %s", exc)
-
-        # Lit les modes UI Auto/Manuel par maillon (poses par le tableau de
-        # commande) et applique-les au pipeline.
-        stage_modes = _read_stage_modes()
-        do_search = stage_modes["search"] == "auto"
-        # write=manual -> on ne genere pas de mails (donc do_send pipeline=False)
-        do_send_stage = stage_modes["write"] == "auto"
-        # send=manual -> on force mode validation (drafts au lieu d'envoi)
-        if stage_modes["send"] == "manual" and cfg.mode == "auto":
-            cfg.mode = "validation"
-            _progress(
-                "Interrupteur Envoie=Manuel : mode pipeline force a "
-                "'validation' (drafts au lieu d'envoi direct)."
-            )
-        # Relit=manual -> on desactive la 2e IA de relecture
-        # Relit=auto   -> on garde la valeur configuree (7 par defaut)
-        if stage_modes["review"] == "manual":
-            cfg.autopilot_review_min_score = 0
-            _progress("Interrupteur Relit=Manuel : 2e IA de relecture desactivee.")
-
-        _progress(
-            f"Lancement nocturne -- Cherche={stage_modes['search']} "
-            f"Trie={stage_modes['sort']} Redige={stage_modes['write']} "
-            f"Relit={stage_modes['review']} Envoie={stage_modes['send']} "
-            f"(mode pipeline {cfg.mode}, produit '{cfg.autopilot_product or '(libre)'}')..."
-        )
-        stats = run_full_pipeline(
-            cfg, progress=_progress,
-            do_search=do_search,
-            do_send=do_send_stage,
-        )
+        stats = run_pipeline_with_ui_modes(cfg, _progress)
         _LAST_RUN_RESULT.clear()
         _LAST_RUN_RESULT.update({
             "searched":         getattr(stats, "searched", 0),

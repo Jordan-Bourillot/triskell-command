@@ -41,8 +41,73 @@ class Api:
             "log": [],          # liste de lignes (plafonnée à 500)
             "stats": None,      # PipelineStats sérialisé en dict, ou None
             "error": "",
+            # Visu temps réel : 5 maillons + activité courante + prospects touchés
+            "stages": self._fresh_stages(),
+            "current_activity": "",
+            "touched_prospects": [],  # [{id, name, action, reason}, ...]
         }
         self._autopilot_lock = threading.Lock()
+
+    @staticmethod
+    def _fresh_stages() -> dict:
+        """État initial des 5 maillons (idle, vide)."""
+        return {
+            stage: {
+                "state": "idle",      # idle | running | done | error
+                "message": "",
+                "count": 0,
+                "started_at": "",
+                "finished_at": "",
+                "error": "",
+            }
+            for stage in ("search", "sort", "write", "review", "send")
+        }
+
+    def _push_event(self, ev: dict) -> None:
+        """Met à jour l'état temps réel d'un run auto-pilote.
+
+        Types d'événements reconnus :
+          - {"type": "stage",       "id": "search"|..., "message": "...", "state": "running"}
+          - {"type": "stage_done",  "id": "search"|..., "message": "...", "count": int}
+          - {"type": "stage_error", "id": "search"|..., "message": "..."}
+          - {"type": "activity",    "message": "Je rédige le mail pour..."}
+          - {"type": "prospect_touched", "id": "...", "name": "...", "action": "sent"|"draft"|"skipped", "reason": "..."}
+        """
+        from datetime import datetime
+        t = ev.get("type")
+        with self._autopilot_lock:
+            stages = self._autopilot_state["stages"]
+            if t == "stage":
+                sid = ev.get("id")
+                if sid in stages:
+                    stages[sid]["state"] = ev.get("state", "running")
+                    stages[sid]["message"] = ev.get("message", "")
+                    if "count" in ev:
+                        stages[sid]["count"] = int(ev.get("count") or 0)
+                    if not stages[sid]["started_at"]:
+                        stages[sid]["started_at"] = datetime.now().isoformat(timespec="seconds")
+            elif t == "stage_done":
+                sid = ev.get("id")
+                if sid in stages:
+                    stages[sid]["state"] = "done"
+                    stages[sid]["message"] = ev.get("message", "")
+                    stages[sid]["count"] = int(ev.get("count", 0) or 0)
+                    stages[sid]["finished_at"] = datetime.now().isoformat(timespec="seconds")
+            elif t == "stage_error":
+                sid = ev.get("id")
+                if sid in stages:
+                    stages[sid]["state"] = "error"
+                    stages[sid]["error"] = ev.get("message", "")
+                    stages[sid]["finished_at"] = datetime.now().isoformat(timespec="seconds")
+            elif t == "activity":
+                self._autopilot_state["current_activity"] = ev.get("message", "")
+            elif t == "prospect_touched":
+                self._autopilot_state["touched_prospects"].append({
+                    "id":     ev.get("id", ""),
+                    "name":   ev.get("name", ""),
+                    "action": ev.get("action", ""),
+                    "reason": ev.get("reason", ""),
+                })
 
         # État runtime des campagnes Convoi (génération de mails + envoi).
         # Clés = campaign_id ; valeur = dict {running, log, log_len, error, stats}.
@@ -1905,6 +1970,50 @@ class Api:
             from ..integrations import brain
             res = brain.process_reminders(client=self._supabase(), dry_run=dry)
             return {"ok": True, **res}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def brain_due_reminders(self, payload: dict | None = None) -> dict:
+        """Liste les notes 'open' dont remind_at est échu ET pas encore
+        marquées comme rappelées. Utilisé par le bandeau in-app qui se
+        déclenche même quand les notifs push ne sont pas activées."""
+        try:
+            from ..integrations import brain
+            from datetime import datetime, timezone
+            sb = brain._sb(self._supabase())
+            if sb is None:
+                return {"ok": True, "notes": []}
+            now_iso = datetime.now(timezone.utc).isoformat()
+            rows = (sb.table(brain.TABLE).select("*")
+                      .eq("status", "open")
+                      .is_("reminded_at", "null")
+                      .lte("remind_at", now_iso)
+                      .order("remind_at", desc=False)
+                      .limit(20)
+                      .execute().data) or []
+            # Filtre par destinataire : on ne ramène que les rappels qui
+            # concernent l'utilisateur courant (assigned_to ou auteur).
+            me = brain._user_alias(self._supabase())
+            mine = [n for n in rows
+                    if (n.get("assigned_to") or n.get("author") or me) == me
+                    or n.get("assigned_to") in (None, "", me)]
+            return {"ok": True, "notes": mine}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def brain_dismiss_reminder(self, payload: dict) -> dict:
+        """Marque un rappel comme vu (sans toucher au statut de la note)."""
+        p = payload or {}
+        nid = (p.get("id") or "").strip()
+        if not nid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations import brain
+            from datetime import datetime, timezone
+            now_iso = datetime.now(timezone.utc).isoformat()
+            ok = brain.update_note(nid, {"reminded_at": now_iso},
+                                    client=self._supabase())
+            return {"ok": bool(ok)}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -5203,6 +5312,9 @@ class Api:
                 "log": [],
                 "stats": None,
                 "error": "",
+                "stages": self._fresh_stages(),
+                "current_activity": "",
+                "touched_prospects": [],
             })
 
         # Sauve la config avant lancement (si fournie)
@@ -5214,18 +5326,44 @@ class Api:
                     self._autopilot_state["error"] = r.get("error", "")
                 return r
 
-        # Sélection des étapes (None = toutes)
+        # Sélection des étapes. None/absent = "bouton Lancer maintenant"
+        # de l'auto-pilote -> on respecte les interrupteurs UI exactement
+        # comme le declencheur automatique. Sinon (ex: Eclaireur qui passe
+        # ['search','enrich']) -> on garde l'ancien comportement explicite.
         stages_in = (payload or {}).get("stages") if isinstance(payload, dict) else None
-        if stages_in is None:
-            stages = {"imap", "search", "enrich", "send", "follow_up"}
-        else:
+        use_ui_modes = stages_in is None
+        if not use_ui_modes:
             stages = {str(s).strip().lower() for s in stages_in if s}
 
         # Sync clés API au Core (au cas où)
         self._sync_keys_to_core()
 
-        def _push_log(msg: str) -> None:
+        # _push_log : accepte une string (log texte) OU un dict (evenement
+        # structure pour la visu temps reel). Les deux peuvent etre emis
+        # par le pipeline / le runner via le callback `progress`.
+        def _push_log(msg) -> None:
             from datetime import datetime
+            if isinstance(msg, dict):
+                self._push_event(msg)
+                # Si l'evenement porte aussi un message lisible, on log
+                t = msg.get("type")
+                txt = msg.get("message") or ""
+                if txt and t in ("stage", "stage_done", "stage_error"):
+                    stage_label = {
+                        "search": "Cherche",
+                        "sort": "Trie",
+                        "write": "Rédige",
+                        "review": "Relit",
+                        "send": "Envoie",
+                    }.get(msg.get("id"), msg.get("id", ""))
+                    prefix = "✓" if t == "stage_done" else ("✗" if t == "stage_error" else "→")
+                    line = f"[{datetime.now().strftime('%H:%M:%S')}] {prefix} {stage_label} — {txt}"
+                    with self._autopilot_lock:
+                        self._autopilot_state["log"].append(line)
+                        buf = self._autopilot_state["log"]
+                        if len(buf) > 500:
+                            del buf[: len(buf) - 500]
+                return
             line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
             with self._autopilot_lock:
                 buf = self._autopilot_state["log"]
@@ -5241,19 +5379,25 @@ class Api:
                     PipelineConfig, run_full_pipeline,
                 )
                 cfg = PipelineConfig.load()
-                _push_log(
-                    "Lancement : " + ", ".join(sorted(stages))
-                    + f" (mode {cfg.mode})…"
-                )
-                stats = run_full_pipeline(
-                    cfg,
-                    progress=_push_log,
-                    poll_imap=("imap" in stages),
-                    do_search=("search" in stages),
-                    do_enrich=("enrich" in stages),
-                    do_send=("send" in stages),
-                    do_follow_up=("follow_up" in stages),
-                )
+                if use_ui_modes:
+                    from triskell_command.integrations.autopilot_runner import (
+                        run_pipeline_with_ui_modes,
+                    )
+                    stats = run_pipeline_with_ui_modes(cfg, _push_log)
+                else:
+                    _push_log(
+                        "Lancement : " + ", ".join(sorted(stages))
+                        + f" (mode {cfg.mode})…"
+                    )
+                    stats = run_full_pipeline(
+                        cfg,
+                        progress=_push_log,
+                        poll_imap=("imap" in stages),
+                        do_search=("search" in stages),
+                        do_enrich=("enrich" in stages),
+                        do_send=("send" in stages),
+                        do_follow_up=("follow_up" in stages),
+                    )
                 _push_log(
                     f"=== Fin === {stats.searched} trouvés, "
                     f"{stats.enriched} enrichis, {stats.drafts_sent} envoyés, "
@@ -5289,6 +5433,7 @@ class Api:
         with self._autopilot_lock:
             log = self._autopilot_state["log"]
             new_lines = log[since:]
+            import copy
             return {
                 "ok": True,
                 "running":     bool(self._autopilot_state["running"]),
@@ -5298,6 +5443,10 @@ class Api:
                 "log_len":     len(log),
                 "stats":       self._autopilot_state["stats"],
                 "error":       self._autopilot_state["error"],
+                # Visu temps réel
+                "stages":            copy.deepcopy(self._autopilot_state["stages"]),
+                "current_activity":  self._autopilot_state["current_activity"],
+                "touched_prospects": list(self._autopilot_state["touched_prospects"]),
             }
 
     # ------------------------------------------------------------------
@@ -5491,10 +5640,13 @@ class Api:
             client = self._supabase()
             if client:
                 cfg = reply_responder.load_config(client)
-                gm = cfg.get("global_mode") or "manual"
-                per = cfg.get("per_category") or {}
-                all_instant = bool(per) and all(v == "instant" for v in per.values())
-                out["reponses"] = "direct" if (gm == "instant" or all_instant) else "validation"
+                if cfg.get("enabled") is False:
+                    out["reponses"] = "off"
+                else:
+                    gm = cfg.get("global_mode") or "manual"
+                    per = cfg.get("per_category") or {}
+                    all_instant = bool(per) and all(v == "instant" for v in per.values())
+                    out["reponses"] = "direct" if (gm == "instant" or all_instant) else "validation"
         except Exception as exc:
             logger.debug("get_simple_modes reponses: %s", exc)
         return out
@@ -5508,8 +5660,13 @@ class Api:
         mode = (payload or {}).get("mode") or ""
         if kind not in ("prospection", "reponses"):
             return {"ok": False, "error": "kind invalide"}
-        if mode not in ("direct", "validation"):
-            return {"ok": False, "error": "mode invalide"}
+        # Le mode "off" est uniquement valable pour les réponses pour le moment.
+        if kind == "reponses":
+            if mode not in ("direct", "validation", "off"):
+                return {"ok": False, "error": "mode invalide"}
+        else:
+            if mode not in ("direct", "validation"):
+                return {"ok": False, "error": "mode invalide"}
         try:
             if kind == "prospection":
                 from triskell_core.prospect.pipeline import PipelineConfig
@@ -5522,12 +5679,16 @@ class Api:
                 if not client:
                     return {"ok": False, "error": "Base partagée non connectée"}
                 cfg = reply_responder.load_config(client)
-                target = "instant" if mode == "direct" else "manual"
-                cfg["global_mode"] = target
-                per = dict(cfg.get("per_category") or {})
-                for k in list(per.keys()):
-                    per[k] = target
-                cfg["per_category"] = per
+                if mode == "off":
+                    cfg["enabled"] = False
+                else:
+                    cfg["enabled"] = True
+                    target = "instant" if mode == "direct" else "manual"
+                    cfg["global_mode"] = target
+                    per = dict(cfg.get("per_category") or {})
+                    for k in list(per.keys()):
+                        per[k] = target
+                    cfg["per_category"] = per
                 reply_responder.save_config(client, cfg)
             return {"ok": True}
         except Exception as exc:
