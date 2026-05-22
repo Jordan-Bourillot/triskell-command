@@ -61,11 +61,11 @@ const Morning = {
             </svg>
             Écosystème
           </button>
-          <button id="m-compose-mail" class="btn btn-secondary" title="Composer (Ctrl+Shift+M)">
+          <button id="m-compose-mail" class="btn btn-secondary" title="Rédiger (Ctrl+Shift+M)">
             <svg class="w-4 h-4" style="color:#f59e0b" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/>
             </svg>
-            Composer
+            Rédiger
           </button>
           <button id="m-brain" class="btn btn-secondary" title="Brain — note rapide (Ctrl+B)">
             <svg class="w-4 h-4" style="color:#a855f7" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
