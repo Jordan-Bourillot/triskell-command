@@ -25,9 +25,34 @@ const Mails = {
     // Mails cochés pour suppression groupée : Set d'ids, vidé à chaque
     // changement d'onglet / rechargement.
     selectedIds: new Set(),
+    // Onglet Boîte de réception : afficher les mails automatiques
+    // (newsletters, notifs, rapports DMARC...). Caché par défaut, persisté
+    // en localStorage. N'affecte que l'onglet 'inbound'.
+    showAuto: null,
   },
 
   READ_STORAGE_KEY: 'triskell.mails.readIds',
+  SHOW_AUTO_STORAGE_KEY: 'triskell.mails.showAuto',
+
+  _loadShowAuto() {
+    if (this.state.showAuto !== null) return this.state.showAuto;
+    try {
+      this.state.showAuto = localStorage.getItem(this.SHOW_AUTO_STORAGE_KEY) === '1';
+    } catch (_) {
+      this.state.showAuto = false;
+    }
+    return this.state.showAuto;
+  },
+
+  _setShowAuto(v) {
+    this.state.showAuto = !!v;
+    try { localStorage.setItem(this.SHOW_AUTO_STORAGE_KEY, v ? '1' : '0'); } catch (_) {}
+  },
+
+  _isAutoMail(m) {
+    const s = (m && m.subject) || '';
+    return s.startsWith('[AUTO]') || s.startsWith('[BOUNCE]');
+  },
 
   _loadReadIds() {
     if (this.state.readIds) return this.state.readIds;
@@ -101,6 +126,9 @@ const Mails = {
           <select id="m-account-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm">
             <option value="">— Tous —</option>
           </select>
+          <button id="m-toggle-auto" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-xs hover:border-accent transition-colors"
+                  style="display:none;" title="Notifications, newsletters, rapports DMARC, alertes sécurité…">
+          </button>
           <div class="relative flex-1 min-w-[220px] max-w-md">
             <input id="m-search" type="search" placeholder="Rechercher un mail (sujet, expéditeur, contenu)…"
                    class="w-full pl-9 pr-3 py-1.5 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
@@ -131,6 +159,10 @@ const Mails = {
     });
     document.getElementById('m-account-filter').onchange = (e) => {
       this.state.accountFilter = e.target.value;
+      this._load();
+    };
+    document.getElementById('m-toggle-auto').onclick = () => {
+      this._setShowAuto(!this._loadShowAuto());
       this._load();
     };
     // Recherche : filtre côté client (debounced)
@@ -293,16 +325,42 @@ const Mails = {
       root.innerHTML = `<div class="card p-6 text-danger">${(r && r.error) || 'Erreur API'}</div>`;
       return;
     }
-    this.state.mails = r.mails || [];
-    countEl.textContent = `${this.state.mails.length} mail(s)`;
+    const allMails = r.mails || [];
+
+    // Bouton bascule "afficher les mails auto" : visible uniquement sur
+    // l'onglet Boîte de réception. Met à jour son label + filtre la liste.
+    const toggleBtn = document.getElementById('m-toggle-auto');
+    let hiddenAutoCount = 0;
+    if (this.state.tab === 'inbound') {
+      const showAuto = this._loadShowAuto();
+      const autoMails = allMails.filter(m => this._isAutoMail(m));
+      hiddenAutoCount = showAuto ? 0 : autoMails.length;
+      this.state.mails = showAuto ? allMails : allMails.filter(m => !this._isAutoMail(m));
+      if (toggleBtn) {
+        toggleBtn.style.display = '';
+        toggleBtn.textContent = showAuto
+          ? `👁 Cacher les notifs auto (${autoMails.length})`
+          : `👁‍🗨 Afficher les notifs auto${autoMails.length ? ` (${autoMails.length})` : ''}`;
+      }
+    } else {
+      this.state.mails = allMails;
+      if (toggleBtn) toggleBtn.style.display = 'none';
+    }
+
+    countEl.textContent = hiddenAutoCount > 0
+      ? `${this.state.mails.length} mail(s) — ${hiddenAutoCount} notif(s) auto cachée(s)`
+      : `${this.state.mails.length} mail(s)`;
 
     const limitedBanner = '';
 
     if (!this.state.mails.length) {
+      const hint = hiddenAutoCount > 0
+        ? `<p class="text-text-muted">Aucun mail visible — ${hiddenAutoCount} notif(s) auto cachée(s). Clique sur "Afficher les notifs auto" pour les voir.</p>`
+        : `<p class="text-text-muted">Aucun mail dans cette catégorie.</p>`;
       root.innerHTML = limitedBanner + `
         <div class="card p-10 text-center">
           <div class="text-3xl mb-3 opacity-60">∅</div>
-          <p class="text-text-muted">Aucun mail dans cette catégorie.</p>
+          ${hint}
         </div>
       `;
       return;
