@@ -688,8 +688,8 @@ const Morning = {
           tag: sentT > 0 ? 'LIVE' : null,
           delta: `<strong>${sentY}</strong> hier · <strong>${sentW}</strong> sur 7 jours`,
           spark: daily,
-          onClick: `App.show('mails')`,
-          hint: 'Voir la boîte d’envoi',
+          onClick: `App.show('mails', { tab: 'sent' })`,
+          hint: 'Voir les messages envoyés',
         })}
         ${this._kpi({
           label: 'Réponses aujourd\'hui',
