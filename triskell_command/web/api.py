@@ -215,9 +215,14 @@ class Api:
                 # Filtre compte mail (si demande explicitement)
                 if account_id and extra.get("account_id") != account_id:
                     continue
-                # Filtre categorie : ne s'applique qu'aux reply_received
-                # (les inbox_received n'ont pas de classification IA)
-                if category != "all" and r.get("kind") == "reply_received":
+                # Filtre categorie : exclut les inbox_received (pas de
+                # classification IA) et filtre les reply_received par
+                # catégorie demandée — sinon le filtre "interested" laisse
+                # passer les mails inconnus et la liste ne colle plus au
+                # chiffre affiché sur la carte Matinale.
+                if category != "all":
+                    if r.get("kind") != "reply_received":
+                        continue
                     cat = (extra.get("classification") or {}).get(
                         "category", "unknown")
                     if cat != category:
