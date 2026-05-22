@@ -204,6 +204,8 @@ const Autopilot = {
     this._syncStageModesFromAPI();
     // Charge la liste des produits dispo dans le select
     this._loadProducts();
+    // Charge la liste des comptes mail pour le pool d'adresses expeditrices
+    this._loadMailAccountsAndRender();
     // Compteurs : appel asynchrone, met a jour quand l'API repond
     this._refreshPulse();
 
@@ -250,6 +252,12 @@ const Autopilot = {
     this._renderForm();
     this._applyDraft();
     this._bindDraftPersist();
+    // Re-rend le pool d'adresses avec la config maintenant disponible
+    // (si les comptes mail ont déjà été chargés en parallèle).
+    if (Array.isArray(this.mailAccounts)) {
+      this._renderSenderPool();
+      this._refreshSenderSummary();
+    }
 
     // Le DOM du log vient d'être réinitialisé : on remet le compteur à 0
     // pour re-récupérer l'historique complet du run en cours / dernier run.
@@ -331,6 +339,26 @@ const Autopilot = {
               </div>
             </div>
           </label>
+        </div>
+      </div>
+
+      <!-- Adresses expéditrices : pool multi-comptes avec cap individuel / 24h -->
+      <div class="card p-5 mb-4">
+        <div class="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+          <div>
+            <div class="text-xs font-bold uppercase tracking-widest text-text-muted mb-1">
+              Adresses expéditrices
+            </div>
+            <div class="text-xs text-text-muted" style="text-wrap: pretty">
+              Coche les boîtes que l'autopilote a le droit d'utiliser et fixe un plafond
+              par boîte sur les dernières 24h. À chaque envoi, l'app tire au hasard parmi
+              les boîtes encore disponibles — ça protège la réputation de chaque adresse.
+            </div>
+          </div>
+          <div id="ap-sender-summary" class="text-xs text-text-muted whitespace-nowrap"></div>
+        </div>
+        <div id="ap-sender-list" class="space-y-2">
+          <div class="text-xs text-text-muted px-3 py-2">Chargement…</div>
         </div>
       </div>
 
@@ -576,6 +604,129 @@ const Autopilot = {
   },
 
   // ------------------------------------------------------------------
+  // Adresses expéditrices : charge la liste des comptes mail + rend les
+  // checkboxes + cap par compte. À chaque mail, l'app tire au hasard parmi
+  // les adresses cochées qui ont encore de la marge sur 24h glissantes.
+  async _loadMailAccountsAndRender() {
+    if (!App.api || !App.api.mail_accounts_list) {
+      const wrap = document.getElementById('ap-sender-list');
+      if (wrap) wrap.innerHTML =
+        `<div class="text-xs text-text-muted px-3 py-2">Comptes mail indisponibles.</div>`;
+      return;
+    }
+    try {
+      const r = await App.api.mail_accounts_list();
+      this.mailAccounts = (r && r.ok && Array.isArray(r.accounts)) ? r.accounts : [];
+    } catch (e) {
+      this.mailAccounts = [];
+    }
+    this._renderSenderPool();
+    this._refreshSenderSummary();
+  },
+
+  _renderSenderPool() {
+    const wrap = document.getElementById('ap-sender-list');
+    if (!wrap) return;
+    const accounts = this.mailAccounts || [];
+    if (accounts.length === 0) {
+      wrap.innerHTML = `
+        <div class="text-xs text-text-muted px-3 py-2 rounded-lg bg-bg border border-border">
+          Aucun compte mail configuré. Va dans Réglages pour ajouter ton compte
+          principal, ou un compte secondaire.
+        </div>`;
+      return;
+    }
+    // Map id → cap déjà sauvegardé dans cfg.autopilot_sender_pool
+    const saved = (this.cfg && Array.isArray(this.cfg.autopilot_sender_pool))
+                ? this.cfg.autopilot_sender_pool : [];
+    const capById = {};
+    for (const e of saved) {
+      if (e && e.account_id) {
+        capById[e.account_id] = parseInt(e.daily_cap, 10) || 0;
+      }
+    }
+    // Par défaut (rien de sauvegardé) : on coche "primary" avec un cap doux
+    // (= daily_cap global de la config, sinon 30).
+    const defaultCap = (this.cfg && parseInt(this.cfg.daily_cap, 10)) || 30;
+    const nothingSaved = saved.length === 0;
+
+    const rows = accounts.map(a => {
+      const checked = nothingSaved
+        ? (a.id === 'primary' || a.is_primary)
+        : (capById[a.id] || 0) > 0;
+      const cap = capById[a.id] || defaultCap;
+      const fromEmail = this._esc(a.from_email || '');
+      const fromName = a.from_name ? ` (${this._esc(a.from_name)})` : '';
+      const lbl = this._esc(a.label || a.from_email || a.id);
+      return `
+        <label class="flex items-center gap-3 p-3 rounded-lg bg-bg border border-border
+                       hover:border-accent/40 transition-colors cursor-pointer"
+               data-account-id="${this._esc(a.id)}">
+          <input type="checkbox" class="ap-sp-check w-4 h-4 accent-accent flex-shrink-0"
+                 ${checked ? 'checked' : ''}
+                 data-account-id="${this._esc(a.id)}">
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold truncate">${lbl}</div>
+            <div class="text-xs text-text-muted truncate">${fromEmail}${fromName}</div>
+          </div>
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            <input type="number" class="ap-sp-cap w-16 px-2 py-1 rounded-md bg-card
+                                        border border-border text-right text-sm
+                                        focus:border-accent focus:outline-none"
+                   min="1" max="1000" value="${cap}"
+                   data-account-id="${this._esc(a.id)}">
+            <span class="text-xs text-text-muted">/ 24h</span>
+          </div>
+        </label>`;
+    }).join('');
+    wrap.innerHTML = rows;
+
+    // Bind changes pour rafraîchir le résumé temps réel
+    wrap.querySelectorAll('.ap-sp-check').forEach(cb => {
+      cb.addEventListener('change', () => this._refreshSenderSummary());
+    });
+    wrap.querySelectorAll('.ap-sp-cap').forEach(inp => {
+      inp.addEventListener('input', () => this._refreshSenderSummary());
+    });
+  },
+
+  _refreshSenderSummary() {
+    const out = document.getElementById('ap-sender-summary');
+    if (!out) return;
+    const checks = document.querySelectorAll('.ap-sp-check');
+    let nChecked = 0, totalCap = 0;
+    checks.forEach(cb => {
+      if (!cb.checked) return;
+      nChecked += 1;
+      const capInput = document.querySelector(
+        `.ap-sp-cap[data-account-id="${cb.dataset.accountId}"]`
+      );
+      totalCap += parseInt((capInput && capInput.value) || 0, 10) || 0;
+    });
+    if (nChecked === 0) {
+      out.innerHTML = '<span style="color: hsl(var(--danger));">⚠ Aucune adresse cochée — rien ne pourra être envoyé.</span>';
+    } else {
+      out.textContent = `${nChecked} adresse(s) · jusqu'à ${totalCap} mails / 24h au total`;
+    }
+  },
+
+  _gatherSenderPool() {
+    const pool = [];
+    document.querySelectorAll('.ap-sp-check').forEach(cb => {
+      if (!cb.checked) return;
+      const id = cb.dataset.accountId;
+      const capInput = document.querySelector(
+        `.ap-sp-cap[data-account-id="${id}"]`
+      );
+      const cap = parseInt((capInput && capInput.value) || 0, 10) || 0;
+      if (id && cap > 0) {
+        pool.push({ account_id: id, daily_cap: cap });
+      }
+    });
+    return pool;
+  },
+
+  // ------------------------------------------------------------------
   // Compteurs des 5 maillons : appelle autopilot_pulse et met a jour
   // les spans .ap-stage-counter de chaque boite.
   async _refreshPulse() {
@@ -713,6 +864,8 @@ const Autopilot = {
       send_hour_end:      numI('send_hour_end',   19),
       // Auto-pilote v2 : heure de declenchement du run nocturne
       nightly_hour:       numI('nightly_hour', 3),
+      // Pool d'adresses expeditrices avec cap individuel / 24h
+      autopilot_sender_pool: this._gatherSenderPool(),
     };
   },
 

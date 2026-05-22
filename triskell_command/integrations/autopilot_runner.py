@@ -118,6 +118,62 @@ def _read_stage_modes() -> dict:
 
 
 # ---------------------------------------------------------------------------
+def _resolve_sender_pool_smtp(cfg, progress) -> dict:
+    """Pour chaque entree du pool (autopilot_sender_pool), resout le dict
+    SMTP via shared_secrets. Renvoie {account_id: smtp_cfg}.
+
+    Les comptes sans config SMTP complete sont logges en WARN et exclus
+    silencieusement (le pipeline les passera en draft pour ces tirages).
+    """
+    pool = list(getattr(cfg, "autopilot_sender_pool", None) or [])
+    if not pool:
+        return {}
+    try:
+        from triskell_command.integrations import shared_secrets
+    except Exception as exc:
+        progress(f"[WARN] shared_secrets indispo ({exc}) -> pool ignore.")
+        return {}
+    # Client Supabase optionnel (les helpers fonctionnent aussi avec
+    # app_state local).
+    client = _supabase_client()
+    out: dict[str, dict] = {}
+    missing: list[str] = []
+    for entry in pool:
+        if not isinstance(entry, dict):
+            continue
+        aid = str(entry.get("account_id") or "").strip()
+        if not aid:
+            continue
+        try:
+            acc = shared_secrets.get_account_by_id(aid, client=client)
+        except Exception as exc:
+            logger.debug("get_account_by_id(%s): %s", aid, exc)
+            acc = None
+        if not acc:
+            missing.append(aid)
+            continue
+        required = ("smtp_host", "smtp_port", "smtp_user",
+                    "smtp_password", "from_email")
+        if any(not acc.get(k) for k in required):
+            missing.append(aid)
+            continue
+        out[aid] = {
+            "smtp_host":     acc.get("smtp_host"),
+            "smtp_port":     int(acc.get("smtp_port") or 587),
+            "smtp_user":     acc.get("smtp_user"),
+            "smtp_password": acc.get("smtp_password"),
+            "from_email":    acc.get("from_email"),
+            "from_name":     acc.get("from_name", ""),
+        }
+    if missing:
+        progress(
+            f"[WARN] config SMTP manquante pour : {', '.join(missing)} "
+            f"-> ces adresses seront ignorees pendant le run."
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
 def run_pipeline_with_ui_modes(cfg, progress):
     """Lance la chaine complete en respectant les interrupteurs UI.
 
@@ -170,10 +226,15 @@ def run_pipeline_with_ui_modes(cfg, progress):
         f"(mode pipeline {cfg.mode}, produit "
         f"'{cfg.autopilot_product or '(libre)'}')..."
     )
+
+    # Resout les SMTP du pool (vide si pas de pool configure).
+    sender_pool_smtp = _resolve_sender_pool_smtp(cfg, progress)
+
     return run_full_pipeline(
         cfg, progress=progress,
         do_search=do_search,
         do_send=do_send_stage,
+        sender_pool_smtp=sender_pool_smtp,
     )
 
 
