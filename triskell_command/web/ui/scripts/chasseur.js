@@ -73,18 +73,18 @@ const Chasseur = {
                 <div>
                   <label class="block text-xs font-semibold mb-1">Mode de chasse</label>
                   <div class="grid grid-cols-2 gap-1.5">
-                    <button type="button" data-mode="all"
-                            class="ch-mode-btn ch-mode-active text-xs font-semibold py-2 px-2 rounded-lg border transition-all text-left leading-tight">
-                      <div class="font-bold mb-0.5">📬 Large</div>
-                      <div class="text-[10px] opacity-80">Tout site avec mail</div>
-                    </button>
                     <button type="button" data-mode="poor_sites"
-                            class="ch-mode-btn text-xs font-semibold py-2 px-2 rounded-lg border transition-all text-left leading-tight">
+                            class="ch-mode-btn ch-mode-active text-xs font-semibold py-2 px-2 rounded-lg border transition-all text-left leading-tight">
                       <div class="font-bold mb-0.5">🎯 Sites pourris</div>
                       <div class="text-[10px] opacity-80">Cibles refonte</div>
                     </button>
+                    <button type="button" data-mode="all"
+                            class="ch-mode-btn text-xs font-semibold py-2 px-2 rounded-lg border transition-all text-left leading-tight">
+                      <div class="font-bold mb-0.5">📬 Large</div>
+                      <div class="text-[10px] opacity-80">Tout site avec mail</div>
+                    </button>
                   </div>
-                  <input type="hidden" id="ch-mode" value="all" />
+                  <input type="hidden" id="ch-mode" value="poor_sites" />
                 </div>
                 <div>
                   <label class="block text-xs font-semibold mb-1">Secteur</label>
@@ -220,6 +220,119 @@ const Chasseur = {
           background: hsl(var(--surface));
           color: hsl(var(--text));
         }
+
+        /* ---------- Stepper (étapes de l'analyse) ---------- */
+        .ch-stepper {
+          position: relative;
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 0;
+          align-items: stretch;
+          z-index: 0;
+        }
+        .ch-step {
+          position: relative;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 4px 0;
+        }
+        .ch-step-bullet { position: relative; z-index: 2; }
+        .ch-step-bullet {
+          flex: 0 0 22px;
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 11px;
+          font-weight: 700;
+          border: 1.5px solid transparent;
+          transition: all 200ms;
+        }
+        .ch-step-pending .ch-step-bullet {
+          background: hsl(var(--bg));
+          border-color: hsl(var(--border-strong));
+          color: hsl(var(--text-muted));
+        }
+        .ch-step-active .ch-step-bullet {
+          background: hsl(var(--accent) / 0.15);
+          border-color: hsl(var(--accent));
+          color: hsl(var(--accent));
+          box-shadow: 0 0 0 4px hsl(var(--accent) / 0.10);
+        }
+        .ch-step-done .ch-step-bullet {
+          background: hsl(var(--success));
+          border-color: hsl(var(--success));
+          color: white;
+        }
+        .ch-step-text { min-width: 0; flex: 1; }
+        .ch-step-label {
+          font-size: 11px;
+          font-weight: 700;
+          line-height: 1.1;
+          color: hsl(var(--text));
+        }
+        .ch-step-pending .ch-step-label { color: hsl(var(--text-muted)); }
+        .ch-step-active .ch-step-label { color: hsl(var(--accent)); }
+        .ch-step-sub {
+          font-size: 9.5px;
+          color: hsl(var(--text-muted));
+          line-height: 1.2;
+          margin-top: 1px;
+        }
+        .ch-step-link {
+          position: absolute;
+          top: 14px;
+          right: -50%;
+          left: 50%;
+          height: 2px;
+          background: hsl(var(--border-strong));
+          z-index: 1;
+          margin-left: 18px;
+          margin-right: 18px;
+        }
+        .ch-step-link-done { background: hsl(var(--success)); }
+        .ch-step-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: hsl(var(--accent));
+          animation: ch-pulse-dot 1.2s ease-in-out infinite;
+        }
+        @keyframes ch-pulse-dot {
+          0%, 100% { transform: scale(0.7); opacity: 0.6; }
+          50%      { transform: scale(1.1); opacity: 1; }
+        }
+
+        /* ---------- Barre de progression animée (en cours) ---------- */
+        .ch-progress-bar-running {
+          background-image: linear-gradient(
+            90deg,
+            hsl(var(--accent)) 0%,
+            hsl(var(--accent) / 0.55) 50%,
+            hsl(var(--accent)) 100%
+          );
+          background-size: 200% 100%;
+          animation: ch-progress-shimmer 1.6s linear infinite;
+        }
+        @keyframes ch-progress-shimmer {
+          0%   { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+
+        /* Petite pastille "vivante" à côté du libellé d'étape */
+        .ch-live-dot {
+          display: inline-block;
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: hsl(var(--accent));
+          margin-right: 4px;
+          vertical-align: middle;
+          animation: ch-pulse-dot 1.2s ease-in-out infinite;
+        }
       `;
       document.head.appendChild(s);
     }
@@ -261,24 +374,70 @@ const Chasseur = {
       const withMail = stats.avec_mail ?? 0;
       const statusBadge = this._statusBadge(h.status, h.running);
       return `
-        <button data-hunt-id="${h.id}"
-                class="w-full text-left p-2.5 rounded-lg border transition-all
-                       ${isActive
-                         ? 'border-accent bg-accent/5'
-                         : 'border-border hover:border-border-strong hover:bg-surface'}">
-          <div class="flex items-center justify-between gap-2 mb-1">
-            <div class="text-xs font-semibold truncate flex-1">${this._esc(h.label || 'Sans titre')}</div>
-            ${statusBadge}
-          </div>
-          <div class="text-[10px] text-text-muted">
-            ${retenus} retenus · ${withMail} avec mail
-          </div>
-        </button>
+        <div class="ch-hunt-row group relative rounded-lg border transition-all
+                    ${isActive
+                      ? 'border-accent bg-accent/5'
+                      : 'border-border hover:border-border-strong hover:bg-surface'}">
+          <button data-hunt-id="${h.id}"
+                  class="w-full text-left p-2.5 pr-9">
+            <div class="flex items-center justify-between gap-2 mb-1">
+              <div class="text-xs font-semibold truncate flex-1">${this._esc(h.label || 'Sans titre')}</div>
+              ${statusBadge}
+            </div>
+            <div class="text-[10px] text-text-muted">
+              ${retenus} retenus · ${withMail} avec mail
+            </div>
+          </button>
+          <button data-del-hunt-id="${h.id}"
+                  title="Supprimer cette chasse"
+                  class="ch-hunt-del absolute top-1.5 right-1.5 w-6 h-6 rounded-md
+                         flex items-center justify-center text-text-muted
+                         hover:bg-danger/15 hover:text-danger transition-all
+                         opacity-0 group-hover:opacity-100 focus:opacity-100">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6M14 11v6"/>
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+            </svg>
+          </button>
+        </div>
       `;
     }).join('');
     wrap.querySelectorAll('[data-hunt-id]').forEach(btn => {
       btn.onclick = () => this._openHunt(btn.dataset.huntId);
     });
+    wrap.querySelectorAll('[data-del-hunt-id]').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        this._deleteHuntById(btn.dataset.delHuntId);
+      };
+    });
+  },
+
+  async _deleteHuntById(huntId) {
+    if (!huntId) return;
+    if (!confirm('Supprimer définitivement cette chasse ?')) return;
+    const r = await this._api('delete_hunt', {hunt_id: huntId});
+    if (!r || !r.ok) {
+      this._toast('Suppression échouée', 'danger');
+      return;
+    }
+    if (this.state.currentId === huntId) {
+      this.state.currentId = null;
+      this.state.currentHunt = null;
+      this._stopPolling();
+      const detail = document.getElementById('ch-detail');
+      if (detail) {
+        detail.innerHTML = `
+          <div class="card p-10 text-center text-text-muted">
+            <div class="text-5xl mb-3 opacity-70">🏹</div>
+            <div class="text-base">Lance une chasse ou ouvre-en une dans la liste.</div>
+          </div>
+        `;
+      }
+    }
+    await this._loadHunts();
   },
 
   _statusBadge(status, running) {
@@ -405,14 +564,22 @@ const Chasseur = {
           <div class="rounded-lg bg-danger/10 border border-danger/30 text-danger
                       text-sm p-3 mb-3">⚠️ ${this._esc(h.error)}</div>` : ''}
 
+        <!-- Étapes de l'analyse -->
+        ${this._renderStepper(h, mode, candidats, traites)}
+
         <!-- Barre de progression -->
         <div class="mb-3">
-          <div class="flex justify-between text-xs text-text-muted mb-1">
-            <span>Progression</span>
-            <span>${h.progress || 0}%</span>
+          <div class="flex justify-between items-center text-xs mb-1">
+            <span class="${isRunning ? 'text-accent font-semibold' : 'text-text-muted'}">
+              ${isRunning
+                ? `<span class="ch-live-dot"></span> ${this._currentStepLabel(h, mode, candidats, traites)}`
+                : (isDone ? '✅ Chasse terminée' : 'Progression')}
+            </span>
+            <span class="text-text-muted">${h.progress || 0}%</span>
           </div>
-          <div class="h-2 rounded-full bg-bg overflow-hidden">
-            <div class="h-full bg-accent transition-all" style="width: ${h.progress || 0}%"></div>
+          <div class="h-2.5 rounded-full bg-bg overflow-hidden relative">
+            <div class="h-full bg-accent transition-all ${isRunning ? 'ch-progress-bar-running' : ''}"
+                 style="width: ${Math.max(h.progress || 0, isRunning ? 3 : 0)}%"></div>
           </div>
         </div>
 
@@ -516,6 +683,81 @@ const Chasseur = {
     `;
   },
 
+  /**
+   * Stepper visuel — 3 phases du pipeline :
+   *   1. Recherche des entreprises (data.gouv)
+   *   2. Analyse des sites + extraction des mails
+   *   3. Terminé
+   * Selon le status et le mode, on met en évidence l'étape en cours.
+   */
+  _renderStepper(h, mode, candidats, traites) {
+    const status = h.status;
+    const isError = status === 'error';
+    const isDone = status === 'done';
+
+    // Détermine l'index de l'étape courante (0/1/2)
+    let activeIdx = 0;
+    if (status === 'searching' || status === 'pending') activeIdx = 0;
+    else if (status === 'enriching') activeIdx = 1;
+    else if (isDone) activeIdx = 2;
+
+    const steps = [
+      {label: 'Recherche entreprises', sub: 'Base data.gouv'},
+      {label: 'Analyse des sites', sub: mode === 'poor_sites' ? 'Mails + qualité' : 'Mails publics'},
+      {label: 'Terminé', sub: isDone ? 'Prêt à exporter' : 'En attente'},
+    ];
+
+    return `
+      <div class="ch-stepper mb-4">
+        ${steps.map((s, i) => {
+          const done = i < activeIdx || (isDone && i <= activeIdx);
+          const active = i === activeIdx && !isDone && !isError;
+          const cls = isError
+            ? 'ch-step-pending'
+            : done ? 'ch-step-done'
+            : active ? 'ch-step-active'
+            : 'ch-step-pending';
+          const icon = done
+            ? `<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`
+            : active
+            ? `<span class="ch-step-dot"></span>`
+            : `<span class="ch-step-num">${i + 1}</span>`;
+          return `
+            <div class="ch-step ${cls}">
+              <div class="ch-step-bullet">${icon}</div>
+              <div class="ch-step-text">
+                <div class="ch-step-label">${s.label}</div>
+                <div class="ch-step-sub">${s.sub}</div>
+              </div>
+              ${i < steps.length - 1 ? `<div class="ch-step-link ${done ? 'ch-step-link-done' : ''}"></div>` : ''}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  },
+
+  /**
+   * Phrase courte d'état pour la zone de progression : décrit ce que la
+   * machine fait à l'instant t, avec compteurs vivants quand on les a.
+   */
+  _currentStepLabel(h, mode, candidats, traites) {
+    const status = h.status;
+    if (status === 'pending') return 'En attente du démarrage…';
+    if (status === 'searching') {
+      return candidats
+        ? `Recherche des entreprises… ${candidats} trouvées`
+        : 'Recherche des entreprises dans la base data.gouv…';
+    }
+    if (status === 'enriching') {
+      if (candidats) {
+        return `Analyse des sites — ${traites} / ${candidats}`;
+      }
+      return 'Analyse des sites et extraction des mails…';
+    }
+    return 'Travail en cours…';
+  },
+
   async _pushToAutopilot() {
     if (!this.state.currentId) return;
     const h = this.state.currentHunt;
@@ -569,22 +811,7 @@ const Chasseur = {
 
   async _deleteHunt() {
     if (!this.state.currentId) return;
-    if (!confirm('Supprimer définitivement cette chasse ?')) return;
-    const r = await this._api('delete_hunt', {hunt_id: this.state.currentId});
-    if (!r || !r.ok) {
-      this._toast('Suppression échouée', 'danger');
-      return;
-    }
-    this.state.currentId = null;
-    this.state.currentHunt = null;
-    this._stopPolling();
-    document.getElementById('ch-detail').innerHTML = `
-      <div class="card p-10 text-center text-text-muted">
-        <div class="text-5xl mb-3 opacity-70">🏹</div>
-        <div class="text-base">Lance une chasse ou ouvre-en une dans la liste.</div>
-      </div>
-    `;
-    await this._loadHunts();
+    await this._deleteHuntById(this.state.currentId);
   },
 
   // ---- Helpers ----
