@@ -255,6 +255,14 @@ def _do_one_cycle(app_state) -> dict:
             if not subject or not body:
                 counters["skipped"] += 1
                 continue
+            # Signature auto : la boîte expéditrice colle sa signature
+            # à la fin du corps (le brief IA dit "NE signe pas — la
+            # signature est ajoutée séparément").
+            try:
+                from .signatures import append_signature_to_body
+                body = append_signature_to_body(body, account_id="primary")
+            except Exception as _sig_exc:
+                logger.warning("dormant signature: %s", _sig_exc)
             ok = _dispatch(client, sb, app_state, prospect, subject, body, mode)
             if ok == "auto":
                 counters["auto_sent"] += 1

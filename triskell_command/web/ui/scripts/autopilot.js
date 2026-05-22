@@ -503,15 +503,15 @@ const Autopilot = {
         'Pour chaque prospect, l\'IA reçoit son contexte (nom, ville, secteur, site web) ' +
         'et tes instructions, puis rédige un mail unique. Pas de copier-coller.',
         `
-        ${this._select('Service IA', 'ai_provider', c.ai_provider || 'google', [
-          ['google',    'Google Gemini'],
+        ${this._select('Service IA', 'ai_provider', c.ai_provider || 'anthropic', [
           ['anthropic', 'Anthropic Claude'],
+          ['google',    'Google Gemini'],
           ['openai',    'OpenAI GPT'],
           ['mistral',   'Mistral'],
           ['xai',       'xAI Grok'],
         ])}
-        ${this._input('Modèle IA', 'ai_model', c.ai_model || 'gemini-2.5-flash',
-          'ex : gemini-2.5-flash (gratuit) ou claude-sonnet-4-5')}
+        ${this._input('Modèle IA', 'ai_model', c.ai_model || 'claude-sonnet-4-5',
+          'ex : claude-sonnet-4-5 (Claude) ou gemini-2.5-flash (gratuit)')}
         ${this._input('Règles d\'écriture (numéros séparés par virgules)',
           'ai_mega_prompts_csv', (c.ai_mega_prompts || ['01']).join(','),
           'ex : 01,06,13')}
@@ -563,8 +563,8 @@ const Autopilot = {
       ...(this.cfg || {}),
       enabled: !!v('enabled'),
       mode:    v('mode') || 'validation',
-      ai_provider:        v('ai_provider') || 'google',
-      ai_model:           v('ai_model') || 'gemini-2.5-flash',
+      ai_provider:        v('ai_provider') || 'anthropic',
+      ai_model:           v('ai_model') || 'claude-sonnet-4-5',
       ai_mega_prompts:    v('ai_mega_prompts_csv').split(',').map(s => s.trim()).filter(Boolean),
       ai_template_brief:  v('ai_template_brief'),
       sender_mon_prenom:  v('sender_mon_prenom'),
