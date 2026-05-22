@@ -12,6 +12,7 @@
  */
 
 const Convoy = {
+  _LS_SELECTED: 'convoy:selected',
   campaigns: [],          // résumé des campagnes (gauche)
   selected:  null,        // campaign_id sélectionnée
   detail:    null,        // campagne complète (drafts inclus)
@@ -162,6 +163,16 @@ const Convoy = {
   async refreshAll() {
     await this._loadMailAccounts();
     await this._loadList();
+    // Restaure la campagne ouverte si state JS vide (refresh complet de l'app)
+    if (!this.selected) {
+      try { this.selected = localStorage.getItem(this._LS_SELECTED) || null; }
+      catch (e) {}
+    }
+    // Si la campagne mémorisée a été supprimée entretemps, on l'ignore.
+    if (this.selected && !this.campaigns.some(c => c.id === this.selected)) {
+      this.selected = null;
+      try { localStorage.removeItem(this._LS_SELECTED); } catch (e) {}
+    }
     if (!this.selected && this.campaigns.length > 0) {
       await this.select(this.campaigns[0].id);
     } else if (this.selected) {
@@ -219,6 +230,7 @@ const Convoy = {
 
   async select(cid, reuseDetail = false) {
     this.selected = cid;
+    try { localStorage.setItem(this._LS_SELECTED, cid || ''); } catch (e) {}
     this._stopPollers();
     this._renderList();
     if (!reuseDetail) {
@@ -483,6 +495,7 @@ const Convoy = {
       try { await App.api.convoy_delete_campaign({ campaign_id: this.detail.id }); }
       catch (e) { /* silent */ }
       this.selected = null;
+      try { localStorage.removeItem(this._LS_SELECTED); } catch (e) {}
       this.detail = null;
       this.raw = null;
       await this._loadList();

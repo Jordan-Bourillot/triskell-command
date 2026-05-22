@@ -11,6 +11,45 @@ const Eclaireur = {
   pollTimer: null,
   logSeen: 0,
 
+  // Brouillon non sauvegardé persisté en local — permet de retrouver ses
+  // modifs en cours même après refresh complet de l'app.
+  _LS_DRAFT: 'eclaireur:draft',
+
+  _saveDraft() {
+    try {
+      const draft = {};
+      document.querySelectorAll('#ec-form [data-key]').forEach(el => {
+        const k = el.dataset.key;
+        draft[k] = (el.type === 'checkbox') ? !!el.checked : el.value;
+      });
+      localStorage.setItem(this._LS_DRAFT, JSON.stringify(draft));
+    } catch (e) {}
+  },
+
+  _applyDraft() {
+    let draft = null;
+    try { draft = JSON.parse(localStorage.getItem(this._LS_DRAFT) || 'null'); }
+    catch (e) {}
+    if (!draft) return;
+    Object.entries(draft).forEach(([k, v]) => {
+      const el = document.querySelector(`#ec-form [data-key="${k}"]`);
+      if (!el) return;
+      if (el.type === 'checkbox') el.checked = !!v;
+      else el.value = (v == null ? '' : String(v));
+    });
+    this._bindShowWhen();  // réapplique l'affichage conditionnel selon la source
+  },
+
+  _bindDraftPersist() {
+    const root = document.getElementById('ec-form');
+    if (!root) return;
+    const save = () => this._saveDraft();
+    root.querySelectorAll('input, select, textarea').forEach(el => {
+      el.addEventListener('input',  save);
+      el.addEventListener('change', save);
+    });
+  },
+
   async render(container) {
     container.innerHTML = `
       <section class="animate-slide-up max-w-4xl">
@@ -66,7 +105,15 @@ const Eclaireur = {
     }
     this.cfg = r.config || {};
     this._renderForm();
+    // Si on a un brouillon local plus récent, on l'applique par-dessus la
+    // config serveur — sinon Jordan perd ses modifs en cours quand il
+    // change de page.
+    this._applyDraft();
+    this._bindDraftPersist();
 
+    // Le DOM du log vient d'être réinitialisé : on remet le compteur à 0
+    // pour re-récupérer l'historique complet du run en cours / dernier run.
+    this.logSeen = 0;
     this._refreshStatus(true);
   },
 
@@ -236,7 +283,11 @@ const Eclaireur = {
     btn.disabled = true; btn.textContent = 'Enregistrement…';
     try {
       const r = await App.api.autopilot_save_config({ config });
-      if (r && r.ok) this.cfg = config;
+      if (r && r.ok) {
+        this.cfg = config;
+        // Brouillon = config serveur → on peut le purger.
+        try { localStorage.removeItem(this._LS_DRAFT); } catch (e) {}
+      }
       btn.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
     } catch (e) { btn.textContent = 'Erreur'; }
     setTimeout(() => { btn.disabled = false; btn.textContent = 'Enregistrer'; }, 1600);

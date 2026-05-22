@@ -28,6 +28,83 @@ const Obelisk = {
 
   _AUDIENCE_KEY: 'obelisk-search-audience',
   _LIST_AUDIENCE_KEY: 'obelisk-list-audience',
+  _LS_SEARCH_DRAFT: 'obelisk:search-draft',
+  _LS_LIST_FILTERS: 'obelisk:list-filters',
+
+  _saveSearchDraft() {
+    try {
+      const ids = ['ob-s-niche','ob-s-osm-area','ob-s-min-subs','ob-s-max-subs','ob-s-max'];
+      const draft = {};
+      ids.forEach(id => { const el = document.getElementById(id); if (el) draft[id] = el.value; });
+      const wEmail = document.getElementById('ob-s-with-email');
+      const uncontacted = document.getElementById('ob-s-uncontacted');
+      if (wEmail) draft['ob-s-with-email'] = !!wEmail.checked;
+      if (uncontacted) draft['ob-s-uncontacted'] = !!uncontacted.checked;
+      const monet = document.querySelector('input[name="ob-monet"]:checked');
+      if (monet) draft['ob-monet'] = monet.value;
+      const plats = [];
+      document.querySelectorAll('[data-ob-plat]:checked').forEach(cb => plats.push(cb.dataset.obPlat));
+      draft['plats'] = plats;
+      draft['_aud'] = this._getSearchAudience();
+      localStorage.setItem(this._LS_SEARCH_DRAFT, JSON.stringify(draft));
+    } catch (e) {}
+  },
+
+  _applySearchDraft() {
+    let draft = null;
+    try { draft = JSON.parse(localStorage.getItem(this._LS_SEARCH_DRAFT) || 'null'); }
+    catch (e) {}
+    if (!draft) return;
+    // Brouillon d'une autre audience (créateur vs pro) → on l'ignore pour
+    // ne pas mélanger les contextes.
+    if (draft._aud && draft._aud !== this._getSearchAudience()) return;
+    Object.entries(draft).forEach(([id, v]) => {
+      if (id === 'plats' || id === '_aud' || id === 'ob-monet') return;
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (el.type === 'checkbox') el.checked = !!v;
+      else el.value = (v == null ? '' : String(v));
+    });
+    if (draft['ob-monet']) {
+      const r = document.querySelector(`input[name="ob-monet"][value="${draft['ob-monet']}"]`);
+      if (r) r.checked = true;
+    }
+    if (Array.isArray(draft.plats)) {
+      document.querySelectorAll('[data-ob-plat]').forEach(cb => {
+        const on = draft.plats.includes(cb.dataset.obPlat);
+        cb.checked = on;
+        cb.closest('.ob-platform-chip')?.classList.toggle('is-on', on);
+      });
+    }
+  },
+
+  _bindSearchDraftPersist() {
+    const root = document.getElementById('ob-content');
+    if (!root) return;
+    const save = () => this._saveSearchDraft();
+    root.querySelectorAll('input, select, textarea').forEach(el => {
+      el.addEventListener('input',  save);
+      el.addEventListener('change', save);
+    });
+  },
+
+  _saveListFilters() {
+    try { localStorage.setItem(this._LS_LIST_FILTERS, JSON.stringify({
+      filters: this.state.filters || {},
+      page:    this.state.page    || 0,
+      jobFilterInfo: this.state.jobFilterInfo || null,
+    })); } catch (e) {}
+  },
+
+  _applyListFilters() {
+    let v = null;
+    try { v = JSON.parse(localStorage.getItem(this._LS_LIST_FILTERS) || 'null'); }
+    catch (e) {}
+    if (!v) return;
+    if (v.filters) Object.assign(this.state.filters, v.filters);
+    if (typeof v.page === 'number') this.state.page = v.page;
+    if (v.jobFilterInfo) this.state.jobFilterInfo = v.jobFilterInfo;
+  },
 
   _getListAudience() {
     // Renvoie le filtre d'audience persisté pour la liste des prospects.
@@ -220,6 +297,8 @@ const Obelisk = {
     `;
     this._injectStyles();
     document.getElementById('ob-refresh').onclick = () => this.refresh();
+    // Restaure les filtres de la liste si on revient sur la vue
+    this._applyListFilters();
     await this._loadStats();
     await this._renderCreators();
   },
@@ -789,6 +868,7 @@ const Obelisk = {
       // Le filtre "pays" reste dans state mais n'est plus exposé dans
       // l'UI (Obelisk est purement francophone maintenant, voir purge).
       this.state.page = 0;
+      this._saveListFilters();
       this._loadCreators();
     };
 
@@ -1077,6 +1157,7 @@ const Obelisk = {
         this.state.filters[k] = (k === 'min_score') ? 0 : '';
         if (k === 'job_id') this.state.jobFilterInfo = null;
         this.state.page = 0;
+        this._saveListFilters();
         this._renderCreators();
       };
     });
@@ -1085,6 +1166,7 @@ const Obelisk = {
       this.state.filters = { platform: '', status: '', min_score: 0, q: '', has_email: '', country: '', job_id: '', audience: '' };
       this.state.jobFilterInfo = null;
       this.state.page = 0;
+      this._saveListFilters();
       this._renderCreators();
     };
   },
@@ -1179,8 +1261,8 @@ const Obelisk = {
     `;
     const prev = pager.querySelector('[data-ob-prev]');
     const next = pager.querySelector('[data-ob-next]');
-    if (prev) prev.onclick = () => { this.state.page = Math.max(0, this.state.page - 1); this._loadCreators(); };
-    if (next) next.onclick = () => { this.state.page = Math.min(lastPage, this.state.page + 1); this._loadCreators(); };
+    if (prev) prev.onclick = () => { this.state.page = Math.max(0, this.state.page - 1); this._saveListFilters(); this._loadCreators(); };
+    if (next) next.onclick = () => { this.state.page = Math.min(lastPage, this.state.page + 1); this._saveListFilters(); this._loadCreators(); };
   },
 
   _rowHtml(p) {
@@ -1708,6 +1790,9 @@ const Obelisk = {
       });
     });
     document.getElementById('ob-s-launch').onclick = () => this._launchSearch();
+    // Restaure le brouillon de recherche en cours (saisies non lancées)
+    this._applySearchDraft();
+    this._bindSearchDraftPersist();
     this._loadRecentJobs();
   },
 

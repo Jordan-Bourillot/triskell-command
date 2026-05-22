@@ -19,6 +19,61 @@ const Chasseur = {
     pollTimer: null,
   },
 
+  // Persistance "où j'en étais" — survit à un refresh complet de l'app.
+  _LS_FORM: 'chasseur:form',
+  _LS_CURRENT: 'chasseur:currentId',
+
+  _saveForm() {
+    try {
+      const f = {
+        preset:        document.getElementById('ch-preset')?.value || '',
+        sectorCustom:  document.getElementById('ch-sector-custom')?.value || '',
+        dept:          document.getElementById('ch-dept')?.value || '',
+        cp:            document.getElementById('ch-cp')?.value || '',
+        target:        document.getElementById('ch-target')?.value || '200',
+        onlyEmail:     !!document.getElementById('ch-only-email')?.checked,
+        mode:          document.getElementById('ch-mode')?.value || 'poor_sites',
+      };
+      localStorage.setItem(this._LS_FORM, JSON.stringify(f));
+    } catch (e) {}
+  },
+
+  _readForm() {
+    try { return JSON.parse(localStorage.getItem(this._LS_FORM) || 'null'); }
+    catch (e) { return null; }
+  },
+
+  _applyForm() {
+    const f = this._readForm();
+    if (!f) return;
+    const set = (id, val) => { const el = document.getElementById(id); if (el != null && val != null) el.value = val; };
+    set('ch-preset', f.preset);
+    set('ch-sector-custom', f.sectorCustom);
+    set('ch-dept', f.dept);
+    set('ch-cp', f.cp);
+    set('ch-target', f.target);
+    if (f.onlyEmail != null) {
+      const el = document.getElementById('ch-only-email');
+      if (el) el.checked = !!f.onlyEmail;
+    }
+    if (f.mode) {
+      document.getElementById('ch-mode').value = f.mode;
+      document.querySelectorAll('[data-mode]').forEach(b => {
+        b.classList.toggle('ch-mode-active', b.dataset.mode === f.mode);
+      });
+    }
+  },
+
+  _bindFormPersist() {
+    const root = document.getElementById('ch-form');
+    if (!root) return;
+    const save = () => this._saveForm();
+    root.querySelectorAll('input, select').forEach(el => {
+      el.addEventListener('input',  save);
+      el.addEventListener('change', save);
+    });
+  },
+
   // Dép FR + Corse + DOM (les principaux). Suffit pour l'UI ; on accepte
   // aussi des inputs libres.
   DEPARTEMENTS: [
@@ -166,6 +221,7 @@ const Chasseur = {
         document.querySelectorAll('[data-mode]').forEach(b => b.classList.remove('ch-mode-active'));
         btn.classList.add('ch-mode-active');
         document.getElementById('ch-mode').value = btn.dataset.mode;
+        this._saveForm();
       };
     });
 
@@ -343,7 +399,17 @@ const Chasseur = {
     }
 
     await this._loadPresets();
+    // Restaure les valeurs du form après le chargement des presets
+    // (sinon le <select preset> n'a pas encore ses options).
+    this._applyForm();
+    this._bindFormPersist();
     await this._loadHunts();
+    // Restaure la chasse active depuis localStorage si state vide
+    if (!this.state.currentId) {
+      try { this.state.currentId = localStorage.getItem(this._LS_CURRENT) || null; }
+      catch (e) {}
+    }
+    if (this.state.currentId) this._openHunt(this.state.currentId);
   },
 
   async _loadPresets() {
@@ -431,6 +497,7 @@ const Chasseur = {
     if (this.state.currentId === huntId) {
       this.state.currentId = null;
       this.state.currentHunt = null;
+      try { localStorage.removeItem(this._LS_CURRENT); } catch (e) {}
       this._stopPolling();
       const detail = document.getElementById('ch-detail');
       if (detail) {
@@ -491,6 +558,7 @@ const Chasseur = {
 
   async _openHunt(huntId) {
     this.state.currentId = huntId;
+    try { localStorage.setItem(this._LS_CURRENT, huntId || ''); } catch (e) {}
     this._renderHuntsList();
     await this._refreshDetail();
     this._startPolling();
