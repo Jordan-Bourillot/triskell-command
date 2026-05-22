@@ -577,12 +577,43 @@ def text_to_email_html(body_text: str, *,
     muted_color = "#6b7280"
     bg_color = "#f9fafb"
 
-    # 1) Échappe le HTML, puis détecte les URLs inline pour les rendre cliquables
+    # 1) Échappe le HTML, applique le markdown léger (**gras** et __souligné__),
+    # puis détecte les URLs inline et les transforme en petits boutons pilule
+    # (plus engageant qu'un simple lien souligné).
     safe = _html_mod.escape(body_text)
+    # Markdown leger : **gras** et __soulignement__. Limite a 1-2 lignes
+    # par marqueur pour eviter qu'une etoile orpheline ne ruine la mise
+    # en forme du reste du mail.
+    import re as _re_md
+    safe = _re_md.sub(
+        r"\*\*([^*\n]{1,120}?)\*\*",
+        r'<strong>\1</strong>',
+        safe,
+    )
+    safe = _re_md.sub(
+        r"__([^_\n]{1,120}?)__",
+        r'<u>\1</u>',
+        safe,
+    )
     def _linkify(m):
         u = m.group(1)
-        return (f'<a href="{u}" style="color:{accent};text-decoration:underline;'
-                f'word-break:break-all;">{u}</a>')
+        # Affichage compact : retire le protocole et le slash final
+        display = u
+        for proto in ("https://", "http://"):
+            if display.startswith(proto):
+                display = display[len(proto):]
+                break
+        display = display.rstrip("/")
+        if len(display) > 36:
+            display = display[:33] + "..."
+        return (
+            f'<a href="{u}" style="display:inline-block;'
+            f'background:{accent};color:white;padding:6px 14px;'
+            f'border-radius:999px;text-decoration:none;font-weight:600;'
+            f'font-size:13.5px;margin:3px 2px;line-height:1.2;'
+            f'white-space:nowrap;">'
+            f'{_html_mod.escape(display)} &rarr;</a>'
+        )
     safe = _URL_RE.sub(_linkify, safe)
 
     # 2) Découpe en paragraphes (double saut de ligne) puis en lignes
@@ -625,22 +656,34 @@ def text_to_email_html(body_text: str, *,
             '</div>'
         )
 
-    # 4) Wrapper sobre (pas de logo, pas de header lourd — l'IA a écrit
-    # un mail naturel, on le présente joliment sans le sur-charger)
+    # 4) Wrapper plus chaleureux : bordure colorée en haut, kicker discret
+    # avec le nom de l'expéditeur, fond doux, ombre marquée, padding aere.
+    sender_safe = _html_mod.escape(sender_name or "").upper()
+    kicker_block = ""
+    if sender_safe:
+        kicker_block = (
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:0.18em;'
+            f'color:{accent};margin:0 0 22px 0;padding-bottom:14px;'
+            f'border-bottom:2px solid #e0e7ff;">'
+            f'{sender_safe}'
+            f'</div>'
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 </head>
 <body style="margin:0;padding:0;background:{bg_color};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:{bg_color};">
-    <tr><td align="center" style="padding:24px 12px;">
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
-        <tr><td style="padding:28px 32px 4px;">
+    <tr><td align="center" style="padding:32px 12px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;background:white;border-radius:14px;box-shadow:0 2px 6px rgba(15,23,42,0.06),0 8px 24px rgba(15,23,42,0.08);border-top:4px solid {accent};">
+        <tr><td style="padding:32px 36px 24px;">
+          {kicker_block}
           {body_html_inner}
           {ctas_block}
         </td></tr>
       </table>
-      <div style="margin-top:14px;font-size:11px;color:{muted_color};">Envoyé par {_html_mod.escape(sender_name or '')}</div>
+      <div style="margin-top:18px;font-size:11px;color:{muted_color};">Ce message vous a ete envoye personnellement.</div>
     </td></tr>
   </table>
 </body></html>"""
