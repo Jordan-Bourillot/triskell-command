@@ -206,6 +206,25 @@ const Autopilot = {
       return;
     }
     this.cfg = r.config || {};
+
+    // Migration des anciens defauts Gemini -> Claude.
+    // Si la config porte EXACTEMENT les anciennes valeurs par defaut
+    // (google + gemini-2.5-flash), on bascule sur Claude et on sauvegarde
+    // en silence. Toute config personnalisee est conservee telle quelle.
+    if (this.cfg.ai_provider === 'google'
+        && (this.cfg.ai_model || '').trim() === 'gemini-2.5-flash') {
+      this.cfg.ai_provider = 'anthropic';
+      this.cfg.ai_model = 'claude-sonnet-4-5';
+      try { App.api.autopilot_save_config({ config: this.cfg }); } catch (e) {}
+    }
+
+    // Charge les signatures pour les afficher dans l'apercu sous le brief IA
+    this.signatures = [];
+    try {
+      const sr = await App.api.signatures_list();
+      if (sr && sr.ok) this.signatures = sr.signatures || [];
+    } catch (e) {}
+
     this._renderForm();
     this._applyDraft();
     this._bindDraftPersist();
@@ -517,6 +536,7 @@ const Autopilot = {
           'ex : 01,06,13')}
         ${this._textarea('Mes instructions à l\'IA', 'ai_template_brief',
           c.ai_template_brief || '', 6)}
+        ${this._signaturePreview()}
         ${this._input('Mon prénom (pour la signature)', 'sender_mon_prenom',
           c.sender_mon_prenom || '')}
         `)}
@@ -753,6 +773,54 @@ const Autopilot = {
           `).join('')}
         </select>
       </label>
+    `;
+  },
+
+  // Apercu de la signature qui sera ajoutee automatiquement a la fin
+  // de chaque mail ecrit par l'IA. Si plusieurs signatures sont configurees
+  // (une par boite expeditrice), on les liste toutes.
+  _signaturePreview() {
+    const sigs = (this.signatures || []).filter(s => (s.body_text || '').trim());
+    if (!sigs.length) {
+      return `
+        <div class="rounded-lg border border-dashed border-border bg-bg/40 p-3">
+          <div class="text-xs font-medium text-text-secondary mb-1">
+            Signature ajoutée automatiquement à la fin du mail
+          </div>
+          <div class="text-xs text-text-muted">
+            Aucune signature configurée. Va dans Réglages → Signatures pour en
+            créer une — elle sera collée derrière « Cordialement, {prénom} »
+            à chaque envoi.
+          </div>
+        </div>
+      `;
+    }
+    const blocks = sigs.map(s => {
+      const name = this._esc(s.name || 'Ma signature');
+      const text = this._esc((s.body_text || '').trim());
+      const accs = (s.account_ids || []).length
+        ? `Boîte(s) : ${this._esc((s.account_ids || []).join(', '))}`
+        : 'Toutes les boîtes (par défaut)';
+      return `
+        <div class="rounded-md bg-bg/60 border border-border px-3 py-2">
+          <div class="flex items-center justify-between mb-1">
+            <div class="text-xs font-semibold text-text">${name}</div>
+            <div class="text-[10px] text-text-muted">${accs}</div>
+          </div>
+          <pre class="text-xs text-text-secondary whitespace-pre-wrap font-mono leading-relaxed m-0">${text}</pre>
+        </div>
+      `;
+    }).join('');
+    return `
+      <div class="rounded-lg border border-dashed border-border bg-bg/40 p-3 space-y-2">
+        <div class="text-xs font-medium text-text-secondary">
+          Signature ajoutée automatiquement à la fin du mail
+          <span class="text-text-muted font-normal">
+            (l'IA s'arrête à « Cordialement, {prénom} », ceci est collé derrière)
+          </span>
+        </div>
+        ${blocks}
+      </div>
     `;
   },
 
