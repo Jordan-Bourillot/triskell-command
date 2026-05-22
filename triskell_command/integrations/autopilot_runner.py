@@ -29,6 +29,14 @@ logger = logging.getLogger(__name__)
 
 
 SHARED_KEY = "autopilot_nightly"
+STAGE_MODES_KEY = "autopilot_stage_modes"  # poses par l'UI (etape 4 du chantier)
+STAGE_MODES_DEFAULTS = {
+    "search": "auto",
+    "sort":   "auto",
+    "write":  "auto",
+    "review": "manual",
+    "send":   "manual",
+}
 DEFAULT_HOUR_PARIS = 3                    # déclenchement à 3h du matin
 WINDOW_MINUTES = 60                       # fenêtre [3h, 4h]
 CYCLE_INTERVAL_SECONDS = 5 * 60           # check toutes les 5 min
@@ -86,6 +94,27 @@ def _write_state(data: dict) -> None:
         sb.set_shared_setting(SHARED_KEY, data)
     except Exception as exc:
         logger.debug("autopilot_runner write_state: %s", exc)
+
+
+def _read_stage_modes() -> dict:
+    """Lit les modes UI Auto/Manuel par maillon poses par le tableau de
+    commande (etape 4 du chantier). Defauts si vide ou indisponible.
+    """
+    sb = _supabase_client()
+    if sb is None:
+        return dict(STAGE_MODES_DEFAULTS)
+    try:
+        raw = sb.get_shared_setting(STAGE_MODES_KEY, {}) or {}
+    except Exception as exc:
+        logger.debug("autopilot_runner read_stage_modes: %s", exc)
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    out = {}
+    for k, default in STAGE_MODES_DEFAULTS.items():
+        v = raw.get(k)
+        out[k] = v if v in ("auto", "manual") else default
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -178,8 +207,31 @@ def _do_one_tick(app_state) -> None:
         logger.info("[autopilot_nightly] %s", msg)
 
     try:
-        _progress(f"Lancement nocturne du pipeline (mode {cfg.mode})…")
-        stats = run_full_pipeline(cfg, progress=_progress)
+        # Lit les modes UI Auto/Manuel par maillon (poses par le tableau de
+        # commande) et applique-les au pipeline.
+        stage_modes = _read_stage_modes()
+        do_search = stage_modes["search"] == "auto"
+        # write=manual -> on ne genere pas de mails (donc do_send pipeline=False)
+        do_send_stage = stage_modes["write"] == "auto"
+        # send=manual -> on force mode validation (drafts au lieu d'envoi)
+        if stage_modes["send"] == "manual" and cfg.mode == "auto":
+            cfg.mode = "validation"
+            _progress(
+                "Interrupteur Envoie=Manuel : mode pipeline force a "
+                "'validation' (drafts au lieu d'envoi direct)."
+            )
+
+        _progress(
+            f"Lancement nocturne — Cherche={stage_modes['search']} "
+            f"Trie={stage_modes['sort']} Redige={stage_modes['write']} "
+            f"Relit={stage_modes['review']} Envoie={stage_modes['send']} "
+            f"(mode pipeline {cfg.mode})..."
+        )
+        stats = run_full_pipeline(
+            cfg, progress=_progress,
+            do_search=do_search,
+            do_send=do_send_stage,
+        )
         _LAST_RUN_RESULT.clear()
         _LAST_RUN_RESULT.update({
             "searched":         getattr(stats, "searched", 0),
