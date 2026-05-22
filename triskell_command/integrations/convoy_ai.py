@@ -482,27 +482,68 @@ def generate_message_from_templates(
 
 
 def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
-    """Remplit les placeholders {prenom}, {nom}, {raison_sociale}, {ville},
-    {secteur}, {email}, {sender_name} dans un texte (HTML ou texte brut).
+    """Remplit les placeholders dans un template.
 
-    Utilisé pour servir un template HTML écrit à la main par l'utilisateur
-    sans le réécrire via IA — on garde la mise en forme intacte."""
+    Accepte 2 syntaxes en parallele (les anciens templates Triskell ET les
+    nouveaux templates Pixel Pros style Mailchimp/CRM) :
+      - syntaxe FR a 1 accolade : {prenom} {ville} {secteur} ...
+      - syntaxe EN a 2 accolades : {{first_name}} {{city}} {{business_type}} ...
+    Toutes pointent vers les memes champs du dict prospect, donc l'auteur
+    du template peut utiliser celle qu'il prefere sans se prendre la tete.
+    """
     if not text:
         return ""
+
+    prenom    = prospect.get("prenom", "") or ""
+    nom       = prospect.get("nom", "") or ""
+    raison    = prospect.get("raison_sociale", "") or ""
+    ville     = prospect.get("ville", "") or ""
+    secteur   = prospect.get("secteur", "") or ""
+    email     = prospect.get("email", "") or ""
+    website   = prospect.get("website", "") or ""
+    sender    = sender_name or "L'équipe"
+    # Fallback "name" = prenom si dispo, sinon raison sociale, sinon ""
+    name_any  = prenom or raison
+
     replacements = {
-        "{prenom}":         prospect.get("prenom", "") or "",
-        "{nom}":            prospect.get("nom", "") or "",
-        "{raison_sociale}": prospect.get("raison_sociale", "") or "",
-        "{ville}":          prospect.get("ville", "") or "",
-        "{secteur}":        prospect.get("secteur", "") or "",
-        "{email}":          prospect.get("email", "") or "",
-        "{sender_name}":    sender_name or "L'équipe",
+        # === Syntaxe FR a 1 accolade (historique) ===
+        "{prenom}":         prenom,
+        "{nom}":            nom,
+        "{raison_sociale}": raison,
+        "{ville}":          ville,
+        "{secteur}":        secteur,
+        "{email}":          email,
+        "{sender_name}":    sender,
+        # === Syntaxe EN a 2 accolades (templates Pixel Pros) ===
+        "{{first_name}}":    prenom,
+        "{{last_name}}":     nom,
+        "{{name}}":          name_any,
+        "{{company_name}}":  raison,
+        "{{company}}":       raison,
+        "{{city}}":          ville,
+        "{{business_type}}": secteur,
+        "{{industry}}":      secteur,
+        "{{sector}}":        secteur,
+        "{{email}}":         email,
+        "{{website}}":       website,
+        "{{domain}}":        website,
+        "{{signature}}":     sender,
+        "{{sender_name}}":   sender,
+        # Placeholders contextuels qu'on ne peut pas auto-remplir : on les
+        # vide pour eviter d'envoyer "{{price}}" en clair au prospect.
+        "{{price}}":         "",
+        "{{link}}":          "",
+        "{{example_content}}": "",
     }
     out = text
     for ph, val in replacements.items():
         out = out.replace(ph, val)
     # Nettoie "Bonjour ," qui apparaît quand le prénom est vide
-    out = out.replace("Bonjour ,", "Bonjour,").replace("Bonjour , ", "Bonjour, ")
+    out = (out
+           .replace("Bonjour ,", "Bonjour,")
+           .replace("Bonjour , ", "Bonjour, ")
+           .replace("Salut ,", "Bonjour,")
+           .replace("Salut , ", "Bonjour, "))
     return out
 
 
