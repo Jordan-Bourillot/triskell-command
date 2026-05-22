@@ -37,6 +37,8 @@ class ProspectsView(BaseView):
                         command=self._wipe_crm).pack(side="left", padx=(0, T.SPACE_SM))
         SecondaryButton(header.actions, colors=c, icon="download", text="Importer Le Dénicheur",
                         command=self._import_denicheur).pack(side="left", padx=(0, T.SPACE_SM))
+        SecondaryButton(header.actions, colors=c, icon="doc", text="Importer fichier",
+                        command=self._open_file_import).pack(side="left", padx=(0, T.SPACE_SM))
         SecondaryButton(header.actions, colors=c, icon="globe", text="Enrichir",
                         command=self._open_enrich_dialog).pack(side="left", padx=(0, T.SPACE_SM))
         SecondaryButton(header.actions, colors=c, icon="plus", text="Nouveau",
@@ -321,6 +323,10 @@ class ProspectsView(BaseView):
 
     def _open_search_dialog(self) -> None:
         SearchDialog(self, on_done=self._refresh)
+
+    def _open_file_import(self) -> None:
+        from ..widgets.file_import_dialog import FileImportDialog
+        FileImportDialog(self, on_done=self._refresh)
 
     def _open_enrich_dialog(self) -> None:
         EnrichDialog(self, on_done=self._refresh)
