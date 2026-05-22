@@ -77,9 +77,13 @@ PUBLIC_API_PATHS = {
 }
 
 # Utilisateurs reconnus (étendre ici si on ajoute du monde)
+# `_no_login` : participant virtuel qui n'a pas de mot de passe et ne
+# peut pas se connecter (ex : Claude, qui poste des messages dans le
+# chat depuis le mode vocal mais n'a pas de session).
 KNOWN_USERS = {
     "jordan": {"display_name": "Jordan", "env_var": "JORDAN_PASSWORD_HASH"},
     "thomas": {"display_name": "Thomas", "env_var": "THOMAS_PASSWORD_HASH"},
+    "claude": {"display_name": "Allo Claude", "env_var": "", "_no_login": True},
 }
 
 
@@ -121,7 +125,7 @@ def authenticate(username: str, password: str) -> Optional[str]:
         return None
     user_id = username.strip().lower()
     user = KNOWN_USERS.get(user_id)
-    if user is None:
+    if user is None or user.get("_no_login"):
         return None
     hashed = os.environ.get(user["env_var"], "").strip()
     if not hashed:
@@ -147,6 +151,10 @@ def read_session_cookie(value: Optional[str]) -> Optional[str]:
         if isinstance(data, dict):
             uid = data.get("u")
             if isinstance(uid, str) and uid in KNOWN_USERS:
+                # On exclut les participants virtuels (claude…) qui ne
+                # peuvent pas avoir de session humaine.
+                if KNOWN_USERS[uid].get("_no_login"):
+                    return None
                 return uid
     except BadSignature:
         return None
@@ -228,6 +236,7 @@ def set_display_name(user_id: str, name: str) -> bool:
 DEFAULT_CHAT_COLORS = {
     "jordan": "#7C7FE9",  # violet accent
     "thomas": "#10b981",  # vert
+    "claude": "#a855f7",  # violet vif (participant virtuel, mode vocal)
 }
 
 # Palette proposée dans le sélecteur de couleur côté front.

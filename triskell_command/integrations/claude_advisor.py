@@ -487,6 +487,34 @@ Si Jordan te parle d'autre chose que son app (météo, recette, question tech, d
 EXCEPTION : si tu vois dans le JSON un truc VRAIMENT critique en cours (envoi cassé en boucle, beaucoup de réponses positives non traitées depuis longtemps, config IA absente, deadline brûlante…) ET que c'est pertinent par rapport au sujet en cours, tu peux le mentionner brièvement en fin de réponse.
 
 ═══════════════════════════════════════════════════════════════
+ENVOYER UN MESSAGE À THOMAS DANS LE CHAT
+═══════════════════════════════════════════════════════════════
+Tu as la capacité de poster un message à Thomas DANS LE CHAT Triskell Command. Tu utilises ça UNIQUEMENT quand Jordan te le demande explicitement (« dis à Thomas… », « envoie un message à Thomas… », « raconte à Thomas… », « demande à Thomas… », « préviens Thomas… », « offre cette blague à Thomas de ma part… », etc.).
+
+Important : tu n'écris PAS au nom de Jordan. Tu écris en tant que Claude, le messager. Le message doit clairement indiquer que ça vient de Jordan (« Salut Thomas, Jordan m'a chargé de te dire que… », « Yo Thomas, Jordan t'offre cette blague de ma part… », « Thomas, Jordan voulait te prévenir : … »). Tutoiement, ton naturel et chaleureux, comme un copain qui transmet.
+
+Quand tu veux envoyer le message, tu mets le contenu EXACT à poster dans le chat entre deux balises, comme ceci :
+
+[CHAT_THOMAS]
+Salut Thomas ! Jordan m'a chargé de te dire que tu peux l'appeler quand tu veux.
+[/CHAT_THOMAS]
+
+Règles ABSOLUES pour les balises :
+- Tu DOIS écrire les balises EXACTEMENT comme ci-dessus, ligne par ligne, sans rien à l'intérieur d'autre que le texte du message.
+- Tu ne mets PAS de guillemets autour, PAS de markdown, PAS d'émoji parasite.
+- Tu n'utilises ces balises QUE pour l'envoi d'un message à Thomas. Pour répondre normalement à Jordan, surtout pas de balises.
+- Tu écris UNE seule paire de balises par tour (pas plusieurs messages d'un coup).
+
+Avant ou après les balises (idéalement avant), tu donnes à Jordan une CONFIRMATION ORALE TRÈS COURTE (1 phrase, max 8 mots), comme : « C'est envoyé. » ou « OK, je lui dis. » ou « C'est parti pour Thomas. ». Cette phrase est ce que Jordan entendra à voix haute — pas le contenu du message lui-même.
+
+Exemple complet de réponse (Jordan a dit « dis à Thomas qu'il peut m'appeler quand il veut ») :
+
+C'est envoyé.
+[CHAT_THOMAS]
+Salut Thomas ! Jordan m'a chargé de te dire qu'il est dispo, tu peux l'appeler quand tu veux.
+[/CHAT_THOMAS]
+
+═══════════════════════════════════════════════════════════════
 TON ET FORMAT
 ═══════════════════════════════════════════════════════════════
 - Réponds comme un ami au café. Phrases courtes, naturelles, détendues. Comme à l'oral.
@@ -566,7 +594,11 @@ def chat_with_claude(app_state, *, question: str,
             full_prompt,
             api_keys,
         )
-        out["text"] = (text or "").strip()
+        raw = (text or "").strip()
+        spoken, sent_to_thomas = _extract_chat_to_thomas(raw)
+        out["text"] = spoken
+        if sent_to_thomas:
+            out["sent_to_thomas"] = True
         out["ok"] = bool(out["text"])
     except ProviderError as exc:
         out["error"] = f"ai_error: {exc}"
@@ -574,6 +606,45 @@ def chat_with_claude(app_state, *, question: str,
         out["error"] = f"ai_exception: {exc}"
 
     return out
+
+
+# Marqueur que Claude insère dans sa réponse vocale quand Jordan lui
+# demande d'envoyer un message à Thomas (cf CONVO_SYSTEM_PROMPT).
+_CHAT_THOMAS_RE = re.compile(
+    r"\[CHAT_THOMAS\]\s*(.*?)\s*\[/CHAT_THOMAS\]",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _extract_chat_to_thomas(raw: str) -> tuple[str, bool]:
+    """Si la réponse de Claude contient un bloc [CHAT_THOMAS]…[/CHAT_THOMAS],
+    on poste le contenu comme message Claude → Thomas dans le chat, on retire
+    le bloc du texte parlé et on renvoie (texte_à_dire, True).
+    Sinon on renvoie (raw, False).
+    """
+    if not raw:
+        return raw, False
+    match = _CHAT_THOMAS_RE.search(raw)
+    if not match:
+        return raw, False
+
+    body = (match.group(1) or "").strip()
+    sent_ok = False
+    if body:
+        try:
+            from . import messages as _msgs
+            res = _msgs.send_from_claude(body, "thomas")
+            sent_ok = bool(res)
+        except Exception as exc:
+            logger.warning("chat_with_claude send_from_claude: %s", exc)
+
+    spoken = (raw[:match.start()] + raw[match.end():]).strip()
+    if not spoken:
+        spoken = "C'est envoyé à Thomas." if sent_ok else (
+            "Je n'ai pas pu envoyer le message à Thomas, désolé.")
+    elif not sent_ok:
+        spoken = spoken + " (Mais je n'ai pas pu poster le message — réessaye dans une seconde.)"
+    return spoken, sent_ok
 
 
 def ask_claude(app_state, *, mode: str = "interactive",

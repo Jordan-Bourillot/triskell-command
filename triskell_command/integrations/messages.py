@@ -31,6 +31,12 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# Participant virtuel : Claude poste dans le chat depuis le mode vocal
+# (Allo Claude). Il n'a pas de session, ses messages sont insérés
+# server-side via send_from_claude().
+CLAUDE_USER_ID = "claude"
+_HUMAN_USERS = ("jordan", "thomas")
+
 
 def _supabase():
     """Retourne le client Supabase brut si dispo + loggé, sinon None."""
@@ -112,7 +118,16 @@ def list_messages(limit: int = 100) -> list[dict[str, Any]]:
                 .select(_MSG_COLUMNS)
                 .eq("sender_id", other).eq("recipient_id", me)
                 .order("created_at", desc=True).limit(limit).execute())
-        merged = (sent.data or []) + (recv.data or [])
+        # 3e requête : messages postés par Claude (mode vocal Allo Claude).
+        # On les affiche aux deux humains, peu importe le destinataire
+        # initial — le chat fonctionne comme un fil partagé où Claude
+        # est un participant visible des deux côtés.
+        claude_q = (c.raw.table("messages")
+                    .select(_MSG_COLUMNS)
+                    .eq("sender_id", CLAUDE_USER_ID)
+                    .in_("recipient_id", list(_HUMAN_USERS))
+                    .order("created_at", desc=True).limit(limit).execute())
+        merged = (sent.data or []) + (recv.data or []) + (claude_q.data or [])
         merged.sort(key=lambda m: m.get("created_at") or "")
         if len(merged) > limit:
             merged = merged[-limit:]
@@ -217,6 +232,39 @@ def send_message(
         return data[0] if data else None
     except Exception as exc:
         logger.warning("send_message: %s", exc)
+        return None
+
+
+def send_from_claude(body: str, recipient: str) -> Optional[dict[str, Any]]:
+    """Poste un message dans le chat **de la part de Claude** (mode vocal
+    Allo Claude). sender_id = 'claude', recipient = 'jordan' ou 'thomas'.
+
+    Utilisé quand Jordan dicte « dis à Thomas que… » via le mode vocal :
+    Claude rédige le message, le serveur l'insère ici. Les deux humains
+    voient ce message dans leur chat grâce au 3e filtre de list_messages().
+    Renvoie la ligne insérée ou None en erreur.
+    """
+    body = (body or "").strip()
+    recipient = (recipient or "").strip().lower()
+    if not body:
+        return None
+    if recipient not in _HUMAN_USERS:
+        logger.warning("send_from_claude: destinataire invalide %r", recipient)
+        return None
+    c = _supabase()
+    if c is None:
+        return None
+    row = {
+        "sender_id": CLAUDE_USER_ID,
+        "recipient_id": recipient,
+        "body": body,
+    }
+    try:
+        res = c.raw.table("messages").insert(row).execute()
+        data = res.data or []
+        return data[0] if data else None
+    except Exception as exc:
+        logger.warning("send_from_claude: %s", exc)
         return None
 
 

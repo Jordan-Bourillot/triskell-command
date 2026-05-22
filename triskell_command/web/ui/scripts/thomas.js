@@ -21,6 +21,12 @@ const Thomas = {
   myUserId: null,
   myColor: '#7C7FE9',         // couleur de mes bulles (rechargée depuis l'API)
   otherColor: '#10b981',      // couleur des bulles de l'autre
+  // Participant virtuel : Claude poste dans le chat depuis le mode vocal
+  // (Allo Claude). Couleur et nom hardcodés côté front — non éditables
+  // par l'utilisateur, alignés avec auth.py (DEFAULT_CHAT_COLORS["claude"]).
+  claudeUserId: 'claude',
+  claudeColor: '#a855f7',
+  claudeName: 'Allo Claude',
   cachedMessages: [],
   cachedById: {},             // {id → msg} pour résoudre les "répondre à"
   pendingAttachment: null,    // {url, name, type, size} entre upload et envoi
@@ -323,15 +329,23 @@ const Thomas = {
 
     const html = msgs.map(m => {
       const isFromMe = this._isFromMe(m);
+      const isFromClaude = m.sender_id === this.claudeUserId;
       const isDeleted = !!m.deleted_at;
       const align = isFromMe ? 'justify-end' : 'justify-start';
-      // Couleur de fond = couleur perso de l'expéditeur (moi ou l'autre).
-      // Texte blanc systématiquement — toutes les couleurs de la palette
-      // sont assez saturées pour garantir le contraste. Pour un message
+      // Couleur de fond = couleur perso de l'expéditeur. Claude (mode vocal)
+      // a sa propre couleur distincte des deux humains. Pour un message
       // supprimé, on neutralise avec un fond grisé discret.
       const bgColor = isDeleted ? '#3a3a44'
-        : (isFromMe ? this.myColor : this.otherColor);
+        : (isFromMe ? this.myColor
+        : (isFromClaude ? this.claudeColor : this.otherColor));
       const corner = isFromMe ? 'rounded-br-sm' : 'rounded-bl-sm';
+      // Label "Allo Claude" au-dessus des bulles postées par Claude, pour
+      // que les deux humains distinguent un message du chat normal d'un
+      // message dicté via le mode vocal.
+      const claudeLabelHtml = isFromClaude
+        ? `<div class="text-[10px] uppercase tracking-wider mb-0.5 opacity-80"
+              style="color:${this._escape(this.claudeColor)};">${this._escape(this.claudeName)}</div>`
+        : '';
       const time = this._fmtTime(m.created_at);
       // Si supprimé : on ignore body/attachment/reply/réactions et on
       // remplace par un placeholder italique.
@@ -412,6 +426,7 @@ const Thomas = {
 
       const bubble = `
         <div class="thomas-bubble-wrap">
+          ${claudeLabelHtml}
           <div class="max-w-[75%] px-3 py-2 rounded-2xl ${corner} text-white"
                data-msg-id="${this._escape(m.id || '')}"
                style="background:${this._escape(bgColor)};">
