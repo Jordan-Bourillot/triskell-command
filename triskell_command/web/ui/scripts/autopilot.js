@@ -858,7 +858,18 @@ const Autopilot = {
             Quand l'auto-pilote prépare des mails en mode validation,
             ils atterrissent ici pour que tu valides ou rejettes en 1 clic.
           </p>
+          <div class="mt-6 flex flex-wrap gap-2 justify-center">
+            <button id="ap-d-wipe-all-empty" class="btn btn-secondary"
+                    style="border-color: hsl(var(--danger) / 0.5); color: hsl(var(--danger));">
+              Tout vider (reset complet)
+            </button>
+            <button id="ap-d-refresh-empty" class="btn btn-secondary">Rafraîchir</button>
+          </div>
         </div>`;
+      const wipe = document.getElementById('ap-d-wipe-all-empty');
+      if (wipe) wipe.onclick = () => this._wipeAllDrafts();
+      const refresh = document.getElementById('ap-d-refresh-empty');
+      if (refresh) refresh.onclick = () => this._refreshDraftsList();
       return;
     }
 
@@ -899,7 +910,12 @@ const Autopilot = {
         <div class="flex gap-2 flex-wrap">
           <button id="ap-d-cleanup-broken" class="btn btn-secondary"
                   title="Supprime les brouillons où l'IA a refusé d'écrire (méta-blabla au lieu d'un mail).">
-            Vider les brouillons cassés
+            Vider les cassés
+          </button>
+          <button id="ap-d-wipe-all" class="btn btn-secondary"
+                  style="border-color: hsl(var(--danger) / 0.5); color: hsl(var(--danger));"
+                  title="Supprime TOUS les brouillons en attente (les bons comme les mauvais). Reset complet.">
+            Tout vider
           </button>
           <button id="ap-d-refresh" class="btn btn-secondary">Rafraîchir</button>
         </div>
@@ -912,12 +928,33 @@ const Autopilot = {
     if (refresh) refresh.onclick = () => this._refreshDraftsList();
     const cleanup = document.getElementById('ap-d-cleanup-broken');
     if (cleanup) cleanup.onclick = () => this._cleanupBrokenDrafts();
+    const wipe = document.getElementById('ap-d-wipe-all');
+    if (wipe) wipe.onclick = () => this._wipeAllDrafts();
     wrap.querySelectorAll('.ap-d-approve').forEach(btn => {
       btn.onclick = () => this._draftAction(rows[parseInt(btn.dataset.idx, 10)], 'approve');
     });
     wrap.querySelectorAll('.ap-d-reject').forEach(btn => {
       btn.onclick = () => this._draftAction(rows[parseInt(btn.dataset.idx, 10)], 'reject');
     });
+  },
+
+  async _wipeAllDrafts() {
+    if (!App.api || !App.api.cleanup_all_pending_drafts) return;
+    const ok = confirm(
+      "ATTENTION : ça supprime TOUS les brouillons en attente "
+      + "(les bons comme les mauvais).\n\nContinuer ?"
+    );
+    if (!ok) return;
+    let r;
+    try { r = await App.api.cleanup_all_pending_drafts(); }
+    catch (e) { alert('Erreur : ' + String(e)); return; }
+    if (r && r.ok) {
+      alert(`${r.total} brouillon(s) supprimé(s).`);
+    } else {
+      alert('Reset partiel. Erreurs : ' + ((r && r.errors) || []).join(' ; '));
+    }
+    await this._refreshDraftsList();
+    await this._refreshDraftsCount();
   },
 
   async _cleanupBrokenDrafts() {

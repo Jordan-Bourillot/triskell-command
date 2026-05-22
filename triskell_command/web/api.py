@@ -941,6 +941,52 @@ class Api:
             "errors": errors,
         }
 
+    def cleanup_all_pending_drafts(self, payload: dict | None = None) -> dict:
+        """Supprime TOUS les drafts pending, sans aucun filtre. Bouton "reset
+        complet" -- utilise quand Jordan veut repartir d'une page blanche.
+
+        Couvre : Supabase prospect_drafts, Supabase convoy_drafts, CRM local
+        (prospect.pending_drafts).
+        """
+        deleted = {"prospect_drafts": 0, "convoy_drafts": 0, "local": 0}
+        errors: list[str] = []
+
+        client = self._supabase_client_or_none()
+        if client is not None:
+            sb = client.raw
+            for table in ("prospect_drafts", "convoy_drafts"):
+                try:
+                    res = (sb.table(table).delete()
+                            .eq("status", "pending")
+                            .execute())
+                    # supabase-py renvoie data = lignes supprimées
+                    deleted[table] = len(res.data or [])
+                except Exception as exc:
+                    errors.append(f"{table}: {exc}")
+
+        try:
+            from triskell_core.prospect.core.crm import CRM
+            crm = CRM()
+            n_local = 0
+            for p in crm.all():
+                if p.pending_drafts:
+                    n_local += len(p.pending_drafts)
+                    p.pending_drafts = []
+                    crm._dirty = True  # noqa: SLF001
+            if crm._dirty:  # noqa: SLF001
+                crm.save()
+            deleted["local"] = n_local
+        except Exception as exc:
+            errors.append(f"local: {exc}")
+
+        total = deleted["prospect_drafts"] + deleted["convoy_drafts"] + deleted["local"]
+        return {
+            "ok": not errors,
+            "deleted": deleted,
+            "total": total,
+            "errors": errors,
+        }
+
     # ----- reject Supabase ---------------------------------------------
     def _reject_supabase_draft(self, table: str, draft_id: str) -> dict:
         if not draft_id:
