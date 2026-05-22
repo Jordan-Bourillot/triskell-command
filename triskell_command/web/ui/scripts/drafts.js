@@ -16,6 +16,15 @@ const Drafts = {
           <div class="flex flex-wrap gap-2 sm:gap-3 mt-5 sm:mt-6">
             <button id="d-refresh" class="btn btn-secondary">Rafraîchir</button>
             <button id="d-cleanup" class="btn btn-secondary" title="Supprime les brouillons en attente qui n'ont jamais reçu de contenu (coquilles vides)">Vider les coquilles vides</button>
+            <button id="d-cleanup-broken" class="btn btn-secondary"
+                    title="Supprime les brouillons où l'IA a refusé d'écrire (méta-blabla au lieu d'un mail).">
+              Vider les cassés
+            </button>
+            <button id="d-wipe-all" class="btn btn-secondary"
+                    style="border-color: hsl(var(--danger) / 0.5); color: hsl(var(--danger));"
+                    title="Supprime TOUS les brouillons en attente (les bons comme les mauvais). Reset complet.">
+              Tout vider
+            </button>
           </div>
         </div>
         <div id="d-list" class="space-y-3 sm:space-y-4"></div>
@@ -23,6 +32,49 @@ const Drafts = {
     `;
     document.getElementById('d-refresh').onclick = () => this.refresh();
     document.getElementById('d-cleanup').onclick = () => this._cleanup();
+    document.getElementById('d-cleanup-broken').onclick = () => this._cleanupBroken();
+    document.getElementById('d-wipe-all').onclick = () => this._wipeAll();
+    await this.refresh();
+  },
+
+  async _cleanupBroken() {
+    if (!App.api || !App.api.cleanup_broken_drafts) return;
+    const ok = confirm(
+      "Supprimer tous les brouillons où l'IA a refusé d'écrire "
+      + "(« Je ne peux pas rédiger… », « PROBLÈME MAJEUR… ») ?\n\n"
+      + "Les vrais brouillons ne sont pas touchés."
+    );
+    if (!ok) return;
+    const btn = document.getElementById('d-cleanup-broken');
+    if (btn) { btn.disabled = true; btn.textContent = 'Nettoyage…'; }
+    let res;
+    try { res = await App.api.cleanup_broken_drafts(); }
+    catch (e) { alert('Erreur : ' + e); }
+    finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Vider les cassés'; }
+    }
+    if (res && res.ok) alert(`${res.total} brouillon(s) cassé(s) supprimé(s).`);
+    else if (res) alert('Nettoyage partiel. Erreurs : ' + (res.errors || []).join(' ; '));
+    await this.refresh();
+  },
+
+  async _wipeAll() {
+    if (!App.api || !App.api.cleanup_all_pending_drafts) return;
+    const ok = confirm(
+      "ATTENTION : ça supprime TOUS les brouillons en attente "
+      + "(les bons comme les mauvais).\n\nContinuer ?"
+    );
+    if (!ok) return;
+    const btn = document.getElementById('d-wipe-all');
+    if (btn) { btn.disabled = true; btn.textContent = 'Reset…'; }
+    let res;
+    try { res = await App.api.cleanup_all_pending_drafts(); }
+    catch (e) { alert('Erreur : ' + e); }
+    finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Tout vider'; }
+    }
+    if (res && res.ok) alert(`${res.total} brouillon(s) supprimé(s).`);
+    else if (res) alert('Reset partiel. Erreurs : ' + (res.errors || []).join(' ; '));
     await this.refresh();
   },
 
