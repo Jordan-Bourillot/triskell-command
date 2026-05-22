@@ -22,6 +22,7 @@ Output/
 # ===== IDE / OS =====
 .vscode/
 .idea/
+.claude/
 desktop.ini
 Thumbs.db
 .DS_Store
