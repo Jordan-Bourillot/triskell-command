@@ -12,7 +12,7 @@
 const Obelisk = {
   state: {
     tab: 'search',
-    filters: { platform: '', status: '', min_score: 0, q: '', has_email: '', country: '', job_id: '', audience: '' },
+    filters: { platform: '', status: '', q: '', has_email: '', country: '', job_id: '', audience: '' },
     jobFilterInfo: null,    // {id, niche, created_at, status} pour afficher la puce
     page: 0,
     pageSize: 50,
@@ -759,7 +759,7 @@ const Obelisk = {
   // -------------------------------------------------------------------
   _hasActiveFilters() {
     const f = this.state.filters;
-    return !!(f.q || f.platform || f.status || f.has_email || f.min_score || f.country || f.job_id);
+    return !!(f.q || f.platform || f.status || f.has_email || f.country || f.job_id);
   },
 
   async _renderCreators() {
@@ -823,11 +823,9 @@ const Obelisk = {
           <option value="yes" ${this.state.filters.contacted === 'yes' ? 'selected' : ''}>Déjà contactés</option>
         </select>
         <select id="ob-f-sort" title="Ordre de tri de la liste">
-          <option value="score" ${(!this.state.filters.sort_by || this.state.filters.sort_by === 'score') ? 'selected' : ''}>Tri : Score</option>
-          <option value="subs_desc" ${this.state.filters.sort_by === 'subs_desc' ? 'selected' : ''}>Tri : Abonnés (+ → -)</option>
+          <option value="subs_desc" ${(!this.state.filters.sort_by || this.state.filters.sort_by === 'subs_desc' || this.state.filters.sort_by === 'score') ? 'selected' : ''}>Tri : Abonnés (+ → -)</option>
           <option value="subs_asc" ${this.state.filters.sort_by === 'subs_asc' ? 'selected' : ''}>Tri : Abonnés (- → +)</option>
         </select>
-        <input id="ob-f-score" class="ob-num" type="number" min="0" max="100" placeholder="Score ≥" value="${this.state.filters.min_score || ''}">
       </div>
 
       <div id="ob-active-filters"></div>
@@ -884,7 +882,6 @@ const Obelisk = {
       this.state.filters.exported = document.getElementById('ob-f-exported').value;
       this.state.filters.contacted= document.getElementById('ob-f-contacted').value;
       this.state.filters.sort_by  = document.getElementById('ob-f-sort').value;
-      this.state.filters.min_score= parseInt(document.getElementById('ob-f-score').value, 10) || 0;
       // Le filtre "pays" reste dans state mais n'est plus exposé dans
       // l'UI (Obelisk est purement francophone maintenant, voir purge).
       this.state.page = 0;
@@ -904,9 +901,9 @@ const Obelisk = {
       clearTimeout(qTimer);
       qTimer = setTimeout(applyFromInputs, 280);
     });
-    // Les selects/score filtrent dès le change
+    // Les selects filtrent dès le change
     ['ob-f-platform', 'ob-f-status', 'ob-f-email', 'ob-f-exported',
-     'ob-f-contacted', 'ob-f-sort', 'ob-f-score'].forEach(id => {
+     'ob-f-contacted', 'ob-f-sort'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('change', applyFromInputs);
     });
@@ -1168,7 +1165,6 @@ const Obelisk = {
         format,
         platform:  f.platform  || '',
         status:    f.status    || '',
-        min_score: f.min_score || 0,
         city:      f.city      || '',
         q:         f.q         || '',
         has_email: f.has_email || '',
@@ -1238,7 +1234,6 @@ const Obelisk = {
     if (f.status)    chips.push(['status', this.STATUS_LABELS[f.status] || f.status]);
     if (f.has_email) chips.push(['has_email', f.has_email === 'yes' ? 'Avec email' : 'Sans email']);
     if (f.country)   chips.push(['country', f.country === 'FR' ? '🇫🇷 France' : f.country === 'OTHERS' ? '🌍 Hors France' : f.country]);
-    if (f.min_score) chips.push(['min_score', `Score ≥ ${f.min_score}`]);
     if (chips.length === 0) { wrap.className = ''; wrap.innerHTML = ''; return; }
     wrap.className = 'ob-active-filters';
     wrap.innerHTML = chips.map(([k, l, extra]) =>
@@ -1247,7 +1242,7 @@ const Obelisk = {
     wrap.querySelectorAll('[data-ob-rmf]').forEach(b => {
       b.onclick = () => {
         const k = b.dataset.obRmf;
-        this.state.filters[k] = (k === 'min_score') ? 0 : '';
+        this.state.filters[k] = '';
         if (k === 'job_id') this.state.jobFilterInfo = null;
         this.state.page = 0;
         this._saveListFilters();
@@ -1256,7 +1251,7 @@ const Obelisk = {
     });
     const clr = wrap.querySelector('[data-ob-clearall]');
     if (clr) clr.onclick = () => {
-      this.state.filters = { platform: '', status: '', min_score: 0, q: '', has_email: '', country: '', job_id: '', audience: '' };
+      this.state.filters = { platform: '', status: '', q: '', has_email: '', country: '', job_id: '', audience: '' };
       this.state.jobFilterInfo = null;
       this.state.page = 0;
       this._saveListFilters();
@@ -1319,7 +1314,7 @@ const Obelisk = {
         <table class="ob-table">
           <thead><tr>
             <th style="width:40px;"><input type="checkbox" id="ob-select-all" title="Tout sélectionner (page)"></th>
-            <th>Créateur</th><th>Plateforme</th><th>Niche</th><th>Abonnés</th><th>Email</th><th>Score</th><th>Ville</th><th>Statut</th>
+            <th>Créateur</th><th>Plateforme</th><th>Niche</th><th>Abonnés</th><th>Email</th><th>Ville</th><th>Statut</th>
           </tr></thead>
           <tbody>
             ${this.state.rows.map(p => this._rowHtml(p)).join('')}
@@ -1361,8 +1356,6 @@ const Obelisk = {
   _rowHtml(p) {
     const platform = this._inferPlatform(p);
     const emails = Array.isArray(p.emails) ? p.emails : [];
-    const score = Math.max(0, Math.min(100, p.score || 0));
-    const scoreVar = score >= 70 ? '--success' : score >= 40 ? '--warning' : '--text-muted';
     const status = p.status || 'new';
     const sel = (this.state.selectedIds instanceof Set) && this.state.selectedIds.has(p.id);
     return `
@@ -1378,12 +1371,6 @@ const Obelisk = {
         <td style="color: hsl(var(--text-muted)); font-size: 12px;">${p.industry ? this._esc(p.industry) : '—'}</td>
         <td style="color: hsl(var(--text)); font-variant-numeric: tabular-nums; white-space: nowrap;">${this._fmtSubs(p.subscribers, p.subs_hidden)}</td>
         <td>${emails[0] ? `<a href="mailto:${this._esc(emails[0])}" style="color: hsl(var(--info));" onclick="event.stopPropagation()">${this._esc(emails[0])}</a>${emails.length > 1 ? ` <span style="color: hsl(var(--text-muted)); font-size: 11.5px;">+${emails.length - 1}</span>` : ''}` : '<span style="color: hsl(var(--text-muted));">—</span>'}</td>
-        <td>
-          <span class="ob-score" style="color: hsl(var(${scoreVar}));">
-            ${score}
-            <span class="ob-score-bar" style="--w: ${score}%;"></span>
-          </span>
-        </td>
         <td style="color: hsl(var(--text-muted));">${this._esc(p.city || '—')}</td>
         <td>
           <select class="ob-status-select" data-ob-status="${this._esc(p.id)}">
