@@ -442,16 +442,35 @@ def generate_message_from_templates(
         return _fallback_first_template(
             templates[0], prospect, sender_name, template_product,
         )
-    # CTA : on récupère l'URL du template choisi si possible (1er lien
-    # http dans le body du template)
+    # On récupère le template choisi pour savoir s'il a une mise en forme
+    # HTML custom écrite à la main par l'utilisateur.
     chosen = next((t for t in templates
                    if (t.get("key") or "") == template_key), templates[0])
-    primary_url = _first_url_in(chosen.get("body_text", ""))
-    body_html = text_to_email_html(
-        body_txt, sender_name=sender_name,
-        primary_url=primary_url,
-        primary_label="En savoir plus",
-    )
+    template_body_html = (chosen.get("body_html") or "").strip()
+
+    if template_body_html:
+        # Le template a une vraie mise en forme HTML (boutons, couleurs, logos…)
+        # — on la respecte intégralement. On n'envoie PAS la réécriture IA
+        # au format HTML : sinon on perd toute la mise en forme. On remplit
+        # juste les placeholders du HTML avec les vraies valeurs.
+        # L'IA garde la main sur le sujet (personnalisation) et le body_text
+        # sert de version "texte brut" pour les clients mail qui n'affichent
+        # pas le HTML (rare, mais ça arrive).
+        body_html = _apply_placeholders(template_body_html, prospect, sender_name)
+        # Pour le body texte, on prend aussi la version du template (avec
+        # placeholders remplis) pour rester cohérent avec le HTML.
+        body_txt = _apply_placeholders(
+            (chosen.get("body_text") or "").strip(), prospect, sender_name,
+        ) or body_txt
+    else:
+        # Pas de HTML custom — on regénère un HTML "standard Triskell" auto
+        # depuis le texte réécrit par l'IA, avec un bouton CTA.
+        primary_url = _first_url_in(chosen.get("body_text", ""))
+        body_html = text_to_email_html(
+            body_txt, sender_name=sender_name,
+            primary_url=primary_url,
+            primary_label="En savoir plus",
+        )
     return {
         "subject":               subj or (chosen.get("subject") or "").strip(),
         "body":                  body_txt,
@@ -460,6 +479,31 @@ def generate_message_from_templates(
         "offer_name":            template_product or "",
         "offer_mail_account_id": "",
     }
+
+
+def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
+    """Remplit les placeholders {prenom}, {nom}, {raison_sociale}, {ville},
+    {secteur}, {email}, {sender_name} dans un texte (HTML ou texte brut).
+
+    Utilisé pour servir un template HTML écrit à la main par l'utilisateur
+    sans le réécrire via IA — on garde la mise en forme intacte."""
+    if not text:
+        return ""
+    replacements = {
+        "{prenom}":         prospect.get("prenom", "") or "",
+        "{nom}":            prospect.get("nom", "") or "",
+        "{raison_sociale}": prospect.get("raison_sociale", "") or "",
+        "{ville}":          prospect.get("ville", "") or "",
+        "{secteur}":        prospect.get("secteur", "") or "",
+        "{email}":          prospect.get("email", "") or "",
+        "{sender_name}":    sender_name or "L'équipe",
+    }
+    out = text
+    for ph, val in replacements.items():
+        out = out.replace(ph, val)
+    # Nettoie "Bonjour ," qui apparaît quand le prénom est vide
+    out = out.replace("Bonjour ,", "Bonjour,").replace("Bonjour , ", "Bonjour, ")
+    return out
 
 
 def _first_url_in(text: str) -> str:
@@ -473,30 +517,26 @@ def _first_url_in(text: str) -> str:
 def _fallback_first_template(template: dict, prospect: dict, sender_name: str,
                               template_product: str) -> dict[str, str]:
     """Si l'IA renvoie n'importe quoi, on prend le 1er template, on remplit
-    les placeholders de base et on l'envoie tel quel. Mieux qu'un mail vide."""
-    subj = (template.get("subject") or "").strip()
-    body = (template.get("body_text") or "").strip()
-    # Remplit les placeholders les plus courants
-    replacements = {
-        "{prenom}":         prospect.get("prenom", "") or "",
-        "{nom}":            prospect.get("nom", "") or "",
-        "{raison_sociale}": prospect.get("raison_sociale", "") or "",
-        "{ville}":          prospect.get("ville", "") or "",
-        "{secteur}":        prospect.get("secteur", "") or "",
-        "{email}":          prospect.get("email", "") or "",
-        "{sender_name}":    sender_name or "L'équipe",
-    }
-    for ph, val in replacements.items():
-        subj = subj.replace(ph, val)
-        body = body.replace(ph, val)
-    # Si pas de prénom, "Bonjour ," → "Bonjour ,"  on nettoie un peu
-    body = body.replace("Bonjour ,", "Bonjour,").replace("Bonjour , ", "Bonjour, ")
-    primary_url = _first_url_in(template.get("body_text", ""))
-    body_html = text_to_email_html(
-        body, sender_name=sender_name,
-        primary_url=primary_url,
-        primary_label="En savoir plus",
-    )
+    les placeholders de base et on l'envoie tel quel. Mieux qu'un mail vide.
+
+    Respecte le body_html du template s'il existe (mise en forme écrite à
+    la main par l'utilisateur)."""
+    subj = _apply_placeholders((template.get("subject") or "").strip(),
+                                prospect, sender_name)
+    body = _apply_placeholders((template.get("body_text") or "").strip(),
+                                prospect, sender_name)
+    template_body_html = (template.get("body_html") or "").strip()
+    if template_body_html:
+        # Respecte la mise en forme HTML écrite à la main
+        body_html = _apply_placeholders(template_body_html, prospect, sender_name)
+    else:
+        # Pas de HTML custom — regénère un HTML auto avec bouton CTA
+        primary_url = _first_url_in(template.get("body_text", ""))
+        body_html = text_to_email_html(
+            body, sender_name=sender_name,
+            primary_url=primary_url,
+            primary_label="En savoir plus",
+        )
     return {
         "subject":               subj or "Une idée pour vous",
         "body":                  body or "(template vide)",
