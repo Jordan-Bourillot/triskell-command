@@ -315,25 +315,9 @@ RÉPONDS AU FORMAT JSON STRICT (pas de markdown, pas de texte autour) :
 # ---------------------------------------------------------------------------
 # Mode "pioche dans templates" — l'IA choisit un template existant et l'adapte
 # ---------------------------------------------------------------------------
-TEMPLATE_PICK_PROMPT = """Tu es {sender_name}, et tu écris un email de prospection au prospect ci-dessous.
-
-Tu ne dois PAS inventer un mail from scratch : on te fournit une LISTE
-de templates écrits à la main pour ce produit, et tu dois :
-  1) Choisir le template qui correspond le MIEUX à ce prospect précis
-     (regarde sa description, son secteur, sa taille, son contexte).
-     S'il n'y a aucun match parfait, prends le moins pire — tu ne dois
-     JAMAIS refuser ni renvoyer un mail vide.
-  2) Remplir les placeholders du template avec les vraies infos du
-     prospect (les placeholders sont au format {{prenom}}, {{raison_sociale}},
-     {{ville}}, etc.).
-  3) Adapter LÉGÈREMENT le corps si nécessaire :
-     - tu peux ajuster 1 à 2 phrases pour coller au métier ou au
-       contexte particulier de ce prospect ;
-     - tu peux remplacer une accroche générique par une accroche
-       personnalisée ;
-     - tu ne dois PAS réécrire tout le mail, ni changer le sens, ni
-       inventer une nouvelle offre. L'écriture / le ton du template
-       doivent rester reconnaissables.
+TEMPLATE_PICK_PROMPT = """Ton SEUL boulot : choisir, parmi les templates ci-dessous, celui qui
+correspond le MIEUX à ce prospect précis. Tu ne réécris RIEN, tu ne
+modifies RIEN. Tu donnes juste la clé du meilleur template.
 
 CONTEXTE DU PROSPECT :
 - Raison sociale : {raison_sociale}
@@ -346,35 +330,21 @@ CONTEXTE DU PROSPECT :
 TEMPLATES DISPONIBLES (produit : {template_product}) :
 {templates_block}
 
-CONSIGNES STRICTES :
-- VOUVOIEMENT OBLIGATOIRE.
-- Les templates utilisent 2 sortes de placeholders, et tu DOIS les traiter
-  TOUS, aucun ne doit traîner dans le mail final :
-    A) Placeholders auto-remplissables avec les infos prospect ci-dessus :
-       {{first_name}} / {{prenom}}, {{last_name}} / {{nom}},
-       {{company_name}} / {{name}} / {{raison_sociale}},
-       {{city}} / {{ville}}, {{business_type}} / {{secteur}},
-       {{domain}} / {{website}}, {{email}}, {{signature}} / {{sender_name}}.
-       → Remplace par la vraie valeur. Si la valeur est vide, REFORMULE la
-       phrase pour qu'elle reste naturelle (ex : « Bonjour, » au lieu de
-       « Bonjour , » ou « Bonjour {{first_name}}, »).
-    B) Placeholders contextuels à INVENTER intelligemment à partir des infos
-       prospect : {{example_pain}} (un problème typique du secteur),
-       {{competitor_example}} (un site concurrent crédible),
-       {{example_content}} (un sujet de contenu plausible).
-       → Si tu n'as PAS assez d'info pour inventer quelque chose de crédible,
-       REFORMULE la phrase pour la supprimer plutôt que de laisser un truc
-       générique ou faux. Ex : si pas d'idée pour {{example_pain}}, retire
-       carrément la phrase qui en parle.
-- Aucun double accolade {{...}} ne doit subsister dans le résultat final.
-- Garde toutes les URLs présentes dans le template (lien CTA, démo, etc.).
-- Signature : « {sender_name} » sur la dernière ligne, rien après.
+CRITÈRES DE CHOIX :
+- Regarde la description et le sujet de chaque template.
+- Privilégie le template dont la description colle le mieux au profil du
+  prospect (son secteur, sa taille, son type d'activité).
+- S'il n'y a aucun match parfait, prends le moins pire — tu DOIS choisir
+  un template, tu n'as JAMAIS le droit de refuser.
 
-INSTRUCTIONS LIBRES DE L'UTILISATEUR (priorité si conflit) :
+INSTRUCTIONS LIBRES DE L'UTILISATEUR (à respecter dans ton choix) :
 {user_brief}
 
 RÉPONDS AU FORMAT JSON STRICT (pas de markdown, pas de texte autour) :
-{{"template_key": "<clé du template choisi>", "subject": "<objet final>", "body": "<corps final>"}}
+{{"template_key": "<clé du template choisi>"}}
+
+Note : sender_name = {sender_name} (juste pour info, ne sert pas dans la
+réponse).
 """
 
 
@@ -443,56 +413,70 @@ def generate_message_from_templates(
     )
     response = _call_ai(prompt, provider=provider, model=model, api_keys=api_keys)
     data = _parse_json_lenient(response)
-    if not isinstance(data, dict):
-        # Plan B : on prend le 1er template tel quel et on remplit les
-        # placeholders de base. Pas de réécriture IA, mais un mail part.
-        return _fallback_first_template(
-            templates[0], prospect, sender_name, template_product,
-        )
-    template_key = _stringify(data.get("template_key", "")).strip()
-    body_txt = _stringify(data.get("body", "")) or ""
-    subj = _stringify(data.get("subject", "")) or ""
-    if not body_txt.strip():
-        return _fallback_first_template(
-            templates[0], prospect, sender_name, template_product,
-        )
-    # On récupère le template choisi pour savoir s'il a une mise en forme
-    # HTML custom écrite à la main par l'utilisateur.
+    template_key = ""
+    if isinstance(data, dict):
+        template_key = _stringify(data.get("template_key", "")).strip()
+    # On retrouve le template choisi par l'IA. Si l'IA a renvoye autre chose
+    # qu'une cle valide -> on prend le premier (filet anti-erreur).
     chosen = next((t for t in templates
                    if (t.get("key") or "") == template_key), templates[0])
+
+    # === SUBSTITUTION PURE, ZERO REECRITURE IA ===
+    # Jordan a explicitement demande que ses templates soient utilises tels
+    # quels, avec juste les placeholders remplis. L'IA n'invente rien, ne
+    # reformule rien, ne change pas le texte. Elle a juste choisi le template.
+    template_subject = (chosen.get("subject") or "").strip()
+    template_body_txt = (chosen.get("body_text") or "").strip()
     template_body_html = (chosen.get("body_html") or "").strip()
 
+    subj = _apply_placeholders(template_subject, prospect, sender_name)
+    body_txt = _apply_placeholders(template_body_txt, prospect, sender_name)
+    body_txt = _strip_unfilled_sentences(body_txt)
     if template_body_html:
-        # Le template a une vraie mise en forme HTML (boutons, couleurs, logos…)
-        # — on la respecte intégralement. On n'envoie PAS la réécriture IA
-        # au format HTML : sinon on perd toute la mise en forme. On remplit
-        # juste les placeholders du HTML avec les vraies valeurs.
-        # L'IA garde la main sur le sujet (personnalisation) et le body_text
-        # sert de version "texte brut" pour les clients mail qui n'affichent
-        # pas le HTML (rare, mais ça arrive).
         body_html = _apply_placeholders(template_body_html, prospect, sender_name)
-        # Pour le body texte, on prend aussi la version du template (avec
-        # placeholders remplis) pour rester cohérent avec le HTML.
-        body_txt = _apply_placeholders(
-            (chosen.get("body_text") or "").strip(), prospect, sender_name,
-        ) or body_txt
+        body_html = _strip_unfilled_sentences(body_html)
     else:
-        # Pas de HTML custom — on regénère un HTML "standard Triskell" auto
-        # depuis le texte réécrit par l'IA, avec un bouton CTA.
-        primary_url = _first_url_in(chosen.get("body_text", ""))
+        # Pas de HTML custom -> on enrobe le texte dans le wrapper Triskell
+        primary_url = _first_url_in(template_body_txt)
         body_html = text_to_email_html(
             body_txt, sender_name=sender_name,
             primary_url=primary_url,
             primary_label="En savoir plus",
         )
     return {
-        "subject":               subj or (chosen.get("subject") or "").strip(),
+        "subject":               subj,
         "body":                  body_txt,
         "body_html":             body_html,
         "template_key":          template_key or (chosen.get("key") or ""),
         "offer_name":            template_product or "",
         "offer_mail_account_id": "",
     }
+
+
+def _strip_unfilled_sentences(text: str) -> str:
+    """Nettoie un texte apres substitution de placeholders : supprime les
+    artefacts comme " . " ou "  " causes par des placeholders contextuels
+    qu'on a vides ({{example_pain}}, {{competitor_example}}, ...).
+
+    Si une phrase finit par "votre . " ou contient "  " (double espace),
+    on nettoie ; si la phrase devient vide, on la retire entierement.
+    """
+    if not text:
+        return ""
+    import re as _re
+    # Suppression des artefacts apres vide-placeholder
+    out = text
+    # "votre . " -> "" (la phrase fait juste reference a un truc vide)
+    out = _re.sub(r"[A-Za-zÀ-ÿ']+\s+\.\s*", "", out)
+    # Doubles/triples espaces -> un seul
+    out = _re.sub(r"[ \t]{2,}", " ", out)
+    # Espace avant ponctuation : "  ." -> "."
+    out = _re.sub(r"\s+([,.;:!?])", r"\1", out)
+    # Lignes vides multiples -> max une ligne vide
+    out = _re.sub(r"\n{3,}", "\n\n", out)
+    # Si une <p>...</p> ne contient plus que des espaces -> on la vire
+    out = _re.sub(r"<p[^>]*>\s*</p>", "", out, flags=_re.IGNORECASE)
+    return out
 
 
 def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
