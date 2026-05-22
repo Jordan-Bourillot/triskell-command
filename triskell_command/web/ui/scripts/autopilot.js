@@ -519,16 +519,17 @@ const Autopilot = {
           c.ai_template_brief || '', 6)}
         ${this._input('Mon prénom (pour la signature)', 'sender_mon_prenom',
           c.sender_mon_prenom || '')}
-        ${this._input('Plafond d\'envois par jour', 'daily_cap',
-          String(c.daily_cap ?? 40))}
-        ${this._input('Délai avant relance (en jours)', 'follow_up_days',
-          String(c.follow_up_days ?? 5))}
         `)}
 
-      ${this._section('Plage horaire d\'envoi',
-        'Les mails ne partent qu\'entre ces deux heures (Paris). Hors plage, ' +
-        'ils sont mis en brouillon en attendant la prochaine fenêtre.',
+      ${this._section('Règles d\'envoi de tout l\'auto-pilote',
+        'Plafonds et fenêtre horaire qui s\'appliquent à toute la chaîne ' +
+        '(recherche, rédaction, envoi). Ces réglages sont globaux : ils valent ' +
+        'pour chaque run, peu importe l\'heure ou le produit poussé.',
         `
+        ${this._input('Plafond total d\'envois sur 24h',
+          'daily_cap', String(c.daily_cap ?? 40))}
+        ${this._input('Délai avant la relance d\'un prospect sans réponse (en jours)',
+          'follow_up_days', String(c.follow_up_days ?? 5))}
         <div class="grid grid-cols-2 gap-3">
           ${this._input('Heure de début (0-23)', 'send_hour_start',
             String(c.send_hour_start ?? 8))}
