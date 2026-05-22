@@ -424,6 +424,7 @@ const App = {
       case 'funnel':    return Funnel.render(target);
       case 'revenue':   return Revenue.render(target);
       case 'clients':   return Clients.render(target);
+      case 'eliks':     return this._renderEliksStudio(target);
       case 'clients_master': return ClientsMaster.render(target);
       case 'phare':     return Phare.render(target);
       case 'wow':       return Wow.render(target);
@@ -448,6 +449,27 @@ const App = {
         return ProspectTimeline.render(target, params || {});
       default: return this._renderPlaceholder(target, viewId, "Cette vue arrive bientôt.");
     }
+  },
+
+  _renderEliksStudio(target) {
+    target.innerHTML = `
+      <section class="animate-slide-up max-w-3xl">
+        <div class="mb-8">
+          <div class="hero-kicker mb-2">ELIKS STUDIO</div>
+          <h1 class="hero-title mb-3" style="font-size: 36px;">Eliks Studio.</h1>
+          <p class="hero-subtitle">Notre branche Growth Partner / Growth Operator.</p>
+        </div>
+
+        <div class="card-hero p-12 text-center" data-accent="accent">
+          <div class="text-6xl mb-5 opacity-80">🌱</div>
+          <div class="hero-kicker text-accent mb-3">AUCUN PROJET POUR LE MOMENT</div>
+          <h2 class="font-sans text-2xl font-bold mb-3 leading-snug">Cet espace est réservé à Eliks Studio.</h2>
+          <p class="text-text-secondary max-w-lg mx-auto">
+            Rien à afficher ici tant qu'aucun projet Growth Partner n'a démarré.
+          </p>
+        </div>
+      </section>
+    `;
   },
 
   _renderPlaceholder(target, viewId, _msg) {

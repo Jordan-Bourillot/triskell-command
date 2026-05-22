@@ -5141,7 +5141,7 @@ class Api:
             "search": _count("prospects",       "created_at"),
             "sort":   _count("prospects",       "created_at", status="qualified"),
             "write":  _count("prospect_drafts", "created_at"),
-            "review": 0,
+            "review": _count("email_history",   "ts", kind="email_reviewed"),
             "send":   _count("email_history",   "ts", kind="email_sent"),
         }
 
@@ -5182,6 +5182,47 @@ class Api:
             "modes": modes,
             "source": "saved" if isinstance(saved, dict) else "defaults",
         }
+
+    def autopilot_list_products(self) -> dict:
+        """Liste les produits ayant au moins un template de prospection actif.
+
+        Source : table triskell_email_templates (migration 26+28+34) filtree
+        sur category='prospection' et enabled=true.
+
+        Renvoie : {ok, products: [{key, label, audiences: ['creator', 'pro']}]}
+        """
+        client = self._supabase()
+        if client is None:
+            return {"ok": False, "error": "Supabase indisponible"}
+        try:
+            res = (client.raw.table("triskell_email_templates")
+                   .select("product, audience")
+                   .eq("category", "prospection")
+                   .eq("enabled", True)
+                   .execute())
+            rows = res.data or []
+        except Exception as exc:
+            logger.warning("autopilot_list_products: %s", exc)
+            return {"ok": False, "error": str(exc)}
+        # Regroupe par produit + collecte les audiences disponibles
+        by_product: dict = {}
+        for r in rows:
+            p = (r.get("product") or "").strip()
+            if not p:
+                continue
+            entry = by_product.setdefault(p, {"key": p, "audiences": set()})
+            a = (r.get("audience") or "").strip()
+            if a:
+                entry["audiences"].add(a)
+        products = []
+        for k in sorted(by_product):
+            e = by_product[k]
+            products.append({
+                "key":       e["key"],
+                "label":     e["key"],   # pas de label produit dans la table -- afficher la cle
+                "audiences": sorted(e["audiences"]),
+            })
+        return {"ok": True, "products": products}
 
     def autopilot_set_stage_mode(self, payload: dict) -> dict:
         """Sauvegarde le mode (auto/manual) d'un maillon.

@@ -220,12 +220,17 @@ def _do_one_tick(app_state) -> None:
                 "Interrupteur Envoie=Manuel : mode pipeline force a "
                 "'validation' (drafts au lieu d'envoi direct)."
             )
+        # Relit=manual -> on desactive la 2e IA de relecture
+        # Relit=auto   -> on garde la valeur configuree (7 par defaut)
+        if stage_modes["review"] == "manual":
+            cfg.autopilot_review_min_score = 0
+            _progress("Interrupteur Relit=Manuel : 2e IA de relecture desactivee.")
 
         _progress(
-            f"Lancement nocturne — Cherche={stage_modes['search']} "
+            f"Lancement nocturne -- Cherche={stage_modes['search']} "
             f"Trie={stage_modes['sort']} Redige={stage_modes['write']} "
             f"Relit={stage_modes['review']} Envoie={stage_modes['send']} "
-            f"(mode pipeline {cfg.mode})..."
+            f"(mode pipeline {cfg.mode}, produit '{cfg.autopilot_product or '(libre)'}')..."
         )
         stats = run_full_pipeline(
             cfg, progress=_progress,

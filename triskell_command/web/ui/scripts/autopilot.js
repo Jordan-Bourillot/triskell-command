@@ -181,6 +181,8 @@ const Autopilot = {
     this._bindStageToggles();
     // En parallele : sync les modes depuis le backend (source de verite)
     this._syncStageModesFromAPI();
+    // Charge la liste des produits dispo dans le select
+    this._loadProducts();
     // Compteurs : appel asynchrone, met a jour quand l'API repond
     this._refreshPulse();
 
@@ -222,10 +224,12 @@ const Autopilot = {
     const c = this.cfg || {};
     const nightlyTarget = c.nightly_target ?? 50;
     const enabledNight  = !!c.enabled;
+    const product       = c.autopilot_product || '';
+    const audience      = c.autopilot_audience || '';
     return `
-      <!-- Bandeau de réglages globaux : combien par nuit + horaire -->
+      <!-- Bandeau de réglages globaux : combien + produit + horaire -->
       <div class="card p-5 mb-4">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
           <label class="block">
             <div class="text-xs font-bold uppercase tracking-widest text-text-muted mb-2">
               Cherche-moi
@@ -236,16 +240,36 @@ const Autopilot = {
                      class="w-24 px-3 py-2 rounded-lg bg-bg border border-border
                             focus:border-accent focus:outline-none text-xl font-bold text-center" />
               <span class="text-sm text-text-secondary" style="text-wrap: balance">
-                prospects par nuit
+                prospects / nuit
               </span>
             </div>
           </label>
-          <label class="flex items-start gap-3 cursor-pointer md:pt-2">
+
+          <label class="block">
+            <div class="text-xs font-bold uppercase tracking-widest text-text-muted mb-2">
+              Pour pousser
+            </div>
+            <select id="ap-product-select" data-key="autopilot_product"
+                    class="w-full px-3 py-2 rounded-lg bg-bg border border-border
+                           focus:border-accent focus:outline-none text-sm">
+              <option value="">— Génération libre (IA from scratch) —</option>
+              ${product ? `<option value="${this._esc(product)}" selected>${this._esc(product)}</option>` : ''}
+            </select>
+            <select id="ap-audience-select" data-key="autopilot_audience"
+                    class="w-full mt-2 px-3 py-2 rounded-lg bg-bg border border-border
+                           focus:border-accent focus:outline-none text-xs ${product ? '' : 'hidden'}">
+              <option value="" ${audience === '' ? 'selected' : ''}>Toutes audiences</option>
+              <option value="creator" ${audience === 'creator' ? 'selected' : ''}>Créateurs</option>
+              <option value="pro" ${audience === 'pro' ? 'selected' : ''}>Pros (B2B)</option>
+            </select>
+          </label>
+
+          <label class="flex items-start gap-3 cursor-pointer md:pt-7">
             <input type="checkbox" data-key="enabled" ${enabledNight ? 'checked' : ''}
                    class="mt-1 w-5 h-5 accent-accent flex-shrink-0" />
             <div class="min-w-0">
               <div class="text-sm font-semibold" style="text-wrap: balance">
-                Le pipeline tourne tout seul vers 3h du matin
+                Pipeline auto à 3h du matin
               </div>
               <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
                 Tu te lèves, ton Cockpit est plein.
@@ -373,6 +397,38 @@ const Autopilot = {
   },
 
   // ------------------------------------------------------------------
+  // Charge la liste des produits disponibles (table triskell_email_templates)
+  // et peuple le <select> du bandeau. Etape 6 du chantier Auto-pilote v2.
+  async _loadProducts() {
+    if (!App.api || !App.api.autopilot_list_products) return;
+    let r;
+    try { r = await App.api.autopilot_list_products(); }
+    catch (e) { return; }
+    if (!r || !r.ok) return;
+    const select = document.getElementById('ap-product-select');
+    if (!select) return;
+    const current = (this.cfg && this.cfg.autopilot_product) || '';
+    const opts = [
+      `<option value="">— Génération libre (IA from scratch) —</option>`,
+    ];
+    (r.products || []).forEach(p => {
+      const sel = p.key === current ? 'selected' : '';
+      opts.push(
+        `<option value="${this._esc(p.key)}" ${sel}>${this._esc(p.label || p.key)}</option>`
+      );
+    });
+    select.innerHTML = opts.join('');
+    // Toggle visibilite du select audience selon presence d'un produit
+    const audSel = document.getElementById('ap-audience-select');
+    const updateAudVisibility = () => {
+      if (!audSel) return;
+      audSel.classList.toggle('hidden', !select.value);
+    };
+    updateAudVisibility();
+    select.addEventListener('change', updateAudVisibility);
+  },
+
+  // ------------------------------------------------------------------
   // Compteurs des 5 maillons : appelle autopilot_pulse et met a jour
   // les spans .ap-stage-counter de chaque boite.
   async _refreshPulse() {
@@ -485,6 +541,10 @@ const Autopilot = {
       sender_mon_prenom:  v('sender_mon_prenom'),
       daily_cap:          numI('daily_cap', 40),
       follow_up_days:     numI('follow_up_days', 5),
+      // Auto-pilote v2 etape 6 : produit pousse + audience
+      nightly_target:     numI('nightly_target', 50),
+      autopilot_product:  v('autopilot_product') || '',
+      autopilot_audience: v('autopilot_audience') || '',
     };
   },
 
