@@ -512,6 +512,23 @@ const Autopilot = {
         ${this._input('Délai avant relance (en jours)', 'follow_up_days',
           String(c.follow_up_days ?? 5))}
         `)}
+
+      ${this._section('Plage horaire d\'envoi',
+        'Les mails ne partent qu\'entre ces deux heures (Paris). Hors plage, ' +
+        'ils sont mis en brouillon en attendant la prochaine fenêtre.',
+        `
+        <div class="grid grid-cols-2 gap-3">
+          ${this._input('Heure de début (0-23)', 'send_hour_start',
+            String(c.send_hour_start ?? 8))}
+          ${this._input('Heure de fin (1-24)', 'send_hour_end',
+            String(c.send_hour_end ?? 19))}
+        </div>
+        <div class="text-xs text-text-muted mt-2" style="text-wrap: pretty">
+          Par défaut : 8h-19h. Pour ne PAS envoyer la nuit même si l'autopilote
+          tourne à 3h, garde ces bornes serrées : les mails seront générés mais
+          mis en brouillon, et tu pourras les valider le matin.
+        </div>
+        `)}
     `;
   },
 
@@ -545,6 +562,9 @@ const Autopilot = {
       nightly_target:     numI('nightly_target', 50),
       autopilot_product:  v('autopilot_product') || '',
       autopilot_audience: v('autopilot_audience') || '',
+      // Auto-pilote v2 etape 8 : plage horaire d'envoi (heure Paris)
+      send_hour_start:    numI('send_hour_start', 8),
+      send_hour_end:      numI('send_hour_end',   19),
     };
   },
 
