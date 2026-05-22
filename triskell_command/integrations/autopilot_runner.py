@@ -234,6 +234,24 @@ def _do_one_tick(app_state) -> None:
                 "nuit ?). Le pipeline est idempotent : pas de double envoi "
                 "grace au filet anti-doublon Supabase."
             )
+
+        # Verifie que le produit configure est toujours actif dans le
+        # catalogue. Si Jordan a desactive le produit entre temps, on
+        # bascule en mode IA libre plutot que de continuer a pousser un
+        # produit qui n'est plus a vendre.
+        if getattr(cfg, "autopilot_product", "").strip():
+            try:
+                from .catalog_overrides import get_disabled_ids
+                disabled = {d.lower() for d in get_disabled_ids()}
+                if cfg.autopilot_product.lower() in disabled:
+                    _progress(
+                        f"[WARN] produit '{cfg.autopilot_product}' desactive "
+                        f"dans le catalogue -> fallback IA libre pour ce run."
+                    )
+                    cfg.autopilot_product = ""
+            except Exception as exc:
+                logger.debug("catalog check KO: %s", exc)
+
         # Lit les modes UI Auto/Manuel par maillon (poses par le tableau de
         # commande) et applique-les au pipeline.
         stage_modes = _read_stage_modes()

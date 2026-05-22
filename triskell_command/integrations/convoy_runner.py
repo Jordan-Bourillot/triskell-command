@@ -649,10 +649,11 @@ def send_draft(
 ) -> ConvoyDraft:
     """Envoie un draft via SMTP. Met à jour son statut (sent / failed).
 
-    Effet de bord : à chaque envoi réussi, le destinataire est upsert
-    automatiquement dans la fiche client master (`clients_master_repo.
-    ensure_client`). C'est ce qui garantit que tout contact démarché
-    devient un client trackable, sans saisie manuelle.
+    NB : le destinataire n'est PAS recopié dans la fiche client master.
+    Les prospects démarchés restent uniquement dans la zone Prospection
+    (alimentée par Convoi / Obelisk / Le Chasseur). Le fichier Clients
+    n'accueille que les vrais clients (paiement, devis signé, intake
+    Lagriffe/RankUs/WoW, etc.).
     """
     from triskell_core.prospect.outreach.smtp_sender import send_email
     from . import prospect_status as PS
@@ -704,9 +705,6 @@ def send_draft(
         draft.message_id = msg_id
         draft.error = ""
         _bump_today_count(1)
-        # Best-effort : crée/met à jour la fiche client master.
-        # On NE bloque PAS l'envoi si ça échoue (Supabase down, etc.).
-        _upsert_client_from_draft(draft)
         # Log dans email_history pour que les envois Convoi remontent dans
         # le compteur "Envoyés aujourd'hui" du cockpit (avant ce fix, les
         # mails partaient mais étaient invisibles côté KPI).
@@ -748,40 +746,6 @@ def send_draft(
         draft.status = "failed"
         draft.error = str(exc)
     return draft
-
-
-def _upsert_client_from_draft(draft: ConvoyDraft) -> None:
-    """Crée ou met à jour la fiche client master à partir du prospect Convoi.
-
-    Mappe les champs du prospect Convoi vers la signature de
-    `clients_master_repo.ensure_client`. Marque la source comme "convoy".
-
-    Idempotent : si le client existe déjà (même email), seuls les champs
-    vides côté master seront remplis — aucune donnée existante n'est écrasée.
-    """
-    try:
-        from . import clients_master_repo
-    except ImportError as exc:
-        logger.debug("clients_master_repo indisponible : %s", exc)
-        return
-    p = draft.prospect or {}
-    email = (p.get("email") or "").strip()
-    if not email:
-        return
-    try:
-        clients_master_repo.ensure_client(
-            email,
-            first_name=p.get("prenom", "") or "",
-            last_name=p.get("nom", "") or "",
-            phone=p.get("telephone", "") or "",
-            company_name=p.get("raison_sociale", "") or "",
-            source="convoy",
-        )
-    except Exception as exc:
-        # Best-effort : on logge, on ne propage pas.
-        logger.warning(
-            "ensure_client depuis convoy a échoué pour %s : %s", email, exc,
-        )
 
 
 # ---------------------------------------------------------------------------

@@ -5389,10 +5389,13 @@ class Api:
         }
 
     def autopilot_list_products(self) -> dict:
-        """Liste les produits ayant au moins un template de prospection actif.
+        """Liste les produits ayant au moins un template de prospection actif
+        ET qui sont actives dans le catalogue (toggle on dans la vue Catalogue).
 
-        Source : table triskell_email_templates (migration 26+28+34) filtree
-        sur category='prospection' et enabled=true.
+        Source 1 : table triskell_email_templates filtree sur
+                   category='prospection' et enabled=true.
+        Source 2 : shared_settings.catalog_overrides.disabled_ids -> on
+                   exclut tout produit dont l'id matche (compare lowercased).
 
         Renvoie : {ok, products: [{key, label, audiences: ['creator', 'pro']}]}
         """
@@ -5409,12 +5412,23 @@ class Api:
         except Exception as exc:
             logger.warning("autopilot_list_products: %s", exc)
             return {"ok": False, "error": str(exc)}
-        # Regroupe par produit + collecte les audiences disponibles
+
+        # Recupere la liste des produits desactives dans le catalogue
+        try:
+            from ..integrations.catalog_overrides import get_disabled_ids
+            disabled = {d.lower() for d in get_disabled_ids()}
+        except Exception as exc:
+            logger.debug("autopilot_list_products: catalog_overrides KO (%s)", exc)
+            disabled = set()
+
+        # Regroupe par produit + collecte les audiences ; exclut les desactives
         by_product: dict = {}
         for r in rows:
             p = (r.get("product") or "").strip()
             if not p:
                 continue
+            if p.lower() in disabled:
+                continue  # produit desactive dans le catalogue -> on cache
             entry = by_product.setdefault(p, {"key": p, "audiences": set()})
             a = (r.get("audience") or "").strip()
             if a:
