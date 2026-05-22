@@ -211,6 +211,74 @@ html, body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* Barre d'actions de la bulle (Modifier / Enregistrer / Annuler / Défaut) */
+.nav-hint-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid hsl(var(--border));
+}
+.nav-hint-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--surface));
+  color: hsl(var(--text-secondary));
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+.nav-hint-action:hover {
+  background: hsl(var(--surface-elevated));
+  color: hsl(var(--text));
+  border-color: hsl(var(--border-strong));
+}
+.nav-hint-action--primary {
+  background: hsl(var(--accent));
+  color: white;
+  border-color: hsl(var(--accent));
+}
+.nav-hint-action--primary:hover {
+  background: hsl(var(--accent-hover));
+  border-color: hsl(var(--accent-hover));
+  color: white;
+}
+.nav-hint-action--ghost {
+  border-color: transparent;
+  background: transparent;
+}
+.nav-hint-action--ghost:hover {
+  background: hsl(var(--surface));
+  border-color: hsl(var(--border));
+}
+
+/* Zone d'édition du texte de la bulle */
+.nav-hint-textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border-strong));
+  background: hsl(var(--surface));
+  color: hsl(var(--text));
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.nav-hint-textarea:focus {
+  border-color: hsl(var(--accent));
+  box-shadow: 0 0 0 3px hsl(var(--accent) / 0.18);
+}
+
 /* Onglets de la page Réglages */
 .cfg-tabs {
   display: flex;

@@ -1,51 +1,83 @@
 // Petites bulles d'aide à côté de chaque onglet de la sidebar.
 // Un bouton "i" discret apparaît sur chaque .nav-item. Au clic, il ouvre
 // une bulle qui résume en deux ou trois phrases ce que contient l'onglet.
+// L'utilisateur peut éditer le texte de chaque bulle ; les modifs sont
+// stockées dans localStorage et survivent au rafraîchissement.
 (function () {
   'use strict';
 
-  // Le résumé est calé sur view_id. Pour la boîte mail, on distingue
+  const STORAGE_KEY = 'triskell.nav_hints.overrides.v1';
+
+  // Texte par défaut. Calé sur view_id. Pour la boîte mail, on distingue
   // les onglets via data-tab (inbound / sent / reply).
-  const HINTS = {
-    morning: "Ton tableau de bord du matin. Tu y vois l'essentiel : tes objectifs, l'humeur du business, ce qu'il y a à faire aujourd'hui.",
-    'mails:inbound': "Tous les mails qui arrivent dans tes adresses Triskell. C'est ta boîte de réception unifiée, comme un seul Gmail pour toutes tes boîtes pro.",
-    'mails:sent': "L'historique des mails que tu as envoyés. Pratique pour retrouver un échange avec un prospect ou vérifier qu'un message est bien parti.",
-    'mails:reply': "Le tri des réponses reçues à tes campagnes de prospection. L'IA les classe par intention : intéressé, à relancer, refus, etc.",
-    brain: "Ta boîte à idées personnelle. Tu y notes en vrac tes pensées, tes idées de site, tes phrases qui claquent, et l'app les retrouve quand tu en as besoin.",
-    clients_master: "L'annuaire complet de tes contacts (prospects et clients). Une fiche par personne, avec tout l'historique en un coup d'œil.",
-    autopilot: "L'app prospecte toute seule pendant que tu fais autre chose. Tu lui dis qui cibler, elle envoie les mails, gère les réponses et te prévient quand un humain doit prendre le relais.",
-    convoy: "Pour importer une liste de prospects d'un coup (Excel, CSV…). L'app les nettoie, les enrichit et les prépare pour la prospection.",
-    drafts: "Les mails que l'IA a préparés pour toi mais que tu dois valider avant envoi. Tu lis, tu corriges si besoin, tu envoies.",
-    replies: "Toutes les réponses qui demandent que tu interviennes. C'est ta pile de \"à traiter\" pour rester réactif sans rien rater.",
-    prospects_crm: "La liste complète de tes prospects en cours. Tu peux filtrer, segmenter, voir où chacun en est dans ton tunnel de vente.",
-    obelisk: "Le moteur qui repère automatiquement de nouveaux prospects qui matchent ton ciblage. Il tourne en fond et te propose des fiches à valider.",
-    chasseur: "L'outil pour partir à la pêche aux prospects toi-même. Tu cherches par secteur, ville, taille d'entreprise, et tu remplis ton vivier.",
-    eclaireur: "Recherche fine sur un prospect précis : son site, ses réseaux, ce qui cloche chez lui. Idéal pour préparer une approche personnalisée.",
-    clients: "Tes projets clients en cours. Pour chaque client, tu vois où on en est, ce qu'il reste à livrer, ce qu'il a payé.",
-    revenue: "Tes revenus dans le temps. Mois par mois, par produit, par client : tu sais combien tu rentres et d'où ça vient.",
-    funnel: "Ton tunnel de conversion en chiffres : combien de prospects contactés, combien ont répondu, combien sont devenus clients.",
-    phare: "Ton agence SEO interne. Tu y suis le positionnement de tes sites sur Google et les actions à mener pour grimper dans les résultats.",
-    lagriffe: "Le pipeline de fabrication des sites Lagriffe. Tu vois chaque commande étape par étape : briefing, production, livraison.",
-    rankus: "Le pipeline RankUs (offre SEO). Suivi des audits, des optimisations, des livrables.",
-    wow: "Le pipeline du Studio WoW. Chaque projet WoW de la commande à la mise en ligne, avec son statut.",
-    pixelpros: "Le pipeline Pixel Pros, le service où le site se génère tout seul après paiement. Tu vois chaque site en cours de fabrication et son statut.",
-    'pixelpros-affiliates': "Le programme d'affiliation Pixel Pros. Tu y suis les affiliés, leurs ventes et les commissions à reverser.",
-    catalogue: "Le catalogue de tout ce que vend Triskell Studio : sites, services, abonnements. Tu gères les prix, les descriptions, les bundles.",
-    mail_templates: "Tes modèles de mail réutilisables. Tu écris un mail une fois, tu le ranges ici, tu le réutilises à l'infini.",
-    health: "L'état de santé de l'app : serveur, base de données, services externes. Si quelque chose cloche, c'est ici qu'on voit la lampe rouge.",
-    tutorial: "Le tour guidé de l'app pour (re)découvrir ses fonctions. À montrer à quelqu'un qui débarque, ou à toi quand tu cherches une feature.",
-    config: "Les réglages de l'app. Ton profil, tes adresses mail connectées, les préférences, les options avancées.",
+  const DEFAULT_HINTS = {
+    morning: "Ton tableau de bord du jour. Tu y vois l’heure, la mission prioritaire, 4 grands chiffres clés sur 7 jours, les relances LinkedIn à faire et les alertes. Boutons rapides pour composer un mail, ouvrir Brain, appeler Claude ou lancer le mode Concentration.",
+    'mails:inbound': "Boîte de réception : tous les mails entrants captés par l’app. Pour l’instant ce sont surtout les réponses de prospects (le reste arrivera plus tard).",
+    'mails:sent': "Tous les mails envoyés depuis l’app : prospection, suivi après-vente, bienvenue client, notifications internes. Filtrable par adresse expéditrice.",
+    'mails:reply': "Les réponses de prospects à tes mails de prospection, déjà rangées par l’IA (intéressé, pas maintenant, refus, désinscription, à trier). Tu réponds directement depuis la liste.",
+    brain: "Boîte à idées partagée avec Thomas. Tu tapes une note, Claude la range automatiquement (catégorie, tags, rappel). Synchronisée avec l’app vocale mobile : ce que tu dictes dehors arrive ici.",
+    clients_master: "L’annuaire complet de toutes les personnes passées par Triskell — prospects, clients, contacts de formulaires. Chaque fiche montre tout son historique (demandes, factures, mails, projets) en un coup d’œil.",
+    autopilot: "Réglages du pilote automatique qui rédige et envoie les mails de prospection tout seul. Tu choisis le mode (validation manuelle ou envoi auto), tes instructions à l’IA, le plafond par jour. Tu peux lancer un tour à la main ou programmer le tour de nuit vers 3h.",
+    convoy: "Pour traiter une liste de prospects en 5 étapes guidées : tu glisses un PDF, Word, Excel ou image avec les contacts, l’app les extrait, tu choisis l’offre et le brief, l’IA rédige un mail unique pour chacun, et tu lances l’envoi.",
+    drafts: "Les mails préparés par l’app en mode validation qui attendent ton feu vert. Tu peux corriger le texte directement, puis approuver ou rejeter en un clic. Inclut aussi un bouton pour vider les brouillons vides.",
+    replies: "Les réponses de prospects, triées par l’IA en 5 catégories (intéressé, pas maintenant, refus, désinscription, à trier). Bouton « Vérifier maintenant » pour forcer un coup d’œil dans ta boîte mail sans attendre les 5 minutes habituelles.",
+    prospects_crm: "La liste de tous tes prospects toutes sources confondues (Sirene, Maps, Obelisk, imports manuels). Filtres par plateforme, statut, score, pays, présence d’email. Clic sur une ligne pour voir la fiche complète et les actions CRM.",
+    obelisk: "Outil de prospection ciblé sur les créateurs et vendeurs présents sur les réseaux (LinkedIn, Instagram, TikTok, YouTube, Twitch…). Tu lances une recherche avec une niche, l’app va chercher les profils en arrière-plan, puis tu les retrouves dans tes prospects.",
+    chasseur: "Tu choisis un secteur (préréglage, code NAF ou mot-clé), une zone (département ou code postal) et un volume. L’app interroge la base officielle des entreprises françaises (data.gouv), retrouve leur site, attrape les mails de leur page contact. Tu récupères un fichier prêt à glisser dans Le Convoi.",
+    eclaireur: "Tu décris ta cible (Sirene pour entreprises FR, Google Maps pour commerces locaux, ou Obelisk pour créateurs). L’app va chercher les prospects et retrouve leurs mails et téléphones. Pas d’envoi de mail ici — c’est juste la phase recherche.",
+    clients: "Tes projets clients en cours, en kanban 4 colonnes : Briefing, En cours, Livré, Clôturé. Tu fais glisser les cartes, tu édites, tu déclenches la livraison automatique (mail de bienvenue + kit produit) quand un projet est prêt.",
+    revenue: "Tous tes encaissements regroupés (Stripe + AppSumo + paiements manuels). Tu vois le total du mois en cours comparé au mois précédent, les 7 et 30 derniers jours, le top clients du mois, la répartition par produit et par source, et les prévisions.",
+    funnel: "Ton entonnoir de conversion étape par étape : prospects, mails envoyés, réponses, intéressés, gagnés. Filtrable par période (7/30/90 jours ou tout) et par type de prospect (créateurs ou B2B local). Tu vois où ça coince.",
+    phare: "Suivi SEO de tes sites (internes et clients). Chaque carte montre la santé du site, les visites du mois, et les améliorations préparées par les robots qui attendent ton feu vert. Tu valides ou tu refuses en un clic.",
+    lagriffe: "Pipeline visuel des demandes de sites Lagriffe Studio, étape par étape jusqu’à la mise en ligne. Comprend une étape supplémentaire « À valider (final) » où tu donnes ton feu vert humain sur le site final avant l’envoi du mail au client.",
+    rankus: "Pipeline visuel des demandes SEO RankUs Studio, étape par étape. Chaque demande montre son étage dans le pipeline et l’historique complet des actions menées.",
+    wow: "Pipeline visuel des demandes Studio WoW, étape par étape. Chaque demande client montre son étage et l’historique pas à pas, de la prise de brief jusqu’à la mise en ligne.",
+    pixelpros: "Kanban des sites Pixel Pros à 4 colonnes : formulaire reçu, payé à construire, en construction, en ligne. Clic sur une carte pour la fiche détaillée et les actions (relancer un mail, marquer en échec, déclencher la construction). Une commande payée qui traîne plus de 6h est marquée urgente.",
+    'pixelpros-affiliates': "Backoffice du programme d’affiliation Pixel Pros (20 % sur 12 mois). Compteurs (actifs, ventes en attente, à verser, déjà versé), liste des affiliés à payer ce mois-ci (≥ 50 €), tableau cherchable de tous les affiliés avec fiche détaillée au clic.",
+    catalogue: "Le catalogue central des produits de l’écosystème Triskell (sites, outils, services). Chaque tuile ouvre une fiche avec pitch, description longue, fonctionnalités, prix. C’est ce catalogue qui sert quand tu choisis une offre dans Le Convoi ou un composeur de mail.",
+    mail_templates: "Éditeur de tous les modèles de mails automatiques (confirmations, relances, livraisons, prospection). Tu modifies sujet, expéditeur et corps HTML sans toucher au code. Si tu désactives un modèle, l’app retombe sur sa version par défaut, donc rien ne casse.",
+    health: "État de tes outils automatiques et de la délivrabilité de tes envois. Carte par robot avec son dernier passage, alertes sur les mails bloqués ou bounces, taux de réponse sur 24h et 7 jours. Se rafraîchit tout seul toutes les 15 secondes.",
+    tutorial: "Visite guidée complète de l’app sous forme de modale avec étapes et barre de progression. Te montre tout le parcours : prospection, rédaction IA, envoi, tri des réponses, suivi client, livraison auto, mesures. À ouvrir au premier lancement ou pour réviser.",
+    config: "Tous les réglages, rangés par onglets : compte, apparence, mails (comptes et signatures), IA, intégrations (Stripe, Phantombuster, tracker), automatisations (passage prospect → client, livraison) et système (sauvegardes, mode démo, visite guidée).",
   };
 
+  // ---- Persistance des modifs utilisateur ----
+  function loadOverrides() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (_) { return {}; }
+  }
+  function saveOverrides(obj) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)); } catch (_) {}
+  }
+  function getHint(key) {
+    const overrides = loadOverrides();
+    if (Object.prototype.hasOwnProperty.call(overrides, key)) return overrides[key];
+    return DEFAULT_HINTS[key];
+  }
+  function setHint(key, text) {
+    const overrides = loadOverrides();
+    if (text == null || text === DEFAULT_HINTS[key]) {
+      delete overrides[key];
+    } else {
+      overrides[key] = text;
+    }
+    saveOverrides(overrides);
+  }
+
+  // ---- État du popover unique ----
   let popoverEl = null;
   let activeBtn = null;
+  let activeKey = null;
+  let editing = false;
 
   function hintKey(navBtn) {
     const view = navBtn.dataset.view;
     const tab = navBtn.dataset.tab;
     if (tab) {
       const composite = `${view}:${tab}`;
-      if (HINTS[composite]) return composite;
+      if (DEFAULT_HINTS[composite]) return composite;
     }
     return view;
   }
@@ -55,32 +87,24 @@
     popoverEl = null;
     if (activeBtn) activeBtn.setAttribute('aria-expanded', 'false');
     activeBtn = null;
+    activeKey = null;
+    editing = false;
   }
 
-  function openPopover(btn, text) {
-    closePopover();
-    popoverEl = document.createElement('div');
-    popoverEl.className = 'nav-hint-popover';
-    popoverEl.setAttribute('role', 'tooltip');
-    popoverEl.innerHTML = `
-      <div class="nav-hint-arrow" aria-hidden="true"></div>
-      <p class="nav-hint-text"></p>
-    `;
-    popoverEl.querySelector('.nav-hint-text').textContent = text;
-    document.body.appendChild(popoverEl);
-
-    // Position : à droite du bouton, centré verticalement.
-    const rect = btn.getBoundingClientRect();
+  function repositionPopover() {
+    if (!popoverEl || !activeBtn) return;
+    const rect = activeBtn.getBoundingClientRect();
+    // Force un layout pour mesurer la nouvelle taille
+    popoverEl.style.left = '-9999px';
+    popoverEl.style.top = '0px';
     const popRect = popoverEl.getBoundingClientRect();
     let left = rect.right + 10;
     let top = rect.top + rect.height / 2 - popRect.height / 2;
-
-    // Si on déborde à droite, on bascule à gauche du sidebar.
+    popoverEl.classList.remove('nav-hint-popover--left');
     if (left + popRect.width > window.innerWidth - 8) {
       left = rect.left - popRect.width - 10;
       popoverEl.classList.add('nav-hint-popover--left');
     }
-    // Clamp vertical
     const margin = 8;
     if (top < margin) top = margin;
     if (top + popRect.height > window.innerHeight - margin) {
@@ -88,12 +112,104 @@
     }
     popoverEl.style.left = `${Math.round(left)}px`;
     popoverEl.style.top = `${Math.round(top)}px`;
-
-    activeBtn = btn;
-    btn.setAttribute('aria-expanded', 'true');
   }
 
-  function makeHintButton(navBtn, text) {
+  // ---- Rendu : mode lecture ----
+  function renderRead() {
+    if (!popoverEl) return;
+    editing = false;
+    const text = getHint(activeKey);
+    const isCustom = Object.prototype.hasOwnProperty.call(loadOverrides(), activeKey);
+    popoverEl.innerHTML = `
+      <div class="nav-hint-arrow" aria-hidden="true"></div>
+      <p class="nav-hint-text"></p>
+      <div class="nav-hint-actions">
+        <button type="button" class="nav-hint-action" data-act="edit" title="Modifier ce texte" aria-label="Modifier ce texte">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+          <span>Modifier</span>
+        </button>
+        ${isCustom ? `
+        <button type="button" class="nav-hint-action nav-hint-action--ghost" data-act="reset" title="Revenir au texte d'origine">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+          <span>Défaut</span>
+        </button>` : ''}
+      </div>
+    `;
+    popoverEl.querySelector('.nav-hint-text').textContent = text;
+    popoverEl.querySelector('[data-act="edit"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      renderEdit();
+    });
+    const resetBtn = popoverEl.querySelector('[data-act="reset"]');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setHint(activeKey, null);
+        renderRead();
+        repositionPopover();
+      });
+    }
+    repositionPopover();
+  }
+
+  // ---- Rendu : mode édition ----
+  function renderEdit() {
+    if (!popoverEl) return;
+    editing = true;
+    const text = getHint(activeKey);
+    popoverEl.innerHTML = `
+      <div class="nav-hint-arrow" aria-hidden="true"></div>
+      <textarea class="nav-hint-textarea" rows="5" spellcheck="true"></textarea>
+      <div class="nav-hint-actions">
+        <button type="button" class="nav-hint-action nav-hint-action--ghost" data-act="cancel">Annuler</button>
+        <button type="button" class="nav-hint-action nav-hint-action--primary" data-act="save">Enregistrer</button>
+      </div>
+    `;
+    const ta = popoverEl.querySelector('.nav-hint-textarea');
+    ta.value = text || '';
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 0);
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        save();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        renderRead();
+      }
+    });
+    ta.addEventListener('click', (e) => e.stopPropagation());
+    popoverEl.querySelector('[data-act="cancel"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      renderRead();
+    });
+    popoverEl.querySelector('[data-act="save"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      save();
+    });
+    function save() {
+      const v = ta.value.trim();
+      setHint(activeKey, v || null);
+      renderRead();
+      repositionPopover();
+    }
+    repositionPopover();
+  }
+
+  function openPopover(btn, key) {
+    closePopover();
+    popoverEl = document.createElement('div');
+    popoverEl.className = 'nav-hint-popover';
+    popoverEl.setAttribute('role', 'tooltip');
+    popoverEl.addEventListener('click', (e) => e.stopPropagation());
+    document.body.appendChild(popoverEl);
+    activeBtn = btn;
+    activeKey = key;
+    btn.setAttribute('aria-expanded', 'true');
+    renderRead();
+  }
+
+  function makeHintButton(navBtn, key) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'nav-hint-btn';
@@ -114,10 +230,9 @@
       if (activeBtn === btn) {
         closePopover();
       } else {
-        openPopover(btn, text);
+        openPopover(btn, key);
       }
     });
-    // Empêche le hover/click du parent de déclencher la navigation.
     btn.addEventListener('mousedown', (e) => e.stopPropagation());
     return btn;
   }
@@ -127,10 +242,8 @@
     items.forEach((nav) => {
       if (nav.dataset.hintAttached === '1') return;
       const key = hintKey(nav);
-      const text = HINTS[key];
-      if (!text) return;
-      const btn = makeHintButton(nav, text);
-      // Si l'item a un badge (.nav-item-badge), on insère avant le badge.
+      if (!DEFAULT_HINTS[key]) return;
+      const btn = makeHintButton(nav, key);
       const badge = nav.querySelector('.nav-item-badge');
       if (badge) {
         nav.insertBefore(btn, badge);
@@ -141,23 +254,23 @@
     });
   }
 
-  // Fermer la bulle quand on clique ailleurs / scroll / resize / Escape.
+  // Fermer quand on clique ailleurs (sauf en édition pour éviter les pertes
+  // accidentelles si l'utilisateur clique dans le textarea, qui stop déjà).
   document.addEventListener('click', (e) => {
     if (!popoverEl) return;
     if (e.target === activeBtn || (activeBtn && activeBtn.contains(e.target))) return;
     if (popoverEl.contains(e.target)) return;
+    if (editing) return; // on garde la bulle ouverte pendant l'édition
     closePopover();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closePopover();
+    if (e.key === 'Escape' && !editing) closePopover();
   });
-  window.addEventListener('resize', closePopover);
-  window.addEventListener('scroll', closePopover, true);
+  window.addEventListener('resize', () => { if (!editing) closePopover(); else repositionPopover(); });
+  window.addEventListener('scroll', () => { if (!editing) closePopover(); }, true);
 
-  // Premier branchement + ré-essai si la sidebar se construit après.
   function init() {
     attachAll();
-    // Quelques retries pour les vues construites dynamiquement.
     setTimeout(attachAll, 300);
     setTimeout(attachAll, 1200);
   }
