@@ -233,9 +233,11 @@ const Chasseur = {
         .ch-step {
           position: relative;
           display: flex;
+          flex-direction: column;
           align-items: center;
-          gap: 8px;
-          padding: 4px 0;
+          text-align: center;
+          gap: 6px;
+          padding: 4px 8px;
         }
         .ch-step-bullet { position: relative; z-index: 2; }
         .ch-step-bullet {
@@ -267,11 +269,11 @@ const Chasseur = {
           border-color: hsl(var(--success));
           color: white;
         }
-        .ch-step-text { min-width: 0; flex: 1; }
+        .ch-step-text { min-width: 0; max-width: 100%; }
         .ch-step-label {
           font-size: 11px;
           font-weight: 700;
-          line-height: 1.1;
+          line-height: 1.15;
           color: hsl(var(--text));
         }
         .ch-step-pending .ch-step-label { color: hsl(var(--text-muted)); }
@@ -280,18 +282,21 @@ const Chasseur = {
           font-size: 9.5px;
           color: hsl(var(--text-muted));
           line-height: 1.2;
-          margin-top: 1px;
+          margin-top: 2px;
         }
+        /* Barre de liaison : part du centre du bullet de cette colonne
+           jusqu'au centre du bullet de la colonne suivante, en évitant
+           le rond lui-même (margin de 14px de chaque côté). */
         .ch-step-link {
           position: absolute;
-          top: 14px;
-          right: -50%;
+          top: 15px;
           left: 50%;
+          right: -50%;
           height: 2px;
           background: hsl(var(--border-strong));
           z-index: 1;
-          margin-left: 18px;
-          margin-right: 18px;
+          margin-left: 14px;
+          margin-right: 14px;
         }
         .ch-step-link-done { background: hsl(var(--success)); }
         .ch-step-dot {
