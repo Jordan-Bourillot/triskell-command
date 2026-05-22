@@ -241,28 +241,33 @@ const Autopilot = {
                      class="w-24 px-3 py-2 rounded-lg bg-bg border border-border
                             focus:border-accent focus:outline-none text-xl font-bold text-center" />
               <span class="text-sm text-text-secondary" style="text-wrap: balance">
-                prospects / nuit
+                prospects / run
               </span>
             </div>
           </label>
 
           <label class="block">
             <div class="text-xs font-bold uppercase tracking-widest text-text-muted mb-2">
-              Pour pousser
+              Tu pousses quoi ?
             </div>
             <select id="ap-product-select" data-key="autopilot_product"
                     class="w-full px-3 py-2 rounded-lg bg-bg border border-border
                            focus:border-accent focus:outline-none text-sm">
-              <option value="">— Génération libre (IA from scratch) —</option>
+              <option value="">— Laisse l'IA écrire toute seule —</option>
               ${product ? `<option value="${this._esc(product)}" selected>${this._esc(product)}</option>` : ''}
             </select>
             <select id="ap-audience-select" data-key="autopilot_audience"
                     class="w-full mt-2 px-3 py-2 rounded-lg bg-bg border border-border
                            focus:border-accent focus:outline-none text-xs ${product ? '' : 'hidden'}">
-              <option value="" ${audience === '' ? 'selected' : ''}>Toutes audiences</option>
-              <option value="creator" ${audience === 'creator' ? 'selected' : ''}>Créateurs</option>
-              <option value="pro" ${audience === 'pro' ? 'selected' : ''}>Pros (B2B)</option>
+              <option value="" ${audience === '' ? 'selected' : ''}>Tout le monde</option>
+              <option value="creator" ${audience === 'creator' ? 'selected' : ''}>Influenceurs / créateurs</option>
+              <option value="pro" ${audience === 'pro' ? 'selected' : ''}>Pros (artisans, commerçants…)</option>
             </select>
+            <div class="text-[11px] text-text-muted mt-1.5 leading-snug"
+                 style="text-wrap: pretty">
+              Choisis un produit : l'IA piochera dans tes <b>modèles d'emails</b>
+              prêts pour ce produit. Sinon, elle invente chaque mail depuis zéro.
+            </div>
           </label>
 
           <label class="flex items-start gap-3 cursor-pointer md:pt-7">
