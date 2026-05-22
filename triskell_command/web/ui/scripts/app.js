@@ -189,6 +189,10 @@ const App = {
         const params = btn.dataset.tab ? { tab: btn.dataset.tab } : null;
         this.show(btn.dataset.view, params);
         this.closeMobileSidebar(); // ferme le drawer après navigation (mobile)
+        // Bouton "Rédiger" de la sidebar → ouvre directement le composer
+        if (btn.dataset.compose === '1' && typeof Mails !== 'undefined') {
+          setTimeout(() => Mails._openComposer({}), 200);
+        }
       });
     });
 

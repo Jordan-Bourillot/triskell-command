@@ -135,6 +135,53 @@ html, body {
 }
 .nav-item.active svg { color: hsl(var(--accent)); }
 
+/* ============================
+ * Titre de section repliable
+ * ============================
+ * Les titres en couleur (COCKPIT, BOÎTE MAIL, etc.) deviennent des
+ * boutons cliquables avec une petite flèche pour replier la section.
+ */
+.nav-section-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0 12px;
+  margin-bottom: 8px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 6px;
+  transition: background 140ms ease;
+}
+.nav-section-toggle:hover {
+  background: hsl(var(--surface-elevated) / 0.5);
+}
+.nav-section-toggle > span {
+  flex: 1;
+  min-width: 0;
+}
+.nav-section-chevron {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  margin-left: 8px;
+  opacity: 0.5;
+  transition: transform 180ms ease, opacity 140ms ease;
+  color: currentColor;
+}
+.nav-section-toggle:hover .nav-section-chevron { opacity: 0.9; }
+.nav-section-toggle[aria-expanded="false"] .nav-section-chevron {
+  transform: rotate(-90deg);
+}
+.nav-section-items {
+  overflow: hidden;
+  transition: max-height 220ms ease, opacity 160ms ease;
+}
+.nav-section-items[hidden] {
+  display: none;
+}
+
 /* Petit bouton "i" à droite de chaque onglet — ouvre une bulle d'aide */
 .nav-hint-btn {
   margin-left: auto;
