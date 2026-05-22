@@ -160,6 +160,11 @@ const Drafts = {
     const testBadge = r.is_test
       ? `<span class="text-xs px-2 py-0.5 rounded-full bg-warning/20 text-warning ml-1">test</span>`
       : '';
+    const hasHtml = !!(r.body_html && String(r.body_html).trim());
+    // srcdoc encode automatiquement les entites quand on le passe en attribut
+    const htmlSrc = hasHtml
+      ? String(r.body_html).replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+      : '';
     return `
       <article class="card p-4 sm:p-7"
                data-idx="${idx}"
@@ -172,12 +177,25 @@ const Drafts = {
           </div>
         </header>
         <div class="text-sm font-semibold text-accent mb-2 break-words">OBJET : ${this._esc(r.subject)}</div>
+        ${hasHtml ? `
+          <div class="flex gap-2 mb-2 text-xs">
+            <button class="d-toggle-view px-2 py-1 rounded-md bg-accent text-white"
+                    data-mode="preview" data-idx="${idx}">Aperçu</button>
+            <button class="d-toggle-view px-2 py-1 rounded-md bg-bg border border-border text-text-muted"
+                    data-mode="source" data-idx="${idx}">Source / éditer</button>
+          </div>
+          <iframe data-preview sandbox=""
+                  srcdoc="${htmlSrc}"
+                  style="width:100%; min-height:300px; max-height:520px;
+                         border:1px solid hsl(var(--border)); border-radius:12px;
+                         background:white;"></iframe>
+        ` : ''}
         <textarea data-body
                   class="w-full text-sm leading-relaxed p-3 sm:p-4 rounded-xl bg-bg
                          border border-border focus:outline-none
                          focus:ring-2 focus:ring-accent/30 focus:border-accent
                          resize-y min-h-[160px] sm:min-h-[180px] max-h-[400px]
-                         text-text"
+                         text-text ${hasHtml ? 'hidden' : ''}"
                   rows="8">${this._esc(r.body)}</textarea>
         <footer class="flex flex-col sm:flex-row sm:justify-end gap-2 mt-4 pt-4 border-t border-border">
           <button class="btn btn-secondary justify-center" data-act="reject">Rejeter</button>
@@ -188,6 +206,34 @@ const Drafts = {
   },
 
   _bind(rows) {
+    // Toggle Apercu HTML / Source texte pour chaque carte
+    document.querySelectorAll('.d-toggle-view').forEach(btn => {
+      btn.onclick = () => {
+        const card = btn.closest('article[data-idx]');
+        if (!card) return;
+        const mode = btn.dataset.mode;
+        const iframe = card.querySelector('iframe[data-preview]');
+        const textarea = card.querySelector('textarea[data-body]');
+        const buttons = card.querySelectorAll('.d-toggle-view');
+        if (mode === 'preview') {
+          if (iframe) iframe.classList.remove('hidden');
+          if (textarea) textarea.classList.add('hidden');
+        } else {
+          if (iframe) iframe.classList.add('hidden');
+          if (textarea) textarea.classList.remove('hidden');
+        }
+        // Met a jour le style actif/inactif des 2 boutons
+        buttons.forEach(b => {
+          const active = b.dataset.mode === mode;
+          if (active) {
+            b.className = 'd-toggle-view px-2 py-1 rounded-md bg-accent text-white';
+          } else {
+            b.className = 'd-toggle-view px-2 py-1 rounded-md bg-bg border border-border text-text-muted';
+          }
+        });
+      };
+    });
+
     document.querySelectorAll('article[data-idx]').forEach(card => {
       const idx = parseInt(card.dataset.idx, 10);
       const id = card.dataset.id;

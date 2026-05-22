@@ -643,6 +643,7 @@ class Api:
                 "city": prospect.city or "",
                 "subject": draft.get("subject", ""),
                 "body": draft.get("body", ""),
+                "body_html": draft.get("body_html", ""),
                 "ts": draft.get("ts", ""),
                 "provider": draft.get("provider", ""),
                 "model": draft.get("model", ""),
