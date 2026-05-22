@@ -109,6 +109,20 @@ def _shift_iso(iso_str: str, *, seconds: int) -> str:
 
 PRO_PLATFORM_URL_PATTERNS = ("openstreetmap", "pubmed")
 
+# Plateformes "créateur/influenceur" — pour distinguer côté UI les onglets
+# « Créateurs » vs « Pros ». La règle est simple et robuste :
+#   - creator = platform_url contient UN de ces patterns
+#   - pro     = TOUT LE RESTE (y compris les prospects sans platform_url,
+#               comme ceux poussés par Le Chasseur depuis SIRENE)
+# Sinon les pros du Chasseur (commerces locaux, artisans, coiffeurs…) ne
+# sont visibles ni dans « Créateurs » ni dans « Pros » alors qu'ils
+# devraient être dans « Pros ».
+CREATOR_PLATFORM_URL_PATTERNS = (
+    "youtube.com", "twitch.tv", "reddit.com", "bsky.app", "github.com",
+    "tiktok.com", "instagram.com", "linkedin.com", "mastodon",
+    "dailymotion.com", "kick.com", "podcasts.apple.com", "pypi.org",
+)
+
 
 def list_creators(*,
                   platform: str = "",
@@ -150,12 +164,14 @@ def list_creators(*,
                      "no" → ceux jamais contactés ;
                      "" (défaut) → tout
       - sort_by    : "score" (défaut, décroissant), "subs_desc", "subs_asc"
-      - audience   : "creator" → uniquement créateurs/influenceurs (toutes
-                     plateformes sauf OpenStreetMap & PubMed) ;
-                     "pro" → uniquement pros/entreprises (OSM + PubMed) ;
+      - audience   : "creator" → uniquement les prospects dont platform_url
+                     matche une plateforme créateur connue (YouTube, Twitch,
+                     GitHub, LinkedIn, Instagram, TikTok…) ;
+                     "pro" → tout le reste : OSM, PubMed, ET les pros sans
+                     platform_url (entreprises poussées par Le Chasseur
+                     depuis SIRENE n'ont qu'un site web, pas d'URL de
+                     plateforme sociale) ;
                      "" (défaut) → tout, sans filtre d'audience.
-                     Heuristique basée sur platform_url car les prospects
-                     "pro" n'ont pas de notion d'abonnés/monétisation.
     """
     sb = _sb()
     if sb is None:
@@ -204,14 +220,20 @@ def list_creators(*,
             # platform_url contient youtube.com / twitch.tv / etc. selon source
             p = platform.lower()
             qy = qy.ilike("platform_url", f"%{p}%")
-        # Filtre par audience (créateurs vs pros/entreprises)
+        # Filtre par audience (créateurs vs pros/entreprises).
+        # Règle : un prospect est "creator" si son platform_url matche un
+        # pattern de plateforme créateur (YouTube, Twitch, GitHub…). Tout
+        # le reste est "pro" — y compris les prospects sans platform_url
+        # (typique des entreprises poussées par Le Chasseur depuis SIRENE)
+        # ou avec un platform_url type openstreetmap.org / pubmed.
         aud = (audience or "").strip().lower()
-        if aud == "pro":
+        if aud == "creator":
             qy = qy.or_(",".join(
-                f"platform_url.ilike.%{pat}%" for pat in PRO_PLATFORM_URL_PATTERNS
+                f"platform_url.ilike.%{pat}%"
+                for pat in CREATOR_PLATFORM_URL_PATTERNS
             ))
-        elif aud == "creator":
-            for pat in PRO_PLATFORM_URL_PATTERNS:
+        elif aud == "pro":
+            for pat in CREATOR_PLATFORM_URL_PATTERNS:
                 qy = qy.filter("platform_url", "not.ilike", f"%{pat}%")
         if country:
             cu = country.strip().upper()
