@@ -219,7 +219,6 @@ const Morning = {
                    + this._renderHero(digest)
                    + `<div id="m-pipelines-slot"></div>`
                    + `<div id="m-obelisk-slot"></div>`
-                   + `<div id="m-modes-slot"></div>`
                    + this._renderKpiGrid(digest)
                    + this._renderAlert(digest)
                    + `<div id="m-linkedin-slot"></div>`;
@@ -227,7 +226,6 @@ const Morning = {
     this._loadSetup();
     this._loadPipelinesActivity();
     this._loadObeliskNotifs();
-    this._loadModes();
     this._loadLinkedinActions();
 
     // Démarre le rafraîchissement automatique des chiffres
@@ -512,26 +510,35 @@ const Morning = {
 
   _modeCard({ kind, title, sub, current }) {
     const isDirect = current === 'direct';
+    const isOff = current === 'off';
+    const isValid = !isDirect && !isOff;
     return `
       <div class="cockpit-mode-card" data-kind="${kind}" data-current="${current}">
         <div class="cockpit-mode-card-head">
           <span class="cockpit-mode-card-title">${title}</span>
           <span class="cockpit-mode-card-sub">${sub}</span>
         </div>
-        <div class="cockpit-mode-switch" role="group" aria-label="Choisir un mode">
+        <div class="cockpit-mode-switch cockpit-mode-switch-3" role="group" aria-label="Choisir un mode">
+          <button type="button"
+                  class="cockpit-mode-opt ${isOff ? 'active off' : ''}"
+                  data-mode="off"
+                  title="Le robot ne fait rien, tu réponds toi-même depuis ta boîte mail">
+            <span class="cockpit-mode-opt-icon">⏸️</span>
+            <span class="cockpit-mode-opt-label">Désactivé</span>
+          </button>
+          <button type="button"
+                  class="cockpit-mode-opt ${isValid ? 'active' : ''}"
+                  data-mode="validation"
+                  title="L'app te montre les mails, tu valides avant envoi">
+            <span class="cockpit-mode-opt-icon">✅</span>
+            <span class="cockpit-mode-opt-label">Je valide</span>
+          </button>
           <button type="button"
                   class="cockpit-mode-opt ${isDirect ? 'active danger' : ''}"
                   data-mode="direct"
                   title="L'IA envoie tout de suite, sans demander">
             <span class="cockpit-mode-opt-icon">🚀</span>
             <span class="cockpit-mode-opt-label">Envoi direct</span>
-          </button>
-          <button type="button"
-                  class="cockpit-mode-opt ${!isDirect ? 'active' : ''}"
-                  data-mode="validation"
-                  title="L'app te montre les mails, tu valides avant envoi">
-            <span class="cockpit-mode-opt-icon">✅</span>
-            <span class="cockpit-mode-opt-label">Je valide</span>
           </button>
         </div>
       </div>
@@ -552,10 +559,11 @@ const Morning = {
             if (!confirm(confirmMsg)) return;
           }
           card.querySelectorAll('.cockpit-mode-opt').forEach(b => {
-            b.classList.remove('active', 'danger');
+            b.classList.remove('active', 'danger', 'off');
           });
           btn.classList.add('active');
           if (target === 'direct') btn.classList.add('danger');
+          if (target === 'off') btn.classList.add('off');
           card.dataset.current = target;
           try {
             const r = await App.api.set_simple_mode({ kind, mode: target });

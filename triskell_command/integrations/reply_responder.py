@@ -40,6 +40,7 @@ DELAY_SECONDS = {
 }
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "enabled": False,  # False = robot totalement coupé (pas de draft, pas d'envoi)
     "global_mode": "manual",  # appliqué si per_category absent pour une catégorie
     "per_category": {
         "interested":  "manual",
@@ -208,6 +209,9 @@ def ensure_suggested_reply(client, history_row_id: str, *,
             return out
 
         config = load_config(client)
+        if not config.get("enabled"):
+            out["error"] = "disabled"
+            return out
         category = (classification or {}).get("category", "unknown")
         mode = mode_for_category(config, category)
         delay = DELAY_SECONDS.get(mode)

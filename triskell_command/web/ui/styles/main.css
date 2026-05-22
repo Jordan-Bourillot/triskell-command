@@ -1824,6 +1824,9 @@ html, body {
   border: 1px solid hsl(var(--border));
   border-radius: 12px;
 }
+.cockpit-mode-switch.cockpit-mode-switch-3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
 .cockpit-mode-opt {
   display: flex;
   align-items: center;
@@ -1854,6 +1857,12 @@ html, body {
   background: hsl(var(--danger) / 0.08);
   color: hsl(var(--danger));
   box-shadow: 0 0 0 2px hsl(var(--danger) / 0.18);
+}
+.cockpit-mode-opt.active.off {
+  border-color: hsl(var(--text-secondary));
+  background: hsl(var(--surface-elevated));
+  color: hsl(var(--text-secondary));
+  box-shadow: 0 0 0 2px hsl(var(--text-secondary) / 0.18);
 }
 .cockpit-mode-opt-icon {
   font-size: 15px;
