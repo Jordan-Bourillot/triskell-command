@@ -22,8 +22,8 @@ const Autopilot = {
       key:    'search',
       n:      '1',
       title:  'Cherche',
-      sources:'Chasseur · Éclaireur · Obelisk',
-      desc:   "Pioche dans « Tous les prospects », le fichier global que ces 3 outils alimentent ensemble.",
+      sources:'Fichier « Tous les prospects »',
+      desc:   "Pioche uniquement dans tes prospects existants. L'autopilote n'ajoute jamais de nouveaux prospects — utilise Chasseur, Éclaireur ou Obelisk pour ça.",
       defaultMode: 'auto',
     },
     {
@@ -139,6 +139,11 @@ const Autopilot = {
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               Lancer maintenant
             </button>
+            <button id="ap-stop" class="btn hidden"
+                    style="background: hsl(var(--danger)); color: white; border-color: transparent;">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+              Arrêter
+            </button>
           </div>
         </div>
 
@@ -204,6 +209,7 @@ const Autopilot = {
 
     document.getElementById('ap-save').onclick = () => this.save();
     document.getElementById('ap-run').onclick  = () => this.run();
+    document.getElementById('ap-stop').onclick = () => this.stop();
 
     if (!App.api) {
       document.getElementById('ap-form').innerHTML = this._previewBanner();
@@ -732,6 +738,9 @@ const Autopilot = {
     const btn = document.getElementById('ap-run');
     btn.disabled = true;
     btn.innerHTML = `<span class="inline-block w-4 h-4 mr-2 rounded-full border-2 border-white/40 border-t-white animate-spin"></span>En cours…`;
+    // Affiche le bouton "Arrêter" pendant le run
+    const stopBtn = document.getElementById('ap-stop');
+    if (stopBtn) { stopBtn.classList.remove('hidden'); stopBtn.disabled = false; }
     document.getElementById('ap-log').textContent = '';
     document.getElementById('ap-stats').classList.add('hidden');
     // Reset visu temps reel : 5 boites en idle, recap cache, activite vide
@@ -790,6 +799,17 @@ const Autopilot = {
     if (r.running) {
       // run en cours, on continue à poller
       if (!this.pollTimer) this._startPolling();
+      // Le bouton Stop doit être visible (cas du rechargement de la page
+      // pendant un run lancé précédemment)
+      const stopBtn = document.getElementById('ap-stop');
+      if (stopBtn && stopBtn.classList.contains('hidden')) {
+        stopBtn.classList.remove('hidden');
+      }
+      const runBtn = document.getElementById('ap-run');
+      if (runBtn && !runBtn.disabled) {
+        runBtn.disabled = true;
+        runBtn.innerHTML = `<span class="inline-block w-4 h-4 mr-2 rounded-full border-2 border-white/40 border-t-white animate-spin"></span>En cours…`;
+      }
       return;
     }
     // run terminé
@@ -810,6 +830,37 @@ const Autopilot = {
     btn.innerHTML = `
       <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
       Lancer maintenant`;
+    const stopBtn = document.getElementById('ap-stop');
+    if (stopBtn) {
+      stopBtn.classList.add('hidden');
+      stopBtn.disabled = false;
+      stopBtn.innerHTML = `
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+        Arrêter`;
+    }
+  },
+
+  // Bouton Arrêter : demande au backend de stopper le run en cours.
+  async stop() {
+    if (!App.api) return;
+    const stopBtn = document.getElementById('ap-stop');
+    if (stopBtn) {
+      stopBtn.disabled = true;
+      stopBtn.innerHTML = `<span class="inline-block w-4 h-4 mr-2 rounded-full border-2 border-white/40 border-t-white animate-spin"></span>Arrêt…`;
+    }
+    try {
+      const r = await App.api.autopilot_stop();
+      if (!r || !r.ok) {
+        this._appendLog((r && r.error) || 'Arrêt impossible.');
+        if (stopBtn) { stopBtn.disabled = false; stopBtn.innerHTML = `
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+          Arrêter`; }
+      }
+      // Sinon : le polling détectera running=false et appellera _stopRun()
+    } catch (e) {
+      this._appendLog('Erreur d’arrêt : ' + String(e));
+      if (stopBtn) { stopBtn.disabled = false; }
+    }
   },
 
   _appendLog(line) {

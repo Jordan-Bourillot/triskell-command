@@ -144,7 +144,11 @@ def run_pipeline_with_ui_modes(cfg, progress):
     # Lit les modes UI Auto/Manuel par maillon (poses par le tableau de
     # commande) et applique-les au pipeline.
     stage_modes = _read_stage_modes()
-    do_search = stage_modes["search"] == "auto"
+    # IMPORTANT : l'autopilote ne cherche JAMAIS de nouveaux prospects sur
+    # internet. Il pioche uniquement dans le CRM existant (Tous les prospects).
+    # Pour ajouter de nouveaux prospects, l'utilisateur passe par les outils
+    # dediés : Chasseur / Eclaireur / Obelisk.
+    do_search = False
     # write=manual -> on ne genere pas de mails (donc do_send pipeline=False)
     do_send_stage = stage_modes["write"] == "auto"
     # send=manual -> on force mode validation (drafts au lieu d'envoi)

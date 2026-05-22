@@ -27,6 +27,10 @@ from ..state import AppState
 logger = logging.getLogger(__name__)
 
 
+class _AutopilotStopped(Exception):
+    """Levée dans _push_log quand le bouton Stop a été cliqué."""
+
+
 class Api:
     """Toutes les méthodes appelables depuis le front (pywebview)."""
 
@@ -45,6 +49,9 @@ class Api:
             "stages": self._fresh_stages(),
             "current_activity": "",
             "touched_prospects": [],  # [{id, name, action, reason}, ...]
+            # Bouton "Arrêter" : passé à True par autopilot_stop(), vérifié
+            # dans _push_log à chaque appel pour interrompre le pipeline.
+            "stop_requested": False,
         }
         self._autopilot_lock = threading.Lock()
 
@@ -1349,6 +1356,10 @@ class Api:
                 if health >= 80: tone = "ok"
                 elif health >= 50: tone = "warn"
                 else: tone = "bad"
+            elif latest:
+                # Un audit a tourné mais PageSpeed n'a pas renvoyé de note
+                # (quota Google, site injoignable, etc.)
+                tone = "failed"
             return {
                 "ok": True,
                 "site": site,
@@ -5315,6 +5326,7 @@ class Api:
                 "stages": self._fresh_stages(),
                 "current_activity": "",
                 "touched_prospects": [],
+                "stop_requested": False,
             })
 
         # Sauve la config avant lancement (si fournie)
@@ -5343,6 +5355,13 @@ class Api:
         # par le pipeline / le runner via le callback `progress`.
         def _push_log(msg) -> None:
             from datetime import datetime
+            # Bouton Stop : si l'utilisateur a demandé l'arrêt, on lève une
+            # exception pour interrompre le pipeline. _push_log est appelé
+            # très souvent par run_full_pipeline (à chaque étape + activity),
+            # donc on attrape l'arrêt rapidement.
+            with self._autopilot_lock:
+                if self._autopilot_state.get("stop_requested"):
+                    raise _AutopilotStopped()
             if isinstance(msg, dict):
                 self._push_event(msg)
                 # Si l'evenement porte aussi un message lisible, on log
@@ -5407,6 +5426,19 @@ class Api:
                 )
                 with self._autopilot_lock:
                     self._autopilot_state["stats"] = asdict(stats)
+            except _AutopilotStopped:
+                # Arrêt demandé via le bouton Stop : on note dans le log sans
+                # passer par _push_log (qui re-leverait l'exception).
+                from datetime import datetime
+                line = (
+                    f"[{datetime.now().strftime('%H:%M:%S')}] "
+                    f"⏹ Run arrêté à la demande de l'utilisateur."
+                )
+                with self._autopilot_lock:
+                    self._autopilot_state["log"].append(line)
+                    self._autopilot_state["error"] = (
+                        "Arrêté à la demande de l'utilisateur."
+                    )
             except Exception as exc:
                 logger.exception("autopilot_run a échoué")
                 _push_log(f"✗ Pipeline a échoué : {exc}")
@@ -5415,6 +5447,7 @@ class Api:
             finally:
                 with self._autopilot_lock:
                     self._autopilot_state["running"] = False
+                    self._autopilot_state["stop_requested"] = False
                     self._autopilot_state["finished_at"] = (
                         datetime.now().isoformat(timespec="seconds")
                     )
@@ -5447,7 +5480,17 @@ class Api:
                 "stages":            copy.deepcopy(self._autopilot_state["stages"]),
                 "current_activity":  self._autopilot_state["current_activity"],
                 "touched_prospects": list(self._autopilot_state["touched_prospects"]),
+                "stop_requested":    bool(self._autopilot_state.get("stop_requested")),
             }
+
+    def autopilot_stop(self, payload: dict | None = None) -> dict:
+        """Demande l'arrêt du run en cours. Le pipeline lèvera _AutopilotStopped
+        à la prochaine émission de log (typiquement < 1s)."""
+        with self._autopilot_lock:
+            if not self._autopilot_state.get("running"):
+                return {"ok": False, "error": "Aucun run en cours."}
+            self._autopilot_state["stop_requested"] = True
+        return {"ok": True}
 
     # ------------------------------------------------------------------
     # Tableau de commande Auto-pilote v2 — compteurs des 5 maillons
