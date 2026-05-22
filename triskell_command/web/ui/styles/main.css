@@ -670,6 +670,74 @@ html, body {
   transform: scale(1.15);
 }
 
+/* ─── Picker émoji (insertion dans le message en cours) ─── */
+.thomas-emoji-popover {
+  position: fixed;
+  z-index: 90;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  background: hsl(var(--surface));
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  animation: thomas-picker-pop 0.12s ease-out;
+}
+.thomas-emoji-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--bg-secondary));
+  overflow-x: auto;
+}
+.thomas-emoji-tab {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--text-muted));
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.thomas-emoji-tab:hover {
+  background: hsl(var(--bg));
+  color: hsl(var(--text));
+}
+.thomas-emoji-tab.is-active {
+  background: hsl(var(--accent));
+  color: white;
+}
+.thomas-emoji-panes {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 8px;
+}
+.thomas-emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+.thomas-emoji-cell {
+  width: 100%;
+  aspect-ratio: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 20px;
+  line-height: 1;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.1s ease, transform 0.1s ease;
+}
+.thomas-emoji-cell:hover {
+  background: hsl(var(--bg-secondary));
+  transform: scale(1.15);
+}
+
 /* ─── Modale picker GIF (Giphy) ─── */
 .thomas-gif-overlay {
   position: fixed;

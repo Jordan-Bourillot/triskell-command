@@ -111,6 +111,10 @@ const Thomas = {
     const gifBtn = document.getElementById('thomas-gif-btn');
     if (gifBtn) gifBtn.addEventListener('click', () => this._openGifPicker());
 
+    // Bouton emoji : ouvre le picker d'émojis à insérer dans le message
+    const emojiBtn = document.getElementById('thomas-emoji-btn');
+    if (emojiBtn) emojiBtn.addEventListener('click', () => this._openEmojiPicker(emojiBtn));
+
     // Lightbox : clic sur fond ou bouton × ferme
     const lightbox = document.getElementById('thomas-lightbox');
     const lightboxClose = document.getElementById('thomas-lightbox-close');
@@ -793,6 +797,110 @@ const Thomas = {
     } catch (e) {
       console.warn('toggleReaction:', e);
     }
+  },
+
+  // ───────────────────────── Picker émoji (insertion message) ─────────────────────────
+  /** Catégories d'émojis pour le picker (insertion dans le message en
+   *  cours). Sélection volontairement courte pour rester lisible. */
+  _emojiCategories: [
+    { name: 'Smileys', emojis: ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😋','😜','🤪','😎','🤓','🥳','🤗','🤔','😐','😏','😒','🙄','😴','🤤','🥱','😪','😌','😔','😢','😭','😤','😠','😡','🤯','😱','😨','😰','😥','🤐','🤫','🤥','🤒','🤧','🥵','🥶'] },
+    { name: 'Gestes', emojis: ['👍','👎','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','👇','☝️','✋','🤚','🖐️','🖖','👋','🤝','🙏','💪','🫶','🤲','👏','🙌','👐','🫰'] },
+    { name: 'Cœurs', emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','💌'] },
+    { name: 'Fête', emojis: ['🎉','🎊','🥳','🎂','🍰','🎈','🎁','🎀','🪅','🎆','🎇','✨','🌟','⭐','💫','🔥','💥','🏆','🥇','🎯','🎊'] },
+    { name: 'Objets', emojis: ['💻','📱','⌨️','🖥️','🖱️','💾','📷','🎧','🔋','💡','🔧','🛠️','📌','📎','✂️','🔑','🔒','💰','💳','📅','📆','✅','❌','⚠️','❓','❗','💯','🆗','🆕'] },
+    { name: 'Café', emojis: ['☕','🍵','🍺','🍻','🥂','🍷','🍸','🍹','🥤','🍔','🍟','🍕','🌭','🥪','🌮','🍣','🍜','🍱','🥗','🍩','🍪','🍫','🍿'] },
+  ],
+
+  _openEmojiPicker(anchorEl) {
+    // Toggle : si déjà ouvert, on referme.
+    const existing = document.getElementById('thomas-emoji-popover');
+    if (existing) { this._closeEmojiPicker(); return; }
+
+    const pop = document.createElement('div');
+    pop.id = 'thomas-emoji-popover';
+    pop.className = 'thomas-emoji-popover';
+    const cats = this._emojiCategories;
+    const tabs = cats.map((c, i) => `
+      <button type="button" class="thomas-emoji-tab ${i === 0 ? 'is-active' : ''}"
+              data-cat-index="${i}">${this._escape(c.name)}</button>`).join('');
+    const grid = cats.map((c, i) => `
+      <div class="thomas-emoji-grid ${i === 0 ? '' : 'hidden'}" data-cat-pane="${i}">
+        ${c.emojis.map(e => `
+          <button type="button" class="thomas-emoji-cell"
+                  data-emoji="${this._escape(e)}"
+                  aria-label="Insérer ${this._escape(e)}">${this._escape(e)}</button>`).join('')}
+      </div>`).join('');
+    pop.innerHTML = `
+      <div class="thomas-emoji-tabs">${tabs}</div>
+      <div class="thomas-emoji-panes">${grid}</div>`;
+    document.body.appendChild(pop);
+
+    // Positionnement : au-dessus du bouton (panel plus grand que reaction picker).
+    const rect = anchorEl.getBoundingClientRect();
+    const popRect = pop.getBoundingClientRect();
+    const margin = 8;
+    let top = rect.top - popRect.height - margin;
+    if (top < 8) top = rect.bottom + margin;
+    let left = rect.left + (rect.width / 2) - (popRect.width / 2);
+    left = Math.max(8, Math.min(left, window.innerWidth - popRect.width - 8));
+    pop.style.top = `${top}px`;
+    pop.style.left = `${left}px`;
+
+    const close = () => {
+      pop.remove();
+      document.removeEventListener('click', onDocClick, true);
+      window.removeEventListener('keydown', onEsc, true);
+    };
+    const onDocClick = (e) => {
+      if (!pop.contains(e.target) && e.target !== anchorEl) close();
+    };
+    const onEsc = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); close(); }
+    };
+    setTimeout(() => {
+      document.addEventListener('click', onDocClick, true);
+      window.addEventListener('keydown', onEsc, true);
+    }, 0);
+
+    // Bascule entre catégories
+    pop.querySelectorAll('.thomas-emoji-tab').forEach(tab => {
+      tab.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = tab.getAttribute('data-cat-index');
+        pop.querySelectorAll('.thomas-emoji-tab').forEach(t =>
+          t.classList.toggle('is-active', t === tab));
+        pop.querySelectorAll('[data-cat-pane]').forEach(p =>
+          p.classList.toggle('hidden', p.getAttribute('data-cat-pane') !== idx));
+      });
+    });
+
+    // Clic sur un émoji → insertion dans l'input
+    pop.querySelectorAll('.thomas-emoji-cell').forEach(cell => {
+      cell.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._insertEmoji(cell.getAttribute('data-emoji') || '');
+      });
+    });
+  },
+
+  _closeEmojiPicker() {
+    const pop = document.getElementById('thomas-emoji-popover');
+    if (pop) pop.remove();
+  },
+
+  /** Insère l'émoji à la position du curseur (ou en fin de texte). */
+  _insertEmoji(emoji) {
+    const input = document.getElementById('thomas-input');
+    if (!input || !emoji) return;
+    const start = (typeof input.selectionStart === 'number') ? input.selectionStart : input.value.length;
+    const end   = (typeof input.selectionEnd === 'number')   ? input.selectionEnd   : input.value.length;
+    const before = input.value.slice(0, start);
+    const after  = input.value.slice(end);
+    input.value = before + emoji + after;
+    const newPos = start + emoji.length;
+    try { input.setSelectionRange(newPos, newPos); } catch (e) {}
+    input.focus();
+    this.notifyTyping();
   },
 
   // ───────────────────────── Picker GIF (Giphy) ─────────────────────────
