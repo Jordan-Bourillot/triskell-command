@@ -463,24 +463,46 @@ const Autopilot = {
     const message  = (info && info.message) || '';
     const count    = (info && info.count) || 0;
 
+    // Cas spécial étape 5 (Envoie) en mode manuel : si le run a posé des
+    // brouillons à valider, on ne veut PAS d'un visuel "fini, tout va bien"
+    // (vert + coche) — sinon Jordan croit que les mails sont partis. On
+    // bascule sur un visuel "à valider" (orange + horloge).
+    const stageDef = this._STAGES.find(s => s.key === stageKey);
+    const stageMode = stageDef ? this._getStageMode(stageDef) : 'auto';
+    const needsReview = (
+      stageKey === 'send' &&
+      state === 'done' &&
+      stageMode === 'manual' &&
+      count > 0 &&
+      /brouillon/i.test(message)
+    );
+
     // Bandeau de couleur en haut de carte
     const bar = el.querySelector('.ap-stage-statusbar');
     if (bar) {
-      bar.classList.remove('bg-border', 'bg-accent', 'bg-success', 'bg-danger');
-      bar.classList.add({
+      bar.classList.remove('bg-border', 'bg-accent', 'bg-success', 'bg-danger', 'bg-warning');
+      let barCls = {
         idle:    'bg-border',
         running: 'bg-accent',
         done:    'bg-success',
         error:   'bg-danger',
-      }[state] || 'bg-border');
+      }[state] || 'bg-border';
+      if (needsReview) barCls = 'bg-warning';
+      bar.classList.add(barCls);
     }
 
-    // Petit indicateur à côté du titre (spinner / check / croix)
+    // Petit indicateur à côté du titre (spinner / check / croix / horloge)
     const icon = el.querySelector('.ap-stage-state-icon');
     if (icon) {
       if (state === 'running') {
         icon.innerHTML = `<span class="inline-block w-4 h-4 rounded-full
           border-2 border-accent/30 border-t-accent animate-spin"></span>`;
+      } else if (needsReview) {
+        // Horloge orange : "à valider", pas "fini".
+        icon.innerHTML = `<svg class="w-5 h-5 text-warning" fill="none"
+          stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 16 14"/></svg>`;
       } else if (state === 'done') {
         icon.innerHTML = `<svg class="w-5 h-5 text-success" fill="none"
           stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
@@ -507,8 +529,14 @@ const Autopilot = {
       const msgEl = el.querySelector('.ap-stage-live-message');
       const cntEl = el.querySelector('.ap-stage-live-count');
       if (msgEl) msgEl.textContent = message || '…';
+      // En mode "à valider" on remplace le texte du compteur par un appel
+      // à l'action clair, en orange, pour bien distinguer du "fini".
       if (cntEl) {
-        if (state === 'done')      cntEl.textContent = `${count} au total`;
+        cntEl.classList.remove('text-warning', 'font-semibold');
+        if (needsReview) {
+          cntEl.textContent = `${count} brouillon(s) à valider`;
+          cntEl.classList.add('text-warning', 'font-semibold');
+        } else if (state === 'done')      cntEl.textContent = `${count} au total`;
         else if (state === 'running' && count > 0) cntEl.textContent = `${count} déjà traité(s)`;
         else if (state === 'error') cntEl.textContent = 'Erreur';
         else                       cntEl.textContent = '';
@@ -1054,7 +1082,6 @@ const Autopilot = {
     const s = stats || {};
     const sent     = s.drafts_sent     || 0;
     const pending  = s.drafts_pending  || 0;
-    const replies  = s.replies_detected || 0;
     const searched = s.searched        || 0;
     const enriched = s.enriched        || 0;
     const errors   = s.errors || [];
@@ -1064,7 +1091,7 @@ const Autopilot = {
     const skippedList = touched.filter(p => p.action === 'skipped');
 
     const nothingHappened = sent === 0 && pending === 0 && searched === 0
-      && enriched === 0 && replies === 0;
+      && enriched === 0;
 
     wrap.classList.remove('hidden');
     wrap.innerHTML = `
@@ -1091,11 +1118,10 @@ const Autopilot = {
           </div>
         </div>
 
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
           ${this._kpi('Prospects ajoutés', searched, searched > 0 ? 'accent' : '')}
           ${this._kpi('Mails envoyés', sent, sent > 0 ? 'success' : '')}
           ${this._kpi('Brouillons posés', pending, pending > 0 ? 'accent' : '')}
-          ${this._kpi('Réponses reçues', replies, replies > 0 ? 'success' : '')}
         </div>
 
         ${sentList.length ? `
