@@ -183,19 +183,55 @@ def run_pipeline_with_ui_modes(cfg, progress):
     """
     from triskell_core.prospect.pipeline import run_full_pipeline
 
-    # Verifie que le produit configure est toujours actif dans le catalogue.
-    if getattr(cfg, "autopilot_product", "").strip():
-        try:
-            from .catalog_overrides import get_disabled_ids
-            disabled = {d.lower() for d in get_disabled_ids()}
-            if cfg.autopilot_product.lower() in disabled:
+    # === Auto-detection des produits ACTIFS dans le catalogue ===
+    # Jordan veut que l'autopilote pioche dans les produits actifs sans
+    # qu'il ait a les selectionner un par un. On lit catalog_central et on
+    # batit la liste combinee des templates de prospection de TOUS les
+    # produits actifs. L'IA picker pourra alors choisir le bon template
+    # (pro / creator / par produit) pour chaque prospect.
+    templates_override: list[dict] | None = None
+    try:
+        from . import catalog_central
+        from .prospection_templates import list_prospection_templates
+        full = catalog_central.get_full() or {}
+        active = [p for p in (full.get("products") or [])
+                  if p.get("is_active") and p.get("id")]
+        if active:
+            combined: list[dict] = []
+            active_labels: list[str] = []
+            for prod in active:
+                pid = str(prod.get("id") or "").strip()
+                if not pid:
+                    continue
+                tmpls_creator = list_prospection_templates(pid, "creator") or []
+                tmpls_pro     = list_prospection_templates(pid, "pro") or []
+                tmpls_any     = []
+                if not tmpls_creator and not tmpls_pro:
+                    tmpls_any = list_prospection_templates(pid, "") or []
+                tmpls = tmpls_creator + tmpls_pro + tmpls_any
+                # Etiquete chaque template avec son produit pour aider l'IA
+                for t in tmpls:
+                    t = dict(t)
+                    t["product"] = pid
+                    t["product_label"] = prod.get("label") or pid
+                    combined.append(t)
+                if tmpls:
+                    active_labels.append(f"{prod.get('label') or pid} ({len(tmpls)})")
+            if combined:
+                templates_override = combined
                 progress(
-                    f"[WARN] produit '{cfg.autopilot_product}' desactive "
-                    f"dans le catalogue -> fallback IA libre pour ce run."
+                    f"Catalogue : {len(active)} produit(s) actif(s), "
+                    f"{len(combined)} template(s) total ({', '.join(active_labels)})."
                 )
-                cfg.autopilot_product = ""
-        except Exception as exc:
-            logger.debug("catalog check KO: %s", exc)
+            else:
+                progress(
+                    f"Catalogue : {len(active)} produit(s) actif(s) mais aucun "
+                    f"template prospection trouve -> generation libre IA."
+                )
+    except Exception as exc:
+        logger.debug("catalog auto-detect KO: %s", exc)
+        progress(f"[WARN] auto-detection produits actifs KO ({exc}) -> "
+                 f"fallback sur cfg.autopilot_product manuel.")
 
     # Lit les modes UI Auto/Manuel par maillon (poses par le tableau de
     # commande) et applique-les au pipeline.
@@ -238,6 +274,7 @@ def run_pipeline_with_ui_modes(cfg, progress):
         do_enrich=do_enrich,
         do_send=do_send_stage,
         sender_pool_smtp=sender_pool_smtp,
+        templates_override=templates_override,
     )
 
 
