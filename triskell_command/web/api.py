@@ -859,6 +859,88 @@ class Api:
             "errors": errors,
         }
 
+    def cleanup_broken_drafts(self, payload: dict | None = None) -> dict:
+        """Supprime les drafts pending dont le corps ressemble a un refus IA
+        (meta-analyse au lieu d'un mail : 'PROBLEME MAJEUR', 'Je ne peux pas
+        rediger', 'Contradiction directe dans les consignes', etc.).
+
+        Couvre les 3 sources :
+          - Supabase prospect_drafts
+          - Supabase convoy_drafts
+          - CRM JSON local (prospect.pending_drafts)
+        """
+        try:
+            from triskell_core.prospect.pipeline import _looks_like_ai_refusal
+        except Exception as exc:
+            return {"ok": False, "error": f"detection indispo : {exc}"}
+
+        deleted = {"prospect_drafts": 0, "convoy_drafts": 0, "local": 0}
+        errors: list[str] = []
+
+        # === Supabase ===
+        client = self._supabase_client_or_none()
+        if client is not None:
+            sb = client.raw
+            for table in ("prospect_drafts", "convoy_drafts"):
+                try:
+                    page_size = 500
+                    offset = 0
+                    broken_ids: list[str] = []
+                    while True:
+                        res = (sb.table(table).select("id, subject, body")
+                                .eq("status", "pending")
+                                .range(offset, offset + page_size - 1).execute())
+                        data = res.data or []
+                        if not data:
+                            break
+                        for r in data:
+                            body = (r.get("body") or "").strip()
+                            if body and _looks_like_ai_refusal(body):
+                                broken_ids.append(r["id"])
+                        if len(data) < page_size:
+                            break
+                        offset += page_size
+                        if offset > 50000:
+                            break
+                    for i in range(0, len(broken_ids), 100):
+                        batch = broken_ids[i:i + 100]
+                        sb.table(table).delete().in_("id", batch).execute()
+                    deleted[table] = len(broken_ids)
+                except Exception as exc:
+                    errors.append(f"{table}: {exc}")
+
+        # === CRM local ===
+        try:
+            from triskell_core.prospect.core.crm import CRM
+            crm = CRM()
+            n_local = 0
+            for p in crm.all():
+                if not p.pending_drafts:
+                    continue
+                kept = []
+                for d in p.pending_drafts:
+                    body = (d.get("body") or "").strip()
+                    if body and _looks_like_ai_refusal(body):
+                        n_local += 1
+                    else:
+                        kept.append(d)
+                if len(kept) != len(p.pending_drafts):
+                    p.pending_drafts = kept
+                    crm._dirty = True  # noqa: SLF001
+            if crm._dirty:  # noqa: SLF001
+                crm.save()
+            deleted["local"] = n_local
+        except Exception as exc:
+            errors.append(f"local: {exc}")
+
+        total = deleted["prospect_drafts"] + deleted["convoy_drafts"] + deleted["local"]
+        return {
+            "ok": not errors,
+            "deleted": deleted,
+            "total": total,
+            "errors": errors,
+        }
+
     # ----- reject Supabase ---------------------------------------------
     def _reject_supabase_draft(self, table: str, draft_id: str) -> dict:
         if not draft_id:

@@ -896,7 +896,13 @@ const Autopilot = {
             Mails préparés en mode validation. Tu approuves pour envoyer, tu rejettes pour supprimer.
           </div>
         </div>
-        <button id="ap-d-refresh" class="btn btn-secondary">Rafraîchir</button>
+        <div class="flex gap-2 flex-wrap">
+          <button id="ap-d-cleanup-broken" class="btn btn-secondary"
+                  title="Supprime les brouillons où l'IA a refusé d'écrire (méta-blabla au lieu d'un mail).">
+            Vider les brouillons cassés
+          </button>
+          <button id="ap-d-refresh" class="btn btn-secondary">Rafraîchir</button>
+        </div>
       </div>
       <div class="space-y-3">${cards}</div>
     `;
@@ -904,12 +910,41 @@ const Autopilot = {
     // Bind boutons
     const refresh = document.getElementById('ap-d-refresh');
     if (refresh) refresh.onclick = () => this._refreshDraftsList();
+    const cleanup = document.getElementById('ap-d-cleanup-broken');
+    if (cleanup) cleanup.onclick = () => this._cleanupBrokenDrafts();
     wrap.querySelectorAll('.ap-d-approve').forEach(btn => {
       btn.onclick = () => this._draftAction(rows[parseInt(btn.dataset.idx, 10)], 'approve');
     });
     wrap.querySelectorAll('.ap-d-reject').forEach(btn => {
       btn.onclick = () => this._draftAction(rows[parseInt(btn.dataset.idx, 10)], 'reject');
     });
+  },
+
+  async _cleanupBrokenDrafts() {
+    if (!App.api || !App.api.cleanup_broken_drafts) return;
+    const ok = confirm(
+      "Supprimer tous les brouillons où l'IA a refusé d'écrire "
+      + "(« Je ne peux pas rédiger… », « PROBLÈME MAJEUR… ») ?\n\n"
+      + "Les vrais brouillons (avec un mail bien rédigé) ne sont pas touchés."
+    );
+    if (!ok) return;
+    const btn = document.getElementById('ap-d-cleanup-broken');
+    if (btn) { btn.disabled = true; btn.textContent = 'Nettoyage…'; }
+    let r;
+    try { r = await App.api.cleanup_broken_drafts(); }
+    catch (e) {
+      alert('Erreur : ' + String(e));
+      if (btn) { btn.disabled = false; btn.textContent = 'Vider les brouillons cassés'; }
+      return;
+    }
+    if (btn) { btn.disabled = false; btn.textContent = 'Vider les brouillons cassés'; }
+    if (r && r.ok) {
+      alert(`${r.total} brouillon(s) cassé(s) supprimé(s).`);
+    } else {
+      alert('Nettoyage partiel. Erreurs : ' + ((r && r.errors) || []).join(' ; '));
+    }
+    await this._refreshDraftsList();
+    await this._refreshDraftsCount();
   },
 
   async _draftAction(draft, action) {
