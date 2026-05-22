@@ -696,6 +696,8 @@ const Morning = {
           tag: sentT > 0 ? 'LIVE' : null,
           delta: `<strong>${sentY}</strong> hier · <strong>${sentW}</strong> sur 7 jours`,
           spark: daily,
+          onClick: `App.show('mails')`,
+          hint: 'Voir la boîte d’envoi',
         })}
         ${this._kpi({
           label: 'Réponses aujourd\'hui',
@@ -703,29 +705,39 @@ const Morning = {
           tag: repT > 0 ? 'LIVE' : null,
           delta: `<strong>${repY}</strong> hier · taux ${sentY ? Math.round(100*repY/sentY) : 0} %`,
           tone: repT > 0 ? 'success' : '',
+          onClick: `if(window.Replies){Replies.filter='all';} App.show('replies')`,
+          hint: 'Voir toutes les réponses',
         })}
         ${this._kpi({
           label: 'Intéressés en file',
           value: nInt,
           delta: nInt === 0 ? 'rien à relancer là tout de suite' : 'à recontacter — chaud',
           tone: nInt > 0 ? 'success' : '',
+          onClick: `if(window.Replies){Replies.filter='interested';} App.show('replies')`,
+          hint: 'Voir les prospects intéressés',
         })}
         ${this._kpi({
           label: 'Brouillons à valider',
           value: nDrafts,
           delta: nDrafts === 0 ? 'inbox vide' : 'prêts à approuver',
           tone: nDrafts > 0 ? 'accent' : '',
+          onClick: `App.show('drafts')`,
+          hint: 'Voir les brouillons',
         })}
       </div>
     `;
   },
 
-  _kpi({ label, value, tag, delta, tone, spark }) {
+  _kpi({ label, value, tag, delta, tone, spark, onClick, hint }) {
     const toneCls = tone ? `tone-${tone}` : '';
+    const clickCls = onClick ? 'is-clickable' : '';
     const tagHtml = tag ? `<span class="cockpit-kpi-tag live">${tag}</span>` : '';
     const sparkHtml = (spark && spark.length) ? this._sparkline(spark) : '';
+    const clickAttrs = onClick
+      ? `role="button" tabindex="0" title="${hint || ''}" onclick="${onClick}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${onClick}}"`
+      : '';
     return `
-      <div class="cockpit-kpi ${toneCls}">
+      <div class="cockpit-kpi ${toneCls} ${clickCls}" ${clickAttrs}>
         <div class="cockpit-kpi-head">
           <span class="cockpit-kpi-label">${label}</span>
           ${tagHtml}
@@ -733,6 +745,7 @@ const Morning = {
         <div class="cockpit-kpi-value">${value}</div>
         ${delta ? `<div class="cockpit-kpi-delta">${delta}</div>` : ''}
         ${sparkHtml}
+        ${onClick ? `<span class="cockpit-kpi-arrow" aria-hidden="true">→</span>` : ''}
       </div>
     `;
   },

@@ -31,7 +31,6 @@ const CatchUp = {
    *  swallow errors si une API n'est pas dispo. */
   async _collectNews(sinceTs) {
     const news = {
-      replies_interested: 0,
       drafts_pending:     0,
       new_mails_received: 0,
       since_human:        this._humanDelta(sinceTs),
@@ -47,18 +46,6 @@ const CatchUp = {
             const t = new Date(m.ts).getTime();
             return t > sinceTs;
           } catch (e) { return false; }
-        }).length;
-      }
-    } catch (e) {}
-
-    // Réponses prospects "intéressés" en attente (snapshot total, on
-    // n'a pas un champ "since" granulaire)
-    try {
-      const r = await App.api.get_replies({ category: 'interested' });
-      if (r && r.ok && Array.isArray(r.rows)) {
-        news.replies_interested = r.rows.filter(row => {
-          const handled = row.extra && row.extra.handled;
-          return !handled;
         }).length;
       }
     } catch (e) {}
@@ -89,13 +76,6 @@ const CatchUp = {
   _showToast(news) {
     if (document.getElementById('catchup-toast')) return;
     const items = [];
-    if (news.replies_interested > 0) {
-      items.push({
-        icon: '💚',
-        label: `${news.replies_interested} prospect${news.replies_interested > 1 ? 's' : ''} intéressé${news.replies_interested > 1 ? 's' : ''} à recontacter`,
-        view: 'replies',
-      });
-    }
     if (news.new_mails_received > 0) {
       items.push({
         icon: '↙',

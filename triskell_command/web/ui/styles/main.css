@@ -874,10 +874,36 @@ html, body {
   overflow: hidden;
   transition: all 200ms ease;
 }
+.cockpit-kpi.is-clickable {
+  cursor: pointer;
+  user-select: none;
+}
+.cockpit-kpi.is-clickable:focus-visible {
+  outline: 2px solid hsl(var(--accent));
+  outline-offset: 2px;
+}
 .cockpit-kpi:hover {
   border-color: hsl(var(--accent) / 0.6);
   transform: translateY(-2px);
   box-shadow: 0 8px 24px hsl(var(--accent) / 0.08);
+}
+.cockpit-kpi-arrow {
+  position: absolute;
+  bottom: 14px;
+  right: 16px;
+  font-size: 16px;
+  line-height: 1;
+  color: hsl(var(--text-muted));
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 180ms ease, transform 180ms ease, color 180ms ease;
+  pointer-events: none;
+}
+.cockpit-kpi.is-clickable .cockpit-kpi-arrow { opacity: 0.55; }
+.cockpit-kpi.is-clickable:hover .cockpit-kpi-arrow {
+  opacity: 1;
+  transform: translateX(0);
+  color: hsl(var(--accent));
 }
 .cockpit-kpi-head {
   display: flex;

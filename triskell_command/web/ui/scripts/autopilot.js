@@ -1,8 +1,7 @@
-/* Vue Auto-pilote — décris ta cible une fois, l'app fait tout.
+/* Vue Auto-pilote — l'IA rédige et envoie les mails toute seule.
  *
- * Branche le pipeline complet de Triskell Core (search → enrich → IA →
- * envoi → suivi) sur une UI web claire, sans jargon. Les libellés
- * parlent à un humain, pas à un dev.
+ * La partie « recherche de prospects » a été déplacée vers L'Éclaireur.
+ * Cette vue ne pilote plus que la rédaction IA et l'envoi.
  */
 
 const Autopilot = {
@@ -17,8 +16,8 @@ const Autopilot = {
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <div class="hero-kicker mb-2">AUTO-PILOTE</div>
-              <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Décris ta cible une fois.</h1>
-              <p class="hero-subtitle">L'app cherche, vérifie, rédige et envoie — pendant que tu fais autre chose.</p>
+              <h1 class="hero-title hero-title--md mb-2 sm:mb-3">L'IA écrit et envoie.</h1>
+              <p class="hero-subtitle">Pour chaque prospect de ta base, l'IA rédige un mail unique et l'envoie — pendant que tu fais autre chose.</p>
             </div>
             ${Help.button('autopilot')}
           </div>
@@ -87,97 +86,6 @@ const Autopilot = {
           'Si activé, le pipeline tourne tout seul vers 3h du matin.')}
         `)}
 
-      ${this._section('Où trouver les prospects ?',
-        'Sirene = entreprises françaises (gratuit). Google Maps = commerces locaux ' +
-        '(clé Google requise). Obelisk = créateurs/vendeurs déjà repérés sur les ' +
-        'réseaux (déposés dans la base partagée Triskell). Aucune = pas de recherche auto.',
-        `
-        ${this._select('Base de données', 'source', c.source || 'sirene', [
-          ['sirene',  'Sirene — entreprises françaises (gratuit)'],
-          ['maps',    'Google Maps — commerces locaux (clé requise)'],
-          ['obelisk', 'Obelisk — créateurs et vendeurs sur les réseaux'],
-          ['none',    'Aucune (utilise mes prospects existants)'],
-        ])}
-        <div data-show-when="source=sirene" class="space-y-3 pt-2">
-          ${this._input('Code activité (NAF)',  'sirene_naf', c.sirene_naf || '',
-            'ex : 43.21A pour électricien')}
-          ${this._input('Département',          'sirene_departement', c.sirene_departement || '',
-            'ex : 35 pour Ille-et-Vilaine')}
-          ${this._input('Code postal',          'sirene_code_postal', c.sirene_code_postal || '')}
-          ${this._input('Mot-clé dans le nom',  'sirene_query', c.sirene_query || '')}
-          ${this._input('Taille de l\'entreprise', 'sirene_effectif', c.sirene_effectif || '00',
-            '00 = sans salarié, 01 = 1-2 salariés…')}
-          ${this._input('Créées depuis (AAAA-MM-JJ)', 'sirene_min_date_creation',
-            c.sirene_min_date_creation || '',
-            'vide = toutes ; ex : 2024-01-01 = uniquement les récentes')}
-        </div>
-        <div data-show-when="source=maps" class="space-y-3 pt-2">
-          ${this._input('Recherche libre',      'maps_query', c.maps_query || '',
-            'ex : « boulangerie Rennes »')}
-          ${this._input('Latitude',             'maps_lat', c.maps_lat ?? '')}
-          ${this._input('Longitude',            'maps_lng', c.maps_lng ?? '')}
-          ${this._input('Rayon (mètres)',       'maps_radius_m', String(c.maps_radius_m ?? 50000))}
-        </div>
-        <div data-show-when="source=obelisk" class="space-y-3 pt-2">
-          <div class="text-xs text-text-muted bg-bg/50 border border-border rounded-lg p-3">
-            Obelisk a déjà déposé ses créateurs/vendeurs dans la base partagée.
-            On les filtre ci-dessous, on les enrichit (email/site), puis l'IA leur écrit.
-          </div>
-          ${this._select('Plateforme', 'obelisk_platform', c.obelisk_platform || '', [
-            ['',          'Toutes les plateformes'],
-            ['youtube',   'YouTube'],
-            ['tiktok',    'TikTok'],
-            ['instagram', 'Instagram'],
-            ['twitch',    'Twitch'],
-            ['reddit',    'Reddit'],
-            ['bluesky',   'Bluesky'],
-            ['mastodon',  'Mastodon'],
-            ['kick',      'Kick'],
-            ['github',    'GitHub'],
-            ['dailymotion', 'Dailymotion'],
-            ['apple_podcasts', 'Apple Podcasts'],
-          ])}
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            ${this._input('Audience minimum (abonnés)', 'obelisk_min_subscribers',
-              String(c.obelisk_min_subscribers || 0), '0 = pas de plancher')}
-            ${this._input('Audience maximum (abonnés)', 'obelisk_max_subscribers',
-              String(c.obelisk_max_subscribers || 0), '0 = pas de plafond')}
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            ${this._input('Pays (code ISO)', 'obelisk_country', c.obelisk_country || '',
-              'ex : FR')}
-            ${this._input('Langue (code ISO)', 'obelisk_language', c.obelisk_language || '',
-              'ex : fr')}
-          </div>
-          ${this._toggle('Uniquement ceux avec un email connu',
-            'obelisk_only_with_email', !!c.obelisk_only_with_email,
-            'Sinon, l\'enrichissement essaiera de trouver l\'email à partir du site web.')}
-          ${this._toggle('Uniquement ceux pas encore contactés',
-            'obelisk_only_uncontacted', c.obelisk_only_uncontacted !== false,
-            'Évite de recontacter quelqu\'un déjà sollicité.')}
-          ${this._toggle('Uniquement les profils détectés monétisés',
-            'obelisk_monetized_only', !!c.obelisk_monetized_only,
-            'Affiliés, sponsors, boutique en ligne… plus probable d\'être réceptifs.')}
-        </div>
-        <div class="pt-2">
-          ${this._input('Nombre max de prospects par recherche', 'search_max_results',
-            String(c.search_max_results ?? 50))}
-        </div>
-        `)}
-
-      ${this._section('Recherche d\'emails et téléphones',
-        'L\'app visite le site web de chaque prospect, en extrait email et téléphone, ' +
-        'et vérifie que le site correspond bien à l\'entreprise.',
-        `
-        ${this._toggle('Détecter automatiquement le site web quand il est inconnu',
-          'enrich_with_footprint', c.enrich_with_footprint !== false,
-          'Essaie nom-entreprise.fr, .com, etc.')}
-        ${this._toggle('Ne traiter que les prospects sans email connu',
-          'enrich_no_emails_only', c.enrich_no_emails_only !== false)}
-        ${this._input('Nombre max de prospects à enrichir par run', 'enrich_max',
-          String(c.enrich_max ?? 100))}
-        `)}
-
       ${this._section('Rédaction des mails par l\'IA',
         'Pour chaque prospect, l\'IA reçoit son contexte (nom, ville, secteur, site web) ' +
         'et tes instructions, puis rédige un mail unique. Pas de copier-coller.',
@@ -204,26 +112,12 @@ const Autopilot = {
           String(c.follow_up_days ?? 5))}
         `)}
     `;
-    this._bindShowWhen();
   },
 
   // ------------------------------------------------------------------
-  // Bindings dynamiques (afficher/masquer selon source choisie)
-  _bindShowWhen() {
-    const apply = () => {
-      const src = (document.querySelector('[data-key="source"]') || {}).value || '';
-      document.querySelectorAll('[data-show-when]').forEach(el => {
-        const cond = el.dataset.showWhen;  // ex: "source=sirene"
-        const [k, v] = cond.split('=');
-        el.style.display = (k === 'source' && v === src) ? '' : 'none';
-      });
-    };
-    const sel = document.querySelector('[data-key="source"]');
-    if (sel) sel.addEventListener('change', apply);
-    apply();
-  },
-
-  // ------------------------------------------------------------------
+  // Récupère uniquement les champs envoi+IA. On fusionne avec la config
+  // existante pour préserver les champs recherche/enrichissement gérés
+  // désormais par L'Éclaireur.
   _gather() {
     const v = (k) => {
       const el = document.querySelector(`[data-key="${k}"]`);
@@ -231,41 +125,14 @@ const Autopilot = {
       if (el.type === 'checkbox') return !!el.checked;
       return el.value;
     };
-    const num = (k, d) => {
-      const x = parseFloat(v(k));
-      return Number.isFinite(x) ? x : d;
-    };
     const numI = (k, d) => {
       const x = parseInt(v(k), 10);
       return Number.isFinite(x) ? x : d;
     };
     return {
+      ...(this.cfg || {}),
       enabled: !!v('enabled'),
       mode:    v('mode') || 'validation',
-      source:  v('source') || 'sirene',
-      sirene_naf:               v('sirene_naf'),
-      sirene_departement:       v('sirene_departement'),
-      sirene_code_postal:       v('sirene_code_postal'),
-      sirene_query:             v('sirene_query'),
-      sirene_effectif:          v('sirene_effectif') || '00',
-      sirene_min_date_creation: v('sirene_min_date_creation'),
-      maps_query:    v('maps_query'),
-      maps_lat:      v('maps_lat')  === '' ? null : num('maps_lat', null),
-      maps_lng:      v('maps_lng')  === '' ? null : num('maps_lng', null),
-      maps_radius_m: numI('maps_radius_m', 50000),
-      search_max_results: numI('search_max_results', 50),
-      // Filtres Obelisk
-      obelisk_platform:        v('obelisk_platform') || '',
-      obelisk_min_subscribers: numI('obelisk_min_subscribers', 0),
-      obelisk_max_subscribers: numI('obelisk_max_subscribers', 0),
-      obelisk_country:         v('obelisk_country') || '',
-      obelisk_language:        v('obelisk_language') || '',
-      obelisk_only_with_email:  !!v('obelisk_only_with_email'),
-      obelisk_only_uncontacted: !!v('obelisk_only_uncontacted'),
-      obelisk_monetized_only:   !!v('obelisk_monetized_only'),
-      enrich_with_footprint:  !!v('enrich_with_footprint'),
-      enrich_no_emails_only:  !!v('enrich_no_emails_only'),
-      enrich_max:             numI('enrich_max', 100),
       ai_provider:        v('ai_provider') || 'google',
       ai_model:           v('ai_model') || 'gemini-2.5-flash',
       ai_mega_prompts:    v('ai_mega_prompts_csv').split(',').map(s => s.trim()).filter(Boolean),
@@ -283,6 +150,7 @@ const Autopilot = {
     btn.disabled = true; btn.textContent = 'Enregistrement…';
     try {
       const r = await App.api.autopilot_save_config({ config });
+      if (r && r.ok) this.cfg = config;
       btn.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
     } catch (e) { btn.textContent = 'Erreur'; }
     setTimeout(() => { btn.disabled = false; btn.textContent = 'Enregistrer'; }, 1600);
@@ -298,7 +166,7 @@ const Autopilot = {
     document.getElementById('ap-stats').classList.add('hidden');
     this.logSeen = 0;
     try {
-      const r = await App.api.autopilot_run({ config });
+      const r = await App.api.autopilot_run({ config, stages: ['imap', 'send', 'follow_up'] });
       if (!r || !r.ok) {
         this._appendLog((r && r.error) || 'Lancement impossible.');
         this._stopRun();
@@ -365,8 +233,6 @@ const Autopilot = {
     wrap.classList.remove('hidden');
     wrap.innerHTML = `
       <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-        ${this._kpi('Prospects trouvés', s.searched ?? 0)}
-        ${this._kpi('Enrichis (email/tel)', s.enriched ?? 0)}
         ${this._kpi('Mails envoyés', s.drafts_sent ?? 0, 'success')}
         ${this._kpi('Brouillons à valider', s.drafts_pending ?? 0,
           (s.drafts_pending > 0) ? 'accent' : '')}

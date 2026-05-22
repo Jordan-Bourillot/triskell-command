@@ -4919,8 +4919,14 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     def autopilot_run(self, payload: dict | None = None) -> dict:
-        """Lance le pipeline complet en arrière-plan. Retourne immédiatement.
-        Le front polle ensuite autopilot_status() pour le log + stats."""
+        """Lance le pipeline en arrière-plan. Retourne immédiatement.
+        Le front polle ensuite autopilot_status() pour le log + stats.
+
+        payload.stages : liste optionnelle parmi
+        ['imap','search','enrich','send','follow_up']. Si absent, tout tourne.
+        L'Éclaireur passe ['search','enrich'] ; l'Auto-pilote passe
+        ['imap','send','follow_up'].
+        """
         # Refuse si un run est déjà en cours
         with self._autopilot_lock:
             if self._autopilot_state.get("running"):
@@ -4945,6 +4951,13 @@ class Api:
                     self._autopilot_state["error"] = r.get("error", "")
                 return r
 
+        # Sélection des étapes (None = toutes)
+        stages_in = (payload or {}).get("stages") if isinstance(payload, dict) else None
+        if stages_in is None:
+            stages = {"imap", "search", "enrich", "send", "follow_up"}
+        else:
+            stages = {str(s).strip().lower() for s in stages_in if s}
+
         # Sync clés API au Core (au cas où)
         self._sync_keys_to_core()
 
@@ -4965,8 +4978,19 @@ class Api:
                     PipelineConfig, run_full_pipeline,
                 )
                 cfg = PipelineConfig.load()
-                _push_log(f"Lancement du pipeline (mode {cfg.mode})…")
-                stats = run_full_pipeline(cfg, progress=_push_log)
+                _push_log(
+                    "Lancement : " + ", ".join(sorted(stages))
+                    + f" (mode {cfg.mode})…"
+                )
+                stats = run_full_pipeline(
+                    cfg,
+                    progress=_push_log,
+                    poll_imap=("imap" in stages),
+                    do_search=("search" in stages),
+                    do_enrich=("enrich" in stages),
+                    do_send=("send" in stages),
+                    do_follow_up=("follow_up" in stages),
+                )
                 _push_log(
                     f"=== Fin === {stats.searched} trouvés, "
                     f"{stats.enriched} enrichis, {stats.drafts_sent} envoyés, "

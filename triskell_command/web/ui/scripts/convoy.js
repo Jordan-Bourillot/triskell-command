@@ -120,8 +120,8 @@ const Convoy = {
         <div class="mb-6 sm:mb-8">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
-              <div class="hero-kicker mb-2">IMPORTER UNE LISTE</div>
-              <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Importer une liste.</h1>
+              <div class="hero-kicker mb-2">LE CONVOI</div>
+              <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Le Convoi.</h1>
               <p class="hero-subtitle">
                 Glisse un PDF, Word, Excel ou image avec tes contacts.
                 L'app les extrait, adapte tes offres à chacun, et prépare les mails.
@@ -1687,7 +1687,7 @@ const Convoy = {
 
   _toast(msg, kind = 'info') {
     if (typeof HealthCheck !== 'undefined' && HealthCheck.toast) {
-      HealthCheck.toast('Importer une liste', msg, kind === 'danger' ? 'error' : kind);
+      HealthCheck.toast('Le Convoi', msg, kind === 'danger' ? 'error' : kind);
       return;
     }
     // Fallback minimal
