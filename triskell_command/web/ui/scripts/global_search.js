@@ -27,7 +27,9 @@ const GlobalSearch = {
   // Liste statique des vues navigables (toujours dans les résultats)
   STATIC_VIEWS: [
     { view: 'morning',   label: 'Cockpit',                kind: 'view', icon: '🎛' },
-    { view: 'mails',     label: 'Mails (toutes les boîtes)', kind: 'view', icon: '✉' },
+    { view: 'mails',     label: 'Boîte de réception',       kind: 'view', icon: '✉', params: { tab: 'inbound' } },
+    { view: 'mails',     label: 'Messages envoyés',         kind: 'view', icon: '📤', params: { tab: 'sent' } },
+    { view: 'mails',     label: 'Réponses prospects (mails)', kind: 'view', icon: '↩', params: { tab: 'reply' } },
     { view: 'drafts',    label: 'Brouillons à valider',   kind: 'view', icon: '✓' },
     { view: 'replies',   label: 'Réponses prospects',     kind: 'view', icon: '💬' },
     { view: 'clients',   label: 'Projets clients',        kind: 'view', icon: '📋' },
@@ -308,7 +310,7 @@ const GlobalSearch = {
   _go(item, closeFn) {
     if (!item) return;
     if (typeof App !== 'undefined' && App.show && item.view) {
-      App.show(item.view);
+      App.show(item.view, item.params || null);
     }
     closeFn();
   },

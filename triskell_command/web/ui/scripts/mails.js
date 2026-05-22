@@ -63,7 +63,10 @@ const Mails = {
     return this._loadReadIds().has(String(id));
   },
 
-  async render(container) {
+  async render(container, params) {
+    if (params && params.tab && ['inbound', 'reply', 'sent'].includes(params.tab)) {
+      this.state.tab = params.tab;
+    }
     container.innerHTML = `
       <section class="animate-slide-up">
         <div class="mb-5 sm:mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
@@ -88,9 +91,9 @@ const Mails = {
         </div>
 
         <div class="flex gap-2 mb-4 border-b border-border">
-          <button data-mtab="inbound" class="m-tab">Boîte de réception</button>
-          <button data-mtab="reply"   class="m-tab is-active">Réponses prospects</button>
-          <button data-mtab="sent"    class="m-tab">Messages envoyés</button>
+          <button data-mtab="inbound" class="m-tab ${this.state.tab === 'inbound' ? 'is-active' : ''}">Boîte de réception</button>
+          <button data-mtab="reply"   class="m-tab ${this.state.tab === 'reply' ? 'is-active' : ''}">Réponses prospects</button>
+          <button data-mtab="sent"    class="m-tab ${this.state.tab === 'sent' ? 'is-active' : ''}">Messages envoyés</button>
         </div>
 
         <div class="flex items-center gap-3 mb-4 flex-wrap">

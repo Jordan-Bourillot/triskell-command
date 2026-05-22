@@ -186,7 +186,8 @@ const App = {
     // Bind sidebar
     document.querySelectorAll('[data-view]').forEach(btn => {
       btn.addEventListener('click', () => {
-        this.show(btn.dataset.view);
+        const params = btn.dataset.tab ? { tab: btn.dataset.tab } : null;
+        this.show(btn.dataset.view, params);
         this.closeMobileSidebar(); // ferme le drawer après navigation (mobile)
       });
     });
@@ -400,7 +401,9 @@ const App = {
     this.currentParams = params || null;
     // Active state sidebar
     document.querySelectorAll('[data-view]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.view === viewId);
+      const matchesView = btn.dataset.view === viewId;
+      const matchesTab = !btn.dataset.tab || (params && params.tab === btn.dataset.tab);
+      btn.classList.toggle('active', matchesView && matchesTab);
     });
     // Si on entre dans un pipeline surveillé, on remet son badge à 0
     if (window.PipelinesActivity && PipelinesActivity.PREFIXES.includes(viewId)) {
@@ -415,7 +418,7 @@ const App = {
     switch (viewId) {
       case 'morning':   return Morning.render(target);
       case 'replies':   return Replies.render(target);
-      case 'mails':     return Mails.render(target);
+      case 'mails':     return Mails.render(target, params);
       case 'brain':     return Brain.render(target);
       case 'drafts':    return Drafts.render(target);
       case 'funnel':    return Funnel.render(target);

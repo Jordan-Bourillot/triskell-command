@@ -249,9 +249,17 @@
         </div>
         <div>
           <div class="px-3 text-[10px] font-bold tracking-widest text-emerald-400 mb-2">BOÎTE MAIL</div>
-          <button data-view="mails" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 8l10 6 10-6"/><path d="M16 19v-3"/></svg>
-            <span>Mails (toutes les boîtes)</span>
+          <button data-view="mails" data-tab="inbound" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>
+            <span>Boîte de réception</span>
+          </button>
+          <button data-view="mails" data-tab="sent" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <span>Messages envoyés</span>
+          </button>
+          <button data-view="mails" data-tab="reply" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 00-4-4H4"/></svg>
+            <span>Réponses prospects</span>
           </button>
         </div>
         <div>
