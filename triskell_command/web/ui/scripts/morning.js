@@ -705,8 +705,8 @@ const Morning = {
           value: nInt,
           delta: nInt === 0 ? 'rien à relancer là tout de suite' : 'à recontacter — chaud',
           tone: nInt > 0 ? 'success' : '',
-          onClick: `App.show('mails', { tab: 'sent' })`,
-          hint: 'Voir les messages envoyés',
+          onClick: `if(window.Replies){Replies.filter='interested';} App.show('replies')`,
+          hint: 'Voir les prospects intéressés',
         })}
         ${this._kpi({
           label: 'Brouillons à valider',
