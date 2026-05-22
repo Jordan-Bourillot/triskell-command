@@ -244,8 +244,10 @@ const Phare = {
                     kpis.position_avg != null && kpis.position_avg <= 10 ? 'Top 10 Google' : 'Sur Google', null)}
         ${this._kpi('Santé SEO', kpis.health != null ? `${kpis.health}/100` : '—',
                     { ok: 'Bon état', warn: 'À surveiller', bad: 'À soigner',
+                      failed: 'Test Google bloqué — relance l’audit',
                       unknown: 'Pas encore audité' }[kpis.health_tone] || '—',
-                    kpis.health_tone === 'ok' ? 'good' : (kpis.health_tone === 'bad' ? 'bad' : null))}
+                    kpis.health_tone === 'ok' ? 'good'
+                      : (kpis.health_tone === 'bad' || kpis.health_tone === 'failed' ? 'bad' : null))}
       </div>
 
       <!-- Bulletin du jour si présent -->

@@ -50,6 +50,9 @@ def run_audit(site_id: str, *, app_state=None) -> dict:
     # PageSpeed sur la home
     home_url = f"https://{domain}{key_paths[0]}"
     psi = pagespeed.audit_url(home_url)
+    if not psi.get("ok"):
+        logger.warning("phare.audit %s: PageSpeed indisponible — %s",
+                       domain, psi.get("error"))
 
     # Agent Auditeur
     try:
