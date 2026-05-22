@@ -180,30 +180,45 @@ def _do_one_tick(app_state) -> None:
         return
 
     now = _now_paris()
-    # Heure de declenchement configuree (defaut 3h Paris, modifiable depuis
-    # le tableau de commande UI). Bornee [0, 23].
-    target_hour = int(getattr(cfg, "nightly_hour", DEFAULT_HOUR_PARIS) or DEFAULT_HOUR_PARIS)
-    target_hour = max(0, min(23, target_hour))
-    if now.hour != target_hour:
-        _LAST_RUN_RESULT.clear()
-        _LAST_RUN_RESULT["skipped_reason"] = (
-            f"outside_window:hour={now.hour} (target={target_hour}h)"
-        )
-        return
-
     today_iso = now.date().isoformat()
     state = _read_state()
-    if state.get("last_run_date") == today_iso:
-        _LAST_RUN_RESULT.clear()
-        _LAST_RUN_RESULT["skipped_reason"] = "already_ran_today"
-        return
 
-    # On y va : trace la tentative AVANT de lancer (anti-double si redémarrage
-    # pendant l'exécution).
+    # === Reprise automatique d'un run interrompu (ex: Coolify a redemarre
+    # pendant le run nocturne suite a un push GitHub). Le pipeline est
+    # idempotent (filet anti-doublon Supabase, etape 8.A) -- on peut le
+    # relancer sans risque de double envoi. On detecte un run interrompu
+    # par : status='started' qui n'a recu ni 'ok' ni 'failed', pour
+    # AUJOURD'HUI. Si la date est plus ancienne, c'etait pour une autre
+    # journee : on n'essaie pas de la rattraper.
+    interrupted = (
+        state.get("last_run_status") == "started"
+        and state.get("last_run_date") == today_iso
+    )
+
+    if not interrupted:
+        # Run normal : on doit etre dans la fenetre horaire configuree
+        target_hour = int(getattr(cfg, "nightly_hour", DEFAULT_HOUR_PARIS)
+                          or DEFAULT_HOUR_PARIS)
+        target_hour = max(0, min(23, target_hour))
+        if now.hour != target_hour:
+            _LAST_RUN_RESULT.clear()
+            _LAST_RUN_RESULT["skipped_reason"] = (
+                f"outside_window:hour={now.hour} (target={target_hour}h)"
+            )
+            return
+        # Pas deja run aujourd'hui ?
+        if state.get("last_run_date") == today_iso:
+            _LAST_RUN_RESULT.clear()
+            _LAST_RUN_RESULT["skipped_reason"] = "already_ran_today"
+            return
+
+    # On y va : trace la tentative AVANT de lancer (anti-double si
+    # redemarrage pendant l'execution).
     _write_state({
         "last_run_date":  today_iso,
         "last_run_at":    now.isoformat(timespec="seconds"),
         "last_run_status": "started",
+        "last_run_resumed": interrupted,
     })
 
     log_lines: list[str] = []
@@ -213,6 +228,12 @@ def _do_one_tick(app_state) -> None:
         logger.info("[autopilot_nightly] %s", msg)
 
     try:
+        if interrupted:
+            _progress(
+                "REPRISE d'un run interrompu (Coolify redemarre pendant la "
+                "nuit ?). Le pipeline est idempotent : pas de double envoi "
+                "grace au filet anti-doublon Supabase."
+            )
         # Lit les modes UI Auto/Manuel par maillon (poses par le tableau de
         # commande) et applique-les au pipeline.
         stage_modes = _read_stage_modes()
