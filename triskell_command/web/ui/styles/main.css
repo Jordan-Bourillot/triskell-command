@@ -3505,6 +3505,29 @@ html, body {
   text-decoration: none;
 }
 .phare-action-link:hover { text-decoration: underline; }
+.phare-action-archive {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: hsl(var(--text-secondary));
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+.phare-action-archive:hover {
+  opacity: 1;
+  color: hsl(var(--danger));
+  background: hsl(var(--danger) / 0.08);
+  border-color: hsl(var(--danger) / 0.3);
+}
+.phare-action-archive:disabled { opacity: 0.3; cursor: not-allowed; }
 .phare-action-foot {
   display: flex;
   justify-content: flex-end;

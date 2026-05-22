@@ -335,6 +335,9 @@ const Phare = {
               <div class="phare-action-meta">${this._esc(agentLabel)} · Appliqué le ${date || '—'}</div>
             </div>
             ${a.github_pr_url ? `<a class="phare-action-link" href="${this._esc(a.github_pr_url)}" target="_blank" rel="noopener">Voir la modif</a>` : ''}
+            <button class="phare-action-archive" data-archive="${this._esc(a.id || '')}" title="Retirer de la liste" aria-label="Retirer de la liste">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+            </button>
           </div>
         </article>`;
     }
@@ -451,6 +454,23 @@ const Phare = {
         const id = b.dataset.preview;
         const action = this._currentActions[id];
         if (action) this._openPreviewDialog(action);
+      };
+    });
+    root.querySelectorAll('[data-archive]').forEach(b => {
+      b.onclick = async () => {
+        const id = b.dataset.archive;
+        if (!confirm("Retirer cette modification de la liste « Ce qui a été fait » ?\n(La modification reste appliquée sur ton site — on la cache juste de ta vue.)")) return;
+        b.disabled = true;
+        try {
+          const res = await App.api.phare_archive_action({ id });
+          if (res && res.ok) {
+            this._toast('Retiré de la liste');
+            this._renderSite(document.getElementById('content'));
+            return;
+          }
+          this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
+          b.disabled = false;
+        } catch (e) { this._toast('Erreur : ' + e, 'error'); b.disabled = false; }
       };
     });
   },

@@ -529,3 +529,9 @@ def reject_action(action_id: str, reason: str = "") -> dict:
         "rejected_reason": reason or "Rejet manuel",
     })
     return {"ok": True}
+
+
+def archive_action(action_id: str) -> dict:
+    """Cache une action déjà validée ('merged') de la liste 'Ce qui a été fait'."""
+    repo.update_action(action_id, {"status": "archived"})
+    return {"ok": True}

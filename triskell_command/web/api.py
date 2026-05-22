@@ -5096,6 +5096,120 @@ class Api:
             }
 
     # ------------------------------------------------------------------
+    # Tableau de commande Auto-pilote v2 — compteurs des 5 maillons
+    # ------------------------------------------------------------------
+    def autopilot_pulse(self, payload: dict | None = None) -> dict:
+        """Renvoie les compteurs des 5 maillons de la chaine, sur les
+        `hours` dernieres heures (defaut : 24h).
+
+        payload = {hours: int}   optionnel, borne [1, 720]
+
+        Renvoie :
+          ok, hours, since,
+          search : nouveaux prospects entres dans la base
+          sort   : prospects passes au statut 'qualified'
+          write  : brouillons crees
+          review : a venir (toujours 0 pour l'instant -- etape 7 du chantier)
+          send   : mails envoyes (kind='email_sent' dans email_history)
+        """
+        from datetime import datetime, timedelta, timezone
+        hours = int((payload or {}).get("hours") or 24)
+        hours = max(1, min(hours, 30 * 24))
+        client = self._supabase()
+        if client is None:
+            return {"ok": False, "error": "Supabase indisponible"}
+        sb = client.raw
+        since = (datetime.now(timezone.utc)
+                 - timedelta(hours=hours)).isoformat()
+
+        def _count(table: str, ts_col: str, **filters) -> int:
+            try:
+                q = (sb.table(table).select("id", count="exact")
+                     .gte(ts_col, since))
+                for k, v in filters.items():
+                    q = q.eq(k, v)
+                r = q.execute()
+                return int(r.count or 0)
+            except Exception as exc:
+                logger.debug("autopilot_pulse count %s: %s", table, exc)
+                return 0
+
+        return {
+            "ok": True,
+            "hours":  hours,
+            "since":  since,
+            "search": _count("prospects",       "created_at"),
+            "sort":   _count("prospects",       "created_at", status="qualified"),
+            "write":  _count("prospect_drafts", "created_at"),
+            "review": 0,
+            "send":   _count("email_history",   "ts", kind="email_sent"),
+        }
+
+    # ------------------------------------------------------------------
+    # Tableau de commande Auto-pilote v2 — modes Auto / Manuel par maillon
+    # ------------------------------------------------------------------
+    _AP_STAGE_KEYS = ("search", "sort", "write", "review", "send")
+    _AP_STAGE_MODES = ("auto", "manual")
+    _AP_STAGE_DEFAULTS = {
+        "search": "auto", "sort": "auto", "write": "auto",
+        "review": "manual", "send": "manual",
+    }
+    _AP_STAGE_SETTING_KEY = "autopilot_stage_modes"
+
+    def autopilot_get_stage_modes(self) -> dict:
+        """Renvoie le dict des 5 modes Auto/Manuel par maillon.
+
+        Lit shared_settings.autopilot_stage_modes ; merge avec les defauts
+        si une cle est absente (compat ajout futur de maillons).
+        """
+        client = self._supabase()
+        defaults = dict(self._AP_STAGE_DEFAULTS)
+        if client is None:
+            return {"ok": True, "modes": defaults, "source": "defaults"}
+        try:
+            saved = client.get_shared_setting(self._AP_STAGE_SETTING_KEY, None)
+        except Exception as exc:
+            logger.debug("autopilot_get_stage_modes: %s", exc)
+            saved = None
+        modes = dict(defaults)
+        if isinstance(saved, dict):
+            for k in self._AP_STAGE_KEYS:
+                v = saved.get(k)
+                if v in self._AP_STAGE_MODES:
+                    modes[k] = v
+        return {
+            "ok": True,
+            "modes": modes,
+            "source": "saved" if isinstance(saved, dict) else "defaults",
+        }
+
+    def autopilot_set_stage_mode(self, payload: dict) -> dict:
+        """Sauvegarde le mode (auto/manual) d'un maillon.
+
+        payload = {stage: 'search|sort|write|review|send', mode: 'auto|manual'}
+        """
+        stage = (payload or {}).get("stage") or ""
+        mode  = (payload or {}).get("mode") or ""
+        if stage not in self._AP_STAGE_KEYS:
+            return {"ok": False, "error": f"stage invalide : {stage}"}
+        if mode not in self._AP_STAGE_MODES:
+            return {"ok": False, "error": f"mode invalide : {mode}"}
+        client = self._supabase()
+        if client is None:
+            return {"ok": False, "error": "Supabase indisponible"}
+        try:
+            current = client.get_shared_setting(
+                self._AP_STAGE_SETTING_KEY, {}) or {}
+            if not isinstance(current, dict):
+                current = {}
+            current[stage] = mode
+            client.set_shared_setting(self._AP_STAGE_SETTING_KEY, current)
+        except Exception as exc:
+            logger.warning("autopilot_set_stage_mode: %s", exc)
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "stage": stage, "mode": mode}
+
+    # ------------------------------------------------------------------
     # Modes simples — bouton "envoi direct" vs "validation manuelle"
     # exposés dans le cockpit pour bascule en 1 clic
     # ------------------------------------------------------------------

@@ -246,13 +246,13 @@ def _should_skip(client, sent_row: dict, stage: str) -> bool:
     except Exception:
         pass
 
-    # Anti-doublon : un mail est deja parti vers ce prospect dans les 48h
-    # depuis un autre runner ? On evite la double relance le meme jour.
+    # Anti-doublon strict (Auto-pilote v2, etape 1.4) :
+    # un mail est deja parti vers ce prospect (a n'importe quel moment) ?
+    # OU le destinataire est-il deja client ?
     try:
         from . import prospect_status as PS
-        # hours=None → lit le cooldown configuré (72h par défaut, ou
-        # shared_settings.email_cooldown_hours si Jordan l'a personnalisé)
-        recent = PS.has_recent_send(client, prospect_id=prospect_id, hours=None)
+        recent = PS.has_recent_send(client, prospect_id=prospect_id,
+                                    forever=True, check_clients=True)
         if recent.get("recent"):
             return True
     except Exception:

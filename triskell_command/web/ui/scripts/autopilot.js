@@ -1,7 +1,11 @@
-/* Vue Auto-pilote — l'IA rédige et envoie les mails toute seule.
+/* Vue Auto-pilote — chef d'orchestre de la chaîne complète.
  *
- * La partie « recherche de prospects » a été déplacée vers L'Éclaireur.
- * Cette vue ne pilote plus que la rédaction IA et l'envoi.
+ * Tableau de commande : 5 boîtes en chaîne (Cherche → Trie → Rédige → Relit
+ * → Envoie), chacune avec un interrupteur Auto / Manuel. Le formulaire
+ * détaillé (config IA, plafonds, signature) est en bas, replié.
+ *
+ * État actuel : visuel uniquement. Les interrupteurs sont sauvegardés
+ * en localStorage mais pas encore branchés au backend (étape 4 du chantier).
  */
 
 const Autopilot = {
@@ -10,6 +14,72 @@ const Autopilot = {
   logSeen: 0,          // index dernière ligne lue
 
   _LS_DRAFT: 'autopilot:draft',
+  _LS_STAGE_MODES: 'autopilot:stage_modes',
+
+  // Les 5 maillons de la chaîne, dans l'ordre.
+  _STAGES: [
+    {
+      key:    'search',
+      n:      '1',
+      title:  'Cherche',
+      sources:'Chasseur · Éclaireur · Obelisk',
+      desc:   'Va puiser dans tes sources de prospects.',
+      defaultMode: 'auto',
+    },
+    {
+      key:    'sort',
+      n:      '2',
+      title:  'Trie',
+      sources:'Doublons · déjà contactés · clients',
+      desc:   'Élimine ce qui ne doit pas être prospecté.',
+      defaultMode: 'auto',
+    },
+    {
+      key:    'write',
+      n:      '3',
+      title:  'Rédige',
+      sources:'IA + bon modèle',
+      desc:   "Choisit le bon modèle et adapte à chaque prospect.",
+      defaultMode: 'auto',
+    },
+    {
+      key:    'review',
+      n:      '4',
+      title:  'Relit',
+      sources:'2è IA · note sur 10',
+      desc:   'Une 2è IA vérifie la qualité du mail.',
+      defaultMode: 'manual',
+    },
+    {
+      key:    'send',
+      n:      '5',
+      title:  'Envoie',
+      sources:'ou met en brouillon si doute',
+      desc:   "Envoie pour de vrai, ou met en brouillon si l'IA hésite.",
+      defaultMode: 'manual',
+    },
+  ],
+
+  // ------------------------------------------------------------------
+  // Persistance des modes Auto / Manuel par maillon (localStorage)
+  _loadStageModes() {
+    let modes = {};
+    try { modes = JSON.parse(localStorage.getItem(this._LS_STAGE_MODES) || '{}'); }
+    catch (e) {}
+    return (modes && typeof modes === 'object') ? modes : {};
+  },
+
+  _saveStageMode(key, mode) {
+    const modes = this._loadStageModes();
+    modes[key] = mode;
+    try { localStorage.setItem(this._LS_STAGE_MODES, JSON.stringify(modes)); }
+    catch (e) {}
+  },
+
+  _getStageMode(stage) {
+    const modes = this._loadStageModes();
+    return modes[stage.key] || stage.defaultMode;
+  },
 
   _saveDraft() {
     try {
@@ -47,13 +117,19 @@ const Autopilot = {
 
   async render(container) {
     container.innerHTML = `
-      <section class="animate-slide-up max-w-4xl">
+      <section class="animate-slide-up max-w-6xl">
         <div class="mb-6 sm:mb-8">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <div class="hero-kicker mb-2">AUTO-PILOTE</div>
-              <h1 class="hero-title hero-title--md mb-2 sm:mb-3">L'IA écrit et envoie.</h1>
-              <p class="hero-subtitle">Pour chaque prospect de ta base, l'IA rédige un mail unique et l'envoie — pendant que tu fais autre chose.</p>
+              <h1 class="hero-title hero-title--md mb-2 sm:mb-3"
+                  style="text-wrap: balance">
+                La chaîne complète, sous tes ordres.
+              </h1>
+              <p class="hero-subtitle" style="text-wrap: pretty">
+                Cherche, trie, rédige, relit, envoie. Chaque maillon peut tourner
+                tout seul ou te laisser la main.
+              </p>
             </div>
             ${Help.button('autopilot')}
           </div>
@@ -66,7 +142,27 @@ const Autopilot = {
           </div>
         </div>
 
-        <div id="ap-form" class="space-y-8"></div>
+        <!-- Tableau de commande : chaîne des 5 maillons + réglages globaux -->
+        <div id="ap-control-panel" class="mb-8"></div>
+
+        <!-- Paramètres avancés : ancien formulaire, replié -->
+        <details class="card p-0 mb-8 group">
+          <summary class="cursor-pointer px-5 py-4 flex items-center justify-between gap-3 hover:bg-bg/40 rounded-2xl">
+            <div>
+              <div class="font-semibold text-sm">Paramètres avancés</div>
+              <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
+                Service IA, modèle, signature, plafonds, délais de relance…
+              </div>
+            </div>
+            <svg class="w-5 h-5 text-text-muted transition-transform group-open:rotate-180"
+                 fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </summary>
+          <div class="px-5 pb-5 pt-2">
+            <div id="ap-form" class="space-y-8"></div>
+          </div>
+        </details>
 
         <div class="mt-10">
           <div class="section-label">Journal du run</div>
@@ -79,6 +175,14 @@ const Autopilot = {
         </div>
       </section>
     `;
+
+    // Rend le tableau de commande tout de suite (depuis localStorage cache)
+    document.getElementById('ap-control-panel').innerHTML = this._renderControlPanel();
+    this._bindStageToggles();
+    // En parallele : sync les modes depuis le backend (source de verite)
+    this._syncStageModesFromAPI();
+    // Compteurs : appel asynchrone, met a jour quand l'API repond
+    this._refreshPulse();
 
     document.getElementById('ap-save').onclick = () => this.save();
     document.getElementById('ap-run').onclick  = () => this.run();
@@ -109,6 +213,206 @@ const Autopilot = {
     this.logSeen = 0;
     // Si un run est déjà en cours (rechargement de l'écran), reprend le log
     this._refreshStatus(true);
+  },
+
+  // ------------------------------------------------------------------
+  // Tableau de commande : 5 maillons en chaîne + réglages globaux
+  // ------------------------------------------------------------------
+  _renderControlPanel() {
+    const c = this.cfg || {};
+    const nightlyTarget = c.nightly_target ?? 50;
+    const enabledNight  = !!c.enabled;
+    return `
+      <!-- Bandeau de réglages globaux : combien par nuit + horaire -->
+      <div class="card p-5 mb-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <label class="block">
+            <div class="text-xs font-bold uppercase tracking-widest text-text-muted mb-2">
+              Cherche-moi
+            </div>
+            <div class="flex items-baseline gap-3">
+              <input type="number" data-key="nightly_target"
+                     value="${nightlyTarget}" min="1" max="500"
+                     class="w-24 px-3 py-2 rounded-lg bg-bg border border-border
+                            focus:border-accent focus:outline-none text-xl font-bold text-center" />
+              <span class="text-sm text-text-secondary" style="text-wrap: balance">
+                prospects par nuit
+              </span>
+            </div>
+          </label>
+          <label class="flex items-start gap-3 cursor-pointer md:pt-2">
+            <input type="checkbox" data-key="enabled" ${enabledNight ? 'checked' : ''}
+                   class="mt-1 w-5 h-5 accent-accent flex-shrink-0" />
+            <div class="min-w-0">
+              <div class="text-sm font-semibold" style="text-wrap: balance">
+                Le pipeline tourne tout seul vers 3h du matin
+              </div>
+              <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
+                Tu te lèves, ton Cockpit est plein.
+              </div>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- La chaîne des 5 maillons -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        ${this._STAGES.map((stage, i) => this._renderStage(stage, i)).join('')}
+      </div>
+
+      <!-- Résumé de la dernière nuit (à brancher étape 3) -->
+      <div class="mt-4 text-center">
+        <span id="ap-last-run-summary" class="text-xs text-text-muted"
+              style="text-wrap: pretty">
+          Dernière nuit : pas encore branché — viendra à la prochaine étape.
+        </span>
+      </div>
+    `;
+  },
+
+  _renderStage(stage, index) {
+    const mode = this._getStageMode(stage);
+    const isAuto = mode === 'auto';
+    const isLast = index === this._STAGES.length - 1;
+    return `
+      <div class="card p-4 relative flex flex-col" data-stage="${stage.key}">
+        <!-- Numéro + titre -->
+        <div class="flex items-center gap-2 mb-2">
+          <div class="w-7 h-7 rounded-lg bg-accent/10 text-accent flex items-center
+                      justify-center text-sm font-bold flex-shrink-0">
+            ${stage.n}
+          </div>
+          <div class="font-semibold text-base">${this._esc(stage.title)}</div>
+          ${!isLast ? `
+            <svg class="w-4 h-4 text-text-muted ml-auto hidden lg:block flex-shrink-0"
+                 fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>` : ''}
+        </div>
+
+        <!-- Sources / outils utilisés -->
+        <div class="text-[11px] font-medium text-text-muted mb-2 uppercase tracking-wide"
+             style="text-wrap: balance">
+          ${this._esc(stage.sources)}
+        </div>
+
+        <!-- Description -->
+        <div class="text-xs text-text-secondary flex-1" style="text-wrap: pretty">
+          ${this._esc(stage.desc)}
+        </div>
+
+        <!-- Interrupteur Auto / Manuel -->
+        <div class="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-border">
+          <span class="text-[10px] font-bold tracking-widest text-text-muted">MODE</span>
+          <div class="flex gap-0.5 bg-bg rounded-lg p-0.5 border border-border">
+            <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
+                    data-mode="auto">Auto</button>
+            <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
+                    data-mode="manual">Manuel</button>
+          </div>
+        </div>
+
+        <!-- Compteur -->
+        <div class="mt-2 text-center text-text-muted text-[11px]">
+          <span class="ap-stage-counter font-mono text-text-secondary">—</span>
+          <span> cette nuit</span>
+        </div>
+      </div>
+    `;
+  },
+
+  _bindStageToggles() {
+    document.querySelectorAll('[data-stage]').forEach(stageEl => {
+      const stageKey = stageEl.dataset.stage;
+      // 1) Applique le style initial (selon état sauvegardé)
+      const stage = this._STAGES.find(s => s.key === stageKey);
+      const currentMode = stage ? this._getStageMode(stage) : 'auto';
+      this._styleStageButtons(stageEl, currentMode);
+      // 2) Branche les clicks
+      stageEl.querySelectorAll('.ap-stage-mode').forEach(btn => {
+        btn.onclick = () => {
+          const mode = btn.dataset.mode;
+          this._saveStageMode(stageKey, mode);
+          this._styleStageButtons(stageEl, mode);
+          this._pushStageModeToAPI(stageKey, mode);
+        };
+      });
+    });
+  },
+
+  // ------------------------------------------------------------------
+  // Sync des modes Auto/Manuel avec le backend (etape 4).
+  // Strategie : localStorage = cache instantane (UI fluide), backend =
+  // source de verite partagee entre appareils + utilisee par le runner
+  // nocturne. Au render : on affiche localStorage puis on fetch l'API en
+  // parallele et on met a jour le visuel si different. Au click : update
+  // local + UI immediat + fire-and-forget API.
+  async _syncStageModesFromAPI() {
+    if (!App.api || !App.api.autopilot_get_stage_modes) return;
+    let r;
+    try { r = await App.api.autopilot_get_stage_modes(); }
+    catch (e) { return; }
+    if (!r || !r.ok || !r.modes) return;
+    // Sauvegarde en local (cache)
+    try {
+      localStorage.setItem(this._LS_STAGE_MODES, JSON.stringify(r.modes));
+    } catch (e) {}
+    // Met a jour le visuel des boites deja rendues
+    Object.entries(r.modes).forEach(([key, mode]) => {
+      const stageEl = document.querySelector(`[data-stage="${key}"]`);
+      if (stageEl) this._styleStageButtons(stageEl, mode);
+    });
+  },
+
+  _pushStageModeToAPI(stage, mode) {
+    if (!App.api || !App.api.autopilot_set_stage_mode) return;
+    // Fire-and-forget : on n'attend pas la reponse (UI deja a jour)
+    try {
+      App.api.autopilot_set_stage_mode({ stage, mode }).catch(() => {});
+    } catch (e) {}
+  },
+
+  // ------------------------------------------------------------------
+  // Compteurs des 5 maillons : appelle autopilot_pulse et met a jour
+  // les spans .ap-stage-counter de chaque boite.
+  async _refreshPulse() {
+    if (!App.api || !App.api.autopilot_pulse) return;
+    let r;
+    try { r = await App.api.autopilot_pulse({ hours: 24 }); }
+    catch (e) { return; }
+    if (!r || !r.ok) return;
+    this._STAGES.forEach(stage => {
+      const stageEl = document.querySelector(`[data-stage="${stage.key}"]`);
+      if (!stageEl) return;
+      const counter = stageEl.querySelector('.ap-stage-counter');
+      if (!counter) return;
+      const n = r[stage.key];
+      counter.textContent = (typeof n === 'number') ? String(n) : '—';
+    });
+    // Met aussi a jour le resume textuel sous la chaine
+    const sum = document.getElementById('ap-last-run-summary');
+    if (sum) {
+      const s = r.search ?? 0;
+      const w = r.write ?? 0;
+      const e = r.send ?? 0;
+      sum.textContent = `Dernieres 24h : ${s} prospects trouves · ${w} brouillons rediges · ${e} mails envoyes`;
+    }
+  },
+
+  _styleStageButtons(stageEl, mode) {
+    stageEl.querySelectorAll('.ap-stage-mode').forEach(b => {
+      const bMode = b.dataset.mode;
+      const isActive = bMode === mode;
+      let cls = 'ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition ';
+      if (isActive && bMode === 'auto') {
+        cls += 'bg-success text-white';
+      } else if (isActive && bMode === 'manual') {
+        cls += 'bg-warning/20 text-warning';
+      } else {
+        cls += 'text-text-muted hover:text-text';
+      }
+      b.className = cls;
+    });
   },
 
   // ------------------------------------------------------------------
