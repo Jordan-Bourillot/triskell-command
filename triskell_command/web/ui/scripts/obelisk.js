@@ -289,6 +289,10 @@ const Obelisk = {
           </div>
           <div class="ob-header-actions">
             <div id="ob-stats-inline" class="ob-stats-inline"></div>
+            <button id="ob-import-file" class="ob-import-btn" title="Importer une liste de prospects depuis un fichier Excel ou CSV">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Importer fichier
+            </button>
             <button id="ob-refresh" class="ob-icon-btn" title="Rafraîchir" aria-label="Rafraîchir">↻</button>
           </div>
         </header>
@@ -297,6 +301,7 @@ const Obelisk = {
     `;
     this._injectStyles();
     document.getElementById('ob-refresh').onclick = () => this.refresh();
+    document.getElementById('ob-import-file').onclick = () => this._openImportFile();
     // Restaure les filtres de la liste si on revient sur la vue
     this._applyListFilters();
     await this._loadStats();
@@ -344,6 +349,21 @@ const Obelisk = {
         cursor: pointer; transition: all 140ms;
       }
       .ob-icon-btn:hover { color: hsl(var(--text)); border-color: hsl(var(--text-muted) / .5); }
+      .ob-import-btn {
+        display: inline-flex; align-items: center; gap: 7px;
+        height: 32px; padding: 0 12px; border-radius: 8px;
+        background: hsl(var(--card)); border: 1px solid hsl(var(--border));
+        color: hsl(var(--text)); font-size: 12.5px; font-weight: 600;
+        cursor: pointer; transition: all 140ms;
+      }
+      .ob-import-btn:hover {
+        border-color: hsl(var(--accent) / .55);
+        color: hsl(var(--accent));
+        background: hsl(var(--accent) / .06);
+      }
+      .ob-import-btn[disabled] {
+        opacity: .6; cursor: progress;
+      }
 
       /* Tabs */
       .ob-tabs {
@@ -1053,6 +1073,79 @@ const Obelisk = {
       alert("Erreur : " + (err && err.message || err));
     } finally {
       if (btn) { btn.disabled = false; btn.innerHTML = originalLabel; }
+    }
+  },
+
+  // ── Importer fichier (Excel / CSV) ───────────────────────────────
+  _openImportFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xlsm,.xls,.csv,.tsv,.txt';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      document.body.removeChild(input);
+      if (file) this._runImportFile(file);
+    });
+    input.click();
+  },
+
+  async _runImportFile(file) {
+    const btn = document.getElementById('ob-import-file');
+    const original = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = 'Lecture du fichier…';
+    }
+    try {
+      // 20 Mo max côté front aussi
+      if (file.size > 20 * 1024 * 1024) {
+        alert("Fichier trop gros (max 20 Mo).");
+        return;
+      }
+      const buf = await file.arrayBuffer();
+      // Encode en base64 par paquets pour éviter de saturer la pile JS
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(
+          null, bytes.subarray(i, i + chunk),
+        );
+      }
+      const b64 = btoa(binary);
+      if (btn) btn.innerHTML = 'Import en cours…';
+      const res = await this._api('import_file', {
+        filename: file.name,
+        data:     b64,
+      });
+      if (!res || !res.ok) {
+        alert("Import impossible : " +
+              ((res && res.error) || 'erreur inconnue'));
+        return;
+      }
+      const parts = [];
+      parts.push(`✓ ${res.inserted} nouveau(x) prospect(s) ajouté(s).`);
+      if (res.duplicates) parts.push(`${res.duplicates} déjà présent(s) (ignorés).`);
+      if (res.skipped)    parts.push(`${res.skipped} ligne(s) vide(s) ou incomplètes.`);
+      if (res.errors)     parts.push(`${res.errors} erreur(s) durant l'insertion.`);
+      parts.push(`Total lu : ${res.total} ligne(s).`);
+      alert(parts.join('\n'));
+      // Recharge stats + liste
+      await this._loadStats();
+      if (typeof this._loadCreators === 'function') {
+        await this._loadCreators();
+      } else {
+        await this.refresh();
+      }
+    } catch (err) {
+      alert("Import en erreur : " + (err && err.message || err));
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = original;
+      }
     }
   },
 

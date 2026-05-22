@@ -3814,6 +3814,206 @@ class Api:
             logger.exception("obelisk_export failed")
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
+    def obelisk_import_file(self, payload: dict) -> dict:
+        """Import d'un fichier Excel/CSV de prospects → table Supabase prospects.
+
+        Payload : { filename, data (base64), industry? }
+        Réponse : { ok, inserted, skipped, duplicates, total, errors, error? }
+
+        Le mapping des colonnes est auto-détecté à partir des en-têtes
+        (suggest_mapping). Dédup sur (email principal) ou (website) pour
+        éviter les doublons. L'industrie passée par l'UI est appliquée à
+        toutes les lignes qui n'ont pas de colonne secteur mappée.
+        """
+        import base64
+        import tempfile
+        from pathlib import Path
+        p = payload or {}
+        data_b64 = (p.get("data") or "").strip()
+        filename = (p.get("filename") or "import.xlsx").strip()
+        industry_override = (p.get("industry") or "").strip()
+        if not data_b64:
+            return {"ok": False, "error": "Fichier manquant"}
+
+        try:
+            file_bytes = base64.b64decode(data_b64)
+        except Exception:
+            return {"ok": False, "error": "Fichier illisible (base64 invalide)"}
+        if len(file_bytes) > 20 * 1024 * 1024:
+            return {"ok": False, "error": "Fichier > 20 Mo"}
+
+        suffix = Path(filename).suffix.lower() or ".xlsx"
+        if suffix not in (".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".txt"):
+            return {"ok": False,
+                    "error": "Format non supporté (utilise .xlsx ou .csv)"}
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        try:
+            tmp.write(file_bytes)
+            tmp.close()
+            tmp_path = Path(tmp.name)
+            try:
+                from triskell_core.prospect.sources import file_import as fi
+            except ImportError as exc:
+                return {"ok": False,
+                        "error": f"Module file_import indisponible : {exc}"}
+
+            try:
+                headers, rows = fi.read_file(tmp_path)
+            except Exception as exc:
+                return {"ok": False,
+                        "error": f"Lecture du fichier impossible : {exc}"}
+            if not rows:
+                return {"ok": False, "error": "Aucune ligne dans le fichier"}
+
+            mapping = fi.suggest_mapping(headers)
+            if not any(k in mapping for k in
+                       ("name", "legal_name", "emails", "phones",
+                        "website", "siren")):
+                return {"ok": False,
+                        "error": ("Impossible de détecter les colonnes. "
+                                  "Vérifie que ton fichier a au moins une "
+                                  "colonne Nom, Email, Téléphone, Site web "
+                                  "ou Raison sociale.")}
+
+            sb = self._supabase()
+            if sb is None:
+                return {"ok": False, "error": "Supabase non configuré"}
+            # Pour les contraintes RLS : on a besoin du wrapper Triskell.
+            try:
+                from triskell_core.db import (
+                    get_client as _gc, SupabaseNotConfigured,
+                )
+                tc = _gc()
+                triskell_client = tc if tc.is_authenticated else None
+            except Exception:
+                triskell_client = None
+            try:
+                from ..integrations import multi_tenant
+                with_workspace = multi_tenant.with_workspace
+            except Exception:
+                with_workspace = lambda _c, row: row  # noqa: E731
+
+            from datetime import datetime, timezone
+            now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            source_label = Path(filename).name
+
+            inserted = 0
+            duplicates = 0
+            skipped = 0
+            errors = 0
+
+            for raw_row in rows:
+                try:
+                    prospect = fi._row_to_prospect(
+                        raw_row, mapping, source_label=source_label,
+                    )
+                except Exception:
+                    errors += 1
+                    continue
+                if prospect is None:
+                    skipped += 1
+                    continue
+
+                emails = list(prospect.emails or [])
+                phones = list(prospect.phones or [])
+                website = (prospect.website or "").strip()
+                industry = (prospect.industry or industry_override or "").strip()
+
+                # Dédup : si email ou website déjà connu, on saute.
+                is_dup = False
+                try:
+                    if emails:
+                        first_email = emails[0].strip().lower()
+                        if first_email:
+                            res = (sb.table("prospects")
+                                   .select("id")
+                                   .contains("emails", [first_email])
+                                   .limit(1).execute())
+                            if res.data:
+                                is_dup = True
+                    if not is_dup and website:
+                        wn = website.rstrip("/").lower()
+                        if wn:
+                            res = (sb.table("prospects")
+                                   .select("id, website")
+                                   .ilike("website", f"%{wn[-40:]}%")
+                                   .limit(5).execute())
+                            for er in (res.data or []):
+                                if ((er.get("website") or "")
+                                        .rstrip("/").lower() == wn):
+                                    is_dup = True
+                                    break
+                except Exception as exc:
+                    logger.warning("obelisk_import_file dedup: %s", exc)
+
+                if is_dup:
+                    duplicates += 1
+                    continue
+
+                row = {
+                    "name":        (prospect.name or "").strip()
+                                    or (prospect.legal_name or "").strip(),
+                    "handle":      "",
+                    "legal_name":  (prospect.legal_name or "").strip(),
+                    "emails":      emails,
+                    "phones":      phones,
+                    "website":     website,
+                    "other_urls":  [],
+                    "address":     (prospect.address or "").strip(),
+                    "city":        (prospect.city or "").strip(),
+                    "postal_code": (prospect.postal_code or "").strip(),
+                    "country":     (prospect.country or "").strip(),
+                    "industry":    industry,
+                    "description": "",
+                    "language":    "",
+                    "monetized":          False,
+                    "monetization_reasons": [],
+                    "has_legal_mentions":   False,
+                    "score":       0,
+                    "score_label": "",
+                    "subscribers": None,
+                    "platform_url": "",
+                    "status":      "new",
+                    "tags":        [industry] if industry else [],
+                    "notes":       (prospect.notes or "").strip(),
+                    "sources":     [{
+                        "name":      "file_import",
+                        "source_id": getattr(prospect, "siren", "") or "",
+                        "url":       "",
+                        "found_at":  now_iso,
+                        "filename":  source_label,
+                    }],
+                    "match_keys":  [],
+                }
+                # Garde-fou : au moins un nom OU un email
+                if not row["name"] and not emails and not phones:
+                    skipped += 1
+                    continue
+
+                try:
+                    row = with_workspace(triskell_client, row)
+                    sb.table("prospects").insert(row).execute()
+                    inserted += 1
+                except Exception as exc:
+                    logger.warning("obelisk_import_file insert: %s", exc)
+                    errors += 1
+
+            return {
+                "ok": True,
+                "inserted":   inserted,
+                "duplicates": duplicates,
+                "skipped":    skipped,
+                "errors":     errors,
+                "total":      len(rows),
+                "filename":   source_label,
+            }
+        finally:
+            try:
+                Path(tmp.name).unlink(missing_ok=True)
+            except Exception:
+                pass
+
     def obelisk_get_config(self, payload: dict | None = None) -> dict:
         try:
             from ..integrations.obelisk import repo as r
