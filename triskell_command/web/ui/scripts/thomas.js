@@ -458,7 +458,7 @@ const Thomas = {
       const bubble = `
         <div class="thomas-bubble-wrap">
           ${claudeLabelHtml}
-          <div class="max-w-[75%] px-3 py-2 rounded-2xl ${corner} text-white"
+          <div class="max-w-[88%] sm:max-w-[75%] px-3 py-2 rounded-2xl ${corner} text-white"
                data-msg-id="${this._escape(m.id || '')}"
                style="background:${this._escape(bgColor)};">
             ${quoteHtml}
