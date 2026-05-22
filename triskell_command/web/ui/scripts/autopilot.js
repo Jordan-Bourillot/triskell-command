@@ -670,9 +670,10 @@ const Autopilot = {
             <div class="text-xs text-text-muted truncate">${fromEmail}${fromName}</div>
           </div>
           <div class="flex items-center gap-1.5 flex-shrink-0">
-            <input type="number" class="ap-sp-cap w-16 px-2 py-1 rounded-md bg-card
+            <input type="number" class="ap-sp-cap w-16 px-2 py-1 rounded-md
                                         border border-border text-right text-sm
                                         focus:border-accent focus:outline-none"
+                   style="background: hsl(var(--bg)); color: hsl(var(--text));"
                    min="1" max="1000" value="${cap}"
                    data-account-id="${this._esc(a.id)}">
             <span class="text-xs text-text-muted">/ 24h</span>
