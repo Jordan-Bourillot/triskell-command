@@ -468,10 +468,10 @@ const Autopilot = {
           </div>
         </div>
 
-        <!-- Compteur dernier run (24h) -->
+        <!-- Compteur 24h glissantes (toutes runs confondus de la journee) -->
         <div class="mt-2 text-center text-text-muted text-[11px]">
           <span class="ap-stage-counter font-mono text-text-secondary">—</span>
-          <span> au dernier run</span>
+          <span> sur 24h</span>
         </div>
       </div>
     `;
@@ -560,7 +560,7 @@ const Autopilot = {
         if (needsReview) {
           cntEl.textContent = `${count} brouillon(s) à valider`;
           cntEl.classList.add('text-warning', 'font-semibold');
-        } else if (state === 'done')      cntEl.textContent = `${count} au total`;
+        } else if (state === 'done')      cntEl.textContent = `${count} sur ce run`;
         else if (state === 'running' && count > 0) cntEl.textContent = `${count} déjà traité(s)`;
         else if (state === 'error') cntEl.textContent = 'Erreur';
         else                       cntEl.textContent = '';
