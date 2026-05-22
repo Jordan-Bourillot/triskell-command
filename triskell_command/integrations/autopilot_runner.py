@@ -201,10 +201,12 @@ def run_pipeline_with_ui_modes(cfg, progress):
     # commande) et applique-les au pipeline.
     stage_modes = _read_stage_modes()
     # IMPORTANT : l'autopilote ne cherche JAMAIS de nouveaux prospects sur
-    # internet. Il pioche uniquement dans le CRM existant (Tous les prospects).
-    # Pour ajouter de nouveaux prospects, l'utilisateur passe par les outils
-    # dediés : Chasseur / Eclaireur / Obelisk.
+    # internet ET n'enrichit JAMAIS les fiches existantes (= ne visite pas
+    # leurs sites web). Il se contente d'utiliser les emails deja presents
+    # dans le CRM. Pour chercher / enrichir, l'utilisateur passe par les
+    # outils dedies : Chasseur / Eclaireur / Obelisk.
     do_search = False
+    do_enrich = False
     # write=manual -> on ne genere pas de mails (donc do_send pipeline=False)
     do_send_stage = stage_modes["write"] == "auto"
     # send=manual -> on force mode validation (drafts au lieu d'envoi)
@@ -233,6 +235,7 @@ def run_pipeline_with_ui_modes(cfg, progress):
     return run_full_pipeline(
         cfg, progress=progress,
         do_search=do_search,
+        do_enrich=do_enrich,
         do_send=do_send_stage,
         sender_pool_smtp=sender_pool_smtp,
     )
