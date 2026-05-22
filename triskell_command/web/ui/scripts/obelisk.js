@@ -11,7 +11,7 @@
 
 const Obelisk = {
   state: {
-    tab: 'creators',
+    tab: 'search',
     filters: { platform: '', status: '', min_score: 0, q: '', has_email: '', country: '', job_id: '', audience: '' },
     jobFilterInfo: null,    // {id, niche, created_at, status} pour afficher la puce
     page: 0,
@@ -178,8 +178,7 @@ const Obelisk = {
         </header>
 
         <nav class="ob-tabs">
-          <button data-ob-tab="creators" class="ob-tab is-active">Créateurs</button>
-          <button data-ob-tab="search"   class="ob-tab">Nouvelle recherche</button>
+          <button data-ob-tab="search"   class="ob-tab is-active">Nouvelle recherche</button>
           <button data-ob-tab="settings" class="ob-tab">Réglages</button>
         </nav>
 
@@ -187,11 +186,42 @@ const Obelisk = {
       </section>
     `;
     this._injectStyles();
+    this._standalone = false;
+    this.state.tab = 'search';
     document.getElementById('ob-refresh').onclick = () => this.refresh();
     this._root.querySelectorAll('[data-ob-tab]').forEach(b => {
       b.addEventListener('click', () => this.switchTab(b.dataset.obTab));
     });
     await this.refresh();
+  },
+
+  // Vue autonome "Tous les prospects" — utilisée par l'item sidebar
+  // "Tous les prospects" sous PROSPECTION. Réutilise toute la machinerie
+  // de l'onglet Créateurs, mais sans les onglets Obelisk (Nouvelle
+  // recherche / Réglages restent dans la vue Obelisk).
+  async renderCreatorsView(container) {
+    this._root = container;
+    this._standalone = true;
+    this.state.tab = 'creators';
+    container.innerHTML = `
+      <section class="animate-slide-up">
+        <header class="ob-header">
+          <div class="ob-header-text">
+            <div class="hero-kicker">PROSPECTION</div>
+            <h1 class="ob-title">Tous tes prospects, peu importe leur source.</h1>
+          </div>
+          <div class="ob-header-actions">
+            <div id="ob-stats-inline" class="ob-stats-inline"></div>
+            <button id="ob-refresh" class="ob-icon-btn" title="Rafraîchir" aria-label="Rafraîchir">↻</button>
+          </div>
+        </header>
+        <div id="ob-content"></div>
+      </section>
+    `;
+    this._injectStyles();
+    document.getElementById('ob-refresh').onclick = () => this.refresh();
+    await this._loadStats();
+    await this._renderCreators();
   },
 
   _injectStyles() {
@@ -641,7 +671,10 @@ const Obelisk = {
     if (totalAll === 0 && !this._hasActiveFilters()) {
       c.innerHTML = this._emptyHeroHtml();
       const cta = document.getElementById('ob-empty-cta');
-      if (cta) cta.onclick = () => this.switchTab('search');
+      if (cta) cta.onclick = () => {
+        if (this._standalone) App.show('obelisk');
+        else this.switchTab('search');
+      };
       return;
     }
 
@@ -1720,7 +1753,7 @@ const Obelisk = {
       found:      (job.stats && job.stats.found) || 0,
     };
     this.state.page = 0;
-    this.switchTab('creators');
+    App.show('prospects_crm');
   },
 
   async _launchSearch() {

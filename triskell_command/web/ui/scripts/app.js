@@ -430,6 +430,7 @@ const App = {
       case 'pixelpros-affiliates': return PixelProsAffiliates.render(target);
       case 'mail_templates': return MailTemplates.render(target);
       case 'obelisk':   return Obelisk.render(target);
+      case 'prospects_crm': return Obelisk.renderCreatorsView(target);
       case 'catalogue': return Catalogue.render(target);
       case 'config':    return Config.render(target);
       case 'tutorial':  return Tutorial.render(target);
