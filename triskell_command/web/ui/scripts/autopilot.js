@@ -226,6 +226,7 @@ const Autopilot = {
     const enabledNight  = !!c.enabled;
     const product       = c.autopilot_product || '';
     const audience      = c.autopilot_audience || '';
+    const nightlyHour   = (c.nightly_hour ?? 3);
     return `
       <!-- Bandeau de réglages globaux : combien + produit + horaire -->
       <div class="card p-5 mb-4">
@@ -268,11 +269,18 @@ const Autopilot = {
             <input type="checkbox" data-key="enabled" ${enabledNight ? 'checked' : ''}
                    class="mt-1 w-5 h-5 accent-accent flex-shrink-0" />
             <div class="min-w-0">
-              <div class="text-sm font-semibold" style="text-wrap: balance">
-                Pipeline auto à 3h du matin
+              <div class="text-sm font-semibold flex items-center gap-2 flex-wrap"
+                   style="text-wrap: balance">
+                <span>Pipeline auto à</span>
+                <input type="number" data-key="nightly_hour"
+                       value="${nightlyHour}" min="0" max="23"
+                       onclick="event.preventDefault(); event.stopPropagation();"
+                       class="w-14 px-2 py-0.5 rounded-md bg-bg border border-border
+                              focus:border-accent focus:outline-none text-sm font-bold text-center" />
+                <span>h du matin</span>
               </div>
               <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
-                Tu te lèves, ton Cockpit est plein.
+                Tu te lèves, ton Cockpit est plein. Heure Paris.
               </div>
             </div>
           </label>
@@ -565,6 +573,8 @@ const Autopilot = {
       // Auto-pilote v2 etape 8 : plage horaire d'envoi (heure Paris)
       send_hour_start:    numI('send_hour_start', 8),
       send_hour_end:      numI('send_hour_end',   19),
+      // Auto-pilote v2 : heure de declenchement du run nocturne
+      nightly_hour:       numI('nightly_hour', 3),
     };
   },
 

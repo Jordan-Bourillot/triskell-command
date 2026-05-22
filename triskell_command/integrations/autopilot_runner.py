@@ -180,9 +180,15 @@ def _do_one_tick(app_state) -> None:
         return
 
     now = _now_paris()
-    if now.hour != DEFAULT_HOUR_PARIS:
+    # Heure de declenchement configuree (defaut 3h Paris, modifiable depuis
+    # le tableau de commande UI). Bornee [0, 23].
+    target_hour = int(getattr(cfg, "nightly_hour", DEFAULT_HOUR_PARIS) or DEFAULT_HOUR_PARIS)
+    target_hour = max(0, min(23, target_hour))
+    if now.hour != target_hour:
         _LAST_RUN_RESULT.clear()
-        _LAST_RUN_RESULT["skipped_reason"] = f"outside_window:hour={now.hour}"
+        _LAST_RUN_RESULT["skipped_reason"] = (
+            f"outside_window:hour={now.hour} (target={target_hour}h)"
+        )
         return
 
     today_iso = now.date().isoformat()
