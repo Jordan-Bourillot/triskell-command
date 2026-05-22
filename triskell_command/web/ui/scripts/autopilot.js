@@ -248,12 +248,12 @@ const Autopilot = {
 
           <label class="block">
             <div class="text-xs font-bold uppercase tracking-widest text-text-muted mb-2">
-              Tu pousses quoi ?
+              Quel produit l'IA va vendre ?
             </div>
             <select id="ap-product-select" data-key="autopilot_product"
                     class="w-full px-3 py-2 rounded-lg bg-bg border border-border
                            focus:border-accent focus:outline-none text-sm">
-              <option value="">— Laisse l'IA écrire toute seule —</option>
+              <option value="">— Aucun : l'IA écrit chaque mail de zéro —</option>
               ${product ? `<option value="${this._esc(product)}" selected>${this._esc(product)}</option>` : ''}
             </select>
             <select id="ap-audience-select" data-key="autopilot_audience"
@@ -265,8 +265,9 @@ const Autopilot = {
             </select>
             <div class="text-[11px] text-text-muted mt-1.5 leading-snug"
                  style="text-wrap: pretty">
-              Choisis un produit : l'IA piochera dans tes <b>modèles d'emails</b>
-              prêts pour ce produit. Sinon, elle invente chaque mail depuis zéro.
+              Si tu choisis un produit, l'IA piochera dans tes <b>modèles d'emails</b>
+              déjà écrits pour ce produit (section « Modèles mails »).
+              Sinon, elle invente chaque mail à partir de rien.
             </div>
           </label>
 
