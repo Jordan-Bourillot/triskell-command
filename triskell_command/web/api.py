@@ -6795,6 +6795,66 @@ class Api:
             logger.exception("convoy_start_send")
             return {"ok": False, "error": str(exc)}
 
+    def resume_convoy_sends(self, payload: dict | None = None) -> dict:
+        """Reprend automatiquement les envois Convoi interrompus par un crash
+        / redemarrage du serveur (typiquement : redeploiement Coolify).
+
+        Appelee au boot du serveur HTTP. Detecte les campagnes en
+        send_state='running' dont le worker n'a pas renouvele son heartbeat
+        depuis trop longtemps, et relance un worker pour chacune.
+
+        Idempotent : si rien a reprendre, renvoie {"resumed": 0}.
+        """
+        try:
+            from ..integrations import convoy_runner
+            cids = convoy_runner.find_resumable_campaign_ids()
+            if not cids:
+                return {"ok": True, "resumed": 0}
+            resumed = 0
+            cleaned = 0
+            errors: list[str] = []
+            for cid in cids:
+                try:
+                    res = self.convoy_start_send({"campaign_id": cid})
+                    if res.get("ok") and res.get("started"):
+                        resumed += 1
+                        logger.info("Convoi %s repris (drafts a envoyer: %s).",
+                                    cid[:8], res.get("approved"))
+                    else:
+                        # Pas de draft approved → la campagne est en realite
+                        # terminee (tout est sent/failed/rejected). On
+                        # nettoie l'etat en base pour la sortir de la liste
+                        # de reprise.
+                        client = convoy_runner._supabase_client()
+                        if client is not None:
+                            try:
+                                from datetime import datetime as _dt, timezone as _tz
+                                (client.raw.table("convoy_campaigns")
+                                 .update({
+                                     "send_state": "done",
+                                     "send_lock_token": None,
+                                     "send_lock_heartbeat_at": None,
+                                     "send_finished_at":
+                                         _dt.now(_tz.utc).isoformat(),
+                                 })
+                                 .eq("id", cid)
+                                 .execute())
+                                cleaned += 1
+                            except Exception as exc:
+                                errors.append(f"{cid[:8]}: {exc}")
+                except Exception as exc:
+                    errors.append(f"{cid[:8]}: {exc}")
+                    logger.exception("resume_convoy_sends %s", cid)
+            return {
+                "ok": True,
+                "resumed": resumed,
+                "cleaned": cleaned,
+                "errors": errors,
+            }
+        except Exception as exc:
+            logger.exception("resume_convoy_sends")
+            return {"ok": False, "error": str(exc)}
+
     def convoy_send_status(self, payload: dict | None = None) -> dict:
         p = payload or {}
         cid = (p.get("campaign_id") or "").strip()

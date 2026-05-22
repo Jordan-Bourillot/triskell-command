@@ -121,6 +121,30 @@ def create_app() -> FastAPI:
     except Exception as exc:
         logger.warning("boot() au démarrage HTTP a échoué : %s", exc)
 
+    # Reprise auto des envois Convoi qui ont ete tues par le redemarrage
+    # precedent (ex: redeploiement Coolify pendant un convoi en cours).
+    # On lance dans un thread daemon pour ne PAS bloquer la creation du
+    # serveur : si Supabase est lent au demarrage, on ne veut pas qu'on
+    # retarde la prise en charge des requetes HTTP.
+    def _resume_convoy_later():
+        # Petit delai pour laisser le boot finir + l'auth Supabase se faire
+        time.sleep(15)
+        try:
+            res = api_instance.resume_convoy_sends()
+            n = res.get("resumed", 0) if isinstance(res, dict) else 0
+            c = res.get("cleaned", 0) if isinstance(res, dict) else 0
+            if n or c:
+                logger.info(
+                    "Convoi : %d envoi(s) repris apres redemarrage, "
+                    "%d campagne(s) nettoyee(s).", n, c,
+                )
+        except Exception as exc:
+            logger.warning("resume_convoy_sends au boot a echoue : %s", exc)
+
+    threading.Thread(
+        target=_resume_convoy_later, name="convoy-resume-boot", daemon=True,
+    ).start()
+
     # Auto-génération des routes depuis les méthodes publiques
     method_count = 0
     for name, method in inspect.getmembers(api_instance, inspect.ismethod):

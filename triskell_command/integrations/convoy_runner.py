@@ -46,6 +46,12 @@ CONVOY_DIR = Path.home() / ".triskell-command" / "convoy"
 CAMPAIGNS_DIR = CONVOY_DIR / "campaigns"
 SEND_LOG = CONVOY_DIR / "send_log.json"
 
+# Reprise apres redemarrage : un worker est considere mort si son
+# heartbeat date de plus de cette duree. Doit etre > a la periode de
+# renouvellement (HEARTBEAT_PERIOD_S) avec une marge confortable.
+LOCK_HEARTBEAT_PERIOD_S = 30        # le worker met a jour son heartbeat toutes les 30s
+LOCK_STALE_AFTER_S = 120            # apres 2 min sans heartbeat → considere mort
+
 
 def ensure_dirs() -> None:
     CAMPAIGNS_DIR.mkdir(parents=True, exist_ok=True)
@@ -454,6 +460,156 @@ def _save_to_supabase(camp: ConvoyCampaign, client) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Verrou d'envoi persiste en base (Supabase)
+# ---------------------------------------------------------------------------
+#
+# Permet a une campagne en cours d'envoi de SURVIVRE a un redemarrage
+# du serveur HTTP Triskell Command (Coolify) : le worker pose un token
+# en base, le renouvelle toutes les 30s, et au boot suivant un autre
+# worker peut reprendre le travail si l'heartbeat est trop vieux.
+#
+# Toute la logique est best-effort : si Supabase est indisponible
+# (mode local), les fonctions retournent neutre et l'envoi tourne en
+# mode legacy sans persistance d'etat.
+
+def _acquire_send_lock(campaign_id: str, token: str) -> bool:
+    """Pose le verrou d'envoi atomiquement.
+
+    Reussit si :
+      - send_state = 'idle' OU 'done'  → personne ne tourne
+      - OU send_state = 'running' mais heartbeat NULL ou trop vieux
+        → l'ancien worker est mort, on prend la main
+
+    Echec si un autre worker est vivant (heartbeat recent).
+
+    Retourne True si le lock est acquis, False sinon.
+    """
+    client = _supabase_client()
+    if client is None:
+        return True   # mode local : pas de lock, on laisse tourner
+    try:
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        now = _dt.now(_tz.utc)
+        stale_cutoff = (now - _td(seconds=LOCK_STALE_AFTER_S)).isoformat()
+        # On lit l'etat actuel pour decider
+        row = (client.raw.table("convoy_campaigns")
+               .select("send_state, send_lock_token, send_lock_heartbeat_at")
+               .eq("id", campaign_id).limit(1).execute().data or [])
+        if not row:
+            return False
+        cur = row[0]
+        state = (cur.get("send_state") or "idle").lower()
+        hb = cur.get("send_lock_heartbeat_at")
+        can_take = (
+            state in ("idle", "done", "failed")
+            or hb is None
+            or str(hb) < stale_cutoff
+        )
+        if not can_take:
+            return False
+        # On pose le lock — on conditionne sur l'etat lu pour eviter une
+        # course (si quelqu'un a pose le lock entre notre SELECT et UPDATE,
+        # on perd la course).
+        upd = {
+            "send_state": "running",
+            "send_lock_token": token,
+            "send_lock_heartbeat_at": now.isoformat(),
+            "send_started_at": now.isoformat(),
+            "send_finished_at": None,
+        }
+        q = client.raw.table("convoy_campaigns").update(upd).eq("id", campaign_id)
+        # Pose une condition optimiste sur le token courant
+        prev_token = cur.get("send_lock_token") or ""
+        if prev_token:
+            q = q.eq("send_lock_token", prev_token)
+        else:
+            q = q.is_("send_lock_token", "null")
+        res = q.execute()
+        return bool(res.data)
+    except Exception as exc:
+        logger.warning("convoy _acquire_send_lock %s : %s", campaign_id, exc)
+        return False
+
+
+def _renew_send_lock(campaign_id: str, token: str) -> bool:
+    """Met a jour le heartbeat. Retourne False si on a perdu le lock
+    (token vole par un autre worker, ou campagne supprimee)."""
+    client = _supabase_client()
+    if client is None:
+        return True
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        now = _dt.now(_tz.utc).isoformat()
+        res = (client.raw.table("convoy_campaigns")
+               .update({"send_lock_heartbeat_at": now})
+               .eq("id", campaign_id)
+               .eq("send_lock_token", token)
+               .execute())
+        return bool(res.data)
+    except Exception as exc:
+        logger.debug("convoy _renew_send_lock %s : %s", campaign_id, exc)
+        return True   # ne pas tuer un envoi si Supabase a un hoquet
+
+
+def _release_send_lock(campaign_id: str, token: str, *, final_state: str) -> None:
+    """Libere le lock et marque l'etat final ('done' ou 'failed').
+
+    Ne fait rien si on a perdu le lock entre-temps.
+    """
+    client = _supabase_client()
+    if client is None:
+        return
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        now = _dt.now(_tz.utc).isoformat()
+        (client.raw.table("convoy_campaigns")
+         .update({
+             "send_state": final_state,
+             "send_lock_token": None,
+             "send_lock_heartbeat_at": None,
+             "send_finished_at": now,
+         })
+         .eq("id", campaign_id)
+         .eq("send_lock_token", token)
+         .execute())
+    except Exception as exc:
+        logger.warning("convoy _release_send_lock %s : %s", campaign_id, exc)
+
+
+def find_resumable_campaign_ids() -> list[str]:
+    """Liste les campagnes qui doivent etre reprises au boot du serveur.
+
+    Critere : send_state='running' ET heartbeat absent ou plus vieux que
+    LOCK_STALE_AFTER_S. Ces campagnes avaient un worker qui a ete tue
+    sans pouvoir releaser proprement (ex: redemarrage Coolify).
+
+    Renvoie une liste d'IDs de campagnes triees par send_started_at.
+    """
+    client = _supabase_client()
+    if client is None:
+        return []
+    try:
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        stale_cutoff = (_dt.now(_tz.utc) - _td(seconds=LOCK_STALE_AFTER_S)).isoformat()
+        # 1) celles sans heartbeat du tout (jamais renouvele apres acquire)
+        # 2) celles avec heartbeat trop vieux
+        rows = (client.raw.table("convoy_campaigns")
+                .select("id, send_started_at, send_lock_heartbeat_at")
+                .eq("send_state", "running")
+                .order("send_started_at", desc=False)
+                .execute().data or [])
+        out: list[str] = []
+        for r in rows:
+            hb = r.get("send_lock_heartbeat_at")
+            if hb is None or str(hb) < stale_cutoff:
+                out.append(r["id"])
+        return out
+    except Exception as exc:
+        logger.warning("convoy find_resumable_campaign_ids : %s", exc)
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Quota quotidien (séparé du Dénicheur — propre au Convoi)
 # ---------------------------------------------------------------------------
 def _load_today_count() -> int:
@@ -515,19 +671,23 @@ def send_draft(
         )
         logger.warning("convoy send_draft blocked — %s (%s)", draft.error, to)
         return draft
-    # Fix 4 : anti-doublon — pas 2 envois automatiques au meme destinataire
-    # dans les 48h, quel que soit le runner d'origine.
+    # Anti-doublon strict (Auto-pilote v2, etape 1.4) :
+    #   forever=True       → jamais 2x le meme mail, quelle que soit la date
+    #   check_clients=True → jamais prospecter un humain deja client
     cli = _supabase_client()
     if cli is not None:
         try:
-            # hours=None → lit le cooldown depuis shared_settings (72h par défaut)
-            recent = PS.has_recent_send(cli, email=to, hours=None)
+            recent = PS.has_recent_send(cli, email=to,
+                                        forever=True, check_clients=True)
             if recent.get("recent"):
                 draft.status = "skipped_duplicate"
-                draft.error = (
-                    f"deja mail dans les 48h vers {to} "
-                    f"(last: {recent.get('last_ts')})"
-                )
+                if recent.get("last_kind") == "client":
+                    draft.error = f"deja client : {to}"
+                else:
+                    draft.error = (
+                        f"deja contacte {to} "
+                        f"(last: {recent.get('last_ts')})"
+                    )
                 return draft
         except Exception:
             pass
@@ -634,6 +794,7 @@ def run_campaign_send(
     smtp_cfgs_by_account: dict[str, dict[str, Any]] | None = None,
     progress: Callable[[str], None] | None = None,
     stop_flag: Callable[[], bool] | None = None,
+    lock_token: str | None = None,
 ) -> dict[str, int]:
     """Envoie tous les drafts approuvés (en mode auto, on aura déjà passé
     tous les pending → approved en amont).
@@ -654,6 +815,11 @@ def run_campaign_send(
 
     smtp_cfgs_by_account : dict {account_id: smtp_cfg} obligatoire en
     mode multi-adresses (au moins pour les comptes du pool).
+
+    lock_token : si fourni, le runner se sert de ce token pour le
+    heartbeat persiste en base. Permet a un envoi de survivre a un
+    redemarrage du serveur (un autre worker reprendra a la fin du TTL).
+    Si None, on en genere un nouveau via _acquire_send_lock().
     """
     log = progress or (lambda m: None)
     sent = 0
@@ -661,62 +827,125 @@ def run_campaign_send(
     overrides = dict(smtp_cfgs_by_account or {})
     pool = list(getattr(campaign, "sender_pool", None) or [])
 
-    # ─── Branche MULTI-ADRESSES ──────────────────────────────────────
-    if pool:
-        return _run_multi_sender(
-            campaign, pool=pool,
-            default_cfg=smtp_cfg, smtp_by_account=overrides,
-            log=log, stop_flag=stop_flag,
-        )
-
-    # ─── Branche MONO-ADRESSE (legacy) ───────────────────────────────
-    cap_today = max(0, int(campaign.daily_cap) - _load_today_count())
-    if cap_today <= 0:
-        log("⚠ Cap quotidien atteint avant de commencer — rien envoyé.")
+    # ─── Pose du verrou + thread heartbeat ────────────────────────────
+    # En mode local (pas de Supabase), tout ca est neutralise et
+    # le runner tourne comme avant.
+    token = lock_token or uuid.uuid4().hex
+    acquired = _acquire_send_lock(campaign.id, token)
+    if not acquired:
+        log("⚠ Un autre worker tient deja le verrou pour cette campagne — abandon.")
         return campaign.counts()
 
-    for i, draft in enumerate(campaign.drafts):
-        if stop_flag and stop_flag():
-            log("⏹ Arrêt demandé.")
-            break
-        if draft.status != "approved":
-            continue
-        if sent >= cap_today:
-            log(f"⚠ Cap quotidien atteint ({campaign.daily_cap}) — pause.")
-            break
+    heartbeat_stop = threading.Event()
 
-        # Choix du compte expéditeur : override produit > défaut campagne.
-        override_id = (getattr(draft, "offer_mail_account_id", "") or "").strip()
-        effective_cfg = smtp_cfg
-        used_label = "défaut"
-        if override_id and override_id in overrides and overrides[override_id]:
-            effective_cfg = overrides[override_id]
-            used_label = override_id
+    def _heartbeat_loop():
+        while not heartbeat_stop.wait(LOCK_HEARTBEAT_PERIOD_S):
+            if not _renew_send_lock(campaign.id, token):
+                # Lock perdu : un autre worker a pris la main.
+                heartbeat_stop.set()
+                break
 
-        log(f"→ [{i + 1}/{len(campaign.drafts)}] envoi à "
-            f"{draft.prospect.get('email', '?')} "
-            f"(via {effective_cfg.get('from_email', '?')})…")
-        send_draft(draft, smtp_cfg=effective_cfg)
-        if draft.status == "sent":
-            sent += 1
-            log(f"  ✓ envoyé ({draft.subject})")
+    hb_thread = threading.Thread(
+        target=_heartbeat_loop, name=f"convoy-heartbeat-{campaign.id[:8]}",
+        daemon=True,
+    )
+    hb_thread.start()
+
+    def _lock_lost() -> bool:
+        """Stop si on a perdu le lock ou si stop_flag externe est leve."""
+        if heartbeat_stop.is_set():
+            return True
+        return bool(stop_flag and stop_flag())
+
+    final_state = "done"
+    try:
+        # ─── Branche MULTI-ADRESSES ──────────────────────────────────
+        if pool:
+            counts = _run_multi_sender(
+                campaign, pool=pool,
+                default_cfg=smtp_cfg, smtp_by_account=overrides,
+                log=log, stop_flag=_lock_lost,
+            )
+            return counts
+
+        # ─── Branche MONO-ADRESSE (legacy) ───────────────────────────
+        cap_today = max(0, int(campaign.daily_cap) - _load_today_count())
+        if cap_today <= 0:
+            log("⚠ Cap quotidien atteint avant de commencer — rien envoyé.")
+            return campaign.counts()
+
+        for i, draft in enumerate(campaign.drafts):
+            if _lock_lost():
+                log("⏹ Arrêt demandé.")
+                break
+            if draft.status != "approved":
+                continue
+            if sent >= cap_today:
+                log(f"⚠ Cap quotidien atteint ({campaign.daily_cap}) — pause.")
+                break
+
+            # Choix du compte expéditeur : override produit > défaut campagne.
+            override_id = (getattr(draft, "offer_mail_account_id", "") or "").strip()
+            effective_cfg = smtp_cfg
+            used_label = "défaut"
+            if override_id and override_id in overrides and overrides[override_id]:
+                effective_cfg = overrides[override_id]
+                used_label = override_id
+
+            log(f"→ [{i + 1}/{len(campaign.drafts)}] envoi à "
+                f"{draft.prospect.get('email', '?')} "
+                f"(via {effective_cfg.get('from_email', '?')})…")
+            send_draft(draft, smtp_cfg=effective_cfg)
+            if draft.status == "sent":
+                sent += 1
+                log(f"  ✓ envoyé ({draft.subject})")
+            else:
+                failed += 1
+                log(f"  ✗ {draft.error}")
+            campaign.save()
+
+            # Délai aléatoire entre 2 envois (anti-spam-throttle)
+            if sent + failed < len(campaign.drafts):
+                wait = max(5, int(campaign.delay_seconds))
+                for _ in range(wait):
+                    if _lock_lost():
+                        break
+                    time.sleep(1)
+
+        counts = campaign.counts()
+        log(f"=== Fin : {counts['sent']} envoyés, {counts['failed']} échoués, "
+            f"{counts['pending']} en attente, {counts['rejected']} rejetés.")
+        return counts
+    except Exception:
+        final_state = "failed"
+        raise
+    finally:
+        # On stoppe le thread heartbeat et on libere le lock.
+        # Si on a perdu le lock en cours de route (heartbeat_stop.is_set),
+        # _release_send_lock no-op grace au filtre eq(token).
+        heartbeat_stop.set()
+        # On considere l'envoi "done" seulement si plus aucun draft approved
+        # ne reste (sinon il faudra qu'un autre worker le reprenne).
+        remaining = sum(1 for d in campaign.drafts if d.status == "approved")
+        if remaining > 0 and final_state == "done":
+            # Sortie propre mais boulot pas fini (stop demande / lock perdu) :
+            # on remet en 'running' avec heartbeat null pour que la reprise
+            # auto au prochain boot ramasse cette campagne.
+            client = _supabase_client()
+            if client is not None:
+                try:
+                    (client.raw.table("convoy_campaigns")
+                     .update({
+                         "send_lock_token": None,
+                         "send_lock_heartbeat_at": None,
+                     })
+                     .eq("id", campaign.id)
+                     .eq("send_lock_token", token)
+                     .execute())
+                except Exception:
+                    pass
         else:
-            failed += 1
-            log(f"  ✗ {draft.error}")
-        campaign.save()
-
-        # Délai aléatoire entre 2 envois (anti-spam-throttle)
-        if sent + failed < len(campaign.drafts):
-            wait = max(5, int(campaign.delay_seconds))
-            for _ in range(wait):
-                if stop_flag and stop_flag():
-                    break
-                time.sleep(1)
-
-    counts = campaign.counts()
-    log(f"=== Fin : {counts['sent']} envoyés, {counts['failed']} échoués, "
-        f"{counts['pending']} en attente, {counts['rejected']} rejetés.")
-    return counts
+            _release_send_lock(campaign.id, token, final_state=final_state)
 
 
 # ---------------------------------------------------------------------------
