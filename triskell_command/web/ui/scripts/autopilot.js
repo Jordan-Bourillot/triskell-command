@@ -228,8 +228,8 @@ const Autopilot = {
     this._bindStageToggles();
     // En parallele : sync les modes depuis le backend (source de verite)
     this._syncStageModesFromAPI();
-    // Charge la liste des produits dispo dans le select
-    this._loadProducts();
+    // (_loadProducts retiré : le dropdown produit n'existe plus.
+    // L'auto-pilote détecte les produits actifs du catalogue tout seul.)
     // Charge la liste des comptes mail pour le pool d'adresses expeditrices
     this._loadMailAccountsAndRender();
     // Compteurs : appel asynchrone, met a jour quand l'API repond
@@ -328,30 +328,21 @@ const Autopilot = {
             </div>
           </label>
 
-          <label class="block">
+          <div class="block">
             <div class="text-xs font-bold uppercase tracking-widest text-text-muted mb-2">
-              Quel produit l'IA va vendre ?
+              Quels produits l'IA va vendre ?
             </div>
-            <select id="ap-product-select" data-key="autopilot_product"
-                    class="w-full px-3 py-2 rounded-lg bg-bg border border-border
-                           focus:border-accent focus:outline-none text-sm">
-              <option value="">— Aucun : l'IA écrit chaque mail de zéro —</option>
-              ${product ? `<option value="${this._esc(product)}" selected>${this._esc(product)}</option>` : ''}
-            </select>
-            <select id="ap-audience-select" data-key="autopilot_audience"
-                    class="w-full mt-2 px-3 py-2 rounded-lg bg-bg border border-border
-                           focus:border-accent focus:outline-none text-xs ${product ? '' : 'hidden'}">
-              <option value="" ${audience === '' ? 'selected' : ''}>Tout le monde</option>
-              <option value="creator" ${audience === 'creator' ? 'selected' : ''}>Influenceurs / créateurs</option>
-              <option value="pro" ${audience === 'pro' ? 'selected' : ''}>Pros (artisans, commerçants…)</option>
-            </select>
+            <div class="text-sm text-text px-3 py-2 rounded-lg bg-bg border border-border"
+                 style="text-wrap: pretty">
+              Tous les produits <b>actifs</b> de ton catalogue.
+            </div>
             <div class="text-[11px] text-text-muted mt-1.5 leading-snug"
                  style="text-wrap: pretty">
-              Si tu choisis un produit, l'IA piochera dans tes <b>modèles d'emails</b>
-              déjà écrits pour ce produit (section « Modèles mails »).
-              Sinon, elle invente chaque mail à partir de rien.
+              L'IA pioche automatiquement dans tes <b>modèles d'emails</b> existants
+              pour chaque produit actif. Pour ajouter, retirer ou désactiver un produit,
+              va dans la section <b>Catalogue</b>.
             </div>
-          </label>
+          </div>
 
           <label class="flex items-start gap-3 cursor-pointer md:pt-7">
             <input type="checkbox" data-key="enabled" ${enabledNight ? 'checked' : ''}
@@ -630,38 +621,6 @@ const Autopilot = {
     try {
       App.api.autopilot_set_stage_mode({ stage, mode }).catch(() => {});
     } catch (e) {}
-  },
-
-  // ------------------------------------------------------------------
-  // Charge la liste des produits disponibles (table triskell_email_templates)
-  // et peuple le <select> du bandeau. Etape 6 du chantier Auto-pilote v2.
-  async _loadProducts() {
-    if (!App.api || !App.api.autopilot_list_products) return;
-    let r;
-    try { r = await App.api.autopilot_list_products(); }
-    catch (e) { return; }
-    if (!r || !r.ok) return;
-    const select = document.getElementById('ap-product-select');
-    if (!select) return;
-    const current = (this.cfg && this.cfg.autopilot_product) || '';
-    const opts = [
-      `<option value="">— Génération libre (IA from scratch) —</option>`,
-    ];
-    (r.products || []).forEach(p => {
-      const sel = p.key === current ? 'selected' : '';
-      opts.push(
-        `<option value="${this._esc(p.key)}" ${sel}>${this._esc(p.label || p.key)}</option>`
-      );
-    });
-    select.innerHTML = opts.join('');
-    // Toggle visibilite du select audience selon presence d'un produit
-    const audSel = document.getElementById('ap-audience-select');
-    const updateAudVisibility = () => {
-      if (!audSel) return;
-      audSel.classList.toggle('hidden', !select.value);
-    };
-    updateAudVisibility();
-    select.addEventListener('change', updateAudVisibility);
   },
 
   // ------------------------------------------------------------------
@@ -1138,9 +1097,12 @@ const Autopilot = {
       daily_cap:          numI('daily_cap', 40),
       follow_up_days:     numI('follow_up_days', 5),
       // Auto-pilote v2 etape 6 : produit pousse + audience
+      // (autopilot_product/audience retires : les produits actifs viennent
+      // automatiquement du catalogue maintenant. On garde la conservation
+      // d'eventuelles valeurs heritees pour ne pas casser une config existante.)
       nightly_target:     numI('nightly_target', 50),
-      autopilot_product:  v('autopilot_product') || '',
-      autopilot_audience: v('autopilot_audience') || '',
+      autopilot_product:  (this.cfg && this.cfg.autopilot_product) || '',
+      autopilot_audience: (this.cfg && this.cfg.autopilot_audience) || '',
       // Auto-pilote v2 etape 8 : plage horaire d'envoi (heure Paris)
       send_hour_start:    numI('send_hour_start', 8),
       send_hour_end:      numI('send_hour_end',   19),
