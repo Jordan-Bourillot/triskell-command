@@ -133,8 +133,31 @@ const Autopilot = {
             </div>
             ${Help.button('autopilot')}
           </div>
-          <div class="flex flex-wrap gap-2 sm:gap-3 mt-5 sm:mt-6">
-            <button id="ap-save" class="btn btn-secondary">Enregistrer</button>
+        </div>
+
+        <!-- Onglets : Pilotage (réglages + chaîne) / Brouillons (drafts générés) -->
+        <div class="flex gap-1 mb-6 border-b border-border">
+          <button id="ap-tab-pilotage-btn"
+                  class="ap-tab-btn px-4 py-2.5 text-sm font-semibold border-b-2 border-accent text-text"
+                  data-tab="pilotage">
+            Pilotage
+          </button>
+          <button id="ap-tab-brouillons-btn"
+                  class="ap-tab-btn px-4 py-2.5 text-sm font-semibold border-b-2 border-transparent text-text-muted hover:text-text"
+                  data-tab="brouillons">
+            Brouillons <span id="ap-tab-brouillons-count"
+                             class="ml-1 inline-block px-1.5 py-0.5 rounded-full text-[10px] font-bold
+                                    bg-accent/15 text-accent hidden"></span>
+          </button>
+        </div>
+
+        <!-- Onglet PILOTAGE -->
+        <div id="ap-tab-pilotage">
+          <!-- Tableau de commande : réglages + adresses + chaîne des 5 maillons -->
+          <div id="ap-control-panel" class="mb-8"></div>
+
+          <!-- Boutons d'action : déplacés ICI (à la fin) après le paramétrage -->
+          <div class="flex flex-wrap gap-2 sm:gap-3 mb-8">
             <button id="ap-run"  class="btn btn-primary">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               Lancer maintenant
@@ -144,56 +167,59 @@ const Autopilot = {
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
               Arrêter
             </button>
+            <button id="ap-save" class="btn btn-secondary">Enregistrer les réglages</button>
           </div>
+
+          <!-- Paramètres avancés : ancien formulaire, replié -->
+          <details class="card p-0 mb-8 group">
+            <summary class="cursor-pointer px-5 py-4 flex items-center justify-between gap-3 hover:bg-bg/40 rounded-2xl">
+              <div>
+                <div class="font-semibold text-sm">Paramètres avancés</div>
+                <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
+                  Service IA, modèle, signature, plafonds, délais de relance…
+                </div>
+              </div>
+              <svg class="w-5 h-5 text-text-muted transition-transform group-open:rotate-180"
+                   fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </summary>
+            <div class="px-5 pb-5 pt-2">
+              <div id="ap-form" class="space-y-8"></div>
+            </div>
+          </details>
+
+          <!-- Journal technique : replié par défaut, pour debug -->
+          <details class="mt-8 card p-0 group">
+            <summary class="cursor-pointer px-5 py-3 flex items-center justify-between gap-3
+                            hover:bg-bg/40 rounded-2xl">
+              <div>
+                <div class="font-semibold text-sm">Détails techniques du run</div>
+                <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
+                  Journal brut avec timestamps — utile pour comprendre un bug.
+                </div>
+              </div>
+              <svg class="w-5 h-5 text-text-muted transition-transform group-open:rotate-180"
+                   fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </summary>
+            <div class="px-5 pb-5 pt-1">
+              <div id="ap-log" class="font-mono text-xs leading-relaxed
+                                      text-text-secondary whitespace-pre-wrap
+                                      bg-bg/40 rounded-xl p-3
+                                      min-h-[120px] max-h-[420px] overflow-y-auto">
+                (en attente d'un run…)
+              </div>
+              <div id="ap-stats" class="mt-4 hidden"></div>
+            </div>
+          </details>
         </div>
 
-        <!-- Tableau de commande : chaîne des 5 maillons + réglages globaux -->
-        <div id="ap-control-panel" class="mb-8"></div>
-
-        <!-- Paramètres avancés : ancien formulaire, replié -->
-        <details class="card p-0 mb-8 group">
-          <summary class="cursor-pointer px-5 py-4 flex items-center justify-between gap-3 hover:bg-bg/40 rounded-2xl">
-            <div>
-              <div class="font-semibold text-sm">Paramètres avancés</div>
-              <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
-                Service IA, modèle, signature, plafonds, délais de relance…
-              </div>
-            </div>
-            <svg class="w-5 h-5 text-text-muted transition-transform group-open:rotate-180"
-                 fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </summary>
-          <div class="px-5 pb-5 pt-2">
-            <div id="ap-form" class="space-y-8"></div>
-          </div>
-        </details>
-
-        <!-- Journal technique : replié par défaut, pour debug -->
-        <details class="mt-8 card p-0 group">
-          <summary class="cursor-pointer px-5 py-3 flex items-center justify-between gap-3
-                          hover:bg-bg/40 rounded-2xl">
-            <div>
-              <div class="font-semibold text-sm">Détails techniques du run</div>
-              <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
-                Journal brut avec timestamps — utile pour comprendre un bug.
-              </div>
-            </div>
-            <svg class="w-5 h-5 text-text-muted transition-transform group-open:rotate-180"
-                 fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </summary>
-          <div class="px-5 pb-5 pt-1">
-            <div id="ap-log" class="font-mono text-xs leading-relaxed
-                                    text-text-secondary whitespace-pre-wrap
-                                    bg-bg/40 rounded-xl p-3
-                                    min-h-[120px] max-h-[420px] overflow-y-auto">
-              (en attente d'un run…)
-            </div>
-            <div id="ap-stats" class="mt-4 hidden"></div>
-          </div>
-        </details>
+        <!-- Onglet BROUILLONS -->
+        <div id="ap-tab-brouillons" class="hidden">
+          <div id="ap-drafts-wrap"></div>
+        </div>
       </section>
     `;
 
@@ -212,6 +238,13 @@ const Autopilot = {
     document.getElementById('ap-save').onclick = () => this.save();
     document.getElementById('ap-run').onclick  = () => this.run();
     document.getElementById('ap-stop').onclick = () => this.stop();
+
+    // Onglets Pilotage / Brouillons
+    document.querySelectorAll('.ap-tab-btn').forEach(btn => {
+      btn.onclick = () => this._switchTab(btn.dataset.tab);
+    });
+    // Au render initial : on affiche le compteur de brouillons (en tache de fond)
+    this._refreshDraftsCount();
 
     if (!App.api) {
       document.getElementById('ap-form').innerHTML = this._previewBanner();
@@ -756,6 +789,154 @@ const Autopilot = {
   },
 
   // ------------------------------------------------------------------
+  // Onglets Pilotage / Brouillons — switch + chargement paresseux du
+  // contenu de l'onglet Brouillons quand on l'ouvre.
+  _switchTab(tab) {
+    const tabs = ['pilotage', 'brouillons'];
+    if (!tabs.includes(tab)) return;
+    tabs.forEach(t => {
+      const pane = document.getElementById('ap-tab-' + t);
+      const btn  = document.getElementById('ap-tab-' + t + '-btn');
+      if (!pane || !btn) return;
+      if (t === tab) {
+        pane.classList.remove('hidden');
+        btn.classList.remove('border-transparent', 'text-text-muted');
+        btn.classList.add('border-accent', 'text-text');
+      } else {
+        pane.classList.add('hidden');
+        btn.classList.remove('border-accent', 'text-text');
+        btn.classList.add('border-transparent', 'text-text-muted');
+      }
+    });
+    if (tab === 'brouillons') this._refreshDraftsList();
+  },
+
+  // Met a jour la petite pastille de compteur sur l'onglet Brouillons.
+  // Appelé au render + après chaque run de l'autopilote (fin de _refreshStatus).
+  async _refreshDraftsCount() {
+    if (!App.api || !App.api.get_drafts) return;
+    let r;
+    try { r = await App.api.get_drafts(); } catch (e) { return; }
+    if (!r || !r.ok) return;
+    const n = (r.rows || []).length;
+    const badge = document.getElementById('ap-tab-brouillons-count');
+    if (!badge) return;
+    if (n > 0) {
+      badge.textContent = String(n);
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  },
+
+  // Charge et affiche la liste des brouillons dans l'onglet Brouillons.
+  async _refreshDraftsList() {
+    const wrap = document.getElementById('ap-drafts-wrap');
+    if (!wrap) return;
+    if (!App.api || !App.api.get_drafts) {
+      wrap.innerHTML = `<div class="card p-6 text-text-muted text-center">Brouillons indisponibles.</div>`;
+      return;
+    }
+    wrap.innerHTML = `<div class="text-center py-12 text-text-muted">Chargement…</div>`;
+    let r;
+    try { r = await App.api.get_drafts(); }
+    catch (e) {
+      wrap.innerHTML = `<div class="card p-6 text-danger">Erreur : ${this._esc(String(e))}</div>`;
+      return;
+    }
+    if (!r || !r.ok) {
+      wrap.innerHTML = `<div class="card p-6 text-danger">${this._esc((r && r.error) || 'Erreur')}</div>`;
+      return;
+    }
+    const rows = r.rows || [];
+    if (rows.length === 0) {
+      wrap.innerHTML = `
+        <div class="card p-6 sm:p-12 text-center">
+          <div class="text-3xl sm:text-4xl mb-3">✓</div>
+          <h2 class="text-xl font-semibold mb-2">Aucun brouillon en attente.</h2>
+          <p class="text-text-secondary max-w-lg mx-auto" style="text-wrap: pretty">
+            Quand l'auto-pilote prépare des mails en mode validation,
+            ils atterrissent ici pour que tu valides ou rejettes en 1 clic.
+          </p>
+        </div>`;
+      return;
+    }
+
+    const cards = rows.map((d, i) => {
+      const ts = (d.ts || '').replace('T', ' ').slice(0, 16);
+      const body = (d.body || '').slice(0, 220);
+      const more = (d.body || '').length > 220 ? '…' : '';
+      return `
+        <div class="card p-4 sm:p-5" data-draft-source="${this._esc(d.source || '')}"
+             data-draft-id="${this._esc(d.id || d.key || '')}">
+          <div class="flex items-start justify-between gap-3 mb-2 flex-wrap">
+            <div class="min-w-0">
+              <div class="font-semibold text-sm">${this._esc(d.name || '(sans nom)')}</div>
+              <div class="text-xs text-text-muted truncate">${this._esc(d.email || '')}
+                ${d.city ? ' · ' + this._esc(d.city) : ''}</div>
+            </div>
+            <div class="text-[11px] text-text-muted whitespace-nowrap">${this._esc(ts)}</div>
+          </div>
+          <div class="text-sm font-semibold mb-1.5">${this._esc(d.subject || '(sans objet)')}</div>
+          <div class="text-xs text-text-secondary mb-3 whitespace-pre-wrap"
+               style="text-wrap: pretty;">${this._esc(body)}${more}</div>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn btn-primary ap-d-approve" data-idx="${i}">Approuver et envoyer</button>
+            <button class="btn btn-secondary ap-d-reject" data-idx="${i}">Rejeter</button>
+            <button class="btn btn-secondary" onclick="App.show('drafts')">Éditer en détail</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
+        <div>
+          <div class="text-sm font-semibold">${rows.length} brouillon(s) en attente</div>
+          <div class="text-xs text-text-muted" style="text-wrap: pretty">
+            Mails préparés en mode validation. Tu approuves pour envoyer, tu rejettes pour supprimer.
+          </div>
+        </div>
+        <button id="ap-d-refresh" class="btn btn-secondary">Rafraîchir</button>
+      </div>
+      <div class="space-y-3">${cards}</div>
+    `;
+
+    // Bind boutons
+    const refresh = document.getElementById('ap-d-refresh');
+    if (refresh) refresh.onclick = () => this._refreshDraftsList();
+    wrap.querySelectorAll('.ap-d-approve').forEach(btn => {
+      btn.onclick = () => this._draftAction(rows[parseInt(btn.dataset.idx, 10)], 'approve');
+    });
+    wrap.querySelectorAll('.ap-d-reject').forEach(btn => {
+      btn.onclick = () => this._draftAction(rows[parseInt(btn.dataset.idx, 10)], 'reject');
+    });
+  },
+
+  async _draftAction(draft, action) {
+    if (!App.api || !draft) return;
+    const fn = action === 'approve' ? 'draft_approve' : 'draft_reject';
+    if (!App.api[fn]) return;
+    if (action === 'reject') {
+      if (!confirm('Rejeter ce brouillon ?')) return;
+    }
+    try {
+      const r = await App.api[fn]({
+        source: draft.source || '',
+        id:     draft.id || draft.key || '',
+        key:    draft.key || draft.id || '',
+      });
+      if (r && r.ok) {
+        await this._refreshDraftsList();
+        await this._refreshDraftsCount();
+      } else {
+        alert((r && r.error) || 'Action impossible.');
+      }
+    } catch (e) {
+      alert('Erreur : ' + String(e));
+    }
+  },
+
+  // ------------------------------------------------------------------
   // Compteurs des 5 maillons : appelle autopilot_pulse et met a jour
   // les spans .ap-stage-counter de chaque boite.
   async _refreshPulse() {
@@ -1003,6 +1184,8 @@ const Autopilot = {
     // Récap final : remplace l'ancien bloc stats par une vue plus riche
     if (r.stats) this._renderRecap(r.stats, r.touched_prospects || [], r.error || '');
     if (r.error) this._appendLog('✗ ' + r.error);
+    // Run terminé : mets à jour la pastille de l'onglet Brouillons
+    this._refreshDraftsCount();
   },
 
   _stopRun() {
