@@ -23,7 +23,7 @@ const Autopilot = {
       n:      '1',
       title:  'Cherche',
       sources:'Chasseur · Éclaireur · Obelisk',
-      desc:   'Va puiser dans tes sources de prospects.',
+      desc:   "Pioche dans « Tous les prospects », le fichier global que ces 3 outils alimentent ensemble.",
       defaultMode: 'auto',
     },
     {
@@ -282,10 +282,10 @@ const Autopilot = {
                        onclick="event.preventDefault(); event.stopPropagation();"
                        class="w-14 px-2 py-0.5 rounded-md bg-bg border border-border
                               focus:border-accent focus:outline-none text-sm font-bold text-center" />
-                <span>h du matin</span>
+                <span>h (Paris)</span>
               </div>
               <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
-                Tu te lèves, ton Cockpit est plein. Heure Paris.
+                L'app bosse pendant que tu fais autre chose.
               </div>
             </div>
           </label>
@@ -297,11 +297,11 @@ const Autopilot = {
         ${this._STAGES.map((stage, i) => this._renderStage(stage, i)).join('')}
       </div>
 
-      <!-- Résumé de la dernière nuit (à brancher étape 3) -->
+      <!-- Résumé du dernier run / 24h -->
       <div class="mt-4 text-center">
         <span id="ap-last-run-summary" class="text-xs text-text-muted"
               style="text-wrap: pretty">
-          Dernière nuit : pas encore branché — viendra à la prochaine étape.
+          En attente de chiffres…
         </span>
       </div>
     `;
@@ -352,7 +352,7 @@ const Autopilot = {
         <!-- Compteur -->
         <div class="mt-2 text-center text-text-muted text-[11px]">
           <span class="ap-stage-counter font-mono text-text-secondary">—</span>
-          <span> cette nuit</span>
+          <span> au dernier run</span>
         </div>
       </div>
     `;
@@ -537,9 +537,8 @@ const Autopilot = {
             String(c.send_hour_end ?? 19))}
         </div>
         <div class="text-xs text-text-muted mt-2" style="text-wrap: pretty">
-          Par défaut : 8h-19h. Pour ne PAS envoyer la nuit même si l'autopilote
-          tourne à 3h, garde ces bornes serrées : les mails seront générés mais
-          mis en brouillon, et tu pourras les valider le matin.
+          Par défaut : 8h-19h. Hors plage, les mails sont mis en brouillon —
+          tu les valides quand tu reviens.
         </div>
         `)}
     `;
