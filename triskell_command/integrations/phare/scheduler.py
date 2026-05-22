@@ -112,8 +112,45 @@ def _loop(app_state) -> None:
             return
 
 
+def _global_ran_today(mission_key: str) -> bool:
+    """Dédup pour une mission globale (pas de site). Lit dans shared_settings."""
+    today_iso = date.today().isoformat()
+    if _LAST_RUNS_BY_MISSION.get(mission_key) == today_iso:
+        return True
+    try:
+        log = repo.get_config().get("scheduler_log") or {}
+        return log.get(mission_key) == today_iso
+    except Exception:
+        return False
+
+
+def _mark_ran(mission_key: str) -> None:
+    """Marque une mission comme exécutée aujourd'hui (mémoire + DB)."""
+    today_iso = date.today().isoformat()
+    _LAST_RUNS_BY_MISSION[mission_key] = today_iso
+    try:
+        cfg = repo.get_config()
+        log = cfg.get("scheduler_log") or {}
+        if log.get(mission_key) != today_iso:
+            log[mission_key] = today_iso
+            # Garde uniquement les 200 dernières entrées (purge naturelle)
+            if len(log) > 200:
+                log = dict(sorted(log.items(), key=lambda kv: kv[1])[-200:])
+            repo.update_config({"scheduler_log": log})
+    except Exception as exc:
+        logger.debug("_mark_ran(%s): %s", mission_key, exc)
+
+
 def _tick(app_state) -> dict:
-    """Un cycle : lit la config, décide quoi lancer, persiste."""
+    """Un cycle : lit la config, décide quoi lancer, persiste.
+
+    Stratégie post-fix : on utilise `hour >= X` (au lieu de `hour == X`)
+    pour les fenêtres de déclenchement, et on dédoublonne via la base
+    (phare_actions pour les missions par site, shared_settings.phare_config
+    .scheduler_log pour les missions globales). Ça permet :
+      1. de résister aux retards de GitHub Actions (cron pas garanti à l'heure)
+      2. d'empêcher les doublons même quand le process redémarre
+    """
     cfg = repo.get_config()
     if not cfg:
         return {"skipped": "supabase_or_config_missing"}
@@ -133,7 +170,7 @@ def _tick(app_state) -> dict:
 
     actions_done: list[dict] = []
 
-    # Audit hebdo : 1 site / heure le lundi 6-22h
+    # Audit hebdo : 1 site/heure le lundi 6-22h (rotation par dédup DB)
     if weekday == 0 and 6 <= hour <= 22:
         target = _pick_next_for_mission("audit", sites)
         if target:
@@ -141,33 +178,35 @@ def _tick(app_state) -> dict:
             actions_done.append({"mission": "audit", "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"audit:{target['id']}"] = today.isoformat()
 
-    # Veille mots-clés : lundi & jeudi 7h
-    if weekday in (0, 3) and hour == 7:
+    # Veille mots-clés : lundi & jeudi à partir de 7h
+    if weekday in (0, 3) and hour >= 7:
         target = _pick_next_for_mission("keywords", sites)
         if target:
             r = orchestrator.run_keywords(target["id"], app_state=app_state)
             actions_done.append({"mission": "keywords", "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"keywords:{target['id']}"] = today.isoformat()
 
-    # Maillage : lundi 9h
-    if weekday == 0 and hour == 9:
+    # Maillage : lundi à partir de 9h
+    if weekday == 0 and hour >= 9:
         target = _pick_next_for_mission("tisseur", sites)
         if target:
             r = orchestrator.run_tisseur(target["id"], app_state=app_state)
             actions_done.append({"mission": "tisseur", "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"tisseur:{target['id']}"] = today.isoformat()
 
-    # Bulletin Analyste : tous les jours 8h sur le top 3
-    if hour == 8:
+    # Bulletin Analyste : tous les jours à partir de 8h, top 3 sites
+    if hour >= 8:
         for s in sites[:3]:
+            if _ran_today_in_db("analyst", s["id"]):
+                continue
+            if _LAST_RUNS_BY_MISSION.get(f"analyst:{s['id']}") == today.isoformat():
+                continue
             r = orchestrator.run_analyst(s["id"], app_state=app_state)
             actions_done.append({"mission": "analyst", "site": s["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"analyst:{s['id']}"] = today.isoformat()
 
-    # Optimisation on-page : mardi/mercredi/vendredi 10h, 1 page par site
-    # prioritaire (la home par défaut, ou la page la moins optimisée si on
-    # a un score). 1 site/cycle pour ne pas saturer.
-    if weekday in (1, 2, 4) and hour == 10:
+    # Optimisation on-page : mardi/mercredi/vendredi à partir de 10h
+    if weekday in (1, 2, 4) and hour >= 10:
         target = _pick_next_for_mission("optim_onpage", sites)
         if target:
             page_path = _pick_page_to_optimize(target["id"])
@@ -180,17 +219,15 @@ def _tick(app_state) -> dict:
                                   "page": page_path, **r})
             _LAST_RUNS_BY_MISSION[f"optim_onpage:{target['id']}"] = today.isoformat()
 
-    # Plan stratégique Opus : 1er du mois 9h
-    if today.day == 1 and hour == 9:
-        last = _LAST_RUNS_BY_MISSION.get("strategy:")
-        if last != today.isoformat():
-            r = orchestrator.run_strategy(app_state=app_state)
-            actions_done.append({"mission": "strategy", **r})
-            _LAST_RUNS_BY_MISSION["strategy:"] = today.isoformat()
+    # Plan stratégique Opus : 1er du mois à partir de 9h
+    if today.day == 1 and hour >= 9 and not _global_ran_today("strategy:"):
+        r = orchestrator.run_strategy(app_state=app_state)
+        actions_done.append({"mission": "strategy", **r})
+        _mark_ran("strategy:")
 
     # ---- Missions avancées v0.5 ----
-    # CTR optim : mardi 11h, 1 site
-    if weekday == 1 and hour == 11:
+    # CTR optim : mardi à partir de 11h
+    if weekday == 1 and hour >= 11:
         target = _pick_next_for_mission("ctr_optim", sites)
         if target:
             r = run_now("ctr_optim", target["id"], app_state=app_state)
@@ -198,8 +235,8 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"ctr_optim:{target['id']}"] = today.isoformat()
 
-    # Snippet hunt : mercredi 11h, 1 site
-    if weekday == 2 and hour == 11:
+    # Snippet hunt : mercredi à partir de 11h
+    if weekday == 2 and hour >= 11:
         target = _pick_next_for_mission("snippet_hunt", sites)
         if target:
             r = run_now("snippet_hunt", target["id"], app_state=app_state)
@@ -207,8 +244,8 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"snippet_hunt:{target['id']}"] = today.isoformat()
 
-    # GEO check (LLM mentions) : jeudi 11h, 1 site
-    if weekday == 3 and hour == 11:
+    # GEO check (LLM mentions) : jeudi à partir de 11h
+    if weekday == 3 and hour >= 11:
         target = _pick_next_for_mission("geo_check", sites)
         if target:
             r = run_now("geo_check", target["id"], app_state=app_state)
@@ -216,8 +253,8 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"geo_check:{target['id']}"] = today.isoformat()
 
-    # Cannibalisation + zombies : vendredi 11h, 1 site (les deux d'affilée)
-    if weekday == 4 and hour == 11:
+    # Cannibalisation + zombies : vendredi à partir de 11h, 1 site (les deux d'affilée)
+    if weekday == 4 and hour >= 11:
         target = _pick_next_for_mission("cannibalization", sites)
         if target:
             r1 = run_now("cannibalization", target["id"], app_state=app_state)
@@ -227,8 +264,8 @@ def _tick(app_state) -> dict:
                                   "cannib": r1, "zombies": r2})
             _LAST_RUNS_BY_MISSION[f"cannibalization:{target['id']}"] = today.isoformat()
 
-    # Image SEO : samedi 9h, 1 site
-    if weekday == 5 and hour == 9:
+    # Image SEO : samedi à partir de 9h
+    if weekday == 5 and hour >= 9:
         target = _pick_next_for_mission("image_seo", sites)
         if target:
             r = run_now("image_seo", target["id"], app_state=app_state)
@@ -236,8 +273,8 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"image_seo:{target['id']}"] = today.isoformat()
 
-    # Refresh content : dimanche 9h, 1 site (top priorité)
-    if weekday == 6 and hour == 9:
+    # Refresh content : dimanche à partir de 9h
+    if weekday == 6 and hour >= 9:
         target = _pick_next_for_mission("refresh", sites)
         if target:
             r = run_now("refresh", target["id"], app_state=app_state)
@@ -245,38 +282,51 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"refresh:{target['id']}"] = today.isoformat()
 
-    # Suivi concurrents : tous les jours à 12h, top 3 sites
-    if hour == 12:
+    # Suivi concurrents : tous les jours à partir de 12h, top 3 sites
+    if hour >= 12:
         for s in sites[:3]:
+            if _ran_today_in_db("competitors", s["id"]):
+                continue
+            if _LAST_RUNS_BY_MISSION.get(f"competitors:{s['id']}") == today.isoformat():
+                continue
             r = run_now("competitors", s["id"], app_state=app_state)
             actions_done.append({"mission": "competitors",
                                   "site": s["domain"], **r})
+            _LAST_RUNS_BY_MISSION[f"competitors:{s['id']}"] = today.isoformat()
 
-    # Rollback check : tous les jours à 13h
-    if hour == 13:
+    # Rollback check : tous les jours à partir de 13h (global, 1 fois/jour)
+    if hour >= 13 and not _global_ran_today("rollback_check:"):
         r = run_now("rollback_check", None, app_state=app_state)
         actions_done.append({"mission": "rollback_check", **r})
+        _mark_ran("rollback_check:")
 
-    # Sitemap + IndexNow : lundi 14h, top 3 sites
-    if weekday == 0 and hour == 14:
+    # Sitemap + IndexNow : lundi à partir de 14h, top 3 sites
+    if weekday == 0 and hour >= 14:
         for s in sites[:3]:
+            if _ran_today_in_db("sitemap", s["id"]):
+                continue
+            if _LAST_RUNS_BY_MISSION.get(f"sitemap:{s['id']}") == today.isoformat():
+                continue
             r = run_now("sitemap", s["id"], app_state=app_state)
             actions_done.append({"mission": "sitemap",
                                   "site": s["domain"], **r})
+            _LAST_RUNS_BY_MISSION[f"sitemap:{s['id']}"] = today.isoformat()
 
     # ---- Missions pro v0.6 ----
-    # Veille algo Google : tous les jours 6h
-    if hour == 6:
+    # Veille algo Google : tous les jours à partir de 6h (global, 1 fois/jour)
+    if hour >= 6 and not _global_ran_today("algo_watch:"):
         r = run_now("algo_watch", None, app_state=app_state)
         actions_done.append({"mission": "algo_watch", **r})
+        _mark_ran("algo_watch:")
 
-    # A/B test measurements : tous les jours 7h
-    if hour == 7:
+    # A/B test measurements : tous les jours à partir de 7h (global, 1 fois/jour)
+    if hour >= 7 and not _global_ran_today("ab_record:"):
         r = run_now("ab_record", None, app_state=app_state)
         actions_done.append({"mission": "ab_record", **r})
+        _mark_ran("ab_record:")
 
-    # Brand monitoring : mardi 9h, 1 site
-    if weekday == 1 and hour == 9:
+    # Brand monitoring : mardi à partir de 9h
+    if weekday == 1 and hour >= 9:
         target = _pick_next_for_mission("brand_scan", sites)
         if target:
             r = run_now("brand_scan", target["id"], app_state=app_state)
@@ -284,8 +334,8 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"brand_scan:{target['id']}"] = today.isoformat()
 
-    # Outreach drafts : mercredi 9h, 1 site
-    if weekday == 2 and hour == 9:
+    # Outreach drafts : mercredi à partir de 9h
+    if weekday == 2 and hour >= 9:
         target = _pick_next_for_mission("outreach_drafts", sites)
         if target:
             r = run_now("outreach_drafts", target["id"], app_state=app_state)
@@ -293,24 +343,31 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"outreach_drafts:{target['id']}"] = today.isoformat()
 
-    # Outreach follow-ups : tous les jours 10h
-    if hour == 10:
+    # Outreach follow-ups : tous les jours à partir de 10h (global, 1 fois/jour)
+    if hour >= 10 and not _global_ran_today("outreach_followups:"):
         r = run_now("outreach_followups", None, app_state=app_state)
         actions_done.append({"mission": "outreach_followups", **r})
+        _mark_ran("outreach_followups:")
 
-    # Local SEO : jeudi 9h, 1 site (s'il a un place_id)
-    if weekday == 3 and hour == 9:
-        cfg = repo.get_config()
-        gbp_map = cfg.get("gbp_place_ids", {}) or {}
+    # Local SEO : jeudi à partir de 9h, 1 site (s'il a un place_id)
+    if weekday == 3 and hour >= 9:
+        cfg2 = repo.get_config()
+        gbp_map = cfg2.get("gbp_place_ids", {}) or {}
         for s in sites:
-            if s["id"] in gbp_map:
-                r = run_now("local_seo", s["id"], app_state=app_state)
-                actions_done.append({"mission": "local_seo",
-                                      "site": s["domain"], **r})
-                break
+            if s["id"] not in gbp_map:
+                continue
+            if _ran_today_in_db("local_seo", s["id"]):
+                continue
+            if _LAST_RUNS_BY_MISSION.get(f"local_seo:{s['id']}") == today.isoformat():
+                continue
+            r = run_now("local_seo", s["id"], app_state=app_state)
+            actions_done.append({"mission": "local_seo",
+                                  "site": s["domain"], **r})
+            _LAST_RUNS_BY_MISSION[f"local_seo:{s['id']}"] = today.isoformat()
+            break
 
-    # CRO check (Clarity) : vendredi 9h, 1 site
-    if weekday == 4 and hour == 9:
+    # CRO check (Clarity) : vendredi à partir de 9h
+    if weekday == 4 and hour >= 9:
         target = _pick_next_for_mission("cro_check", sites)
         if target:
             r = run_now("cro_check", target["id"], app_state=app_state)
@@ -318,36 +375,97 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"cro_check:{target['id']}"] = today.isoformat()
 
-    # Bulletin PDF : 1er du mois 10h (après le plan stratégique)
-    if today.day == 1 and hour == 10:
-        last = _LAST_RUNS_BY_MISSION.get("bulletin_pdf:")
-        if last != today.isoformat():
-            r = run_now("bulletin_pdf", None, app_state=app_state)
-            actions_done.append({"mission": "bulletin_pdf", **r})
-            _LAST_RUNS_BY_MISSION["bulletin_pdf:"] = today.isoformat()
+    # Bulletin PDF : 1er du mois à partir de 10h (global)
+    if today.day == 1 and hour >= 10 and not _global_ran_today("bulletin_pdf:"):
+        r = run_now("bulletin_pdf", None, app_state=app_state)
+        actions_done.append({"mission": "bulletin_pdf", **r})
+        _mark_ran("bulletin_pdf:")
 
-    # Envoi rapports clients SEO : 1er du mois 11h
-    # (1h après la génération bulletin pour laisser respirer)
-    if today.day == 1 and hour == 11:
-        last = _LAST_RUNS_BY_MISSION.get("client_reports_send:")
-        if last != today.isoformat():
-            r = run_now("client_reports_send", None, app_state=app_state)
-            actions_done.append({"mission": "client_reports_send", **r})
-            _LAST_RUNS_BY_MISSION["client_reports_send:"] = today.isoformat()
+    # Envoi rapports clients SEO : 1er du mois à partir de 11h (global)
+    if today.day == 1 and hour >= 11 and not _global_ran_today("client_reports_send:"):
+        r = run_now("client_reports_send", None, app_state=app_state)
+        actions_done.append({"mission": "client_reports_send", **r})
+        _mark_ran("client_reports_send:")
 
     return {"actions_done": actions_done,
             "sites_count": len(sites),
             "weekday": weekday, "hour": hour}
 
 
+# Mission → nom d'agent stocké dans phare_actions.agent.
+# Sert au dédoublonnage "mission déjà passée aujourd'hui sur ce site" via DB,
+# pour résister aux redémarrages du worker (GitHub Actions = nouveau process
+# à chaque tick, donc _LAST_RUNS_BY_MISSION en mémoire est inutile).
+_MISSION_TO_AGENT: dict[str, str] = {
+    "audit":              "auditeur",
+    "keywords":           "veilleur",
+    "tisseur":            "tisseur",
+    "analyst":            "analyste",
+    "optim_onpage":       "optimiseur_onpage",
+    "ctr_optim":          "ctr_hacker",
+    "snippet_hunt":       "snippet_hunter",
+    "geo_check":          "geo_surveillant",
+    "cannibalization":    "cannibalization",
+    "zombies":            "zombies_hunter",
+    "image_seo":          "image_seo",
+    "refresh":            "refresh",
+    "competitors":        "competitors",
+    "sitemap":            "sitemap_builder",
+    "brand_scan":         "brand_monitoring",
+    "outreach_drafts":    "outreach",
+    "local_seo":          "local_seo",
+    "cro_check":          "cro",
+    "rollback_check":     "rollback_watch",
+    "programmatic":       "programmatic",
+}
+
+
+def _ran_today_in_db(mission: str, site_id: str) -> bool:
+    """Vérifie en base si la mission a déjà tourné aujourd'hui sur ce site.
+
+    Utilisé pour le dédoublonnage cross-process (GH Actions tick = nouveau
+    process Python à chaque heure). On lit phare_actions filtré par agent +
+    site + created_at >= aujourd'hui à 00:00.
+    """
+    agent = _MISSION_TO_AGENT.get(mission)
+    if not agent or not site_id:
+        return False
+    try:
+        sb = repo._sb()
+        if sb is None:
+            return False
+        today_start = datetime.combine(date.today(), datetime.min.time()).isoformat()
+        r = (sb.table("phare_actions")
+             .select("id", count="exact")
+             .eq("site_id", site_id)
+             .eq("agent", agent)
+             .gte("created_at", today_start)
+             .limit(1).execute())
+        return (r.count or 0) > 0
+    except Exception as exc:
+        logger.debug("_ran_today_in_db(%s, %s): %s", mission, site_id, exc)
+        return False
+
+
 def _pick_next_for_mission(mission: str, sites: list[dict]) -> Optional[dict]:
-    """Choisit le site le plus prioritaire qui n'a pas eu cette mission aujourd'hui."""
+    """Choisit le site le plus prioritaire qui n'a pas eu cette mission aujourd'hui.
+
+    Combine deux sources :
+      - _LAST_RUNS_BY_MISSION (mémoire process — gratuit, sert tant que le
+        worker tourne en continu, ex. Triskell Command desktop)
+      - phare_actions (DB) via _ran_today_in_db — survit aux redémarrages
+        de process, indispensable pour GitHub Actions où chaque tick =
+        nouveau process Python.
+    """
     today_iso = date.today().isoformat()
     sorted_sites = sorted(sites, key=lambda s: -(s.get("priority") or 0))
     for s in sorted_sites:
         last = _LAST_RUNS_BY_MISSION.get(f"{mission}:{s['id']}")
-        if last != today_iso:
-            return s
+        if last == today_iso:
+            continue
+        if _ran_today_in_db(mission, s["id"]):
+            continue
+        return s
     return None
 
 

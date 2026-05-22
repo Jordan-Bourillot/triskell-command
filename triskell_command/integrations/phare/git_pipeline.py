@@ -285,8 +285,19 @@ def apply_and_open_pr(*,
     workdir_root = workdir_root or tempfile.mkdtemp(prefix="phare_")
     workdir = str(Path(workdir_root) / repo_full.split("/")[-1])
 
-    if not clone_repo(repo_full, workdir, branch=base_branch):
-        return {"ok": False, "error": "clone échoué"}
+    # Si workdir existe déjà ET est un repo git valide, on réutilise (cas où
+    # l'appelant a déjà cloné, ex. run_onpage_optim qui clone d'abord pour
+    # localiser les patches via patcher.localize_patches). Sinon on clone.
+    workdir_path = Path(workdir)
+    is_existing_repo = (workdir_path.exists()
+                        and (workdir_path / ".git").exists())
+    if is_existing_repo:
+        # Le repo est déjà cloné par l'appelant — on vérifie juste qu'on est
+        # sur la bonne branche de base avant de créer la branche de travail.
+        _git("checkout", base_branch, cwd=workdir)
+    else:
+        if not clone_repo(repo_full, workdir, branch=base_branch):
+            return {"ok": False, "error": "clone échoué"}
     if not create_branch(workdir, branch):
         return {"ok": False, "error": "création branche échouée"}
 
