@@ -135,6 +135,82 @@ html, body {
 }
 .nav-item.active svg { color: hsl(var(--accent)); }
 
+/* Petit bouton "i" à droite de chaque onglet — ouvre une bulle d'aide */
+.nav-hint-btn {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--text-muted));
+  cursor: pointer;
+  opacity: 0.55;
+  flex-shrink: 0;
+  transition: opacity 140ms ease, background 140ms ease, color 140ms ease;
+}
+.nav-item:hover .nav-hint-btn { opacity: 0.9; }
+.nav-hint-btn:hover {
+  opacity: 1;
+  background: hsl(var(--surface));
+  color: hsl(var(--accent));
+}
+.nav-hint-btn[aria-expanded="true"] {
+  opacity: 1;
+  background: hsl(var(--accent) / 0.15);
+  color: hsl(var(--accent));
+}
+/* Si un badge de notif est présent, on garde nos 4px d'écart entre eux */
+.nav-item-badge + .nav-hint-btn,
+.nav-hint-btn + .nav-item-badge { margin-left: 4px; }
+
+/* Bulle elle-même : popover en position fixed, ancrée par JS */
+.nav-hint-popover {
+  position: fixed;
+  z-index: 70;
+  width: 280px;
+  max-width: calc(100vw - 24px);
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: hsl(var(--surface-elevated));
+  color: hsl(var(--text));
+  border: 1px solid hsl(var(--border));
+  box-shadow: 0 4px 12px rgba(15,23,42,0.10), 0 12px 32px rgba(15,23,42,0.14);
+  font-size: 13px;
+  line-height: 1.5;
+  animation: navHintIn 160ms ease-out;
+}
+.nav-hint-text { margin: 0; color: hsl(var(--text)); }
+.nav-hint-arrow {
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+  width: 10px;
+  height: 10px;
+  background: hsl(var(--surface-elevated));
+  border-left: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
+  border-bottom-left-radius: 2px;
+}
+.nav-hint-popover--left .nav-hint-arrow {
+  left: auto;
+  right: -6px;
+  border-left: 0;
+  border-bottom: 0;
+  border-right: 1px solid hsl(var(--border));
+  border-top: 1px solid hsl(var(--border));
+  border-bottom-left-radius: 0;
+  border-top-right-radius: 2px;
+}
+@keyframes navHintIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* Onglets de la page Réglages */
 .cfg-tabs {
   display: flex;
