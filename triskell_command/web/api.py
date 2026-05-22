@@ -602,6 +602,26 @@ class Api:
         if len(rows) >= self._DRAFTS_LIMIT_PER_SOURCE:
             truncated = True
 
+        # === Merge local CRM ===
+        # Le pipeline de l'autopilote stocke les drafts en mode validation dans
+        # le CRM local (~/.triskell-prospect/prospects.json), PAS dans Supabase.
+        # Sans ce merge, les drafts de l'autopilote sont invisibles tant que
+        # Supabase est joignable. On les rajoute en bout de liste.
+        try:
+            local = self._get_drafts_local_fallback()
+            local_rows = (local.get("rows") if local and local.get("ok") else []) or []
+            # Anti-doublon basique : pas de drafts locaux deja presents en Supabase
+            # (par exemple si un autre process les a syncronises). Cle = email+subject.
+            seen = {(r.get("email", ""), r.get("subject", "")) for r in rows}
+            for lr in local_rows:
+                k = (lr.get("email", ""), lr.get("subject", ""))
+                if k in seen:
+                    continue
+                rows.append(lr)
+                seen.add(k)
+        except Exception as exc:
+            logger.debug("get_drafts: merge local KO: %s", exc)
+
         return {"ok": True, "rows": rows, "truncated": truncated,
                 "limit_per_source": self._DRAFTS_LIMIT_PER_SOURCE}
 
