@@ -281,8 +281,8 @@ const Autopilot = {
                 <input type="number" data-key="nightly_hour"
                        value="${nightlyHour}" min="0" max="23"
                        onclick="event.preventDefault(); event.stopPropagation();"
-                       class="w-14 px-2 py-0.5 rounded-md bg-bg border border-border
-                              focus:border-accent focus:outline-none text-sm font-bold text-center" />
+                       class="w-20 px-3 py-1.5 rounded-md bg-bg border border-border
+                              focus:border-accent focus:outline-none text-base font-bold text-center" />
                 <span>h (Paris)</span>
               </div>
               <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
