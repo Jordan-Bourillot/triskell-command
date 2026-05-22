@@ -454,7 +454,7 @@ const Autopilot = {
         </div>
         <div class="hidden ap-stage-live mt-1 flex-1">
           <div class="text-xs ap-stage-live-message" style="text-wrap: pretty">…</div>
-          <div class="text-[11px] text-text-muted mt-1 ap-stage-live-count"></div>
+          <div class="text-[11px] text-text-muted mt-1 ap-stage-live-count hidden"></div>
         </div>
 
         <!-- Interrupteur Auto / Manuel -->
@@ -468,10 +468,14 @@ const Autopilot = {
           </div>
         </div>
 
-        <!-- Compteur 24h glissantes (toutes runs confondus de la journee) -->
-        <div class="mt-2 text-center text-text-muted text-[11px]">
+        <!-- Compteur 24h glissantes : ce qui s'est passe au total dans la
+             base sur 24h, TOUTES sources confondues (autopilote + outils
+             manuels Chasseur/Eclaireur/Obelisk/Convoi). Pas specifique a
+             la derniere run de l'autopilote. -->
+        <div class="mt-2 text-center text-text-muted text-[11px]"
+             style="text-wrap: pretty">
           <span class="ap-stage-counter font-mono text-text-secondary">—</span>
-          <span> sur 24h</span>
+          <span class="ap-stage-counter-label"> sur 24h</span>
         </div>
       </div>
     `;
@@ -554,16 +558,19 @@ const Autopilot = {
       const cntEl = el.querySelector('.ap-stage-live-count');
       if (msgEl) msgEl.textContent = message || '…';
       // En mode "à valider" on remplace le texte du compteur par un appel
-      // à l'action clair, en orange, pour bien distinguer du "fini".
+      // à l'action clair, en orange. Sinon : on masque le compteur duplique
+      // (le message juste au-dessus contient deja le chiffre, par ex.
+      // "2 prospect(s) prets a recevoir un mail").
       if (cntEl) {
         cntEl.classList.remove('text-warning', 'font-semibold');
+        cntEl.classList.add('hidden');
         if (needsReview) {
           cntEl.textContent = `${count} brouillon(s) à valider`;
           cntEl.classList.add('text-warning', 'font-semibold');
-        } else if (state === 'done')      cntEl.textContent = `${count} sur ce run`;
-        else if (state === 'running' && count > 0) cntEl.textContent = `${count} déjà traité(s)`;
-        else if (state === 'error') cntEl.textContent = 'Erreur';
-        else                       cntEl.textContent = '';
+          cntEl.classList.remove('hidden');
+        } else {
+          cntEl.textContent = '';
+        }
       }
     }
   },
@@ -976,13 +983,23 @@ const Autopilot = {
     try { r = await App.api.autopilot_pulse({ hours: 24 }); }
     catch (e) { return; }
     if (!r || !r.ok) return;
+    // Libelle 24h specifique a chaque etape, plus clair que "sur 24h" generique
+    const LABEL_24H = {
+      search: ' ajoutés à la base / 24h',
+      sort:   ' qualifiés / 24h',
+      write:  ' brouillons rédigés / 24h',
+      review: ' relus / 24h',
+      send:   ' mails envoyés / 24h',
+    };
     this._STAGES.forEach(stage => {
       const stageEl = document.querySelector(`[data-stage="${stage.key}"]`);
       if (!stageEl) return;
       const counter = stageEl.querySelector('.ap-stage-counter');
+      const label   = stageEl.querySelector('.ap-stage-counter-label');
       if (!counter) return;
       const n = r[stage.key];
       counter.textContent = (typeof n === 'number') ? String(n) : '—';
+      if (label && LABEL_24H[stage.key]) label.textContent = LABEL_24H[stage.key];
     });
     // Met aussi a jour le resume textuel sous la chaine
     const sum = document.getElementById('ap-last-run-summary');
