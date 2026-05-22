@@ -417,14 +417,21 @@ def process_reminders(client=None, *, dry_run: bool = False) -> dict:
             sent += 1
             continue
         try:
+            delivered = 0
             for t in targets:
-                _push.send_push(title, body,
+                res = _push.send_push(title, body,
                                 user_id=t, tag=f"brain-{nid}",
                                 tag_group="brain", priority=("urgent" if u == 5 else "normal"),
                                 url="/?view=brain",
                                 extra_data={"note_id": nid})
-            sb.table(TABLE).update({"reminded_at": now_iso}).eq("id", nid).execute()
-            sent += 1
+                if isinstance(res, dict):
+                    delivered += int(res.get("sent") or 0)
+            # On ne marque "rappelée" QUE si au moins une notif est partie.
+            # Sinon (pas d'abonnement push, VAPID absent…), on laisse la note
+            # active pour que le bandeau in-app dans le navigateur la rattrape.
+            if delivered > 0:
+                sb.table(TABLE).update({"reminded_at": now_iso}).eq("id", nid).execute()
+                sent += 1
         except Exception as exc:
             errors.append(f"{nid}: {exc}")
 
