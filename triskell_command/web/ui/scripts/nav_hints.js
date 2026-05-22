@@ -39,6 +39,7 @@
     health: "État de tes outils automatiques et de la délivrabilité de tes envois. Carte par robot avec son dernier passage, alertes sur les mails bloqués ou bounces, taux de réponse sur 24h et 7 jours. Se rafraîchit tout seul toutes les 15 secondes.",
     tutorial: "Visite guidée complète de l’app sous forme de modale avec étapes et barre de progression. Te montre tout le parcours : prospection, rédaction IA, envoi, tri des réponses, suivi client, livraison auto, mesures. À ouvrir au premier lancement ou pour réviser.",
     config: "Tous les réglages, rangés par onglets : compte, apparence, mails (comptes et signatures), IA, intégrations (Stripe, Phantombuster, tracker), automatisations (passage prospect → client, livraison) et système (sauvegardes, mode démo, visite guidée).",
+    eliks: "Notre service de croissance multi-réseaux. On prend en main les comptes Instagram, TikTok et LinkedIn d’un client pour les faire grossir (contenu, posts, interactions). C’est le « bras armé » côté présence en ligne.",
   };
 
   // ---- Persistance des modifs utilisateur ----
