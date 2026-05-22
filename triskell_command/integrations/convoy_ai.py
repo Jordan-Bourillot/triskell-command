@@ -348,11 +348,25 @@ TEMPLATES DISPONIBLES (produit : {template_product}) :
 
 CONSIGNES STRICTES :
 - VOUVOIEMENT OBLIGATOIRE.
-- Si le template contient un placeholder dont tu n'as PAS la valeur
-  (ex : {{prenom}} alors qu'il n'y a pas de prénom), tu reformules la
-  phrase pour qu'elle reste naturelle sans le placeholder (ex : « Bonjour, »
-  au lieu de « Bonjour {{prenom}}, »). JAMAIS de placeholder qui traîne
-  dans le mail final.
+- Les templates utilisent 2 sortes de placeholders, et tu DOIS les traiter
+  TOUS, aucun ne doit traîner dans le mail final :
+    A) Placeholders auto-remplissables avec les infos prospect ci-dessus :
+       {{first_name}} / {{prenom}}, {{last_name}} / {{nom}},
+       {{company_name}} / {{name}} / {{raison_sociale}},
+       {{city}} / {{ville}}, {{business_type}} / {{secteur}},
+       {{domain}} / {{website}}, {{email}}, {{signature}} / {{sender_name}}.
+       → Remplace par la vraie valeur. Si la valeur est vide, REFORMULE la
+       phrase pour qu'elle reste naturelle (ex : « Bonjour, » au lieu de
+       « Bonjour , » ou « Bonjour {{first_name}}, »).
+    B) Placeholders contextuels à INVENTER intelligemment à partir des infos
+       prospect : {{example_pain}} (un problème typique du secteur),
+       {{competitor_example}} (un site concurrent crédible),
+       {{example_content}} (un sujet de contenu plausible).
+       → Si tu n'as PAS assez d'info pour inventer quelque chose de crédible,
+       REFORMULE la phrase pour la supprimer plutôt que de laisser un truc
+       générique ou faux. Ex : si pas d'idée pour {{example_pain}}, retire
+       carrément la phrase qui en parle.
+- Aucun double accolade {{...}} ne doit subsister dans le résultat final.
 - Garde toutes les URLs présentes dans le template (lien CTA, démo, etc.).
 - Signature : « {sender_name} » sur la dernière ligne, rien après.
 
@@ -531,9 +545,14 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         "{{sender_name}}":   sender,
         # Placeholders contextuels qu'on ne peut pas auto-remplir : on les
         # vide pour eviter d'envoyer "{{price}}" en clair au prospect.
-        "{{price}}":         "",
-        "{{link}}":          "",
-        "{{example_content}}": "",
+        # IMPORTANT : tous les placeholders presents dans les templates Pixel
+        # Pros qui ne peuvent pas etre devines doivent figurer ici, sinon ils
+        # apparaissent en clair dans le mail envoye.
+        "{{price}}":             "",
+        "{{link}}":              "",
+        "{{example_content}}":   "",
+        "{{example_pain}}":      "",
+        "{{competitor_example}}": "",
     }
     out = text
     for ph, val in replacements.items():
