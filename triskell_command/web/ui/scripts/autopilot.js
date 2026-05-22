@@ -491,14 +491,12 @@ const Autopilot = {
     document.getElementById('ap-form').innerHTML = `
       ${this._section('Mode d\'envoi',
         'AUTO : l\'IA envoie chaque mail sans demander. ' +
-        'VALIDATION : l\'app prépare un brouillon, tu valides en 1 clic chaque matin.',
+        'VALIDATION : l\'app prépare un brouillon, tu valides chaque mail en 1 clic.',
         `
         ${this._select('Mode d\'envoi', 'mode', c.mode || 'validation', [
           ['validation', 'Validation manuelle (recommandé pour démarrer)'],
           ['auto',       'Auto (envoi sans demander)'],
         ])}
-        ${this._toggle('Auto-pilote programmé chaque nuit', 'enabled', !!c.enabled,
-          'Si activé, le pipeline tourne tout seul vers 3h du matin.')}
         `)}
 
       ${this._section('Rédaction des mails par l\'IA',
