@@ -450,8 +450,10 @@
 
   <!-- ===================== Dialog Thomas (chat) ===================== -->
   <!-- Mobile : full-screen. Desktop : carte 420x620 ancrée bas-droite. -->
+  <!-- height: 100dvh (dynamic viewport) pour que le clavier mobile ne masque pas le bouton Envoyer. -->
   <div id="thomas-dialog"
-       class="fixed inset-0 z-[60] bg-black/40 hidden items-stretch sm:items-end justify-stretch sm:justify-end p-0 sm:p-8">
+       class="fixed inset-0 z-[60] bg-black/40 hidden items-stretch sm:items-end justify-stretch sm:justify-end p-0 sm:p-8"
+       style="height: 100dvh;">
     <div class="bg-surface w-full sm:w-[420px] h-full sm:h-[620px] sm:max-h-[90vh] sm:rounded-2xl
                 shadow-lift flex flex-col overflow-hidden sm:border border-border">
       <!-- Header -->
@@ -486,9 +488,10 @@
             </svg>
           </button>
           <button id="thomas-dialog-close"
-                  class="w-8 h-8 rounded-lg flex items-center justify-center
-                         text-text-muted hover:text-text hover:bg-bg
-                         transition-colors text-xl leading-none">×</button>
+                  aria-label="Fermer le chat"
+                  class="w-11 h-11 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center
+                         text-text hover:text-text hover:bg-bg
+                         transition-colors text-3xl sm:text-xl leading-none">×</button>
         </div>
       </div>
 
@@ -551,14 +554,14 @@
         <input id="thomas-input" type="text"
                placeholder="Écris un message à Thomas…"
                autocomplete="off"
-               class="flex-1 px-3 py-2 rounded-lg bg-bg
+               class="flex-1 min-w-0 px-3 py-2 rounded-lg bg-bg
                       border border-border
                       text-sm text-text
                       placeholder:text-text-muted
                       focus:border-accent focus:outline-none
                       transition-colors"/>
         <button id="thomas-send"
-                class="px-4 py-2 rounded-lg
+                class="px-4 py-2 shrink-0 rounded-lg
                        bg-gradient-to-br from-accent to-accent-hover
                        text-white text-sm font-semibold
                        hover:shadow-soft transition-all

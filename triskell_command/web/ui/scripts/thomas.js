@@ -125,6 +125,13 @@ const Thomas = {
     }
     if (lightboxClose) lightboxClose.addEventListener('click', () => this._closeLightbox());
 
+    // Bouton "retour" du téléphone (ou geste de retour PWA) : ferme le chat
+    // au lieu de quitter l'application. À l'ouverture on pushe une entrée
+    // d'historique, à la fermeture on la pop (ou popstate la consomme).
+    window.addEventListener('popstate', () => {
+      if (this.open) this._teardown();
+    });
+
     // F11 pour ouvrir le chat
     window.addEventListener('keydown', (e) => {
       if (e.key === 'F11') {
@@ -260,10 +267,18 @@ const Thomas = {
   },
 
   async openDialog() {
+    if (this.open) return;
     const dlg = document.getElementById('thomas-dialog');
     dlg.classList.remove('hidden');
     dlg.classList.add('flex');
     this.open = true;
+    // Pousse une entrée d'historique : sur mobile/PWA, le bouton "retour"
+    // ferme alors le chat au lieu de quitter l'application.
+    try {
+      if (!history.state || !history.state.thomasOpen) {
+        history.pushState({ thomasOpen: true }, '');
+      }
+    } catch (e) {}
     await this.refreshMessages();
     try { await App.api.messages_mark_read(); } catch(e){}
     this.updateBadge(0);
@@ -271,19 +286,31 @@ const Thomas = {
     this.startPolling();
   },
 
+  // Fermeture déclenchée par l'utilisateur (croix, clic sur fond, Escape).
+  // On préfère passer par history.back() pour rester en phase avec la pile
+  // d'historique — popstate consommera et appellera _teardown.
   closeDialog() {
+    if (!this.open) return;
+    if (history.state && history.state.thomasOpen) {
+      history.back();
+    } else {
+      this._teardown();
+    }
+  },
+
+  // Vraie fermeture (UI). Appelée soit par closeDialog → history.back → popstate,
+  // soit directement par popstate quand l'utilisateur tape "retour".
+  _teardown() {
+    if (!this.open) return;
     const dlg = document.getElementById('thomas-dialog');
     dlg.classList.add('hidden');
     dlg.classList.remove('flex');
     this.open = false;
-    // Stop le ping "is typing" si en cours
     if (this.typingIdleTimeout) {
       clearTimeout(this.typingIdleTimeout);
       this.typingIdleTimeout = null;
     }
     try { App.api.messages_set_typing({ active: false }); } catch(e){}
-    // Réinitialise l'état "en train de répondre / modifier" : si on
-    // rouvre, c'est un nouveau contexte (on n'avait juste pas envoyé).
     this._clearReplyTo();
     this._clearEditMode();
     this.startPolling();
