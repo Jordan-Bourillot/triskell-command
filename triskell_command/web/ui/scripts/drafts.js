@@ -423,25 +423,78 @@ const Drafts = {
         card.querySelectorAll('button').forEach(b => b.disabled = busy);
         card.style.opacity = busy ? '0.6' : '1';
       };
-      card.querySelector('[data-act="reject"]').onclick = async () => {
-        if (!App.api) return;
-        setBusy(true);
-        try {
-          const r = await App.api.draft_reject({ id, source, key: id });
-          if (r && r.ok === false) alert('Rejet KO : ' + (r.error || '?'));
-        } catch (e) { console.warn(e); }
-        await this.refresh();
-      };
-      card.querySelector('[data-act="approve"]').onclick = async () => {
-        if (!App.api) return;
-        const body = bodyEl ? bodyEl.value : rows[idx].body;
-        setBusy(true);
-        try {
-          const r = await App.api.draft_approve({ id, source, key: id, body });
-          if (r && r.ok === false) alert('Envoi KO : ' + (r.error || '?'));
-        } catch (e) { console.warn(e); }
-        await this.refresh();
-      };
+      const rejectBtn  = card.querySelector('[data-act="reject"]');
+      const approveBtn = card.querySelector('[data-act="approve"]');
+      if (rejectBtn) {
+        rejectBtn.addEventListener('click', async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (!App.api || !App.api.draft_reject) {
+            alert('API indisponible — rafraichis la page.');
+            return;
+          }
+          setBusy(true);
+          rejectBtn.textContent = 'Rejet…';
+          let r;
+          try {
+            r = await App.api.draft_reject({ id, source, key: id });
+          } catch (e) {
+            console.error('draft_reject KO', e);
+            alert('Erreur reseau pendant le rejet : ' + String(e));
+            setBusy(false);
+            rejectBtn.textContent = 'Rejeter';
+            return;
+          }
+          if (!r || r.ok === false) {
+            const why = (r && r.error) || 'reponse vide du serveur';
+            alert('Rejet refuse : ' + why);
+            setBusy(false);
+            rejectBtn.textContent = 'Rejeter';
+            return;
+          }
+          // OK : on cache la carte tout de suite (feedback immediat) puis
+          // on refresh la liste depuis le serveur.
+          card.style.transition = 'opacity 200ms';
+          card.style.opacity = '0';
+          setTimeout(() => { try { card.remove(); } catch (e) {} }, 220);
+          await this.refresh();
+        });
+      }
+      if (approveBtn) {
+        approveBtn.addEventListener('click', async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (!App.api || !App.api.draft_approve) {
+            alert('API indisponible — rafraichis la page.');
+            return;
+          }
+          const body = bodyEl ? bodyEl.value : rows[idx].body;
+          setBusy(true);
+          const originalLabel = approveBtn.textContent;
+          approveBtn.textContent = 'Envoi…';
+          let r;
+          try {
+            r = await App.api.draft_approve({ id, source, key: id, body });
+          } catch (e) {
+            console.error('draft_approve KO', e);
+            alert('Erreur reseau pendant l envoi : ' + String(e));
+            setBusy(false);
+            approveBtn.textContent = originalLabel;
+            return;
+          }
+          if (!r || r.ok === false) {
+            const why = (r && r.error) || 'reponse vide du serveur';
+            alert('Envoi refuse : ' + why);
+            setBusy(false);
+            approveBtn.textContent = originalLabel;
+            return;
+          }
+          card.style.transition = 'opacity 200ms';
+          card.style.opacity = '0';
+          setTimeout(() => { try { card.remove(); } catch (e) {} }, 220);
+          await this.refresh();
+        });
+      }
     });
   },
 
