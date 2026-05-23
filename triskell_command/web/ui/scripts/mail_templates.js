@@ -1127,13 +1127,15 @@ const MailTemplates = {
         ${warnHtml}
       </div>
 
-      <!-- Tabs Édition / Aperçu (gardés mais plus discrets) -->
+      <!-- Tabs Édition / Aperçu — par défaut on ouvre sur Aperçu pour
+           que Jordan voie tout de suite à quoi ressemble le mail final ;
+           si besoin d'éditer il bascule sur l'onglet ✎ Édition. -->
       <div class="mt-tabs">
-        <button class="mt-tab is-active" data-mt-pane="edit">✎ Édition</button>
-        <button class="mt-tab" data-mt-pane="preview">👁 Aperçu</button>
+        <button class="mt-tab" data-mt-pane="edit">✎ Édition</button>
+        <button class="mt-tab is-active" data-mt-pane="preview">👁 Aperçu</button>
       </div>
 
-      <div id="mt-pane-edit">
+      <div id="mt-pane-edit" style="display:none;">
         ${isProspection ? `
         <!-- CATÉGORIE DE PROSPECT CIBLÉE : à choisir manuellement.
              L'autopilote utilisera ensuite cette info pour piocher dans
@@ -1238,7 +1240,7 @@ const MailTemplates = {
         </div>
       </div>
 
-      <div id="mt-pane-preview" style="display:none;">
+      <div id="mt-pane-preview">
         <iframe id="mt-preview-iframe" class="mt-preview-frame" sandbox=""></iframe>
         <p class="text-[11px] text-text-muted mt-3">Les variables <code>{{…}}</code> sont remplacées par des valeurs d'exemple ci-dessus.</p>
       </div>
@@ -1271,6 +1273,9 @@ const MailTemplates = {
     document.getElementById('mt-save').onclick = () => this.save();
     const delBtn = document.getElementById('mt-delete');
     if (delBtn) delBtn.onclick = () => this.deleteCurrent();
+    // L'onglet par défaut est "Aperçu" : on remplit l'iframe tout de suite
+    // sinon elle s'affiche blanche tant qu'on n'a pas re-cliqué.
+    this._renderPreview();
   },
 
   _switchPane(name) {
