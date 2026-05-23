@@ -1377,6 +1377,14 @@ const Autopilot = {
           'daily_cap', String(c.daily_cap ?? 40))}
         ${this._input('Délai avant la relance d\'un prospect sans réponse (en jours)',
           'follow_up_days', String(c.follow_up_days ?? 5))}
+        ${this._input('Espacement entre 2 envois (en secondes)',
+          'send_delay_seconds', String(c.send_delay_seconds ?? 0))}
+        <div class="text-xs text-text-muted -mt-2 mb-3" style="text-wrap: pretty">
+          0 = pas d'attente (les mails partent à la chaîne). Mettre 30 à 60
+          secondes pour étaler la cadence et protéger la réputation de tes
+          adresses (anti-spam). S'applique aussi au bouton « Tout envoyer »
+          de l'onglet Brouillons.
+        </div>
         <div class="grid grid-cols-2 gap-3">
           ${this._input('Heure de début (0-23)', 'send_hour_start',
             String(c.send_hour_start ?? 8))}
@@ -1417,6 +1425,7 @@ const Autopilot = {
       sender_mon_prenom:  v('sender_mon_prenom'),
       daily_cap:          numI('daily_cap', 40),
       follow_up_days:     numI('follow_up_days', 5),
+      send_delay_seconds: numI('send_delay_seconds', 0),
       // Auto-pilote v2 etape 6 : produit pousse + audience
       // (autopilot_product/audience retires : les produits actifs viennent
       // automatiquement du catalogue maintenant. On garde la conservation

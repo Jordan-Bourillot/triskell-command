@@ -14,6 +14,10 @@ const Drafts = {
             ${Help.button('drafts')}
           </div>
           <div class="flex flex-wrap gap-2 sm:gap-3 mt-5 sm:mt-6">
+            <button id="d-send-all" class="btn btn-primary"
+                    title="Envoie d'un coup tous les brouillons en attente, apres confirmation.">
+              Tout envoyer
+            </button>
             <button id="d-refresh" class="btn btn-secondary">Rafraîchir</button>
             <button id="d-cleanup" class="btn btn-secondary" title="Supprime les brouillons en attente qui n'ont jamais reçu de contenu (coquilles vides)">Vider les coquilles vides</button>
             <button id="d-cleanup-broken" class="btn btn-secondary"
@@ -34,6 +38,7 @@ const Drafts = {
     document.getElementById('d-cleanup').onclick = () => this._cleanup();
     document.getElementById('d-cleanup-broken').onclick = () => this._cleanupBroken();
     document.getElementById('d-wipe-all').onclick = () => this._wipeAll();
+    document.getElementById('d-send-all').onclick = () => this._sendAll();
     await this.refresh();
   },
 
@@ -55,6 +60,98 @@ const Drafts = {
     }
     if (res && res.ok) alert(`${res.total} brouillon(s) cassé(s) supprimé(s).`);
     else if (res) alert('Nettoyage partiel. Erreurs : ' + (res.errors || []).join(' ; '));
+    await this.refresh();
+  },
+
+  // Envoi groupe : approuve et envoie d'un coup TOUS les brouillons en
+  // attente. Demande confirmation explicite avant (pas de bouton magique
+  // qui balance 50 mails par erreur). Iteration sequentielle pour ne pas
+  // surcharger le serveur SMTP et garder les erreurs lisibles. Respecte
+  // l'espacement entre 2 envois configure dans les reglages autopilote
+  // (send_delay_seconds) pour proteger la reputation des adresses.
+  async _sendAll() {
+    if (!App.api || !App.api.get_drafts || !App.api.draft_approve) return;
+    // On relit la liste a chaud (pas de cache potentiellement perime).
+    let data;
+    try { data = await App.api.get_drafts(); }
+    catch (e) { alert('Erreur lecture brouillons : ' + e); return; }
+    const rows = (data && data.rows) || [];
+    if (!rows.length) {
+      alert('Aucun brouillon a envoyer.');
+      return;
+    }
+    // Lit le delai inter-envoi parametre cote autopilote. Sans cle ou en
+    // cas d'erreur : 0 (pas de delai). On lit ici plutot que de cacher
+    // pour que tout changement de reglage soit pris en compte au prochain
+    // clic, sans avoir a rafraichir la page.
+    let delaySec = 0;
+    try {
+      const cfgRes = await App.api.autopilot_get_config();
+      delaySec = parseInt(
+        (cfgRes && cfgRes.config && cfgRes.config.send_delay_seconds) || 0, 10
+      ) || 0;
+    } catch (e) { /* on tolere : delai = 0 par defaut */ }
+    const delayMsg = delaySec > 0
+      ? `\n\nEspacement entre 2 envois : ${delaySec}s (regle dans l'autopilote).`
+      + `\nDuree estimee : ~${Math.ceil((rows.length - 1) * delaySec / 60)} min.`
+      : '';
+    const ok = confirm(
+      `ENVOYER ${rows.length} BROUILLON(S) MAINTENANT ?\n\n`
+      + `Tous les mails en attente vont partir reellement, depuis ta boite `
+      + `mail configuree.\n\n`
+      + `Pas de retour en arriere : une fois envoye, c'est envoye.`
+      + `${delayMsg}\n\n`
+      + `Continuer ?`
+    );
+    if (!ok) return;
+    const topBtn    = document.getElementById('d-send-all');
+    const bottomBtn = document.getElementById('d-send-all-bottom');
+    const setBusy = (busy, label) => {
+      [topBtn, bottomBtn].forEach(b => {
+        if (!b) return;
+        b.disabled = busy;
+        if (label) b.textContent = label;
+      });
+    };
+    setBusy(true, 'Envoi en cours…');
+    let sent = 0;
+    const errors = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      setBusy(true, `Envoi ${i + 1}/${rows.length}…`);
+      try {
+        const res = await App.api.draft_approve({
+          id: r.id || r.key,
+          key: r.id || r.key,
+          source: r.source || '',
+          body: r.body,   // on garde le corps tel quel (pas de modif par batch)
+        });
+        if (res && res.ok === false) {
+          errors.push(`${r.name || r.email || '?'} : ${res.error || '?'}`);
+        } else {
+          sent += 1;
+        }
+      } catch (e) {
+        errors.push(`${r.name || r.email || '?'} : ${e}`);
+      }
+      // Espacement entre 2 envois (sauf apres le dernier). Affiche un
+      // libelle d'attente pour que Jordan sache qu'on est en pause et
+      // pas en bug.
+      if (delaySec > 0 && i < rows.length - 1) {
+        setBusy(true, `Attente ${delaySec}s avant le suivant…`);
+        await new Promise(res => setTimeout(res, delaySec * 1000));
+      }
+    }
+    setBusy(false, 'Tout envoyer');
+    if (errors.length) {
+      alert(
+        `${sent} envoye(s), ${errors.length} echec(s).\n\n`
+        + `Echecs :\n- ` + errors.slice(0, 10).join('\n- ')
+        + (errors.length > 10 ? `\n… (+${errors.length - 10} autres)` : '')
+      );
+    } else {
+      alert(`${sent} mail(s) envoye(s).`);
+    }
     await this.refresh();
   },
 
@@ -137,8 +234,22 @@ const Drafts = {
             Approuve ou rejette pour faire descendre la file.
           </div>`
       : '';
-    list.innerHTML = banner + data.rows.map((r, i) => this._card(r, i)).join('');
+    // Bouton "Tout envoyer" duplique au pied de la liste : evite a Jordan
+    // de remonter en haut quand il vient de tout relire en scrollant.
+    const sendAllFooter = data.rows.length > 1
+      ? `<div class="flex justify-end pt-4">
+           <button id="d-send-all-bottom" class="btn btn-primary"
+                   title="Envoie d'un coup tous les brouillons en attente, apres confirmation.">
+             Tout envoyer (${data.rows.length})
+           </button>
+         </div>`
+      : '';
+    list.innerHTML = banner
+      + data.rows.map((r, i) => this._card(r, i)).join('')
+      + sendAllFooter;
     this._bind(data.rows);
+    const bottomBtn = document.getElementById('d-send-all-bottom');
+    if (bottomBtn) bottomBtn.onclick = () => this._sendAll();
   },
 
   _card(r, idx) {
