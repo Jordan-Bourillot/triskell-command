@@ -1119,17 +1119,83 @@ class Api:
         try:
             from triskell_core.prospect.core.crm import CRM
             from triskell_core.prospect.pipeline import approve_draft
-            if body is not None:
-                crm = CRM()
-                target = next((x for x in crm.all()
-                                if key in x.match_keys), None)
-                if target and target.pending_drafts:
+            # Capture les infos AVANT envoi : on en aura besoin apres
+            # pour logger dans Supabase email_history (sans ca, le mail
+            # part bien mais n'apparait pas dans la vue "Messages envoyes"
+            # -- bug remonte par Jordan 2026-05-23).
+            crm = CRM()
+            target = next((x for x in crm.all()
+                            if key in x.match_keys), None)
+            captured = None
+            if target and target.pending_drafts:
+                if body is not None:
                     target.pending_drafts[0]["body"] = body
                     crm._dirty = True  # noqa
                     crm.save()
-            return approve_draft(key, draft_index=0)
+                d = target.pending_drafts[0]
+                captured = {
+                    "to":         (target.emails[0] if target.emails else ""),
+                    "subject":    d.get("subject") or "",
+                    "body":       d.get("body") or "",
+                    "body_html":  d.get("body_html") or "",
+                    "prospect_id": getattr(target, "id", "") or "",
+                }
+            res = approve_draft(key, draft_index=0)
+            # Log Supabase si l'envoi a reussi : ainsi la vue Mails ->
+            # Messages envoyes recupere bien le mail dans la base partagee.
+            if res and res.get("ok") and captured:
+                self._log_sent_email_to_history(
+                    message_id=res.get("message_id") or "",
+                    captured=captured,
+                )
+            return res
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    def _log_sent_email_to_history(self, *, message_id: str,
+                                   captured: dict) -> None:
+        """Insere une ligne email_sent dans Supabase email_history apres
+        l'approbation d'un brouillon depuis l'autopilote. Tolerant : si
+        Supabase est indisponible, on log mais on n'echoue pas (l'envoi
+        SMTP a deja eu lieu)."""
+        try:
+            client = self._supabase()
+            if not client:
+                return
+            sb = client.raw
+            row = {
+                "kind":       "email_sent",
+                "ts":         self._iso_now(),
+                "subject":    (captured.get("subject") or "")[:200],
+                "body":       (captured.get("body") or "")[:5000],
+                "message_id": message_id,
+                "extra": {
+                    "to":          captured.get("to") or "",
+                    "to_all":      captured.get("to") or "",
+                    "from":        "",   # le compte primary est utilise
+                    "account_id":  "primary",
+                    "has_html":    bool(captured.get("body_html")),
+                    "body_html":   (captured.get("body_html") or "")[:50000],
+                    "source":      "autopilot_draft_approve",
+                },
+                "created_by": getattr(client, "user_id", None),
+            }
+            if captured.get("prospect_id"):
+                row["prospect_id"] = captured["prospect_id"]
+            try:
+                from ..integrations.multi_tenant import with_workspace
+                row = with_workspace(client, row)
+            except Exception:
+                # with_workspace pas dispo dans ce contexte -> on continue
+                # sans workspace_id (la base accepte NULL).
+                pass
+            sb.table("email_history").insert(row).execute()
+        except Exception as exc:
+            logger.warning(
+                "log email_sent KO depuis approve_draft "
+                "(le mail est parti, mais ne s'affichera pas dans "
+                "Messages envoyes) : %s", exc
+            )
 
     def _reject_local_draft(self, key: str) -> dict:
         try:
