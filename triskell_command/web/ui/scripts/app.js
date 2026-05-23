@@ -8,6 +8,7 @@
 const App = {
   api: null,
   currentView: 'morning',
+  previousView: null,   // vue precedente, sert au bouton "Retour" des sous-pages
   currentUser: {},   // {first_name, full_name, email} — rempli au boot
 
   // ---- Wait for API to be ready ----
@@ -401,6 +402,11 @@ const App = {
 
   // ---- Routing entre vues ----
   show(viewId, params) {
+    // Memorise la vue precedente (sauf si on re-rentre dans la meme vue),
+    // pour permettre aux sous-pages d'afficher un bouton "Retour".
+    if (this.currentView && this.currentView !== viewId) {
+      this.previousView = this.currentView;
+    }
     this.currentView = viewId;
     this.currentParams = params || null;
     // Active state sidebar

@@ -2,8 +2,23 @@
 
 const Drafts = {
   async render(container) {
+    // Label du bouton Retour : tente d'humaniser la vue precedente si elle
+    // est connue, sinon retombe sur le cockpit (page d'accueil).
+    const backTarget = App.previousView || 'morning';
+    const backLabels = {
+      morning:   'Retour au cockpit',
+      autopilot: "Retour a l'auto-pilote",
+      mails:     'Retour aux mails',
+      replies:   'Retour aux reponses',
+      convoy:    'Retour au Convoi',
+      health:    'Retour a la sante',
+    };
+    const backLabel = backLabels[backTarget] || 'Retour';
     container.innerHTML = `
       <section class="animate-slide-up">
+        <div class="mb-4">
+          <button id="d-back" class="btn btn-secondary btn-sm">← ${backLabel}</button>
+        </div>
         <div class="mb-6 sm:mb-8">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
@@ -34,6 +49,8 @@ const Drafts = {
         <div id="d-list" class="space-y-3 sm:space-y-4"></div>
       </section>
     `;
+    const backBtn = document.getElementById('d-back');
+    if (backBtn) backBtn.onclick = () => App.show(backTarget);
     document.getElementById('d-refresh').onclick = () => this.refresh();
     document.getElementById('d-cleanup').onclick = () => this._cleanup();
     document.getElementById('d-cleanup-broken').onclick = () => this._cleanupBroken();
