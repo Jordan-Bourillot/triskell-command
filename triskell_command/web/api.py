@@ -5749,6 +5749,41 @@ class Api:
     # ------------------------------------------------------------------
     # Tableau de commande Auto-pilote v2 — compteurs des 5 maillons
     # ------------------------------------------------------------------
+    def autopilot_last_run_counts(self) -> dict:
+        """Renvoie les compteurs des 5 maillons pour le DERNIER run de
+        l'autopilote (en mémoire). Si aucun run n'a tourné depuis le boot
+        du serveur, tous les chiffres sont None et `has_data` est False.
+
+        Les chiffres viennent de `self._autopilot_state["stages"]` qui est
+        rempli en temps réel pendant un run (events `stage_done`).
+        """
+        with self._autopilot_lock:
+            stages = dict(self._autopilot_state.get("stages") or {})
+            started_at = self._autopilot_state.get("started_at") or ""
+            finished_at = self._autopilot_state.get("finished_at") or ""
+            running = bool(self._autopilot_state.get("running"))
+        # has_data = au moins UN stage a tourné (running, done ou error)
+        has_data = any(
+            (info or {}).get("state") not in (None, "", "idle")
+            for info in stages.values()
+        )
+        out: dict = {
+            "ok": True,
+            "has_data": has_data,
+            "running": running,
+            "started_at": started_at,
+            "finished_at": finished_at,
+        }
+        for stage_key in ("search", "sort", "write", "review", "send"):
+            info = stages.get(stage_key) or {}
+            # On expose count uniquement si le stage a vraiment tourné,
+            # sinon None pour que le front affiche "—"
+            if info.get("state") in (None, "", "idle"):
+                out[stage_key] = None
+            else:
+                out[stage_key] = int(info.get("count") or 0)
+        return out
+
     def autopilot_target_count(self) -> dict:
         """Compte les prospects qui pourraient être ciblés par un run.
 

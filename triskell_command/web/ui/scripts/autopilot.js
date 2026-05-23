@@ -1009,18 +1009,22 @@ const Autopilot = {
   // Compteurs des 5 maillons : appelle autopilot_pulse et met a jour
   // les spans .ap-stage-counter de chaque boite.
   async _refreshPulse() {
-    if (!App.api || !App.api.autopilot_pulse) return;
+    // Compteurs des 5 maillons = ce que l'autopilote a fait à son DERNIER
+    // run. Avant on affichait "X / 24h toutes sources" — chiffres faux et
+    // trompeurs sur la page Auto-pilote (incluaient Chasseur, Obélisk, etc.
+    // + bugs côté tri/rédige). Maintenant on lit l'état du dernier run en
+    // mémoire (autopilot_last_run_counts).
+    if (!App.api || !App.api.autopilot_last_run_counts) return;
     let r;
-    try { r = await App.api.autopilot_pulse({ hours: 24 }); }
+    try { r = await App.api.autopilot_last_run_counts(); }
     catch (e) { return; }
     if (!r || !r.ok) return;
-    // Libelle 24h specifique a chaque etape, plus clair que "sur 24h" generique
-    const LABEL_24H = {
-      search: ' ajoutés à la base / 24h',
-      sort:   ' qualifiés / 24h',
-      write:  ' brouillons rédigés / 24h',
-      review: ' relus / 24h',
-      send:   ' mails envoyés / 24h',
+    const LABEL_LAST_RUN = {
+      search: ' trouvés au dernier run',
+      sort:   ' qualifiés au dernier run',
+      write:  ' brouillons rédigés au dernier run',
+      review: ' relus au dernier run',
+      send:   ' envoyés ou mis en brouillon au dernier run',
     };
     this._STAGES.forEach(stage => {
       const stageEl = document.querySelector(`[data-stage="${stage.key}"]`);
@@ -1029,16 +1033,25 @@ const Autopilot = {
       const label   = stageEl.querySelector('.ap-stage-counter-label');
       if (!counter) return;
       const n = r[stage.key];
+      // null => "—" : ce maillon n'a pas tourné lors du dernier run
       counter.textContent = (typeof n === 'number') ? String(n) : '—';
-      if (label && LABEL_24H[stage.key]) label.textContent = LABEL_24H[stage.key];
+      if (label && LABEL_LAST_RUN[stage.key]) {
+        label.textContent = LABEL_LAST_RUN[stage.key];
+      }
     });
-    // Met aussi a jour le resume textuel sous la chaine
+    // Résumé textuel sous la chaîne des 5 cartes
     const sum = document.getElementById('ap-last-run-summary');
     if (sum) {
-      const s = r.search ?? 0;
-      const w = r.write ?? 0;
-      const e = r.send ?? 0;
-      sum.textContent = `Dernieres 24h : ${s} prospects trouves · ${w} brouillons rediges · ${e} mails envoyes`;
+      if (!r.has_data) {
+        sum.textContent =
+          "L'autopilote n'a pas encore tourné depuis le dernier redémarrage du serveur.";
+      } else {
+        const s = r.search ?? 0;
+        const w = r.write ?? 0;
+        const e = r.send ?? 0;
+        const tag = r.running ? '(run en cours)' : '(terminé)';
+        sum.textContent = `Dernier run ${tag} : ${s} trouvés · ${w} rédigés · ${e} envoyés ou mis en brouillon.`;
+      }
     }
   },
 
@@ -1398,6 +1411,9 @@ const Autopilot = {
         runBtn.disabled = true;
         runBtn.innerHTML = `<span class="inline-block w-4 h-4 mr-2 rounded-full border-2 border-white/40 border-t-white animate-spin"></span>En cours…`;
       }
+      // Rafraîchit les compteurs du bas (dernier run) pendant le tick :
+      // ça donne un effet "compteurs qui montent" pendant la run.
+      this._refreshPulse();
       return;
     }
     // run terminé
@@ -1407,10 +1423,12 @@ const Autopilot = {
     }
     if (!silent) this._stopRun();
     // Récap final : remplace l'ancien bloc stats par une vue plus riche
-    if (r.stats) this._renderRecap(r.stats, r.touched_prospects || [], r.error || '');
+    if (r.stats) this._renderRecap(r.stats, r.touched_prospects || [], r.error || '', r.stages || {});
     if (r.error) this._appendLog('✗ ' + r.error);
     // Run terminé : mets à jour la pastille de l'onglet Brouillons
+    // + fige les compteurs du bas sur les chiffres finaux du run.
     this._refreshDraftsCount();
+    this._refreshPulse();
   },
 
   _stopRun() {
@@ -1484,13 +1502,23 @@ const Autopilot = {
   // Récap final : grand bloc visuel sous le tableau de commande,
   // remplace l'ancien bloc stats minimaliste.
   // ------------------------------------------------------------------
-  _renderRecap(stats, touched, errorTop) {
+  _renderRecap(stats, touched, errorTop, stages) {
     const wrap = document.getElementById('ap-recap');
     if (!wrap) return;
     const s = stats || {};
+    const st = stages || {};
     const sent     = s.drafts_sent     || 0;
     const pending  = s.drafts_pending  || 0;
-    const searched = s.searched        || 0;
+    // "Prospects ciblés" = prospects retenus par le tri pour ce run. Le
+    // champ `searched` du backend ne compte que les NOUVEAUX prospects
+    // créés (et l'autopilote n'en crée jamais — il pioche dans les
+    // existants), donc on lit le count remonté par l'étape "Trie" et
+    // on retombe en dernier ressort sur sent+pending (ceux qu'on a
+    // vraiment touchés) puis sur `searched`.
+    const sortCount = (st.sort && Number(st.sort.count)) || 0;
+    const targeted = sortCount > 0
+      ? sortCount
+      : (sent + pending) || (s.searched || 0);
     const enriched = s.enriched        || 0;
     const errors   = s.errors || [];
 
@@ -1498,7 +1526,7 @@ const Autopilot = {
     const draftList = touched.filter(p => p.action === 'draft');
     const skippedList = touched.filter(p => p.action === 'skipped');
 
-    const nothingHappened = sent === 0 && pending === 0 && searched === 0
+    const nothingHappened = sent === 0 && pending === 0 && targeted === 0
       && enriched === 0;
 
     wrap.classList.remove('hidden');
@@ -1527,7 +1555,7 @@ const Autopilot = {
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-          ${this._kpi('Prospects ciblés', searched, searched > 0 ? 'accent' : '')}
+          ${this._kpi('Prospects ciblés', targeted, targeted > 0 ? 'accent' : '')}
           ${this._kpi('Mails envoyés', sent, sent > 0 ? 'success' : '')}
           ${this._kpi('Brouillons posés', pending, pending > 0 ? 'accent' : '')}
         </div>
