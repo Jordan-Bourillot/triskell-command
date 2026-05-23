@@ -55,6 +55,23 @@ class Api:
         }
         self._autopilot_lock = threading.Lock()
 
+        # État du batch "Tout envoyer" depuis l'écran Brouillons. Permet au
+        # Cockpit de montrer un encadré live (comme l'étape 5 de l'auto-pilote)
+        # quand Jordan envoie en série depuis la file de validation.
+        self._drafts_batch_state = {
+            "running":      False,
+            "started_at":   "",
+            "finished_at":  "",
+            "total":        0,
+            "sent":         0,
+            "errors":       0,
+            "current_name": "",
+            "current_email":"",
+            "error_msgs":   [],   # liste {name, email, reason} pour les échecs
+            "stop_requested": False,
+        }
+        self._drafts_batch_lock = threading.Lock()
+
     @staticmethod
     def _fresh_stages() -> dict:
         """État initial des 5 maillons (idle, vide)."""
@@ -5895,6 +5912,155 @@ class Api:
         if not (local_running or nightly_running):
             return {"ok": False, "error": "Aucun run en cours."}
         return {"ok": True}
+
+    # ------------------------------------------------------------------
+    # "Tout envoyer" depuis l'écran Brouillons
+    # ------------------------------------------------------------------
+    def drafts_send_all_start(self, payload: dict | None = None) -> dict:
+        """Démarre un envoi en série de tous les brouillons en attente,
+        en arrière-plan. Le front polle ensuite drafts_send_all_status()
+        pour le live, et le Cockpit montre un encadré tant que ça tourne."""
+        with self._drafts_batch_lock:
+            if self._drafts_batch_state.get("running"):
+                return {"ok": False, "error": "Un envoi est déjà en cours."}
+            from datetime import datetime
+            self._drafts_batch_state.update({
+                "running":        True,
+                "started_at":     datetime.now().isoformat(timespec="seconds"),
+                "finished_at":    "",
+                "total":          0,
+                "sent":           0,
+                "errors":         0,
+                "current_name":   "",
+                "current_email":  "",
+                "error_msgs":     [],
+                "stop_requested": False,
+            })
+
+        # Lit l'espacement entre 2 envois depuis la config autopilote, pour
+        # respecter le même réglage que les sends auto.
+        try:
+            delay_sec = int(self._app_state.get(
+                "outreach", "send_delay_seconds", default=0) or 0)
+        except Exception:
+            delay_sec = 0
+
+        import threading
+        t = threading.Thread(
+            target=self._drafts_batch_worker,
+            args=(delay_sec,),
+            name="DraftsSendAllWorker",
+            daemon=True,
+        )
+        t.start()
+        return {"ok": True, "started": True}
+
+    def drafts_send_all_status(self, payload: dict | None = None) -> dict:
+        with self._drafts_batch_lock:
+            import copy
+            s = copy.deepcopy(self._drafts_batch_state)
+        s["ok"] = True
+        return s
+
+    def drafts_send_all_stop(self, payload: dict | None = None) -> dict:
+        with self._drafts_batch_lock:
+            if not self._drafts_batch_state.get("running"):
+                return {"ok": False, "error": "Aucun envoi en cours."}
+            self._drafts_batch_state["stop_requested"] = True
+        return {"ok": True}
+
+    def _drafts_batch_worker(self, delay_sec: int) -> None:
+        """Worker thread : itère les brouillons en attente et appelle
+        draft_approve sur chacun. Met à jour _drafts_batch_state à chaque
+        pas pour que le Cockpit montre la progression en direct.
+        """
+        import time
+        from datetime import datetime
+        try:
+            data = self.get_drafts()
+            rows = (data or {}).get("rows") or []
+        except Exception as exc:
+            with self._drafts_batch_lock:
+                self._drafts_batch_state.update({
+                    "running":     False,
+                    "finished_at": datetime.now().isoformat(timespec="seconds"),
+                    "error_msgs":  [{"name": "", "email": "",
+                                     "reason": f"lecture brouillons KO : {exc}"}],
+                })
+            return
+
+        with self._drafts_batch_lock:
+            self._drafts_batch_state["total"] = len(rows)
+
+        if not rows:
+            with self._drafts_batch_lock:
+                self._drafts_batch_state.update({
+                    "running":     False,
+                    "finished_at": datetime.now().isoformat(timespec="seconds"),
+                })
+            return
+
+        for i, r in enumerate(rows):
+            # Stop demandé par l'UI ?
+            with self._drafts_batch_lock:
+                if self._drafts_batch_state.get("stop_requested"):
+                    break
+                self._drafts_batch_state.update({
+                    "current_name":  r.get("name") or "",
+                    "current_email": r.get("email") or "",
+                })
+
+            try:
+                res = self.draft_approve({
+                    "id":     r.get("id") or r.get("key") or "",
+                    "key":    r.get("id") or r.get("key") or "",
+                    "source": r.get("source") or "",
+                    "body":   r.get("body"),
+                })
+                ok = bool(res and res.get("ok"))
+            except Exception as exc:
+                res = {"ok": False, "error": str(exc)}
+                ok = False
+
+            with self._drafts_batch_lock:
+                if ok:
+                    self._drafts_batch_state["sent"] += 1
+                else:
+                    self._drafts_batch_state["errors"] += 1
+                    why = (res.get("error") if res else None) \
+                          or (res.get("reason") if res else None) \
+                          or "?"
+                    msgs = self._drafts_batch_state["error_msgs"]
+                    msgs.append({
+                        "name":  r.get("name") or "",
+                        "email": r.get("email") or "",
+                        "reason": str(why)[:200],
+                    })
+                    # On plafonne pour éviter de gonfler la mémoire.
+                    if len(msgs) > 50:
+                        del msgs[:len(msgs) - 50]
+
+            # Pause entre 2 envois (sauf après le dernier). Sleep haché
+            # pour réagir vite à un stop_requested.
+            if delay_sec > 0 and i < len(rows) - 1:
+                slept = 0
+                while slept < delay_sec:
+                    with self._drafts_batch_lock:
+                        if self._drafts_batch_state.get("stop_requested"):
+                            break
+                    time.sleep(0.5)
+                    slept += 0.5
+                with self._drafts_batch_lock:
+                    if self._drafts_batch_state.get("stop_requested"):
+                        break
+
+        with self._drafts_batch_lock:
+            self._drafts_batch_state.update({
+                "running":     False,
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+                "current_name":  "",
+                "current_email": "",
+            })
 
     # ------------------------------------------------------------------
     # Tableau de commande Auto-pilote v2 — compteurs des 5 maillons

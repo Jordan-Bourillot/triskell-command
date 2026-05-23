@@ -111,6 +111,10 @@ const Morning = {
              run. Polling toutes les 3s. Cliquable pour ouvrir la page complète. -->
         <div id="m-autopilot-live" class="mt-6 hidden"></div>
 
+        <!-- Encadré "envoi en série depuis Brouillons" : visible UNIQUEMENT
+             pendant qu'un envoi manuel tourne sur le serveur. -->
+        <div id="m-drafts-batch-live" class="mt-6 hidden"></div>
+
         <div id="m-content" class="mt-6"></div>
       </section>
     `;
@@ -188,6 +192,9 @@ const Morning = {
     // pour afficher/cacher le bandeau live en haut du Cockpit selon que
     // l'auto-pilote tourne ou pas.
     this._startAutopilotPoll();
+    // Encadré "envoi en série en cours" : même logique, poll dédié pour le
+    // bouton "Tout envoyer" depuis la page Brouillons.
+    this._startDraftsBatchPoll();
 
     // 2. Charge le digest
     const slot = document.getElementById('m-content');
@@ -714,6 +721,115 @@ const Morning = {
                   style="border-color: hsl(var(--accent) / 0.4); color: hsl(var(--accent));">
             Voir le détail →
           </button>
+        </div>
+      </div>
+    `;
+  },
+
+  // -------- Encadré "envoi en série en cours" --------
+  // Même approche que l'auto-pilote : un poll toutes les 3s tant qu'on est
+  // sur le Cockpit, affiche un bandeau quand un envoi tourne, le cache sinon.
+  _startDraftsBatchPoll() {
+    if (this._dbPollTimer) clearInterval(this._dbPollTimer);
+    const tick = async () => {
+      const slot = document.getElementById('m-drafts-batch-live');
+      if (!slot) {
+        if (this._dbPollTimer) clearInterval(this._dbPollTimer);
+        this._dbPollTimer = null;
+        return;
+      }
+      if (!App.api || !App.api.drafts_send_all_status) return;
+      let s;
+      try { s = await App.api.drafts_send_all_status({}); }
+      catch (e) { return; }
+      if (!s || !s.ok) return;
+      if (s.running) {
+        slot.innerHTML = this._renderDraftsBatchLive(s);
+        slot.classList.remove('hidden');
+        const card = slot.querySelector('[data-db-card]');
+        if (card) card.style.cursor = 'pointer';
+        if (card) card.onclick = (ev) => {
+          if (!(ev.target.closest('button'))) App.show('drafts');
+        };
+        const btn = slot.querySelector('[data-db-open]');
+        if (btn) btn.onclick = (ev) => {
+          ev.stopPropagation();
+          App.show('drafts');
+        };
+        const stopBtn = slot.querySelector('[data-db-stop]');
+        if (stopBtn) stopBtn.onclick = async (ev) => {
+          ev.stopPropagation();
+          if (App.api.drafts_send_all_stop) {
+            try { await App.api.drafts_send_all_stop({}); } catch (e) {}
+          }
+        };
+      } else {
+        slot.innerHTML = '';
+        slot.classList.add('hidden');
+      }
+    };
+    tick();
+    this._dbPollTimer = setInterval(tick, 3000);
+  },
+
+  _renderDraftsBatchLive(s) {
+    const total = s.total || 0;
+    const sent = s.sent || 0;
+    const errors = s.errors || 0;
+    const done = sent + errors;
+    const remaining = Math.max(0, total - done);
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    const current = s.current_name || s.current_email || '';
+    return `
+      <div class="card p-5 relative overflow-hidden" data-db-card
+           style="border-color: hsl(var(--accent) / 0.4);">
+        <div class="absolute top-0 left-0 right-0 h-1 bg-accent"></div>
+        <div class="flex items-start gap-4 flex-wrap sm:flex-nowrap">
+          <span class="inline-block w-9 h-9 rounded-full border-[3px] border-accent/30 border-t-accent animate-spin flex-shrink-0 mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="text-[11px] font-bold uppercase tracking-widest text-accent mb-1">
+              Envoi en série des brouillons
+            </div>
+            <div class="text-sm text-text mb-3" style="text-wrap: pretty">
+              ${current
+                ? `En cours : <strong>${this._esc(current)}</strong>`
+                : 'Préparation…'}
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-3">
+              <div class="text-center">
+                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted">Envoyés</div>
+                <div class="text-2xl font-bold text-success mt-1">${sent}</div>
+              </div>
+              <div class="text-center">
+                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted">Échecs</div>
+                <div class="text-2xl font-bold text-danger mt-1">${errors}</div>
+              </div>
+              <div class="text-center">
+                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted">Restants</div>
+                <div class="text-2xl font-bold text-accent mt-1">${remaining}</div>
+              </div>
+              <div class="text-center">
+                <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted">Total</div>
+                <div class="text-2xl font-bold text-text mt-1">${total}</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="flex-1 h-1.5 rounded-full bg-bg border border-border overflow-hidden">
+                <div class="h-full bg-accent transition-all duration-500 ease-out" style="width: ${pct}%"></div>
+              </div>
+              <div class="text-xs text-text-muted font-mono w-12 text-right">${pct}%</div>
+            </div>
+          </div>
+          <div class="flex flex-col gap-2 flex-shrink-0 self-start">
+            <button data-db-open class="btn btn-secondary"
+                    style="border-color: hsl(var(--accent) / 0.4); color: hsl(var(--accent));">
+              Voir →
+            </button>
+            <button data-db-stop class="btn btn-secondary"
+                    style="border-color: hsl(var(--danger) / 0.5); color: hsl(var(--danger));">
+              Arrêter
+            </button>
+          </div>
         </div>
       </div>
     `;

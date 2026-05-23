@@ -131,26 +131,22 @@ const Drafts = {
       b.style.borderColor = '';
     });
 
-    // On relit la liste a chaud (pas de cache potentiellement perime).
-    let data;
-    try { data = await App.api.get_drafts(); }
-    catch (e) { alert('Erreur lecture brouillons : ' + e); return; }
-    const rows = (data && data.rows) || [];
-    if (!rows.length) {
-      alert('Aucun brouillon a envoyer.');
+    // On lance l'envoi côté serveur (worker thread) : ça permet au Cockpit
+    // d'afficher un encadré live, et au navigateur de fermer la page sans
+    // interrompre l'envoi.
+    if (!App.api.drafts_send_all_start) {
+      alert('Le serveur n a pas encore la fonction "Tout envoyer en série". Rafraichis la page.');
       return;
     }
-    // Lit le delai inter-envoi parametre cote autopilote. Sans cle ou en
-    // cas d'erreur : 0 (pas de delai). On lit ici plutot que de cacher
-    // pour que tout changement de reglage soit pris en compte au prochain
-    // clic, sans avoir a rafraichir la page.
-    let delaySec = 0;
-    try {
-      const cfgRes = await App.api.autopilot_get_config();
-      delaySec = parseInt(
-        (cfgRes && cfgRes.config && cfgRes.config.send_delay_seconds) || 0, 10
-      ) || 0;
-    } catch (e) { /* on tolere : delai = 0 par defaut */ }
+    let startRes;
+    try { startRes = await App.api.drafts_send_all_start({}); }
+    catch (e) { alert('Erreur démarrage envoi : ' + e); return; }
+    if (!startRes || !startRes.ok) {
+      alert('Démarrage refusé : ' + ((startRes && startRes.error) || '?'));
+      return;
+    }
+    // Poll le statut et met à jour le bouton tant que ça tourne. Le Cockpit
+    // a son propre poll, l'encadré apparaîtra là-bas aussi.
     const topBtn    = document.getElementById('d-send-all');
     const bottomBtn = document.getElementById('d-send-all-bottom');
     const setBusy = (busy, label) => {
@@ -160,46 +156,35 @@ const Drafts = {
         if (label) b.textContent = label;
       });
     };
-    setBusy(true, 'Envoi en cours…');
-    let sent = 0;
-    const errors = [];
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
-      setBusy(true, `Envoi ${i + 1}/${rows.length}…`);
-      try {
-        const res = await App.api.draft_approve({
-          id: r.id || r.key,
-          key: r.id || r.key,
-          source: r.source || '',
-          body: r.body,   // on garde le corps tel quel (pas de modif par batch)
-        });
-        if (res && res.ok === false) {
-          // approve_draft renvoie "reason", _approve_local_draft "error" :
-          // on lit les deux pour ne pas perdre le message reel.
-          errors.push(`${r.name || r.email || '?'} : ${res.error || res.reason || '?'}`);
-        } else {
-          sent += 1;
-        }
-      } catch (e) {
-        errors.push(`${r.name || r.email || '?'} : ${e}`);
-      }
-      // Espacement entre 2 envois (sauf apres le dernier). Affiche un
-      // libelle d'attente pour que Jordan sache qu'on est en pause et
-      // pas en bug.
-      if (delaySec > 0 && i < rows.length - 1) {
-        setBusy(true, `Attente ${delaySec}s avant le suivant…`);
-        await new Promise(res => setTimeout(res, delaySec * 1000));
-      }
-    }
+    setBusy(true, 'Envoi…');
+    const pollDone = await new Promise((resolve) => {
+      const tick = async () => {
+        let s;
+        try { s = await App.api.drafts_send_all_status({}); }
+        catch (e) { resolve({ error: String(e) }); return; }
+        if (!s) { resolve({ error: 'pas de statut' }); return; }
+        const done = (s.sent || 0) + (s.errors || 0);
+        const total = s.total || 0;
+        setBusy(true, total
+          ? `Envoi ${done}/${total}…`
+          : 'Envoi…');
+        if (!s.running) { resolve(s); return; }
+        setTimeout(tick, 1500);
+      };
+      tick();
+    });
     setBusy(false, 'Tout envoyer');
-    if (errors.length) {
+    if (pollDone && pollDone.error) {
+      alert('Erreur : ' + pollDone.error);
+    } else if (pollDone && (pollDone.errors || 0) > 0) {
+      const msgs = (pollDone.error_msgs || []).slice(0, 10).map(
+        m => `${m.name || m.email || '?'} : ${m.reason || '?'}`);
       alert(
-        `${sent} envoye(s), ${errors.length} echec(s).\n\n`
-        + `Echecs :\n- ` + errors.slice(0, 10).join('\n- ')
-        + (errors.length > 10 ? `\n… (+${errors.length - 10} autres)` : '')
+        `${pollDone.sent || 0} envoye(s), ${pollDone.errors || 0} echec(s).\n\n`
+        + (msgs.length ? `Echecs :\n- ${msgs.join('\n- ')}` : '')
       );
-    } else {
-      alert(`${sent} mail(s) envoye(s).`);
+    } else if (pollDone) {
+      alert(`${pollDone.sent || 0} mail(s) envoye(s).`);
     }
     await this.refresh();
   },
