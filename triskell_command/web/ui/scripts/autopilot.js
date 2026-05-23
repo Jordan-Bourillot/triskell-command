@@ -963,6 +963,106 @@ const Autopilot = {
     wrap.querySelectorAll('.ap-d-reject').forEach(btn => {
       btn.onclick = () => this._draftAction(rows[parseInt(btn.dataset.idx, 10)], 'reject');
     });
+    wrap.querySelectorAll('.ap-d-view').forEach(btn => {
+      btn.onclick = () => this._viewDraft(rows[parseInt(btn.dataset.idx, 10)]);
+    });
+  },
+
+  // ------------------------------------------------------------------
+  // Modale "Voir" : affiche le mail complet (rendu HTML si dispo, sinon
+  // texte brut joliment formaté) dans une lightbox. Lecture seule —
+  // pour éditer, c'est "Éditer en détail" qui amène sur la page brouillons.
+  _viewDraft(draft) {
+    if (!draft) return;
+    // Ferme une modale précédente s'il y en a une (clic rapide sur "Voir"
+    // de plusieurs brouillons).
+    this._closeDraftViewer();
+
+    const ts = (draft.ts || '').replace('T', ' ').slice(0, 16);
+    const hasHtml = !!(draft.body_html && String(draft.body_html).trim());
+    const htmlSrc = hasHtml
+      ? String(draft.body_html).replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+      : '';
+    const textBody = this._esc(draft.body || '').replace(/\n/g, '<br>');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ap-d-viewer';
+    overlay.className = 'fixed inset-0 z-[100] flex items-start justify-center p-4 sm:p-8';
+    overlay.style.background = 'rgba(0, 0, 0, 0.65)';
+    overlay.innerHTML = `
+      <div class="card w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden"
+           style="background: hsl(var(--bg-elev, var(--bg))); box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
+        <!-- Header destinataire -->
+        <header class="px-5 sm:px-7 py-4 border-b border-border flex items-start justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-bold uppercase tracking-widest text-text-muted mb-1.5">
+              Brouillon — lecture seule
+            </div>
+            <div class="font-semibold text-base truncate">${this._esc(draft.name || '(sans nom)')}</div>
+            <div class="text-xs text-text-muted break-all mt-0.5">
+              ${this._esc(draft.email || '')}${draft.city ? ' · ' + this._esc(draft.city) : ''}${ts ? ' · ' + this._esc(ts) : ''}
+            </div>
+          </div>
+          <button id="ap-d-viewer-close"
+                  class="text-text-muted hover:text-text transition-colors flex-shrink-0 p-1"
+                  title="Fermer (Échap)">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <line x1="6" y1="6" x2="18" y2="18"/>
+              <line x1="6" y1="18" x2="18" y2="6"/>
+            </svg>
+          </button>
+        </header>
+
+        <!-- Objet -->
+        <div class="px-5 sm:px-7 py-3 border-b border-border bg-bg/40">
+          <div class="text-[11px] uppercase tracking-widest text-text-muted mb-0.5">Objet</div>
+          <div class="text-sm font-semibold break-words">${this._esc(draft.subject || '(sans objet)')}</div>
+        </div>
+
+        <!-- Corps : iframe sandbox si HTML dispo, sinon texte joli -->
+        <div class="flex-1 overflow-y-auto p-5 sm:p-7">
+          ${hasHtml ? `
+            <iframe sandbox=""
+                    srcdoc="${htmlSrc}"
+                    style="width:100%; min-height:480px;
+                           border:1px solid hsl(var(--border));
+                           border-radius:12px; background:white;"></iframe>
+          ` : `
+            <div class="text-sm leading-relaxed text-text-secondary"
+                 style="text-wrap: pretty;">
+              ${textBody || '<span class="text-text-muted">(corps vide)</span>'}
+            </div>
+          `}
+        </div>
+
+        <!-- Footer : juste Fermer (les actions sont sur la carte d'origine) -->
+        <footer class="px-5 sm:px-7 py-4 border-t border-border flex justify-end">
+          <button id="ap-d-viewer-close-btn" class="btn btn-secondary">Fermer</button>
+        </footer>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Bindings : fermeture par croix, bouton, clic en dehors, ou touche Échap
+    const close = () => this._closeDraftViewer();
+    overlay.querySelector('#ap-d-viewer-close').onclick = close;
+    overlay.querySelector('#ap-d-viewer-close-btn').onclick = close;
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) close();
+    });
+    this._draftViewerKeyHandler = (ev) => {
+      if (ev.key === 'Escape') close();
+    };
+    document.addEventListener('keydown', this._draftViewerKeyHandler);
+  },
+
+  _closeDraftViewer() {
+    const overlay = document.getElementById('ap-d-viewer');
+    if (overlay) overlay.remove();
+    if (this._draftViewerKeyHandler) {
+      document.removeEventListener('keydown', this._draftViewerKeyHandler);
+      this._draftViewerKeyHandler = null;
+    }
   },
 
   async _wipeAllDrafts() {
