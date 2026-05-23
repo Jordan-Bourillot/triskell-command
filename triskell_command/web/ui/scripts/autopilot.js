@@ -596,11 +596,17 @@ const Autopilot = {
         cntEl.classList.remove('text-warning', 'font-semibold');
         cntEl.classList.add('hidden');
         if (needsReview) {
+          // On affiche le nb POSE pendant le run par defaut, puis
+          // _refreshDraftsCount() viendra patcher avec le nb REEL en
+          // attente (un draft valide / supprime depuis la fin du run ne
+          // doit plus compter ici, sinon Jordan voit "2 a valider" mais
+          // n'en trouve qu'un dans l'onglet Brouillons).
           cntEl.textContent = `${count} brouillon(s) à valider`;
-          cntEl.classList.add('text-warning', 'font-semibold');
+          cntEl.classList.add('text-warning', 'font-semibold', 'js-stage5-pending-label');
           cntEl.classList.remove('hidden');
         } else {
           cntEl.textContent = '';
+          cntEl.classList.remove('js-stage5-pending-label');
         }
       }
     }
@@ -810,20 +816,43 @@ const Autopilot = {
 
   // Met a jour la petite pastille de compteur sur l'onglet Brouillons.
   // Appelé au render + après chaque run de l'autopilote (fin de _refreshStatus).
+  //
+  // Aligne aussi en passant tous les compteurs de brouillons visibles sur
+  // le NB REEL en attente : la case "Brouillons à valider" du récap et le
+  // label orange "X brouillon(s) à valider" sous l'étape 5. Sans ça, ces
+  // chiffres restent figés sur la valeur du run (n_pending) — et divergent
+  // dès qu'un brouillon est validé / rejeté / disparait pour autre raison.
   async _refreshDraftsCount() {
     if (!App.api || !App.api.get_drafts) return;
     let r;
     try { r = await App.api.get_drafts(); } catch (e) { return; }
     if (!r || !r.ok) return;
     const n = (r.rows || []).length;
+
+    // 1) Pastille de l'onglet Brouillons (comportement historique).
     const badge = document.getElementById('ap-tab-brouillons-count');
-    if (!badge) return;
-    if (n > 0) {
-      badge.textContent = String(n);
-      badge.classList.remove('hidden');
-    } else {
-      badge.classList.add('hidden');
+    if (badge) {
+      if (n > 0) {
+        badge.textContent = String(n);
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
     }
+
+    // 2) Case "Brouillons à valider" du récap "Voici ce qui s'est passé".
+    document.querySelectorAll('.js-drafts-pending-count').forEach(el => {
+      el.textContent = String(n);
+    });
+    // Carte d'ambiance : accent si > 0, neutre sinon.
+    document.querySelectorAll('[data-kpi-drafts-pending]').forEach(card => {
+      card.classList.toggle('accent-accent', n > 0);
+    });
+
+    // 3) Label orange "X brouillon(s) à valider" sous l'etape 5 "Envoie".
+    document.querySelectorAll('.js-stage5-pending-label').forEach(el => {
+      el.textContent = `${n} brouillon(s) à valider`;
+    });
   },
 
   // Charge et affiche la liste des brouillons dans l'onglet Brouillons.
@@ -890,7 +919,8 @@ const Autopilot = {
                style="text-wrap: pretty;">${this._esc(body)}${more}</div>
           <div class="flex flex-wrap gap-2">
             <button class="btn btn-primary ap-d-approve" data-idx="${i}">Approuver et envoyer</button>
-            <button class="btn btn-secondary ap-d-reject" data-idx="${i}">Rejeter</button>
+            <button class="btn btn-secondary ap-d-view"    data-idx="${i}">Voir</button>
+            <button class="btn btn-secondary ap-d-reject"  data-idx="${i}">Rejeter</button>
             <button class="btn btn-secondary" onclick="App.show('drafts')">Éditer en détail</button>
           </div>
         </div>`;
@@ -1557,7 +1587,16 @@ const Autopilot = {
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
           ${this._kpi('Prospects ciblés', targeted, targeted > 0 ? 'accent' : '')}
           ${this._kpi('Mails envoyés', sent, sent > 0 ? 'success' : '')}
-          ${this._kpi('Brouillons posés', pending, pending > 0 ? 'accent' : '')}
+          <!-- La case "Brouillons" reflete le nb REEL de brouillons en
+               attente dans l'onglet Brouillons, pas le nb fige du run.
+               _refreshDraftsCount() patche la classe js-drafts-pending-count
+               apres chaque mise a jour pour rester aligne sur la realite
+               (un draft valide / rejete / perdu disparait de ce compteur). -->
+          <div class="stat-card ${pending > 0 ? 'accent-accent' : ''}"
+               data-kpi-drafts-pending>
+            <div class="label">Brouillons à valider</div>
+            <div class="value js-drafts-pending-count">${pending}</div>
+          </div>
         </div>
 
         ${sentList.length ? `
