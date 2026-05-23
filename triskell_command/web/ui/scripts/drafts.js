@@ -86,8 +86,51 @@ const Drafts = {
   // surcharger le serveur SMTP et garder les erreurs lisibles. Respecte
   // l'espacement entre 2 envois configure dans les reglages autopilote
   // (send_delay_seconds) pour proteger la reputation des adresses.
+  // État du double-clic du bouton "Tout envoyer".
+  _sendAllArmedAt: 0,
+  _sendAllArmTimer: null,
+
   async _sendAll() {
     if (!App.api || !App.api.get_drafts || !App.api.draft_approve) return;
+    const topBtn0    = document.getElementById('d-send-all');
+    const bottomBtn0 = document.getElementById('d-send-all-bottom');
+
+    // Double-clic dans les 5 s = confirmation (Firefox bloque parfois les
+    // confirm() apres un certain nombre, et l'action ne se declenche plus).
+    const armed = (Date.now() - this._sendAllArmedAt) < 5000;
+    if (!armed) {
+      this._sendAllArmedAt = Date.now();
+      [topBtn0, bottomBtn0].forEach(b => {
+        if (!b) return;
+        b.dataset.origLabel = b.textContent;
+        b.textContent = 'Confirmer envoi (re-cliquer)';
+        b.style.background = 'hsl(var(--danger))';
+        b.style.borderColor = 'hsl(var(--danger))';
+      });
+      if (this._sendAllArmTimer) clearTimeout(this._sendAllArmTimer);
+      this._sendAllArmTimer = setTimeout(() => {
+        this._sendAllArmedAt = 0;
+        [topBtn0, bottomBtn0].forEach(b => {
+          if (!b) return;
+          b.textContent = b.dataset.origLabel || 'Tout envoyer';
+          b.style.background = '';
+          b.style.borderColor = '';
+        });
+      }, 5000);
+      return;
+    }
+    // 2e clic dans la fenetre : on y va.
+    if (this._sendAllArmTimer) {
+      clearTimeout(this._sendAllArmTimer);
+      this._sendAllArmTimer = null;
+    }
+    this._sendAllArmedAt = 0;
+    [topBtn0, bottomBtn0].forEach(b => {
+      if (!b) return;
+      b.style.background = '';
+      b.style.borderColor = '';
+    });
+
     // On relit la liste a chaud (pas de cache potentiellement perime).
     let data;
     try { data = await App.api.get_drafts(); }
@@ -108,19 +151,6 @@ const Drafts = {
         (cfgRes && cfgRes.config && cfgRes.config.send_delay_seconds) || 0, 10
       ) || 0;
     } catch (e) { /* on tolere : delai = 0 par defaut */ }
-    const delayMsg = delaySec > 0
-      ? `\n\nEspacement entre 2 envois : ${delaySec}s (regle dans l'autopilote).`
-      + `\nDuree estimee : ~${Math.ceil((rows.length - 1) * delaySec / 60)} min.`
-      : '';
-    const ok = confirm(
-      `ENVOYER ${rows.length} BROUILLON(S) MAINTENANT ?\n\n`
-      + `Tous les mails en attente vont partir reellement, depuis ta boite `
-      + `mail configuree.\n\n`
-      + `Pas de retour en arriere : une fois envoye, c'est envoye.`
-      + `${delayMsg}\n\n`
-      + `Continuer ?`
-    );
-    if (!ok) return;
     const topBtn    = document.getElementById('d-send-all');
     const bottomBtn = document.getElementById('d-send-all-bottom');
     const setBusy = (busy, label) => {
