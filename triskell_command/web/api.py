@@ -1065,6 +1065,10 @@ class Api:
 
         Couvre : Supabase prospect_drafts, Supabase convoy_drafts, CRM local
         (prospect.pending_drafts).
+
+        Pour avoir un compteur fiable (et eviter le souci de supabase-py qui
+        renvoie data=[] sur les DELETE sans .select()), on SELECT d'abord les
+        IDs puis on DELETE par lots — meme pattern que cleanup_empty_drafts.
         """
         deleted = {"prospect_drafts": 0, "convoy_drafts": 0, "local": 0}
         errors: list[str] = []
@@ -1074,11 +1078,28 @@ class Api:
             sb = client.raw
             for table in ("prospect_drafts", "convoy_drafts"):
                 try:
-                    res = (sb.table(table).delete()
-                            .eq("status", "pending")
-                            .execute())
-                    # supabase-py renvoie data = lignes supprimées
-                    deleted[table] = len(res.data or [])
+                    page_size = 500
+                    offset = 0
+                    ids: list[str] = []
+                    while True:
+                        res = (sb.table(table).select("id")
+                                .eq("status", "pending")
+                                .range(offset, offset + page_size - 1)
+                                .execute())
+                        data = res.data or []
+                        if not data:
+                            break
+                        ids.extend(r["id"] for r in data if r.get("id"))
+                        if len(data) < page_size:
+                            break
+                        offset += page_size
+                        if offset > 50000:
+                            break
+                    # delete par lots de 100 pour ne pas exploser l'URL
+                    for i in range(0, len(ids), 100):
+                        batch = ids[i:i + 100]
+                        sb.table(table).delete().in_("id", batch).execute()
+                    deleted[table] = len(ids)
                 except Exception as exc:
                     errors.append(f"{table}: {exc}")
 
