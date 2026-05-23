@@ -672,7 +672,9 @@ const Autopilot = {
   },
 
   // Formate une duree en secondes en chaine humaine ("2 min 30 s", "45 s").
+  // Sous 10 s on affiche "qq sec" pour eviter le faux "0 s" trompeur.
   _formatDuration(totalSec) {
+    if (totalSec < 10) return 'qq sec';
     if (totalSec < 60) return `${Math.round(totalSec)} s`;
     const m = Math.floor(totalSec / 60);
     const s = Math.round(totalSec - m * 60);
@@ -1350,8 +1352,13 @@ const Autopilot = {
     setText('ap-send-count-sent',      p.sent);
     setText('ap-send-count-drafts',    Math.max(0, p.remaining)); // restants = pas encore envoyes
     setText('ap-send-count-remaining', Math.max(0, p.remaining));
-    // Temps restant base sur la cadence reelle observee (si on a deja
-    // envoye au moins 1 mail), sinon estimation initiale.
+    // Temps restant : on prend le MAX entre la cadence reellement
+    // observee (utile quand l envoi est lent type templates lourds) et
+    // une borne basse "raisonnable" (delai configure + 8s SMTP, minimum
+    // 10s par mail). Sans cette borne basse, un 1er envoi instantane
+    // (echec SMTP immediat par exemple) faisait afficher "0 s" alors
+    // qu il restait encore des mails a traiter -> Jordan croit que c est
+    // fini alors qu en realite ca continue.
     let etaText = '—';
     if (p.done) {
       etaText = 'fini';
@@ -1372,15 +1379,17 @@ const Autopilot = {
       }
     } else if (p.remaining > 0) {
       const done = p.sent + p.failed;
+      // Borne basse fiable, valable des le 1er affichage : delai
+      // configure + 8s pour le SMTP, minimum 10s.
+      const floorPerMail = Math.max(10, (p.delaySec || 0) + 8);
+      let perMail = floorPerMail;
       if (done > 0 && p.t0) {
-        const elapsedSec = (Date.now() - p.t0) / 1000;
-        const perMail = elapsedSec / done;
-        etaText = this._formatDuration(p.remaining * perMail);
-      } else {
-        // Estimation initiale avant le 1er envoi
-        const perMail = Math.max(8, (p.delaySec || 0) + 6);
-        etaText = this._formatDuration(p.remaining * perMail);
+        const observed = ((Date.now() - p.t0) / 1000) / done;
+        // On garde la borne basse si l observation est plus optimiste
+        // (1er envoi tres rapide = echantillon non representatif).
+        perMail = Math.max(observed, floorPerMail);
       }
+      etaText = this._formatDuration(p.remaining * perMail);
     }
     setText('ap-send-count-eta', etaText);
     // Barre de progression dediee
