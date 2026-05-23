@@ -1282,11 +1282,14 @@ const MailTemplates = {
 
   // Applique le style "actif" ou "inactif" à un bouton du sélecteur catégorie
   // de prospect. La valeur courante est dans wrap.dataset.mtAudienceCurrent.
+  // ATTENTION : on garde la classe `mt-aud-btn` dans le className, sinon
+  // au clic suivant le querySelectorAll('.mt-aud-btn') ne retrouve plus les
+  // boutons et la sélection visuelle ne se met plus à jour.
   _styleAudBtn(btn) {
     const wrap = btn.closest('[data-mt-audience-current]');
     if (!wrap) return;
     const active = btn.dataset.mtAud === wrap.dataset.mtAudienceCurrent;
-    const base = 'px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors';
+    const base = 'mt-aud-btn px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors';
     if (active) {
       btn.className = base + ' bg-accent text-white border-accent';
     } else {
