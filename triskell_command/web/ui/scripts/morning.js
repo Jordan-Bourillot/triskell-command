@@ -107,6 +107,10 @@ const Morning = {
           </button>
         </div>
 
+        <!-- Encadré "auto-pilote en cours" : visible UNIQUEMENT pendant un
+             run. Polling toutes les 3s. Cliquable pour ouvrir la page complète. -->
+        <div id="m-autopilot-live" class="mt-6 hidden"></div>
+
         <div id="m-content" class="mt-6"></div>
       </section>
     `;
@@ -179,6 +183,11 @@ const Morning = {
 
     // Démarre l'horloge live
     this._startClock();
+
+    // Encadré "auto-pilote en cours" : poll en arrière-plan toutes les 3s
+    // pour afficher/cacher le bandeau live en haut du Cockpit selon que
+    // l'auto-pilote tourne ou pas.
+    this._startAutopilotPoll();
 
     // 2. Charge le digest
     const slot = document.getElementById('m-content');
@@ -597,6 +606,117 @@ const Morning = {
     tick();
     if (this._clockTimer) clearInterval(this._clockTimer);
     this._clockTimer = setInterval(tick, 1000);
+  },
+
+  // -------- Encadré "auto-pilote en cours" --------
+  // Poll toutes les 3s tant qu'on est sur le Cockpit. Affiche un bandeau
+  // en haut du contenu quand un run est en cours, le cache sinon.
+  _startAutopilotPoll() {
+    if (this._apPollTimer) clearInterval(this._apPollTimer);
+    const tick = async () => {
+      const slot = document.getElementById('m-autopilot-live');
+      if (!slot) {
+        // On a quitté le Cockpit : on arrête le poll
+        if (this._apPollTimer) clearInterval(this._apPollTimer);
+        this._apPollTimer = null;
+        return;
+      }
+      if (!App.api || !App.api.autopilot_status) return;
+      let r;
+      try { r = await App.api.autopilot_status({ since: 0 }); }
+      catch (e) { return; }
+      if (!r || !r.ok) return;
+      if (r.running) {
+        slot.innerHTML = this._renderAutopilotLive(r);
+        slot.classList.remove('hidden');
+        // Click sur la carte → ouvre la page Auto-pilote (sauf clic exact
+        // sur le bouton "Voir le détail", géré séparément)
+        const card = slot.querySelector('[data-ap-card]');
+        if (card) card.style.cursor = 'pointer';
+        if (card) card.onclick = (ev) => {
+          if (!(ev.target.closest('button'))) App.show('autopilot');
+        };
+        const btn = slot.querySelector('[data-ap-open]');
+        if (btn) btn.onclick = () => App.show('autopilot');
+      } else {
+        slot.innerHTML = '';
+        slot.classList.add('hidden');
+      }
+    };
+    tick();
+    this._apPollTimer = setInterval(tick, 3000);
+  },
+
+  _renderAutopilotLive(state) {
+    const stages = state.stages || {};
+    const order = ['search', 'sort', 'write', 'review', 'send'];
+    const labels = {
+      search: 'Cherche',
+      sort:   'Trie',
+      write:  'Rédige',
+      review: 'Relit',
+      send:   'Envoie',
+    };
+    // % d'avancement global : chaque maillon vaut 20 %. Pour celui en cours
+    // on prend 50 % de son poids ; pour les terminés, 100 % de leur poids.
+    let done = 0, currentRatio = 0, currentKey = '';
+    for (const k of order) {
+      const s = stages[k] || {};
+      if (s.state === 'done') { done += 1; continue; }
+      if (s.state === 'running') { currentKey = k; currentRatio = 0.5; break; }
+      if (s.state === 'error') { currentKey = k; currentRatio = 0; break; }
+      currentKey = k; currentRatio = 0; break;
+    }
+    const pct = Math.max(0, Math.min(100, Math.round(((done + currentRatio) / order.length) * 100)));
+    // Chips pour les 5 maillons : couleur selon l'état
+    const chips = order.map(k => {
+      const s = stages[k] || {};
+      const st = s.state || 'idle';
+      const cnt = (typeof s.count === 'number' && s.count > 0) ? ` · ${s.count}` : '';
+      let cls = 'text-text-muted bg-bg border-border';
+      let icon = '';
+      if (st === 'done') {
+        cls = 'text-success bg-success/10 border-success/30';
+        icon = '✓ ';
+      } else if (st === 'running') {
+        cls = 'text-accent bg-accent/10 border-accent/40';
+        icon = '<span class="inline-block w-2 h-2 rounded-full bg-accent animate-pulse mr-1.5"></span>';
+      } else if (st === 'error') {
+        cls = 'text-danger bg-danger/10 border-danger/30';
+        icon = '✗ ';
+      }
+      return `<span class="text-[11px] px-2 py-1 rounded-full border ${cls} inline-flex items-center">${icon}${labels[k]}${cnt}</span>`;
+    }).join('');
+    const activity = state.current_activity
+      || (stages[currentKey] && stages[currentKey].message)
+      || 'En cours…';
+    return `
+      <div class="card p-5 relative overflow-hidden" data-ap-card
+           style="border-color: hsl(var(--accent) / 0.4);">
+        <!-- Bandeau accent en haut, comme les cartes de l'écran Auto-pilote -->
+        <div class="absolute top-0 left-0 right-0 h-1 bg-accent"></div>
+        <div class="flex items-start gap-4 flex-wrap sm:flex-nowrap">
+          <span class="inline-block w-9 h-9 rounded-full border-[3px] border-accent/30 border-t-accent animate-spin flex-shrink-0 mt-1"></span>
+          <div class="flex-1 min-w-0">
+            <div class="text-[11px] font-bold uppercase tracking-widest text-accent mb-1">
+              L'auto-pilote tourne
+            </div>
+            <div class="text-sm text-text mb-3" style="text-wrap: pretty">${this._esc(activity)}</div>
+            <div class="flex flex-wrap gap-2 mb-3">${chips}</div>
+            <div class="flex items-center gap-3">
+              <div class="flex-1 h-1.5 rounded-full bg-bg border border-border overflow-hidden">
+                <div class="h-full bg-accent transition-all duration-500 ease-out" style="width: ${pct}%"></div>
+              </div>
+              <span class="text-xs font-bold text-accent">${pct}%</span>
+            </div>
+          </div>
+          <button data-ap-open class="btn btn-secondary flex-shrink-0 self-start"
+                  style="border-color: hsl(var(--accent) / 0.4); color: hsl(var(--accent));">
+            Voir le détail →
+          </button>
+        </div>
+      </div>
+    `;
   },
 
   _setSystemLed(state, label) {
