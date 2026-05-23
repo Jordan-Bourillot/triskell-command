@@ -397,6 +397,39 @@ def generate_message_from_templates(
         return {"subject": "", "body": "", "body_html": "",
                 "template_key": "", "offer_name": "",
                 "offer_mail_account_id": ""}
+    # Court-circuit : si l'appelant nous passe deja UN seul template, il a
+    # deja fait son choix (round-robin pipeline par exemple). Inutile de
+    # demander a l'IA de "choisir" parmi 1 option -> on saute l'appel IA
+    # et on enchaine direct sur la substitution des placeholders.
+    if len(templates) == 1:
+        chosen = templates[0]
+        template_key = chosen.get("key") or ""
+        # Saut au bloc substitution en court-circuitant les variables
+        # intermediaires (data, response). On reutilise le bloc en aval.
+        template_subject = (chosen.get("subject") or "").strip()
+        template_body_txt = (chosen.get("body_text") or "").strip()
+        template_body_html = (chosen.get("body_html") or "").strip()
+        subj = _apply_placeholders(template_subject, prospect, sender_name)
+        body_txt = _apply_placeholders(template_body_txt, prospect, sender_name)
+        body_txt = _strip_unfilled_sentences(body_txt)
+        if template_body_html:
+            body_html = _apply_placeholders(template_body_html, prospect, sender_name)
+            body_html = _strip_unfilled_sentences(body_html)
+        else:
+            primary_url = _first_url_in(template_body_txt)
+            body_html = text_to_email_html(
+                body_txt, sender_name=sender_name,
+                primary_url=primary_url,
+                primary_label="En savoir plus",
+            )
+        return {
+            "subject":               subj,
+            "body":                  body_txt,
+            "body_html":             body_html,
+            "template_key":          template_key,
+            "offer_name":            template_product or "",
+            "offer_mail_account_id": "",
+        }
     prompt = TEMPLATE_PICK_PROMPT.format(
         raison_sociale=prospect.get("raison_sociale", "") or "(non précisé)",
         prenom=prospect.get("prenom", ""),
