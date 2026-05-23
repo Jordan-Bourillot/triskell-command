@@ -174,20 +174,47 @@ const Drafts = {
     await this.refresh();
   },
 
+  // État de la double confirmation du bouton "Tout vider".
+  _wipeArmedAt: 0,
+  _wipeArmTimer: null,
+
   async _wipeAll() {
     if (!App.api || !App.api.cleanup_all_pending_drafts) return;
-    const ok = confirm(
-      "ATTENTION : ça supprime TOUS les brouillons en attente "
-      + "(les bons comme les mauvais).\n\nContinuer ?"
-    );
-    if (!ok) return;
     const btn = document.getElementById('d-wipe-all');
-    if (btn) { btn.disabled = true; btn.textContent = 'Reset…'; }
+    if (!btn) return;
+
+    // Double-clic dans les 5 s = confirmation. Pas de confirm() navigateur :
+    // certains navigateurs (Firefox) le bloquent silencieusement et l'action
+    // ne se faisait plus.
+    const armed = (Date.now() - this._wipeArmedAt) < 5000;
+    if (!armed) {
+      this._wipeArmedAt = Date.now();
+      const original = 'Tout vider';
+      btn.textContent = 'Confirmer (re-cliquer)';
+      btn.style.background = 'hsl(var(--danger))';
+      btn.style.color = 'white';
+      if (this._wipeArmTimer) clearTimeout(this._wipeArmTimer);
+      this._wipeArmTimer = setTimeout(() => {
+        this._wipeArmedAt = 0;
+        btn.textContent = original;
+        btn.style.background = '';
+        btn.style.color = '';
+      }, 5000);
+      return;
+    }
+    // 2e clic dans la fenêtre : on y va.
+    if (this._wipeArmTimer) { clearTimeout(this._wipeArmTimer); this._wipeArmTimer = null; }
+    this._wipeArmedAt = 0;
+    btn.disabled = true;
+    btn.textContent = 'Suppression…';
     let res;
     try { res = await App.api.cleanup_all_pending_drafts(); }
     catch (e) { alert('Erreur : ' + e); }
     finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Tout vider'; }
+      btn.disabled = false;
+      btn.textContent = 'Tout vider';
+      btn.style.background = '';
+      btn.style.color = '';
     }
     if (res && res.ok) alert(`${res.total} brouillon(s) supprimé(s).`);
     else if (res) alert('Reset partiel. Erreurs : ' + (res.errors || []).join(' ; '));
