@@ -1224,9 +1224,37 @@ class Api:
             )
 
     def _reject_local_draft(self, key: str) -> dict:
+        """Supprime le 1er brouillon en attente d'un prospect du CRM local.
+
+        Le helper triskell_core.reject_draft prend le PREMIER prospect dont
+        match_keys contient `key`. Probleme : plusieurs prospects peuvent
+        partager une meme cle (ex. meme email "service@atom.com"). Le 1er
+        peut ne pas avoir de pending_drafts -> "aucun draft" alors qu'un
+        autre prospect avec la meme cle en a. On fait notre propre lookup
+        qui ne s'arrete que sur un prospect ayant un draft a enlever.
+        """
+        if not key:
+            return {"ok": False, "error": "id manquant"}
         try:
-            from triskell_core.prospect.pipeline import reject_draft
-            return reject_draft(key, draft_index=0)
+            from triskell_core.prospect.core.crm import CRM
+            from datetime import datetime
+            crm = CRM()
+            target = None
+            for p in crm.all():
+                if key in p.match_keys and p.pending_drafts:
+                    target = p
+                    break
+            if target is None:
+                return {"ok": False,
+                        "error": f"aucun brouillon trouve pour {key}"}
+            target.pending_drafts.pop(0)
+            target.history.append({
+                "ts":   datetime.now().isoformat(timespec="seconds"),
+                "kind": "draft_rejected",
+            })
+            crm._dirty = True  # noqa: SLF001
+            crm.save()
+            return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
