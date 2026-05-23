@@ -903,6 +903,8 @@ const Autopilot = {
       const ts = (d.ts || '').replace('T', ' ').slice(0, 16);
       const body = (d.body || '').slice(0, 220);
       const more = (d.body || '').length > 220 ? '…' : '';
+      // Bandeau "Note 2e IA" si la relecture a tourne sur ce brouillon.
+      const reviewBanner = this._reviewBannerAP(d);
       return `
         <div class="card p-4 sm:p-5" data-draft-source="${this._esc(d.source || '')}"
              data-draft-id="${this._esc(d.id || d.key || '')}">
@@ -914,6 +916,7 @@ const Autopilot = {
             </div>
             <div class="text-[11px] text-text-muted whitespace-nowrap">${this._esc(ts)}</div>
           </div>
+          ${reviewBanner}
           <div class="text-sm font-semibold mb-1.5">${this._esc(d.subject || '(sans objet)')}</div>
           <div class="text-xs text-text-secondary mb-3 whitespace-pre-wrap"
                style="text-wrap: pretty;">${this._esc(body)}${more}</div>
@@ -926,6 +929,17 @@ const Autopilot = {
         </div>`;
     }).join('');
 
+    // Footer "Tout envoyer (N)" duplique en bas de la liste : evite de
+    // remonter en haut quand on vient de tout relire en scrollant.
+    const sendAllFooter = rows.length > 1
+      ? `<div class="flex justify-end pt-4">
+           <button id="ap-d-send-all-bottom" class="btn btn-primary"
+                   title="Envoie d'un coup tous les brouillons en attente, apres confirmation.">
+             Tout envoyer (${rows.length})
+           </button>
+         </div>`
+      : '';
+
     wrap.innerHTML = `
       <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div>
@@ -935,6 +949,10 @@ const Autopilot = {
           </div>
         </div>
         <div class="flex gap-2 flex-wrap">
+          <button id="ap-d-send-all" class="btn btn-primary"
+                  title="Envoie d'un coup tous les brouillons en attente, apres confirmation.">
+            Tout envoyer
+          </button>
           <button id="ap-d-cleanup-broken" class="btn btn-secondary"
                   title="Supprime les brouillons où l'IA a refusé d'écrire (méta-blabla au lieu d'un mail).">
             Vider les cassés
@@ -948,6 +966,7 @@ const Autopilot = {
         </div>
       </div>
       <div class="space-y-3">${cards}</div>
+      ${sendAllFooter}
     `;
 
     // Bind boutons
@@ -957,6 +976,10 @@ const Autopilot = {
     if (cleanup) cleanup.onclick = () => this._cleanupBrokenDrafts();
     const wipe = document.getElementById('ap-d-wipe-all');
     if (wipe) wipe.onclick = () => this._wipeAllDrafts();
+    const sendAllTop = document.getElementById('ap-d-send-all');
+    if (sendAllTop) sendAllTop.onclick = () => this._sendAllDrafts();
+    const sendAllBot = document.getElementById('ap-d-send-all-bottom');
+    if (sendAllBot) sendAllBot.onclick = () => this._sendAllDrafts();
     wrap.querySelectorAll('.ap-d-approve').forEach(btn => {
       btn.onclick = () => this._draftAction(rows[parseInt(btn.dataset.idx, 10)], 'approve');
     });
@@ -966,6 +989,119 @@ const Autopilot = {
     wrap.querySelectorAll('.ap-d-view').forEach(btn => {
       btn.onclick = () => this._viewDraft(rows[parseInt(btn.dataset.idx, 10)]);
     });
+  },
+
+  // Bandeau "Note 2è IA : X/10 — commentaire" pour les cartes brouillon
+  // de l'onglet Brouillons de l'autopilote. Couleur selon le score :
+  //  - >= 7 : vert (mail sur)
+  //  - 5-6  : orange (moyen, a relire)
+  //  - < 5  : rouge (douteux)
+  // Renvoie '' si le brouillon n'a pas de review (2e IA desactivee).
+  _reviewBannerAP(d) {
+    if (!d || d.review_score == null) return '';
+    const score = Math.max(0, Math.min(10, parseInt(d.review_score, 10) || 0));
+    const comment = (d.review_comment || '').trim();
+    let cls = 'bg-success/10 border-success/30 text-success';
+    let label = 'OK';
+    if (score < 5) {
+      cls = 'bg-danger/10 border-danger/40 text-danger';
+      label = 'Attention';
+    } else if (score < 7) {
+      cls = 'bg-warning/10 border-warning/40 text-warning';
+      label = 'Moyen';
+    }
+    const commentPart = comment
+      ? ` <span class="text-text-secondary font-normal">— ${this._esc(comment)}</span>`
+      : '';
+    return `
+      <div class="mb-3 px-3 py-2 rounded-lg border text-xs ${cls}"
+           style="text-wrap: pretty">
+        <span class="font-semibold">2è IA · ${label} · ${score}/10</span>${commentPart}
+      </div>`;
+  },
+
+  // Envoi groupe depuis l'onglet Brouillons de l'autopilote : approuve
+  // et envoie d'un coup TOUS les brouillons en attente, apres confirmation
+  // explicite. Respecte le delai send_delay_seconds configure dans les
+  // reglages autopilote (entre 2 envois).
+  async _sendAllDrafts() {
+    if (!App.api || !App.api.get_drafts || !App.api.draft_approve) return;
+    let data;
+    try { data = await App.api.get_drafts(); }
+    catch (e) { alert('Erreur lecture brouillons : ' + e); return; }
+    const rows = (data && data.rows) || [];
+    if (!rows.length) {
+      alert('Aucun brouillon a envoyer.');
+      return;
+    }
+    // Delai entre 2 envois (lu a chaud depuis la config autopilote).
+    let delaySec = 0;
+    try {
+      const cfgRes = await App.api.autopilot_get_config();
+      delaySec = parseInt(
+        (cfgRes && cfgRes.config && cfgRes.config.send_delay_seconds) || 0, 10
+      ) || 0;
+    } catch (e) { /* tolere : delai = 0 */ }
+    const delayMsg = delaySec > 0
+      ? `\n\nEspacement entre 2 envois : ${delaySec}s (regle dans l'autopilote).`
+      + `\nDuree estimee : ~${Math.ceil((rows.length - 1) * delaySec / 60)} min.`
+      : '';
+    const ok = confirm(
+      `ENVOYER ${rows.length} BROUILLON(S) MAINTENANT ?\n\n`
+      + `Tous les mails en attente vont partir reellement, depuis ta boite `
+      + `mail configuree.\n\n`
+      + `Pas de retour en arriere : une fois envoye, c'est envoye.`
+      + `${delayMsg}\n\n`
+      + `Continuer ?`
+    );
+    if (!ok) return;
+    const topBtn    = document.getElementById('ap-d-send-all');
+    const bottomBtn = document.getElementById('ap-d-send-all-bottom');
+    const setBusy = (busy, label) => {
+      [topBtn, bottomBtn].forEach(b => {
+        if (!b) return;
+        b.disabled = busy;
+        if (label) b.textContent = label;
+      });
+    };
+    setBusy(true, 'Envoi en cours…');
+    let sent = 0;
+    const errors = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      setBusy(true, `Envoi ${i + 1}/${rows.length}…`);
+      try {
+        const res = await App.api.draft_approve({
+          id: r.id || r.key,
+          key: r.id || r.key,
+          source: r.source || '',
+          body: r.body,
+        });
+        if (res && res.ok === false) {
+          errors.push(`${r.name || r.email || '?'} : ${res.error || '?'}`);
+        } else {
+          sent += 1;
+        }
+      } catch (e) {
+        errors.push(`${r.name || r.email || '?'} : ${e}`);
+      }
+      if (delaySec > 0 && i < rows.length - 1) {
+        setBusy(true, `Attente ${delaySec}s avant le suivant…`);
+        await new Promise(res => setTimeout(res, delaySec * 1000));
+      }
+    }
+    setBusy(false, 'Tout envoyer');
+    if (errors.length) {
+      alert(
+        `${sent} envoye(s), ${errors.length} echec(s).\n\n`
+        + `Echecs :\n- ` + errors.slice(0, 10).join('\n- ')
+        + (errors.length > 10 ? `\n… (+${errors.length - 10} autres)` : '')
+      );
+    } else {
+      alert(`${sent} mail(s) envoye(s).`);
+    }
+    await this._refreshDraftsList();
+    await this._refreshDraftsCount();
   },
 
   // ------------------------------------------------------------------
