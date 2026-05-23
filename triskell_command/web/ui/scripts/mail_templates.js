@@ -1144,12 +1144,12 @@ const MailTemplates = {
           <label>Catégorie de prospect ciblée par ce modèle</label>
           <div class="flex flex-wrap gap-2 mt-1.5"
                data-mt-audience-current="${this._esc(t.audience || 'creator')}">
-            <button type="button" class="mt-aud-btn"
-                    data-mt-aud="creator">
+            <button type="button" class="mt-audsel-btn"
+                    data-mt-audsel="creator">
               Créateurs / Influenceurs
             </button>
-            <button type="button" class="mt-aud-btn"
-                    data-mt-aud="pro">
+            <button type="button" class="mt-audsel-btn"
+                    data-mt-audsel="pro">
               Pros / Entreprises
             </button>
           </div>
@@ -1252,13 +1252,13 @@ const MailTemplates = {
     // Sélecteur catégorie de prospect (prospection uniquement) : 2 boutons
     // qui agissent comme des radios. La valeur courante est stockée sur le
     // parent via data-mt-audience-current — c'est ce que `save()` relira.
-    e.querySelectorAll('.mt-aud-btn').forEach(btn => {
+    e.querySelectorAll('.mt-audsel-btn').forEach(btn => {
       this._styleAudBtn(btn);
       btn.onclick = () => {
         const wrap = btn.closest('[data-mt-audience-current]');
         if (!wrap) return;
-        wrap.dataset.mtAudienceCurrent = btn.dataset.mtAud;
-        wrap.querySelectorAll('.mt-aud-btn').forEach(b => this._styleAudBtn(b));
+        wrap.dataset.mtAudienceCurrent = btn.dataset.mtAudsel;
+        wrap.querySelectorAll('.mt-audsel-btn').forEach(b => this._styleAudBtn(b));
       };
     });
     const prodBtn = document.getElementById('mt-insert-product');
@@ -1287,14 +1287,14 @@ const MailTemplates = {
 
   // Applique le style "actif" ou "inactif" à un bouton du sélecteur catégorie
   // de prospect. La valeur courante est dans wrap.dataset.mtAudienceCurrent.
-  // ATTENTION : on garde la classe `mt-aud-btn` dans le className, sinon
-  // au clic suivant le querySelectorAll('.mt-aud-btn') ne retrouve plus les
+  // ATTENTION : on garde la classe `mt-audsel-btn` dans le className, sinon
+  // au clic suivant le querySelectorAll('.mt-audsel-btn') ne retrouve plus les
   // boutons et la sélection visuelle ne se met plus à jour.
   _styleAudBtn(btn) {
     const wrap = btn.closest('[data-mt-audience-current]');
     if (!wrap) return;
-    const active = btn.dataset.mtAud === wrap.dataset.mtAudienceCurrent;
-    const base = 'mt-aud-btn px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors';
+    const active = btn.dataset.mtAudsel === wrap.dataset.mtAudienceCurrent;
+    const base = 'mt-audsel-btn px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors';
     if (active) {
       btn.className = base + ' bg-accent text-white border-accent';
     } else {
