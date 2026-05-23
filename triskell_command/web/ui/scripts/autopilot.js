@@ -234,6 +234,8 @@ const Autopilot = {
     this._loadMailAccountsAndRender();
     // Compteurs : appel asynchrone, met a jour quand l'API repond
     this._refreshPulse();
+    // Combien de prospects dans la liste cible (étape 1 "Cherche")
+    this._refreshTargetCount();
 
     document.getElementById('ap-save').onclick = () => this.save();
     document.getElementById('ap-run').onclick  = () => this.run();
@@ -397,6 +399,27 @@ const Autopilot = {
               style="text-wrap: pretty">…</span>
       </div>
 
+      <!-- Barre de progression globale du run.
+           Cachée hors run, apparaît dès que "Lancer maintenant" démarre.
+           Le pourcentage est calculé à partir de l'état des 5 maillons. -->
+      <div id="ap-progress-wrap" class="hidden mb-4">
+        <div class="flex items-baseline justify-between mb-1.5 gap-3 flex-wrap">
+          <div class="text-xs font-bold uppercase tracking-widest text-text-muted">
+            Avancement de la run
+          </div>
+          <div class="text-xs text-text-muted">
+            <span id="ap-progress-step" class="text-text font-semibold">—</span>
+            <span class="mx-1">·</span>
+            <span id="ap-progress-pct" class="text-accent font-bold">0%</span>
+          </div>
+        </div>
+        <div class="w-full h-2 rounded-full bg-bg border border-border overflow-hidden">
+          <div id="ap-progress-bar"
+               class="h-full bg-accent transition-all duration-500 ease-out"
+               style="width: 0%"></div>
+        </div>
+      </div>
+
       <!-- La chaîne des 5 maillons -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         ${this._STAGES.map((stage, i) => this._renderStage(stage, i)).join('')}
@@ -451,6 +474,14 @@ const Autopilot = {
         <div class="text-xs text-text-secondary flex-1 ap-stage-desc"
              style="text-wrap: pretty">
           ${this._esc(stage.desc)}
+          ${stage.key === 'search' ? `
+            <div id="ap-target-count"
+                 class="mt-2 px-2.5 py-1.5 rounded-lg bg-accent/5 border border-accent/20
+                        text-[11px] text-text-secondary"
+                 style="text-wrap: pretty">
+              <span class="text-text-muted">Chargement de la liste cible…</span>
+            </div>
+          ` : ''}
         </div>
         <div class="hidden ap-stage-live mt-1 flex-1">
           <div class="text-xs ap-stage-live-message" style="text-wrap: pretty">…</div>
@@ -1011,6 +1042,136 @@ const Autopilot = {
     }
   },
 
+  // ------------------------------------------------------------------
+  // Compteur "combien de prospects dans la liste cible" — affiché sur
+  // la carte étape 1 (Cherche). Source = autopilot_target_count() qui
+  // applique les mêmes filtres que le pipeline : status new/qualified
+  // + au moins un email.
+  async _refreshTargetCount() {
+    const slot = document.getElementById('ap-target-count');
+    if (!slot) return;
+    if (!App.api || !App.api.autopilot_target_count) {
+      slot.innerHTML = `<span class="text-text-muted">Compteur indisponible.</span>`;
+      return;
+    }
+    let r;
+    try { r = await App.api.autopilot_target_count(); }
+    catch (e) {
+      slot.innerHTML = `<span class="text-danger">Erreur compteur cible.</span>`;
+      return;
+    }
+    if (!r || !r.ok) {
+      slot.innerHTML = `<span class="text-text-muted">Liste cible indisponible (${this._esc((r && r.error) || 'inconnu')}).</span>`;
+      return;
+    }
+    const total = r.eligible_total || 0;
+    const pickable = r.pickable || 0;
+    const cap = r.nightly_target || 0;
+    if (total === 0) {
+      slot.innerHTML = `
+        <span class="text-warning font-semibold">Liste cible vide.</span>
+        <span class="text-text-muted">
+          Aucun prospect avec mail dans le CRM. Utilise Le Chasseur ou Obélisk pour en trouver.
+        </span>`;
+      return;
+    }
+    const capLine = (cap > 0 && cap < total)
+      ? `<span class="text-text-muted"> · va en piocher </span>
+         <span class="text-accent font-bold">${pickable.toLocaleString('fr-FR')}</span>
+         <span class="text-text-muted"> à ce run</span>`
+      : `<span class="text-text-muted"> · tout sera traité ce run</span>`;
+    slot.innerHTML = `
+      <span class="text-text font-bold">${total.toLocaleString('fr-FR')}</span>
+      <span class="text-text-muted"> prospect(s) prêt(s) à recevoir un mail</span>
+      ${capLine}`;
+  },
+
+  // ------------------------------------------------------------------
+  // Barre de progression globale d'un run.
+  // Logique : 5 maillons d'égal poids (20% chacun). Pour le maillon en
+  // cours, on lit son `count` (= déjà traité) face au total trouvé à
+  // l'étape 2 (Trie) pour avoir un % intra-stage. Sinon 50% du stage.
+  _updateProgress(stages, running) {
+    const wrap = document.getElementById('ap-progress-wrap');
+    const bar  = document.getElementById('ap-progress-bar');
+    const pct  = document.getElementById('ap-progress-pct');
+    const step = document.getElementById('ap-progress-step');
+    if (!wrap || !bar || !pct || !step) return;
+
+    // Hors run : on cache la barre (mais on garde la dernière valeur visible
+    // un court instant pour montrer le résultat final).
+    if (!running) {
+      // Si tous les maillons sont idle => pas démarré, on cache.
+      const anyActive = stages && Object.values(stages).some(s =>
+        s && (s.state === 'running' || s.state === 'done' || s.state === 'error')
+      );
+      if (!anyActive) {
+        wrap.classList.add('hidden');
+        return;
+      }
+      // Sinon : run fini, on laisse la barre affichée à 100%.
+      wrap.classList.remove('hidden');
+    } else {
+      wrap.classList.remove('hidden');
+    }
+
+    const order = ['search', 'sort', 'write', 'review', 'send'];
+    const labels = {
+      search: '1/5 · Cherche',
+      sort:   '2/5 · Trie',
+      write:  '3/5 · Rédige',
+      review: '4/5 · Relit',
+      send:   '5/5 · Envoie',
+    };
+    const totalAt = (stages && stages.sort && stages.sort.count) || 0;
+    let done = 0;
+    let currentKey = '';
+    let currentRatio = 0;
+    for (const k of order) {
+      const s = (stages && stages[k]) || {};
+      if (s.state === 'done') {
+        done += 1;
+        continue;
+      }
+      if (s.state === 'running') {
+        currentKey = k;
+        // % intra-stage si on connaît un total exploitable
+        if (totalAt > 0 && k !== 'search' && k !== 'sort') {
+          currentRatio = Math.min(1, (s.count || 0) / totalAt);
+        } else {
+          currentRatio = 0.5;
+        }
+        break;
+      }
+      if (s.state === 'error') {
+        currentKey = k;
+        currentRatio = 0;
+        break;
+      }
+      // idle dans le flow → on s'arrête là
+      currentKey = k;
+      currentRatio = 0;
+      break;
+    }
+    // Si tout est done, currentKey reste vide → 100%
+    const stagesTotal = order.length;
+    const ratio = (done + currentRatio) / stagesTotal;
+    const pctNum = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+    bar.style.width = pctNum + '%';
+    pct.textContent = pctNum + '%';
+    step.textContent = labels[currentKey] || (done === stagesTotal ? 'Terminé' : '—');
+    // Couleur de la barre : verte si run terminé, accent sinon, rouge sur erreur.
+    bar.classList.remove('bg-accent', 'bg-success', 'bg-danger');
+    const hasError = stages && Object.values(stages).some(s => s && s.state === 'error');
+    if (hasError) {
+      bar.classList.add('bg-danger');
+    } else if (done === stagesTotal && !running) {
+      bar.classList.add('bg-success');
+    } else {
+      bar.classList.add('bg-accent');
+    }
+  },
+
   _styleStageButtons(stageEl, mode) {
     stageEl.querySelectorAll('.ap-stage-mode').forEach(b => {
       const bMode = b.dataset.mode;
@@ -1163,6 +1324,17 @@ const Autopilot = {
     if (recap) { recap.classList.add('hidden'); recap.innerHTML = ''; }
     const activityBox = document.getElementById('ap-current-activity');
     if (activityBox) activityBox.classList.add('hidden');
+    // Reset barre de progression : affichée à 0 % et bien visible.
+    const wrap = document.getElementById('ap-progress-wrap');
+    const bar  = document.getElementById('ap-progress-bar');
+    const pct  = document.getElementById('ap-progress-pct');
+    const step = document.getElementById('ap-progress-step');
+    if (wrap) wrap.classList.remove('hidden');
+    if (bar)  { bar.style.width = '0%';
+                bar.classList.remove('bg-success', 'bg-danger');
+                bar.classList.add('bg-accent'); }
+    if (pct)  pct.textContent = '0%';
+    if (step) step.textContent = 'Démarrage…';
     this.logSeen = 0;
     try {
       const r = await App.api.autopilot_run({ config });
@@ -1199,6 +1371,8 @@ const Autopilot = {
     if (r.stages) {
       Object.entries(r.stages).forEach(([k, info]) => this._applyStageState(k, info));
     }
+    // Barre de progression globale du run
+    this._updateProgress(r.stages || {}, !!r.running);
     const activityBox = document.getElementById('ap-current-activity');
     const activityTxt = document.getElementById('ap-current-activity-text');
     if (activityBox && activityTxt) {

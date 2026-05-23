@@ -5749,6 +5749,54 @@ class Api:
     # ------------------------------------------------------------------
     # Tableau de commande Auto-pilote v2 — compteurs des 5 maillons
     # ------------------------------------------------------------------
+    def autopilot_target_count(self) -> dict:
+        """Compte les prospects qui pourraient être ciblés par un run.
+
+        Pour éviter une logique métier dupliquée, on reprend les filtres
+        structurels du pipeline d'éligibilité :
+          - status ∈ {'new', 'qualified'} (les autres sont déjà avancés)
+          - au moins un email (sans email l'app ne peut rien envoyer)
+        On ne refait PAS ici le filtre "jamais contacté" (qui regarde
+        l'historique des mails) — c'est coûteux et de toute façon le
+        run réel re-filtrera. Ce chiffre est une **borne supérieure
+        de ce qui peut potentiellement être traité**.
+
+        Renvoie :
+          {ok, eligible_total, target_per_run, nightly_target,
+           pickable: min(target_per_run, eligible_total)}
+        """
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Supabase indisponible"}
+        sb = client.raw
+        try:
+            r = (sb.table("prospects")
+                   .select("id", count="exact")
+                   .in_("status", ["new", "qualified"])
+                   .neq("emails", "[]")
+                   .execute())
+            eligible_total = int(r.count or 0)
+        except Exception as exc:
+            logger.debug("autopilot_target_count : %s", exc)
+            eligible_total = 0
+        # Récupère le nightly_target courant pour montrer combien sera
+        # piocé sur cette base éligible.
+        nightly_target = 0
+        try:
+            cfg_r = self.autopilot_get_config()
+            cfg = (cfg_r.get("config") or {}) if isinstance(cfg_r, dict) else {}
+            nightly_target = int(cfg.get("nightly_target") or 0)
+        except Exception:
+            nightly_target = 0
+        pickable = (min(nightly_target, eligible_total)
+                    if nightly_target > 0 else eligible_total)
+        return {
+            "ok": True,
+            "eligible_total": eligible_total,
+            "nightly_target": nightly_target,
+            "pickable":       pickable,
+        }
+
     def autopilot_pulse(self, payload: dict | None = None) -> dict:
         """Renvoie les compteurs des 5 maillons de la chaine, sur les
         `hours` dernieres heures (defaut : 24h).
