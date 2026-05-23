@@ -127,7 +127,9 @@ const Drafts = {
           body: r.body,   // on garde le corps tel quel (pas de modif par batch)
         });
         if (res && res.ok === false) {
-          errors.push(`${r.name || r.email || '?'} : ${res.error || '?'}`);
+          // approve_draft renvoie "reason", _approve_local_draft "error" :
+          // on lit les deux pour ne pas perdre le message reel.
+          errors.push(`${r.name || r.email || '?'} : ${res.error || res.reason || '?'}`);
         } else {
           sent += 1;
         }
@@ -282,9 +284,13 @@ const Drafts = {
     // les brouillons surs (vert >=7) vs douteux (orange 5-6, rouge <5).
     const reviewBanner = this._reviewBanner(r);
     const hasHtml = !!(r.body_html && String(r.body_html).trim());
-    // srcdoc encode automatiquement les entites quand on le passe en attribut
+    // On prefixe par <base target="_blank"> pour que tous les liens
+    // cliques dans l apercu s ouvrent dans un nouvel onglet plutot
+    // que dans l iframe sandbox (sinon les sites a X-Frame-Options
+    // DENY type Pixel Pros affichent une erreur Firefox).
     const htmlSrc = hasHtml
-      ? String(r.body_html).replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+      ? (`<base target="_blank">` + String(r.body_html))
+          .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
       : '';
     return `
       <article class="card p-4 sm:p-7"
@@ -313,7 +319,8 @@ const Drafts = {
             <button class="d-toggle-view px-2 py-1 rounded-md bg-bg border border-border text-text-muted"
                     data-mode="source" data-idx="${idx}">Source / éditer</button>
           </div>
-          <iframe data-preview sandbox=""
+          <iframe data-preview
+                  sandbox="allow-popups allow-popups-to-escape-sandbox"
                   srcdoc="${htmlSrc}"
                   style="width:100%; min-height:300px; max-height:520px;
                          border:1px solid hsl(var(--border)); border-radius:12px;

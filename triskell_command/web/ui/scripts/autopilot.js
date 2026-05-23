@@ -1265,7 +1265,9 @@ const Autopilot = {
           body: r.body,
         });
         if (res && res.ok === false) {
-          errors.push(`${r.name || r.email || '?'} : ${res.error || '?'}`);
+          // approve_draft renvoie "reason", _approve_local_draft "error" :
+          // on lit les deux pour ne pas perdre le message reel.
+          errors.push(`${r.name || r.email || '?'} : ${res.error || res.reason || '?'}`);
           failed += 1;
         } else {
           sent += 1;
@@ -1417,8 +1419,12 @@ const Autopilot = {
 
     const ts = (draft.ts || '').replace('T', ' ').slice(0, 16);
     const hasHtml = !!(draft.body_html && String(draft.body_html).trim());
+    // Prefixe <base target="_blank"> pour que les liens du mail s ouvrent
+    // dans un nouvel onglet et pas dans l iframe sandbox (sinon les sites
+    // a X-Frame-Options DENY type Pixel Pros affichent erreur Firefox).
     const htmlSrc = hasHtml
-      ? String(draft.body_html).replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+      ? (`<base target="_blank">` + String(draft.body_html))
+          .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
       : '';
     const textBody = this._esc(draft.body || '').replace(/\n/g, '<br>');
 
@@ -1459,7 +1465,7 @@ const Autopilot = {
         <!-- Corps : iframe sandbox si HTML dispo, sinon texte joli -->
         <div class="flex-1 overflow-y-auto p-5 sm:p-7">
           ${hasHtml ? `
-            <iframe sandbox=""
+            <iframe sandbox="allow-popups allow-popups-to-escape-sandbox"
                     srcdoc="${htmlSrc}"
                     style="width:100%; min-height:480px;
                            border:1px solid hsl(var(--border));

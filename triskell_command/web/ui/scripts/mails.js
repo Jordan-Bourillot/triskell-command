@@ -3477,13 +3477,26 @@ const Mails = {
         <pre class="text-sm text-text whitespace-pre-wrap font-sans leading-relaxed m-0">${this._escape(text)}</pre>
       </div>`;
     }
+    // On prefixe le HTML par <base target="_blank"> pour que tous les
+    // liens cliques s ouvrent dans un nouvel onglet plutot que dans
+    // l iframe sandbox -- sinon les sites avec X-Frame-Options DENY
+    // (Pixel Pros, beaucoup de sites pros) refusent de s afficher et
+    // le user voit une page d erreur Firefox.
+    const wrapped = `<base target="_blank">${text}`;
     // Échappe pour l'attribut srcdoc (& et " uniquement, les < > restent intacts)
-    const srcdoc = text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-    // sandbox="allow-same-origin" : permet au parent de lire scrollHeight pour
-    // auto-resize, sans autoriser JS, formulaires, popups, etc.
+    const srcdoc = wrapped.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    // sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" :
+    //  - allow-same-origin : auto-resize de l iframe par lecture scrollHeight
+    //  - allow-popups : autorise target="_blank" (sinon clics inertes)
+    //  - allow-popups-to-escape-sandbox : le nouvel onglet n herite pas
+    //    de la sandbox (sinon il aurait les memes restrictions)
     const onload = "try{var d=this.contentDocument;if(d){this.style.height=(d.documentElement.scrollHeight+24)+'px';}}catch(e){}";
     return `<div class="rounded-xl bg-white border border-border overflow-hidden">
-      <iframe class="w-full block" sandbox="allow-same-origin" srcdoc="${srcdoc}" style="border:0;min-height:300px;background:#fff;" onload="${onload}"></iframe>
+      <iframe class="w-full block"
+              sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+              srcdoc="${srcdoc}"
+              style="border:0;min-height:300px;background:#fff;"
+              onload="${onload}"></iframe>
     </div>`;
   },
 
