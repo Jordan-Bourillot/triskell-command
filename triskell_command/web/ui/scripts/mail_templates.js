@@ -1134,6 +1134,30 @@ const MailTemplates = {
       </div>
 
       <div id="mt-pane-edit">
+        ${isProspection ? `
+        <!-- CATÉGORIE DE PROSPECT CIBLÉE : à choisir manuellement.
+             L'autopilote utilisera ensuite cette info pour piocher dans
+             les bons modèles selon le type de prospect qu'il traite. -->
+        <div class="mt-field">
+          <label>Catégorie de prospect ciblée par ce modèle</label>
+          <div class="flex flex-wrap gap-2 mt-1.5"
+               data-mt-audience-current="${this._esc(t.audience || 'creator')}">
+            <button type="button" class="mt-aud-btn"
+                    data-mt-aud="creator">
+              Créateurs / Influenceurs
+            </button>
+            <button type="button" class="mt-aud-btn"
+                    data-mt-aud="pro">
+              Pros / Entreprises
+            </button>
+          </div>
+          <div class="text-[11px] text-text-muted mt-1.5"
+               style="text-wrap: pretty">
+            L'auto-pilote n'enverra ce modèle qu'aux prospects de cette catégorie.
+          </div>
+        </div>
+        ` : ''}
+
         <!-- SUJET : grand, c'est ce que voit le destinataire en premier -->
         <div class="mt-field mt-field-hero">
           <label>Sujet du mail</label>
@@ -1223,6 +1247,18 @@ const MailTemplates = {
     // Binds
     e.querySelectorAll('[data-mt-pane]').forEach(b => b.onclick = () => this._switchPane(b.dataset.mtPane));
     e.querySelectorAll('[data-mt-insert]').forEach(c => c.onclick = () => this._insertPlaceholder(c.dataset.mtInsert));
+    // Sélecteur catégorie de prospect (prospection uniquement) : 2 boutons
+    // qui agissent comme des radios. La valeur courante est stockée sur le
+    // parent via data-mt-audience-current — c'est ce que `save()` relira.
+    e.querySelectorAll('.mt-aud-btn').forEach(btn => {
+      this._styleAudBtn(btn);
+      btn.onclick = () => {
+        const wrap = btn.closest('[data-mt-audience-current]');
+        if (!wrap) return;
+        wrap.dataset.mtAudienceCurrent = btn.dataset.mtAud;
+        wrap.querySelectorAll('.mt-aud-btn').forEach(b => this._styleAudBtn(b));
+      };
+    });
     const prodBtn = document.getElementById('mt-insert-product');
     if (prodBtn && typeof Catalogue !== 'undefined') {
       prodBtn.onclick = () => {
@@ -1242,6 +1278,20 @@ const MailTemplates = {
     document.getElementById('mt-pane-edit').style.display    = (name === 'edit')    ? '' : 'none';
     document.getElementById('mt-pane-preview').style.display = (name === 'preview') ? '' : 'none';
     if (name === 'preview') this._renderPreview();
+  },
+
+  // Applique le style "actif" ou "inactif" à un bouton du sélecteur catégorie
+  // de prospect. La valeur courante est dans wrap.dataset.mtAudienceCurrent.
+  _styleAudBtn(btn) {
+    const wrap = btn.closest('[data-mt-audience-current]');
+    if (!wrap) return;
+    const active = btn.dataset.mtAud === wrap.dataset.mtAudienceCurrent;
+    const base = 'px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors';
+    if (active) {
+      btn.className = base + ' bg-accent text-white border-accent';
+    } else {
+      btn.className = base + ' bg-bg border-border text-text-muted hover:text-text hover:border-accent/50';
+    }
   },
 
   _renderPreview() {
@@ -1303,6 +1353,14 @@ const MailTemplates = {
         alert('Le titre du modèle est obligatoire (ex. "Mail 1 — commission classique").');
         return;
       }
+      // Catégorie de prospect choisie via le sélecteur. Si l'utilisateur n'a
+      // pas vu / pas choisi, on conserve la valeur existante (par défaut
+      // 'creator' pour les vieux modèles d'avant cette UI).
+      const audWrap = document.querySelector('[data-mt-audience-current]');
+      const audVal = audWrap
+        ? (audWrap.dataset.mtAudienceCurrent || 'creator')
+        : (t.audience || 'creator');
+      fields.audience = (audVal === 'pro') ? 'pro' : 'creator';
     }
     if (!fields.subject) {
       alert('Le sujet du mail est obligatoire.');

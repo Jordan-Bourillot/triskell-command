@@ -402,7 +402,7 @@ def mail_templates_list() -> dict:
         rows = (sb.table("triskell_email_templates")
                   .select("product, key, from_address, from_name, subject, "
                           "description, placeholders, enabled, category, label, "
-                          "updated_at, updated_by")
+                          "audience, updated_at, updated_by")
                   .order("product")
                   .order("key")
                   .execute().data or [])
@@ -457,7 +457,8 @@ def mail_templates_save(product: str, key: str, fields: dict, updated_by: str = 
 
     ALLOWED = ("from_address", "from_name", "subject",
                "body_html", "body_text", "description",
-               "placeholders", "enabled", "category", "label")
+               "placeholders", "enabled", "category", "label",
+               "audience")
     payload = {"product": product, "key": key}
     for k in ALLOWED:
         if k in fields:
@@ -485,6 +486,13 @@ def mail_templates_save(product: str, key: str, fields: dict, updated_by: str = 
         payload["category"] = cat if cat in ("transactionnel", "prospection") else "transactionnel"
     if "label" in payload and isinstance(payload["label"], str):
         payload["label"] = payload["label"][:200]
+    # Catégorie de prospect ciblée par le modèle (créateurs/influenceurs vs
+    # pros/entreprises). Valeurs autorisées : 'creator', 'pro', ou None
+    # (None = non précisé, dans ce cas le modèle est traité comme 'creator'
+    # par convention historique — les 5 templates Pixel Pros d'origine).
+    if "audience" in payload:
+        aud = str(payload["audience"] or "").strip().lower()
+        payload["audience"] = aud if aud in ("creator", "pro") else None
 
     payload["updated_at"] = datetime.now(timezone.utc).isoformat()
     payload["updated_by"] = (updated_by or "")[:200]
