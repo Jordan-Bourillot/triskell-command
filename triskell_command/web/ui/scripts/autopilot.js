@@ -587,7 +587,8 @@ const Autopilot = {
                    id="ap-send-count-remaining">0</div>
             </div>
             <div class="text-center">
-              <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted">Temps restant</div>
+              <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted"
+                   id="ap-send-count-eta-label">Temps restant</div>
               <div class="text-2xl sm:text-3xl font-bold text-text mt-1"
                    id="ap-send-count-eta">—</div>
             </div>
@@ -646,8 +647,15 @@ const Autopilot = {
 
     // Temps restant estime : (restants) * (delai entre envois + buffer SMTP).
     // Si pas de delai configure, on prend 8s par mail (envoi SMTP moyen).
+    //
+    // En mode Envoie=Manuel, on ne fait que poser des brouillons (pas
+    // d'envoi SMTP), donc l'estimation basee sur send_delay_seconds n'a
+    // pas de sens. On affiche "—" avec un libelle plus parlant.
+    const sendStageDef = this._STAGES.find(s => s.key === 'send');
+    const sendMode = sendStageDef ? this._getStageMode(sendStageDef) : 'auto';
+    const isSendManual = sendMode === 'manual';
     let eta = '—';
-    if (remaining > 0 && running) {
+    if (remaining > 0 && running && !isSendManual) {
       const delaySec = parseInt(
         (this.cfg && this.cfg.send_delay_seconds) || 0, 10
       ) || 0;
@@ -663,6 +671,12 @@ const Autopilot = {
       eta = '—';
     }
     document.getElementById('ap-send-count-eta').textContent = eta;
+    // Adapte le libelle "Temps restant" en mode manuel (rien n'est envoye,
+    // que des brouillons crees a la vitesse de l'IA).
+    const etaLabelEl = document.getElementById('ap-send-count-eta-label');
+    if (etaLabelEl) {
+      etaLabelEl.textContent = isSendManual ? 'Envoi : manuel' : 'Temps restant';
+    }
 
     // Barre de progression dediee
     const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
