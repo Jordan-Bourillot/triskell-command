@@ -160,6 +160,12 @@ const Drafts = {
     const testBadge = r.is_test
       ? `<span class="text-xs px-2 py-0.5 rounded-full bg-warning/20 text-warning ml-1">test</span>`
       : '';
+    // Pastille catégorie : Pro / Créateur
+    const audBadge = this._audienceBadge(r.audience);
+    // Pastilles "trouvé via …" pour chaque source d'origine (globale)
+    const srcBadges = this._sourceBadges(r.prospect_sources);
+    // Provenance précise de l'email choisi pour ce brouillon
+    const emailOriginLine = this._emailOriginLine(r.email, r.email_meta);
     const hasHtml = !!(r.body_html && String(r.body_html).trim());
     // srcdoc encode automatiquement les entites quand on le passe en attribut
     const htmlSrc = hasHtml
@@ -174,6 +180,13 @@ const Drafts = {
           <div class="min-w-0">
             <div class="font-semibold text-base truncate">${this._esc(r.name)} ${badge}${testBadge}</div>
             <div class="text-xs sm:text-sm text-text-muted break-all">${meta.join(' · ')}</div>
+            ${(audBadge || srcBadges) ? `
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                ${audBadge}
+                ${srcBadges}
+              </div>
+            ` : ''}
+            ${emailOriginLine}
           </div>
         </header>
         <div class="text-sm font-semibold text-accent mb-2 break-words">OBJET : ${this._esc(r.subject)}</div>
@@ -263,6 +276,106 @@ const Drafts = {
         await this.refresh();
       };
     });
+  },
+
+  // Petite ligne d'info "Cet email vient de : …" sous les pastilles.
+  // Précise pour chaque brouillon d'où vient exactement l'adresse choisie
+  // (page mentions légales d'un site, bio YouTube, fiche Google Maps…).
+  _emailOriginLine(email, meta) {
+    if (!email || !meta || typeof meta !== 'object') return '';
+    // Préfère le `context` déjà rédigé pour humain, sinon traduit la source.
+    const ctx = (meta.context || '').trim();
+    const label = ctx || this._humanizeEmailSource(meta.source || '');
+    if (!label) return '';
+    const urlPart = meta.url
+      ? ` <span class="text-text-muted/70">· ${this._esc(meta.url)}</span>`
+      : '';
+    return `
+      <div class="text-[11px] text-text-muted mt-1.5 flex items-start gap-1.5"
+           style="text-wrap: pretty">
+        <svg class="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-accent/70"
+             fill="none" stroke="currentColor" stroke-width="2"
+             viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="13"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <span>
+          <span class="text-text-secondary">Cet email vient de :</span>
+          <span class="text-text">${this._esc(label)}</span>${urlPart}
+        </span>
+      </div>`;
+  },
+
+  // Traduit une source technique (sirene, web, obelisk_youtube…) en français.
+  _humanizeEmailSource(source) {
+    const s = String(source || '').toLowerCase();
+    const direct = {
+      web:           'page contact ou mentions légales du site officiel',
+      web_inferred:  'adresse devinée à partir du domaine du site (non vérifiée)',
+      sirene:        'annuaire d’entreprises SIRENE',
+      maps:          'fiche Google Maps de l’établissement',
+      file:          'fichier importé',
+      linktree:      'hub de liens (Linktree, Beacons, etc.)',
+      obelisk:       'profil créateur récupéré via Obélisk',
+      phantombuster: 'profil social récupéré via PhantomBuster',
+      chasseur:      'trouvé via Le Chasseur (entreprises)',
+      bio:           'bio / description du profil',
+    };
+    if (direct[s]) return direct[s];
+    if (s.startsWith('obelisk_')) {
+      return `profil ${s.slice(8)} (récupéré via Obélisk)`;
+    }
+    if (s.startsWith('phantombuster_')) {
+      return `profil ${s.slice(14)} (récupéré via PhantomBuster)`;
+    }
+    return s || '';
+  },
+
+  // Pastille "catégorie" : Pro / Entreprise vs Créateur / Influenceur
+  _audienceBadge(audience) {
+    const aud = (audience || '').toLowerCase();
+    if (aud === 'creator') {
+      return `<span class="text-xs px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30">Créateur / Influenceur</span>`;
+    }
+    if (aud === 'pro') {
+      return `<span class="text-xs px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">Pro / Entreprise</span>`;
+    }
+    return '';
+  },
+
+  // Pastilles "trouvé via X" — une par source d'origine du prospect
+  _sourceBadges(sources) {
+    if (!Array.isArray(sources) || sources.length === 0) return '';
+    const labels = {
+      sirene:     'SIRENE (entreprises)',
+      maps:       'Google Maps',
+      denicheur:  'Le Dénicheur',
+      web:        'Site web',
+      footprint:  'Empreinte web',
+      linktree:   'Linktree',
+      file:       'Import fichier',
+      convoy:     'Import Convoi',
+      obelisk:    'Obélisk',
+      youtube:    'YouTube',
+      twitch:     'Twitch',
+      reddit:     'Reddit',
+      bluesky:    'Bluesky',
+      github:     'GitHub',
+      tiktok:     'TikTok',
+      instagram:  'Instagram',
+      linkedin:   'LinkedIn',
+      mastodon:   'Mastodon',
+      dailymotion:'Dailymotion',
+      kick:       'Kick',
+      podcasts:   'Apple Podcasts',
+      pypi:       'PyPI',
+    };
+    return sources.map(s => {
+      const key = String(s || '').toLowerCase();
+      const label = labels[key] || key;
+      return `<span class="text-xs px-2 py-0.5 rounded-full bg-bg border border-border text-text-muted">via ${this._esc(label)}</span>`;
+    }).join('');
   },
 
   _esc(s) {

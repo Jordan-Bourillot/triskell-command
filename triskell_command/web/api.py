@@ -479,6 +479,65 @@ class Api:
 
     _DRAFTS_LIMIT_PER_SOURCE = 200
 
+    # Plateformes considérées comme "créateur/influenceur" (même règle que
+    # l'onglet Obélisk). Tout le reste est considéré "pro / entreprise".
+    _CREATOR_PLATFORM_PATTERNS = (
+        "youtube.com", "twitch.tv", "reddit.com", "bsky.app", "github.com",
+        "tiktok.com", "instagram.com", "linkedin.com", "mastodon",
+        "dailymotion.com", "kick.com", "podcasts.apple.com", "pypi.org",
+    )
+
+    @classmethod
+    def _audience_from_platform_url(cls, platform_url: str) -> str:
+        """'creator' si l'URL plateforme matche un réseau créateur connu,
+        sinon 'pro' (y compris quand il n'y a pas d'URL plateforme : c'est
+        typique des entreprises poussées par Le Chasseur depuis SIRENE).
+        """
+        u = (platform_url or "").lower()
+        if not u:
+            return "pro"
+        for pat in cls._CREATOR_PLATFORM_PATTERNS:
+            if pat in u:
+                return "creator"
+        return "pro"
+
+    @staticmethod
+    def _source_names_from_sources(sources) -> list:
+        """Retourne la liste des noms de sources (dédupliqués, ordre stable)
+        à partir du JSONB `sources` d'un prospect."""
+        out: list = []
+        seen: set = set()
+        for s in (sources or []):
+            if isinstance(s, dict):
+                n = (s.get("name") or "").strip().lower()
+            else:
+                n = (getattr(s, "name", "") or "").strip().lower()
+            if n and n not in seen:
+                out.append(n)
+                seen.add(n)
+        return out
+
+    @staticmethod
+    def _meta_for_chosen_email(chosen_email: str,
+                                emails_meta) -> dict | None:
+        """Retrouve l'entrée meta correspondant à l'email choisi dans la
+        liste `emails_meta` d'un prospect (insensible à la casse / espaces)."""
+        if not chosen_email or not isinstance(emails_meta, list):
+            return None
+        target = chosen_email.strip().lower()
+        for m in emails_meta:
+            if isinstance(m, dict):
+                e = (m.get("email") or "").strip().lower()
+                if e and e == target:
+                    return {
+                        "source":    str(m.get("source") or "").lower(),
+                        "source_id": str(m.get("source_id") or ""),
+                        "url":       str(m.get("url") or ""),
+                        "context":   str(m.get("context") or ""),
+                        "found_at":  str(m.get("found_at") or ""),
+                    }
+        return None
+
     def _supabase_client_or_none(self):
         try:
             from triskell_core.db import get_client, SupabaseNotConfigured
@@ -510,7 +569,7 @@ class Api:
                     .select("id, subject, body, kind, provider, model, "
                             "created_at, "
                             "prospects:prospect_id(name, legal_name, "
-                            "emails, city)")
+                            "emails, emails_meta, city, sources, platform_url)")
                     .eq("status", "pending")
                     .order("created_at", desc=True)
                     .limit(self._DRAFTS_LIMIT_PER_SOURCE * 4)
@@ -523,13 +582,17 @@ class Api:
                     continue
                 p = r.get("prospects") or {}
                 emails = p.get("emails") or []
+                platform_url = p.get("platform_url") or ""
+                chosen_email = emails[0] if emails else ""
+                email_meta = self._meta_for_chosen_email(
+                    chosen_email, p.get("emails_meta"))
                 rows.append({
                     "source": "prospect",
                     "id": r.get("id") or "",
                     "key": r.get("id") or "",   # compat ancien front
                     "name": (p.get("name")
                               or p.get("legal_name") or "(sans nom)"),
-                    "email": (emails[0] if emails else ""),
+                    "email": chosen_email,
                     "city": p.get("city") or "",
                     "subject": r.get("subject") or "",
                     "body": r.get("body") or "",
@@ -537,6 +600,14 @@ class Api:
                     "provider": r.get("provider") or "",
                     "model": r.get("model") or "",
                     "kind": r.get("kind") or "",
+                    # Origine globale du prospect + catégorie
+                    "prospect_sources":
+                        self._source_names_from_sources(p.get("sources")),
+                    "platform_url": platform_url,
+                    "audience":
+                        self._audience_from_platform_url(platform_url),
+                    # Provenance précise de l'email choisi pour ce brouillon
+                    "email_meta": email_meta,
                 })
                 if len(rows) >= self._DRAFTS_LIMIT_PER_SOURCE:
                     break
@@ -563,14 +634,18 @@ class Api:
                     continue
                 p = r.get("prospect") or {}
                 camp = r.get("convoy_campaigns") or {}
+                convoy_platform_url = p.get("platform_url") or ""
+                convoy_email = (p.get("email")
+                                 or (p.get("emails") or [""])[0])
+                convoy_email_meta = self._meta_for_chosen_email(
+                    convoy_email, p.get("emails_meta"))
                 rows.append({
                     "source": "convoy",
                     "id": r.get("id") or "",
                     "key": r.get("id") or "",   # compat ancien front
                     "name": (p.get("name") or p.get("legal_name")
                               or "(sans nom)"),
-                    "email": (p.get("email")
-                              or (p.get("emails") or [""])[0]),
+                    "email": convoy_email,
                     "city": p.get("city") or "",
                     "subject": r.get("subject") or "",
                     "body": r.get("body") or "",
@@ -581,6 +656,15 @@ class Api:
                     "campaign_name": camp.get("name") or "",
                     "offer_name": r.get("offer_name") or "",
                     "is_test": bool(r.get("is_test")),
+                    # Origine + catégorie (best-effort sur le snapshot Convoi —
+                    # souvent un import CSV, donc pas toujours dispo)
+                    "prospect_sources":
+                        self._source_names_from_sources(p.get("sources"))
+                        or (["convoy"] if not p.get("sources") else []),
+                    "platform_url": convoy_platform_url,
+                    "audience":
+                        self._audience_from_platform_url(convoy_platform_url),
+                    "email_meta": convoy_email_meta,
                 })
                 convoy_added += 1
                 if convoy_added >= self._DRAFTS_LIMIT_PER_SOURCE:
@@ -634,6 +718,21 @@ class Api:
             return {"ok": False, "error": str(exc), "rows": []}
         rows = []
         for prospect, draft in pairs:
+            platform_url = getattr(prospect, "platform_url", "") or ""
+            local_email = (prospect.emails[0] if prospect.emails else "")
+            local_email_meta = None
+            try:
+                m = prospect.source_of_email(local_email)
+                if m:
+                    local_email_meta = {
+                        "source":    str(m.get("source") or "").lower(),
+                        "source_id": str(m.get("source_id") or ""),
+                        "url":       str(m.get("url") or ""),
+                        "context":   str(m.get("context") or ""),
+                        "found_at":  str(m.get("found_at") or ""),
+                    }
+            except Exception:
+                local_email_meta = None
             rows.append({
                 "source": "local",
                 "id": prospect.match_keys[0] if prospect.match_keys else "",
@@ -648,6 +747,12 @@ class Api:
                 "provider": draft.get("provider", ""),
                 "model": draft.get("model", ""),
                 "kind": draft.get("kind", ""),
+                # Origine + catégorie (depuis l'objet Prospect en mémoire)
+                "prospect_sources":
+                    self._source_names_from_sources(prospect.sources),
+                "platform_url": platform_url,
+                "audience": self._audience_from_platform_url(platform_url),
+                "email_meta": local_email_meta,
             })
         return {"ok": True, "rows": rows}
 

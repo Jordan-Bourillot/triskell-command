@@ -357,10 +357,18 @@ def _scrape_bio_urls(urls: Iterable[str]) -> set[str]:
 # ---------------------------------------------------------------------------
 # API publique
 # ---------------------------------------------------------------------------
-def enrich_emails(prospect: dict) -> list[str]:
-    """Renvoie la liste fusionnée des emails déjà connus + ceux qu'on trouve.
+def enrich_emails(prospect: dict) -> tuple[list[str], str, str, str]:
+    """Cherche un email pour un prospect qui n'en a pas. Retourne un tuple
+    `(emails, source, context, url)` :
 
-    Modifie PAS le dict source. Renvoie [] si rien trouvé.
+      - emails  : liste d'adresses trouvées (peut être vide)
+      - source  : étiquette d'origine pour les meta du prospect
+                  ("bio" / "web" / "linktree" / "")
+      - context : libellé humain ("bio du profil créateur",
+                  "page contact du site officiel", "hub Linktree", "")
+      - url     : URL d'origine si pertinent (site visité), sinon ""
+
+    Modifie PAS le dict source.
     """
     known = set(
         _clean_email(e) for e in (prospect.get("emails") or [])
@@ -370,7 +378,7 @@ def enrich_emails(prospect: dict) -> list[str]:
         # Déjà au moins un email valide → on garde et on s'arrête
         # (on pourrait toujours essayer d'en trouver d'autres mais ça
         # coûte du temps réseau pour peu de valeur)
-        return sorted(known)
+        return sorted(known), "", "", ""
 
     # 1) Bio / description : instantané, pas de réseau
     bio_text = " ".join(filter(None, [
@@ -382,14 +390,16 @@ def enrich_emails(prospect: dict) -> list[str]:
     ]))
     found = _extract_emails_from_text(bio_text)
     if found:
-        return sorted(found)
+        return sorted(found), "bio", "bio / description du profil", ""
 
     # 2) Site web officiel
     website = prospect.get("website") or ""
     if website:
         found = _scrape_website(website)
         if found:
-            return sorted(found)
+            return (sorted(found), "web",
+                    "page contact ou mentions légales du site officiel",
+                    website)
 
     # 3) URLs en bio (Linktree, Beacons, site perso annexe…)
     bio_urls = (
@@ -400,9 +410,11 @@ def enrich_emails(prospect: dict) -> list[str]:
     if bio_urls:
         found = _scrape_bio_urls(bio_urls)
         if found:
-            return sorted(found)
+            return (sorted(found), "linktree",
+                    "hub de liens (Linktree, Beacons, etc.)",
+                    bio_urls[0] if isinstance(bio_urls[0], str) else "")
 
-    return []
+    return [], "", "", ""
 
 
 def enrich_batch(
@@ -436,26 +448,36 @@ def enrich_batch(
     log(f"📧 Enrichissement email : scan de {len(todo)} prospect(s) "
         f"sans adresse connue (concurrence {max_workers})…")
 
-    def _work(item: tuple[int, dict]) -> tuple[int, list[str]]:
+    def _work(item: tuple[int, dict]) -> tuple[int, list[str], str, str, str]:
         idx, p = item
         try:
-            emails = enrich_emails(p)
+            emails, source, context, url = enrich_emails(p)
         except Exception as exc:
             logger.debug("enrich_emails crashed for %s : %s",
                          p.get("name") or p.get("handle") or "?", exc)
-            emails = []
-        return idx, emails
+            emails, source, context, url = [], "", "", ""
+        return idx, emails, source, context, url
 
     enriched_examples: list[str] = []
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         for fut in as_completed([pool.submit(_work, it) for it in todo]):
             try:
-                idx, emails = fut.result()
+                idx, emails, source, context, url = fut.result()
             except Exception:
                 continue
             stats["scanned"] += 1
             if emails:
                 prospects[idx]["emails"] = emails
+                # Provenance : on tag chaque email enrichi avec son origine
+                # exacte (bio profil / site officiel / hub Linktree). Ces
+                # meta seront ensuite réutilisées par le pipeline IA pour
+                # adapter le ton du mail.
+                if source:
+                    prospects[idx]["emails_meta"] = [
+                        {"email": e, "source": source, "source_id": "",
+                         "url": url, "context": context, "found_at": ""}
+                        for e in emails
+                    ]
                 stats["enriched"] += 1
                 if len(enriched_examples) < 3:
                     name = (prospects[idx].get("name")

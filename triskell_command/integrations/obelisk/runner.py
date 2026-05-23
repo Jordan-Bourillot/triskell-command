@@ -568,11 +568,38 @@ def _local_prospect_to_supabase_row(p: dict, niche: str,
         "url":       platform_url,
         "found_at":  p.get("found_at") or now_iso,
     }
+    # Provenance par email : pour Obélisk, l'email vient soit du profil
+    # plateforme (bio YouTube, "About" Twitch, etc.), soit du site lié dans
+    # la bio (enrichi a posteriori par email_enricher.enrich_batch / le
+    # pipeline créateurs de Triskell Core). Si l'enrichisseur a déjà tagué
+    # les emails (raw["emails_meta"]), on respecte ce tag. Sinon : source
+    # par défaut = la plateforme du créateur.
+    emails_list = list(emails) if isinstance(emails, list) else []
+    raw_meta = p.get("emails_meta")
+    if isinstance(raw_meta, list) and raw_meta:
+        emails_meta_list = [
+            m for m in raw_meta
+            if isinstance(m, dict) and m.get("email")
+        ]
+    else:
+        emails_meta_list = [
+            {
+                "email":     e,
+                "source":    f"obelisk_{platform}" if platform else "obelisk",
+                "source_id": pid,
+                "url":       platform_url,
+                "context":   (f"bio / profil {platform}" if platform
+                              else "profil créateur"),
+                "found_at":  p.get("found_at") or now_iso,
+            }
+            for e in emails_list if e
+        ]
     return {
         "name":          name,
         "handle":        handle,
         "legal_name":    "",
-        "emails":        list(emails) if isinstance(emails, list) else [],
+        "emails":        emails_list,
+        "emails_meta":   emails_meta_list,
         "phones":        list(phones) if isinstance(phones, list) else [],
         "website":       website,
         "other_urls":    list(urls_in_bio) if isinstance(urls_in_bio, list) else [],

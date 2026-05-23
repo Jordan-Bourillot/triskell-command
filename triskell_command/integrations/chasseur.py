@@ -1215,6 +1215,37 @@ def push_to_autopilot(hunt_id: str) -> dict:
     mode = (h.filters or {}).get("mode") or "all"
     sector = (h.filters or {}).get("sector_input") or ""
 
+    # Traduit la valeur "source_mail" du Chasseur en (source, contexte humain)
+    # pour les meta d'email. Référence Triskell : explique à l'IA d'où vient
+    # exactement l'adresse pour qu'elle adapte son mail de prospection.
+    def _email_meta_for_chasseur(p_raw: dict, email_value: str,
+                                  is_main: bool) -> dict:
+        sm = (p_raw.get("source_mail") or "").strip().lower()
+        site = (p_raw.get("site_web") or "").strip()
+        siren = (p_raw.get("siren") or "").strip()
+        if sm == "site_contact":
+            return {"email": email_value, "source": "web",
+                    "source_id": "", "url": site,
+                    "context": "page contact du site officiel",
+                    "found_at": ""}
+        if sm == "site_home":
+            return {"email": email_value, "source": "web",
+                    "source_id": "", "url": site,
+                    "context": "page d'accueil du site officiel",
+                    "found_at": ""}
+        if sm == "annuaire":
+            return {"email": email_value, "source": "sirene",
+                    "source_id": siren, "url": "",
+                    "context": "annuaire d'entreprises (SIRENE)",
+                    "found_at": ""}
+        # Email principal trouvé par Chasseur sans précision : on tag "web"
+        # par défaut (Chasseur enrichit massivement via le site).
+        return {"email": email_value, "source": "web" if is_main else "chasseur",
+                "source_id": siren, "url": site,
+                "context": "trouvé via Le Chasseur" if not is_main else
+                           "site web de l'entreprise",
+                "found_at": ""}
+
     core_prospects: list[CoreProspect] = []
     for p in h.prospects:
         email = (p.get("email") or "").strip()
@@ -1223,11 +1254,16 @@ def push_to_autopilot(hunt_id: str) -> dict:
         # Tag spécifique au mode pour reconnaître la cohorte côté CRM
         tag_mode = "chasseur:sites_pourris" if mode == "poor_sites" else "chasseur:large"
         reasons = p.get("site_quality_reasons") or []
+        all_emails = [email] + [e for e in (p.get("emails_extra") or []) if e]
+        emails_meta = []
+        for idx, e in enumerate(all_emails):
+            emails_meta.append(_email_meta_for_chasseur(p, e, is_main=(idx == 0)))
         cp = CoreProspect(
             name=(p.get("nom") or "").strip(),
             legal_name=(p.get("nom") or "").strip(),
             siren=(p.get("siren") or "").strip(),
-            emails=[email] + [e for e in (p.get("emails_extra") or []) if e],
+            emails=all_emails,
+            emails_meta=emails_meta,
             website=(p.get("site_web") or "").strip(),
             address=(p.get("adresse") or "").strip(),
             city=(p.get("ville") or "").strip(),

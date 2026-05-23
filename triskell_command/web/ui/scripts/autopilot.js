@@ -1353,7 +1353,7 @@ const Autopilot = {
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-          ${this._kpi('Prospects ajoutés', searched, searched > 0 ? 'accent' : '')}
+          ${this._kpi('Prospects ciblés', searched, searched > 0 ? 'accent' : '')}
           ${this._kpi('Mails envoyés', sent, sent > 0 ? 'success' : '')}
           ${this._kpi('Brouillons posés', pending, pending > 0 ? 'accent' : '')}
         </div>

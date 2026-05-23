@@ -263,8 +263,20 @@ const MailTemplates = {
   },
 
   // ---------- Render ----------
-  async render(container) {
+  async render(container, params) {
     this._root = container;
+    // L'onglet (transactionnel / prospection) est piloté par la sidebar.
+    const tab = params && params.tab;
+    if (tab === 'transactionnel' || tab === 'prospection') {
+      if (this._state.categoryMode !== tab) {
+        this._state.selected = null;
+        this._state.editing = null;
+      }
+      this._state.categoryMode = tab;
+    }
+    const isProsp = (this._state.categoryMode === 'prospection');
+    const transacDisplay = isProsp ? 'none' : 'flex';
+    const prospDisplay   = isProsp ? 'flex' : 'none';
     container.innerHTML = `
       <section class="animate-slide-up">
         <!-- En-tête épuré : titre court, pas de gros pavé d'intro -->
@@ -282,27 +294,15 @@ const MailTemplates = {
         <!-- Banner d'aide masqué par défaut, affichable via le bouton ⓘ -->
         <div id="mt-banner" class="mb-4 text-[12px] text-text-muted px-3 py-2 rounded-lg bg-accent/5 border border-accent/20" style="display:none;"></div>
 
-        <!-- Onglets compacts (sans sous-titres redondants) -->
-        <div class="mt-cat-toggle mb-3" role="tablist" aria-label="Catégorie de modèle">
-          <button class="mt-cat-btn is-active" data-mt-cat="transactionnel" role="tab">
-            <span class="mt-cat-ico">🤖</span>
-            <span class="mt-cat-title">Transactionnel</span>
-          </button>
-          <button class="mt-cat-btn" data-mt-cat="prospection" role="tab">
-            <span class="mt-cat-ico">📨</span>
-            <span class="mt-cat-title">Prospection</span>
-          </button>
-        </div>
-
         <!-- Toolbar : filtre + compteur sur la même ligne, pas de label en double -->
-        <div id="mt-toolbar-transac" class="flex items-center gap-2 mb-3 flex-wrap">
+        <div id="mt-toolbar-transac" class="flex items-center gap-2 mb-3 flex-wrap" style="display:${transacDisplay};">
           <select id="mt-sender-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm" aria-label="Filtrer par adresse">
             <option value="">— Toutes les adresses —</option>
           </select>
           <span id="mt-count" class="text-[11px] text-text-muted ml-auto"></span>
         </div>
 
-        <div id="mt-toolbar-prosp" class="flex items-center gap-2 mb-3 flex-wrap" style="display:none;">
+        <div id="mt-toolbar-prosp" class="flex items-center gap-2 mb-3 flex-wrap" style="display:${prospDisplay};">
           <select id="mt-product-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm" aria-label="Filtrer par produit">
             <option value="">— Tous les produits —</option>
           </select>
@@ -651,7 +651,7 @@ const MailTemplates = {
       this._state.products = {};
     } else {
       this._state.products = res.products || {};
-      banner.innerHTML = `Templates synchronisés avec Supabase. Bascule entre <strong>Transactionnel</strong> (mails auto envoyés par tes sites) et <strong>Prospection</strong> (mails de démarchage rangés par produit).`;
+      banner.innerHTML = `Templates synchronisés avec Supabase. Choisis dans la barre de gauche entre <strong>Transactionnel</strong> (mails auto envoyés par tes sites) et <strong>Prospection</strong> (mails de démarchage rangés par produit).`;
     }
 
     this._state.catalog = this._buildCatalog();

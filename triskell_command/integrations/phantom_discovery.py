@@ -251,11 +251,27 @@ def map_raw_to_prospect(raw: dict, platform: str, niche: str) -> Optional[dict]:
     ])
 
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # Provenance du mail : PhantomBuster lit le champ "email" exposé par le
+    # profil social (Instagram, LinkedIn, TikTok…). On marque la source en
+    # ce sens — si l'enricheur web rajoute des emails par la suite, il
+    # taggera lui-même avec sa propre source ("web", "linktree"…).
+    emails_meta_list = ([
+        {
+            "email":     email,
+            "source":    f"phantombuster_{platform}" if platform else "phantombuster",
+            "source_id": "",
+            "url":       profile_url,
+            "context":   (f"profil {platform} (champ email public)" if platform
+                          else "profil social (champ email public)"),
+            "found_at":  now_iso,
+        }
+    ] if email else [])
     return {
         "name":          name,
         "handle":        handle,
         "legal_name":    "",
         "emails":        [email] if email else [],
+        "emails_meta":   emails_meta_list,
         "phones":        [],
         "website":       website,
         "other_urls":    [],
