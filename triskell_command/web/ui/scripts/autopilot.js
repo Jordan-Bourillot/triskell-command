@@ -420,10 +420,16 @@ const Autopilot = {
         </div>
       </div>
 
-      <!-- La chaîne des 5 maillons -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        ${this._STAGES.map((stage, i) => this._renderStage(stage, i)).join('')}
+      <!-- Les 4 premiers maillons : recherche / tri / redaction / relecture -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        ${this._STAGES.slice(0, 4).map((stage, i) => this._renderStage(stage, i)).join('')}
       </div>
+
+      <!-- Etape 5 "Envoie" : mise en valeur (grand bloc pleine largeur,
+           compteurs detailles, temps estime, barre de progression dediee).
+           C'est la seule etape qui touche au monde reel (mails qui partent
+           ou pas), donc Jordan veut la voir vraiment clairement. -->
+      ${this._renderSendStage(this._STAGES[4])}
 
       <!-- Résumé du dernier run / 24h -->
       <div class="mt-4 text-center">
@@ -510,6 +516,168 @@ const Autopilot = {
         </div>
       </div>
     `;
+  },
+
+  // ------------------------------------------------------------------
+  // Etape 5 "Envoie" : grand bloc pleine largeur avec compteurs detailles
+  // (envoyes / total / restants), barre de progression dediee, temps
+  // estime restant, et le compteur 24h. Garde le data-stage="send" pour
+  // que _applyStageState() continue a piloter le bandeau / icone.
+  // ------------------------------------------------------------------
+  _renderSendStage(stage) {
+    const mode = this._getStageMode(stage);
+    return `
+      <div class="card p-5 sm:p-6 mt-4 relative overflow-hidden"
+           data-stage="${stage.key}" data-send-card>
+        <!-- Bandeau d'etat (8px en haut, double epaisseur vs 4px ailleurs) -->
+        <div class="ap-stage-statusbar absolute top-0 left-0 right-0 h-2
+                    bg-border transition-colors"></div>
+
+        <div class="flex items-start gap-4 mb-4 mt-2">
+          <!-- Numero plus gros que sur les 4 autres -->
+          <div class="w-12 h-12 rounded-xl bg-accent/10 text-accent flex
+                      items-center justify-center text-xl font-bold flex-shrink-0">
+            ${stage.n}
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-3 flex-wrap">
+              <div class="font-bold text-xl sm:text-2xl">${this._esc(stage.title)}</div>
+              <span class="ap-stage-state-icon flex-shrink-0"></span>
+            </div>
+            <div class="text-xs font-medium text-text-muted mt-1 uppercase tracking-wide">
+              ${this._esc(stage.sources)}
+            </div>
+            <!-- Description par defaut OU message live -->
+            <div class="text-sm text-text-secondary mt-2 ap-stage-desc"
+                 style="text-wrap: pretty">
+              ${this._esc(stage.desc)}
+            </div>
+            <div class="hidden ap-stage-live mt-2">
+              <div class="text-sm ap-stage-live-message" style="text-wrap: pretty">…</div>
+              <div class="text-xs text-text-muted mt-1 ap-stage-live-count hidden"></div>
+            </div>
+          </div>
+          <!-- Interrupteur Auto / Manuel -->
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <span class="text-[10px] font-bold tracking-widest text-text-muted">MODE</span>
+            <div class="flex gap-0.5 bg-bg rounded-lg p-0.5 border border-border">
+              <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
+                      data-mode="auto">Auto</button>
+              <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
+                      data-mode="manual">Manuel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bloc compteurs detailles : visible pendant et apres un run.
+             Cache au repos (rien a montrer). -->
+        <div id="ap-send-counters" class="hidden mt-4 pt-4 border-t border-border">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            <div class="text-center">
+              <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted">Envoyes</div>
+              <div class="text-2xl sm:text-3xl font-bold text-success mt-1"
+                   id="ap-send-count-sent">0</div>
+            </div>
+            <div class="text-center">
+              <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted">Brouillons</div>
+              <div class="text-2xl sm:text-3xl font-bold text-warning mt-1"
+                   id="ap-send-count-drafts">0</div>
+            </div>
+            <div class="text-center">
+              <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted">Restants</div>
+              <div class="text-2xl sm:text-3xl font-bold text-accent mt-1"
+                   id="ap-send-count-remaining">0</div>
+            </div>
+            <div class="text-center">
+              <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted">Temps restant</div>
+              <div class="text-2xl sm:text-3xl font-bold text-text mt-1"
+                   id="ap-send-count-eta">—</div>
+            </div>
+          </div>
+          <!-- Barre de progression dediee a l'etape 5 -->
+          <div class="mt-4">
+            <div class="flex items-center justify-between text-[11px]
+                        text-text-muted mb-1.5 font-medium">
+              <span id="ap-send-progress-label">0 / 0 traites</span>
+              <span id="ap-send-progress-pct">0%</span>
+            </div>
+            <div class="h-2 rounded-full bg-bg overflow-hidden border border-border">
+              <div id="ap-send-progress-bar"
+                   class="h-full bg-accent transition-all duration-500 ease-out"
+                   style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Compteur 24h glissantes -->
+        <div class="mt-4 text-center text-text-muted text-xs"
+             style="text-wrap: pretty">
+          <span class="ap-stage-counter font-mono text-text-secondary">—</span>
+          <span class="ap-stage-counter-label"> sur 24h</span>
+        </div>
+      </div>
+    `;
+  },
+
+  // Met a jour les compteurs detailles de l'etape 5 a partir des stats du
+  // run (transmises par _pollOnce via this._lastStats / this._lastStages).
+  // Appele a chaque tick de polling pendant un run, et une fois en fin.
+  _updateSendCounters(stats, stages, running) {
+    const wrap = document.getElementById('ap-send-counters');
+    if (!wrap) return;
+    const s  = stats  || {};
+    const st = stages || {};
+    const sent      = parseInt(s.drafts_sent    || 0, 10);
+    const pending   = parseInt(s.drafts_pending || 0, 10);
+    // Total prevu = nb de prospects retenus par le tri (etape 2).
+    const total = parseInt((st.sort && st.sort.count) || 0, 10)
+               || (sent + pending);
+    const done = sent + pending;
+    const remaining = Math.max(0, total - done);
+    const sendActive = st.send && (st.send.state === 'running'
+                                  || st.send.state === 'done');
+    if (!sendActive && total === 0) {
+      wrap.classList.add('hidden');
+      return;
+    }
+    wrap.classList.remove('hidden');
+
+    document.getElementById('ap-send-count-sent').textContent      = String(sent);
+    document.getElementById('ap-send-count-drafts').textContent    = String(pending);
+    document.getElementById('ap-send-count-remaining').textContent = String(remaining);
+
+    // Temps restant estime : (restants) * (delai entre envois + buffer SMTP).
+    // Si pas de delai configure, on prend 8s par mail (envoi SMTP moyen).
+    let eta = '—';
+    if (remaining > 0 && running) {
+      const delaySec = parseInt(
+        (this.cfg && this.cfg.send_delay_seconds) || 0, 10
+      ) || 0;
+      const perMailSec = Math.max(8, delaySec + 6);
+      const totalSec = remaining * perMailSec;
+      eta = this._formatDuration(totalSec);
+    } else if (!running && remaining === 0) {
+      eta = 'fini';
+    } else if (!running) {
+      eta = '—';
+    }
+    document.getElementById('ap-send-count-eta').textContent = eta;
+
+    // Barre de progression dediee
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    document.getElementById('ap-send-progress-bar').style.width = pct + '%';
+    document.getElementById('ap-send-progress-pct').textContent = pct + '%';
+    document.getElementById('ap-send-progress-label').textContent =
+      `${done} / ${total} traités`;
+  },
+
+  // Formate une duree en secondes en chaine humaine ("2 min 30 s", "45 s").
+  _formatDuration(totalSec) {
+    if (totalSec < 60) return `${Math.round(totalSec)} s`;
+    const m = Math.floor(totalSec / 60);
+    const s = Math.round(totalSec - m * 60);
+    if (s === 0) return `${m} min`;
+    return `${m} min ${s} s`;
   },
 
   // ------------------------------------------------------------------
@@ -1661,6 +1829,9 @@ const Autopilot = {
     }
     // Barre de progression globale du run
     this._updateProgress(r.stages || {}, !!r.running);
+    // Bloc detaille de l'etape 5 (compteurs envoyes/brouillons/restants
+    // + temps estime + barre de progression dediee).
+    this._updateSendCounters(r.stats || {}, r.stages || {}, !!r.running);
     const activityBox = document.getElementById('ap-current-activity');
     const activityTxt = document.getElementById('ap-current-activity-text');
     if (activityBox && activityTxt) {
