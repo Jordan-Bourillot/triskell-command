@@ -1,11 +1,12 @@
-/* Vue Auto-pilote — chef d'orchestre de la chaîne complète.
+﻿/* Vue Auto-pilote — chef d'orchestre de la chaîne complète.
  *
  * Tableau de commande : 5 boîtes en chaîne (Cherche → Trie → Rédige → Relit
- * → Envoie), chacune avec un interrupteur Auto / Manuel. Le formulaire
- * détaillé (config IA, plafonds, signature) est en bas, replié.
+ * → Envoie). Les 3 derniers maillons (Rédige / Relit / Envoie) ont un
+ * interrupteur Auto / Manuel ; les 2 premiers tournent toujours en auto.
+ * Le formulaire détaillé (config IA, plafonds, signature) est en bas, replié.
  *
- * État actuel : visuel uniquement. Les interrupteurs sont sauvegardés
- * en localStorage mais pas encore branchés au backend (étape 4 du chantier).
+ * Les modes sont sauvegardés en localStorage (cache) ET en backend (source
+ * de vérité partagée entre appareils + utilisée par le worker nocturne).
  */
 
 const Autopilot = {
@@ -135,26 +136,34 @@ const Autopilot = {
           </div>
         </div>
 
-        <!-- Onglets : Pilotage (réglages + chaîne) / Brouillons (drafts générés) -->
-        <div class="flex gap-1 mb-6 border-b border-border">
-          <button id="ap-tab-pilotage-btn"
-                  class="ap-tab-btn px-4 py-2.5 text-sm font-semibold border-b-2 border-accent text-text"
-                  data-tab="pilotage">
-            Pilotage
-          </button>
-          <button id="ap-tab-brouillons-btn"
-                  class="ap-tab-btn px-4 py-2.5 text-sm font-semibold border-b-2 border-transparent text-text-muted hover:text-text"
-                  data-tab="brouillons">
-            Brouillons <span id="ap-tab-brouillons-count"
-                             class="ml-1 inline-block px-1.5 py-0.5 rounded-full text-[10px] font-bold
-                                    bg-accent/15 text-accent hidden"></span>
+        <!-- Bandeau "X brouillons à valider" : visible uniquement quand il
+             y en a. Sert de raccourci direct vers la page Brouillons. -->
+        <div id="ap-drafts-banner"
+             class="hidden mb-6 rounded-2xl border border-accent/30 bg-accent/5
+                    px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-9 h-9 rounded-full bg-accent/15 text-accent flex items-center
+                        justify-center flex-shrink-0">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M4 4h16v16H4z"/><polyline points="4 8 12 13 20 8"/>
+              </svg>
+            </div>
+            <div class="min-w-0">
+              <div class="font-semibold text-sm">
+                <span id="ap-drafts-banner-count">0</span> brouillon(s) à valider
+              </div>
+              <div class="text-xs text-text-muted" style="text-wrap: pretty">
+                Mails préparés en mode validation, en attente de ton OK.
+              </div>
+            </div>
+          </div>
+          <button id="ap-drafts-banner-open" class="btn btn-primary">
+            Voir les brouillons →
           </button>
         </div>
 
-        <!-- Onglet PILOTAGE -->
-        <div id="ap-tab-pilotage">
-          <!-- Tableau de commande : réglages + adresses + chaîne des 5 maillons -->
-          <div id="ap-control-panel" class="mb-8"></div>
+        <!-- Tableau de commande : réglages + adresses + chaîne des 5 maillons -->
+        <div id="ap-control-panel" class="mb-8"></div>
 
           <!-- Boutons d'action : déplacés ICI (à la fin) après le paramétrage -->
           <div class="flex flex-wrap gap-2 sm:gap-3 mb-8">
@@ -176,7 +185,7 @@ const Autopilot = {
               <div>
                 <div class="font-semibold text-sm">Paramètres avancés</div>
                 <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
-                  Service IA, modèle, signature, plafonds, délais de relance…
+                  Service IA, modèle, signature, plafonds, plage horaire d'envoi…
                 </div>
               </div>
               <svg class="w-5 h-5 text-text-muted transition-transform group-open:rotate-180"
@@ -214,12 +223,6 @@ const Autopilot = {
               <div id="ap-stats" class="mt-4 hidden"></div>
             </div>
           </details>
-        </div>
-
-        <!-- Onglet BROUILLONS -->
-        <div id="ap-tab-brouillons" class="hidden">
-          <div id="ap-drafts-wrap"></div>
-        </div>
       </section>
     `;
 
@@ -241,11 +244,10 @@ const Autopilot = {
     document.getElementById('ap-run').onclick  = () => this.run();
     document.getElementById('ap-stop').onclick = () => this.stop();
 
-    // Onglets Pilotage / Brouillons
-    document.querySelectorAll('.ap-tab-btn').forEach(btn => {
-      btn.onclick = () => this._switchTab(btn.dataset.tab);
-    });
-    // Au render initial : on affiche le compteur de brouillons (en tache de fond)
+    // Bandeau "X brouillons à valider" : clic = ouvre la page Brouillons
+    const draftsBtn = document.getElementById('ap-drafts-banner-open');
+    if (draftsBtn) draftsBtn.onclick = () => App.show('drafts');
+    // Au render initial : on affiche le bandeau si necessaire (tache de fond)
     this._refreshDraftsCount();
 
     if (!App.api) {
@@ -265,17 +267,6 @@ const Autopilot = {
       return;
     }
     this.cfg = r.config || {};
-
-    // Migration des anciens defauts Gemini -> Claude.
-    // Si la config porte EXACTEMENT les anciennes valeurs par defaut
-    // (google + gemini-2.5-flash), on bascule sur Claude et on sauvegarde
-    // en silence. Toute config personnalisee est conservee telle quelle.
-    if (this.cfg.ai_provider === 'google'
-        && (this.cfg.ai_model || '').trim() === 'gemini-2.5-flash') {
-      this.cfg.ai_provider = 'anthropic';
-      this.cfg.ai_model = 'claude-sonnet-4-5';
-      try { App.api.autopilot_save_config({ config: this.cfg }); } catch (e) {}
-    }
 
     // Charge les signatures pour les afficher dans l'apercu sous le brief IA
     this.signatures = [];
@@ -308,8 +299,6 @@ const Autopilot = {
     const c = this.cfg || {};
     const nightlyTarget = c.nightly_target ?? 50;
     const enabledNight  = !!c.enabled;
-    const product       = c.autopilot_product || '';
-    const audience      = c.autopilot_audience || '';
     const nightlyHour   = (c.nightly_hour ?? 3);
     return `
       <!-- Bandeau de réglages globaux : combien + produit + horaire -->
@@ -494,16 +483,25 @@ const Autopilot = {
           <div class="text-[11px] text-text-muted mt-1 ap-stage-live-count hidden"></div>
         </div>
 
-        <!-- Interrupteur Auto / Manuel -->
-        <div class="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-border">
-          <span class="text-[10px] font-bold tracking-widest text-text-muted">MODE</span>
-          <div class="flex gap-0.5 bg-bg rounded-lg p-0.5 border border-border">
-            <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
-                    data-mode="auto">Auto</button>
-            <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
-                    data-mode="manual">Manuel</button>
+        <!-- Interrupteur Auto / Manuel : uniquement sur les maillons ou
+             l'utilisateur a vraiment un choix (Redige, Relit, Envoie).
+             Cherche et Trie tournent toujours en automatique. -->
+        ${(stage.key === 'search' || stage.key === 'sort') ? `
+          <div class="mt-4 pt-3 border-t border-border text-[10px]
+                      text-text-muted tracking-widest font-bold text-center">
+            TOUJOURS AUTO
           </div>
-        </div>
+        ` : `
+          <div class="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-border">
+            <span class="text-[10px] font-bold tracking-widest text-text-muted">MODE</span>
+            <div class="flex gap-0.5 bg-bg rounded-lg p-0.5 border border-border">
+              <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
+                      data-mode="auto">Auto</button>
+              <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
+                      data-mode="manual">Manuel</button>
+            </div>
+          </div>
+        `}
 
         <!-- Compteur 24h glissantes : ce qui s'est passe au total dans la
              base sur 24h, TOUTES sources confondues (autopilote + outils
@@ -653,7 +651,10 @@ const Autopilot = {
       const delaySec = parseInt(
         (this.cfg && this.cfg.send_delay_seconds) || 0, 10
       ) || 0;
-      const perMailSec = Math.max(8, delaySec + 6);
+      // Borne basse fiable : delai configure + 8s SMTP, minimum 10s par
+      // mail. Sans cette borne, un 1er envoi rapide laisse croire "0 s
+      // restant" alors qu'il reste plein de mails a faire.
+      const perMailSec = Math.max(10, delaySec + 8);
       const totalSec = remaining * perMailSec;
       eta = this._formatDuration(totalSec);
     } else if (!running && remaining === 0) {
@@ -961,37 +962,14 @@ const Autopilot = {
     return pool;
   },
 
-  // ------------------------------------------------------------------
-  // Onglets Pilotage / Brouillons — switch + chargement paresseux du
-  // contenu de l'onglet Brouillons quand on l'ouvre.
-  _switchTab(tab) {
-    const tabs = ['pilotage', 'brouillons'];
-    if (!tabs.includes(tab)) return;
-    tabs.forEach(t => {
-      const pane = document.getElementById('ap-tab-' + t);
-      const btn  = document.getElementById('ap-tab-' + t + '-btn');
-      if (!pane || !btn) return;
-      if (t === tab) {
-        pane.classList.remove('hidden');
-        btn.classList.remove('border-transparent', 'text-text-muted');
-        btn.classList.add('border-accent', 'text-text');
-      } else {
-        pane.classList.add('hidden');
-        btn.classList.remove('border-accent', 'text-text');
-        btn.classList.add('border-transparent', 'text-text-muted');
-      }
-    });
-    if (tab === 'brouillons') this._refreshDraftsList();
-  },
-
-  // Met a jour la petite pastille de compteur sur l'onglet Brouillons.
-  // Appelé au render + après chaque run de l'autopilote (fin de _refreshStatus).
+  // Met a jour le bandeau "X brouillons a valider" en haut de la page.
+  // Appele au render + apres chaque run de l'autopilote (fin de _refreshStatus).
   //
-  // Aligne aussi en passant tous les compteurs de brouillons visibles sur
-  // le NB REEL en attente : la case "Brouillons à valider" du récap et le
-  // label orange "X brouillon(s) à valider" sous l'étape 5. Sans ça, ces
-  // chiffres restent figés sur la valeur du run (n_pending) — et divergent
-  // dès qu'un brouillon est validé / rejeté / disparait pour autre raison.
+  // Aligne aussi tous les compteurs de brouillons visibles sur le NB REEL :
+  // la case "Brouillons à valider" du récap et le label orange "X
+  // brouillon(s) à valider" sous l'étape 5. Sans ça, ces chiffres restent
+  // figés sur la valeur du run (n_pending) — et divergent dès qu'un
+  // brouillon est validé / rejeté / disparait pour autre raison.
   async _refreshDraftsCount() {
     if (!App.api || !App.api.get_drafts) return;
     let r;
@@ -999,15 +977,13 @@ const Autopilot = {
     if (!r || !r.ok) return;
     const n = (r.rows || []).length;
 
-    // 1) Pastille de l'onglet Brouillons (comportement historique).
-    const badge = document.getElementById('ap-tab-brouillons-count');
-    if (badge) {
-      if (n > 0) {
-        badge.textContent = String(n);
-        badge.classList.remove('hidden');
-      } else {
-        badge.classList.add('hidden');
-      }
+    // 1) Bandeau "X brouillons a valider" en haut de la page autopilote :
+    //    visible uniquement si n > 0.
+    const banner = document.getElementById('ap-drafts-banner');
+    const bCount = document.getElementById('ap-drafts-banner-count');
+    if (banner && bCount) {
+      bCount.textContent = String(n);
+      banner.classList.toggle('hidden', n === 0);
     }
 
     // 2) Case "Brouillons à valider" du récap "Voici ce qui s'est passé".
@@ -1025,558 +1001,6 @@ const Autopilot = {
     });
   },
 
-  // Charge et affiche la liste des brouillons dans l'onglet Brouillons.
-  async _refreshDraftsList() {
-    const wrap = document.getElementById('ap-drafts-wrap');
-    if (!wrap) return;
-    if (!App.api || !App.api.get_drafts) {
-      wrap.innerHTML = `<div class="card p-6 text-text-muted text-center">Brouillons indisponibles.</div>`;
-      return;
-    }
-    wrap.innerHTML = `<div class="text-center py-12 text-text-muted">Chargement…</div>`;
-    let r;
-    try { r = await App.api.get_drafts(); }
-    catch (e) {
-      wrap.innerHTML = `<div class="card p-6 text-danger">Erreur : ${this._esc(String(e))}</div>`;
-      return;
-    }
-    if (!r || !r.ok) {
-      wrap.innerHTML = `<div class="card p-6 text-danger">${this._esc((r && r.error) || 'Erreur')}</div>`;
-      return;
-    }
-    const rows = r.rows || [];
-    if (rows.length === 0) {
-      wrap.innerHTML = `
-        <div class="card p-6 sm:p-12 text-center">
-          <div class="text-3xl sm:text-4xl mb-3">✓</div>
-          <h2 class="text-xl font-semibold mb-2">Aucun brouillon en attente.</h2>
-          <p class="text-text-secondary max-w-lg mx-auto" style="text-wrap: pretty">
-            Quand l'auto-pilote prépare des mails en mode validation,
-            ils atterrissent ici pour que tu valides ou rejettes en 1 clic.
-          </p>
-          <div class="mt-6 flex flex-wrap gap-2 justify-center">
-            <button id="ap-d-wipe-all-empty" class="btn btn-secondary"
-                    style="border-color: hsl(var(--danger) / 0.5); color: hsl(var(--danger));">
-              Tout vider (reset complet)
-            </button>
-            <button id="ap-d-refresh-empty" class="btn btn-secondary">Rafraîchir</button>
-          </div>
-        </div>`;
-      const wipe = document.getElementById('ap-d-wipe-all-empty');
-      if (wipe) wipe.onclick = () => this._wipeAllDrafts();
-      const refresh = document.getElementById('ap-d-refresh-empty');
-      if (refresh) refresh.onclick = () => this._refreshDraftsList();
-      return;
-    }
-
-    const cards = rows.map((d, i) => {
-      const ts = (d.ts || '').replace('T', ' ').slice(0, 16);
-      const body = (d.body || '').slice(0, 220);
-      const more = (d.body || '').length > 220 ? '…' : '';
-      // Bandeau "Note 2e IA" si la relecture a tourne sur ce brouillon.
-      const reviewBanner = this._reviewBannerAP(d);
-      return `
-        <div class="card p-4 sm:p-5" data-draft-source="${this._esc(d.source || '')}"
-             data-draft-id="${this._esc(d.id || d.key || '')}">
-          <div class="flex items-start justify-between gap-3 mb-2 flex-wrap">
-            <div class="min-w-0">
-              <div class="font-semibold text-sm">${this._esc(d.name || '(sans nom)')}</div>
-              <div class="text-xs text-text-muted truncate">${this._esc(d.email || '')}
-                ${d.city ? ' · ' + this._esc(d.city) : ''}</div>
-            </div>
-            <div class="text-[11px] text-text-muted whitespace-nowrap">${this._esc(ts)}</div>
-          </div>
-          ${reviewBanner}
-          <div class="text-sm font-semibold mb-1.5">${this._esc(d.subject || '(sans objet)')}</div>
-          <div class="text-xs text-text-secondary mb-3 whitespace-pre-wrap"
-               style="text-wrap: pretty;">${this._esc(body)}${more}</div>
-          <div class="flex flex-wrap gap-2">
-            <button class="btn btn-primary ap-d-approve" data-idx="${i}">Approuver et envoyer</button>
-            <button class="btn btn-secondary ap-d-view"    data-idx="${i}">Voir</button>
-            <button class="btn btn-secondary ap-d-reject"  data-idx="${i}">Rejeter</button>
-            <button class="btn btn-secondary" onclick="App.show('drafts')">Éditer en détail</button>
-          </div>
-        </div>`;
-    }).join('');
-
-    // Footer "Tout envoyer (N)" duplique en bas de la liste : evite de
-    // remonter en haut quand on vient de tout relire en scrollant.
-    const sendAllFooter = rows.length > 1
-      ? `<div class="flex justify-end pt-4">
-           <button id="ap-d-send-all-bottom" class="btn btn-primary"
-                   title="Envoie d'un coup tous les brouillons en attente, apres confirmation.">
-             Tout envoyer (${rows.length})
-           </button>
-         </div>`
-      : '';
-
-    wrap.innerHTML = `
-      <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
-        <div>
-          <div class="text-sm font-semibold">${rows.length} brouillon(s) en attente</div>
-          <div class="text-xs text-text-muted" style="text-wrap: pretty">
-            Mails préparés en mode validation. Tu approuves pour envoyer, tu rejettes pour supprimer.
-          </div>
-        </div>
-        <div class="flex gap-2 flex-wrap">
-          <button id="ap-d-send-all" class="btn btn-primary"
-                  title="Envoie d'un coup tous les brouillons en attente, apres confirmation.">
-            Tout envoyer
-          </button>
-          <button id="ap-d-cleanup-broken" class="btn btn-secondary"
-                  title="Supprime les brouillons où l'IA a refusé d'écrire (méta-blabla au lieu d'un mail).">
-            Vider les cassés
-          </button>
-          <button id="ap-d-wipe-all" class="btn btn-secondary"
-                  style="border-color: hsl(var(--danger) / 0.5); color: hsl(var(--danger));"
-                  title="Supprime TOUS les brouillons en attente (les bons comme les mauvais). Reset complet.">
-            Tout vider
-          </button>
-          <button id="ap-d-refresh" class="btn btn-secondary">Rafraîchir</button>
-        </div>
-      </div>
-      <div class="space-y-3">${cards}</div>
-      ${sendAllFooter}
-    `;
-
-    // Bind boutons
-    const refresh = document.getElementById('ap-d-refresh');
-    if (refresh) refresh.onclick = () => this._refreshDraftsList();
-    const cleanup = document.getElementById('ap-d-cleanup-broken');
-    if (cleanup) cleanup.onclick = () => this._cleanupBrokenDrafts();
-    const wipe = document.getElementById('ap-d-wipe-all');
-    if (wipe) wipe.onclick = () => this._wipeAllDrafts();
-    const sendAllTop = document.getElementById('ap-d-send-all');
-    if (sendAllTop) sendAllTop.onclick = () => this._sendAllDrafts();
-    const sendAllBot = document.getElementById('ap-d-send-all-bottom');
-    if (sendAllBot) sendAllBot.onclick = () => this._sendAllDrafts();
-    wrap.querySelectorAll('.ap-d-approve').forEach(btn => {
-      btn.onclick = () => this._draftAction(rows[parseInt(btn.dataset.idx, 10)], 'approve');
-    });
-    wrap.querySelectorAll('.ap-d-reject').forEach(btn => {
-      btn.onclick = () => this._draftAction(rows[parseInt(btn.dataset.idx, 10)], 'reject');
-    });
-    wrap.querySelectorAll('.ap-d-view').forEach(btn => {
-      btn.onclick = () => this._viewDraft(rows[parseInt(btn.dataset.idx, 10)]);
-    });
-  },
-
-  // Bandeau "Note 2è IA : X/10 — commentaire" pour les cartes brouillon
-  // de l'onglet Brouillons de l'autopilote. Couleur selon le score :
-  //  - >= 7 : vert (mail sur)
-  //  - 5-6  : orange (moyen, a relire)
-  //  - < 5  : rouge (douteux)
-  // Renvoie '' si le brouillon n'a pas de review (2e IA desactivee).
-  _reviewBannerAP(d) {
-    if (!d || d.review_score == null) return '';
-    const score = Math.max(0, Math.min(10, parseInt(d.review_score, 10) || 0));
-    const comment = (d.review_comment || '').trim();
-    let cls = 'bg-success/10 border-success/30 text-success';
-    let label = 'OK';
-    if (score < 5) {
-      cls = 'bg-danger/10 border-danger/40 text-danger';
-      label = 'Attention';
-    } else if (score < 7) {
-      cls = 'bg-warning/10 border-warning/40 text-warning';
-      label = 'Moyen';
-    }
-    const commentPart = comment
-      ? ` <span class="text-text-secondary font-normal">— ${this._esc(comment)}</span>`
-      : '';
-    return `
-      <div class="mb-3 px-3 py-2 rounded-lg border text-xs ${cls}"
-           style="text-wrap: pretty">
-        <span class="font-semibold">2è IA · ${label} · ${score}/10</span>${commentPart}
-      </div>`;
-  },
-
-  // Envoi groupe depuis l'onglet Brouillons de l'autopilote : approuve
-  // et envoie d'un coup TOUS les brouillons en attente, apres confirmation
-  // explicite. Respecte le delai send_delay_seconds configure dans les
-  // reglages autopilote (entre 2 envois).
-  async _sendAllDrafts() {
-    if (!App.api || !App.api.get_drafts || !App.api.draft_approve) return;
-    let data;
-    try { data = await App.api.get_drafts(); }
-    catch (e) { alert('Erreur lecture brouillons : ' + e); return; }
-    const rows = (data && data.rows) || [];
-    if (!rows.length) {
-      alert('Aucun brouillon a envoyer.');
-      return;
-    }
-    // Delai entre 2 envois (lu a chaud depuis la config autopilote).
-    let delaySec = 0;
-    try {
-      const cfgRes = await App.api.autopilot_get_config();
-      delaySec = parseInt(
-        (cfgRes && cfgRes.config && cfgRes.config.send_delay_seconds) || 0, 10
-      ) || 0;
-    } catch (e) { /* tolere : delai = 0 */ }
-    const delayMsg = delaySec > 0
-      ? `\n\nEspacement entre 2 envois : ${delaySec}s (regle dans l'autopilote).`
-      + `\nDuree estimee : ~${Math.ceil((rows.length - 1) * delaySec / 60)} min.`
-      : '';
-    const ok = confirm(
-      `ENVOYER ${rows.length} BROUILLON(S) MAINTENANT ?\n\n`
-      + `Tous les mails en attente vont partir reellement, depuis ta boite `
-      + `mail configuree.\n\n`
-      + `Pas de retour en arriere : une fois envoye, c'est envoye.`
-      + `${delayMsg}\n\n`
-      + `Continuer ?`
-    );
-    if (!ok) return;
-    const topBtn    = document.getElementById('ap-d-send-all');
-    const bottomBtn = document.getElementById('ap-d-send-all-bottom');
-    const setBusy = (busy, label) => {
-      [topBtn, bottomBtn].forEach(b => {
-        if (!b) return;
-        b.disabled = busy;
-        if (label) b.textContent = label;
-      });
-    };
-    // Sync visuelle de l'etape 5 (bloc detaille du pilotage) en LIVE
-    // pendant les envois manuels : sans ca, le bloc resterait fige sur
-    // l'etat du dernier run autopilote tant qu'on n'aura pas reclique
-    // "Lancer". Comme Jordan envoie via l'onglet Brouillons, le polling
-    // autopilot_status ne tourne pas -- on patche les DOM directement.
-    const totalToSend = rows.length;
-    this._showSendCountersManual(totalToSend, delaySec);
-    setBusy(true, 'Envoi en cours…');
-    let sent = 0;
-    let failed = 0;
-    const errors = [];
-    const t0 = Date.now();
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
-      setBusy(true, `Envoi ${i + 1}/${rows.length}…`);
-      this._updateSendCountersManual({
-        sent, failed,
-        remaining: totalToSend - sent - failed,
-        total: totalToSend,
-        delaySec,
-        t0,
-        inFlight: r.name || r.email || '?',
-      });
-      try {
-        const res = await App.api.draft_approve({
-          id: r.id || r.key,
-          key: r.id || r.key,
-          source: r.source || '',
-          body: r.body,
-        });
-        if (res && res.ok === false) {
-          // approve_draft renvoie "reason", _approve_local_draft "error" :
-          // on lit les deux pour ne pas perdre le message reel.
-          errors.push(`${r.name || r.email || '?'} : ${res.error || res.reason || '?'}`);
-          failed += 1;
-        } else {
-          sent += 1;
-        }
-      } catch (e) {
-        errors.push(`${r.name || r.email || '?'} : ${e}`);
-        failed += 1;
-      }
-      // Refresh visuel apres chaque envoi (incrementiel)
-      this._updateSendCountersManual({
-        sent, failed,
-        remaining: totalToSend - sent - failed,
-        total: totalToSend,
-        delaySec,
-        t0,
-        inFlight: null,
-      });
-      if (delaySec > 0 && i < rows.length - 1) {
-        setBusy(true, `Attente ${delaySec}s avant le suivant…`);
-        await new Promise(res => setTimeout(res, delaySec * 1000));
-      }
-    }
-    setBusy(false, 'Tout envoyer');
-    // Etat final dans le bloc compteurs
-    this._updateSendCountersManual({
-      sent, failed,
-      remaining: 0,
-      total: totalToSend,
-      delaySec: 0,
-      t0,
-      inFlight: null,
-      done: true,
-    });
-    if (errors.length) {
-      alert(
-        `${sent} envoye(s), ${errors.length} echec(s).\n\n`
-        + `Echecs :\n- ` + errors.slice(0, 10).join('\n- ')
-        + (errors.length > 10 ? `\n… (+${errors.length - 10} autres)` : '')
-      );
-    } else {
-      alert(`${sent} mail(s) envoye(s).`);
-    }
-    await this._refreshDraftsList();
-    await this._refreshDraftsCount();
-  },
-
-  // Force l'apparition du bloc compteurs detaille de l'etape 5 (et le
-  // pre-remplit avec les valeurs initiales). Appele au DEMARRAGE d'un
-  // envoi manuel "Tout envoyer" depuis l'onglet Brouillons.
-  _showSendCountersManual(totalToSend, delaySec) {
-    const wrap = document.getElementById('ap-send-counters');
-    if (!wrap) return;
-    wrap.classList.remove('hidden');
-    // Bandeau d'etat de l'etape 5 : on force "running" (accent + spinner)
-    // pendant l'envoi manuel pour que ce soit visuellement coherent.
-    const stageEl = document.querySelector('[data-stage="send"]');
-    if (stageEl) {
-      const bar = stageEl.querySelector('.ap-stage-statusbar');
-      if (bar) {
-        bar.classList.remove('bg-border', 'bg-success', 'bg-danger', 'bg-warning');
-        bar.classList.add('bg-accent');
-      }
-      const icon = stageEl.querySelector('.ap-stage-state-icon');
-      if (icon) {
-        icon.innerHTML = `<span class="inline-block w-4 h-4 rounded-full
-          border-2 border-accent/30 border-t-accent animate-spin"></span>`;
-      }
-    }
-    this._updateSendCountersManual({
-      sent: 0, failed: 0,
-      remaining: totalToSend, total: totalToSend,
-      delaySec, t0: Date.now(), inFlight: null,
-    });
-  },
-
-  // Patch DIRECT des elements DOM du bloc compteurs etape 5, sans passer
-  // par les stats du polling autopilote. Sert pendant un envoi manuel
-  // "Tout envoyer" pour donner a Jordan le live qu'il attend.
-  _updateSendCountersManual(p) {
-    const setText = (id, txt) => {
-      const el = document.getElementById(id);
-      if (el) el.textContent = String(txt);
-    };
-    setText('ap-send-count-sent',      p.sent);
-    setText('ap-send-count-drafts',    Math.max(0, p.remaining)); // restants = pas encore envoyes
-    setText('ap-send-count-remaining', Math.max(0, p.remaining));
-    // Temps restant : on prend le MAX entre la cadence reellement
-    // observee (utile quand l envoi est lent type templates lourds) et
-    // une borne basse "raisonnable" (delai configure + 8s SMTP, minimum
-    // 10s par mail). Sans cette borne basse, un 1er envoi instantane
-    // (echec SMTP immediat par exemple) faisait afficher "0 s" alors
-    // qu il restait encore des mails a traiter -> Jordan croit que c est
-    // fini alors qu en realite ca continue.
-    let etaText = '—';
-    if (p.done) {
-      etaText = 'fini';
-      // En fin d'envoi, bascule le bandeau etape 5 en done (vert).
-      const stageEl = document.querySelector('[data-stage="send"]');
-      if (stageEl) {
-        const bar = stageEl.querySelector('.ap-stage-statusbar');
-        if (bar) {
-          bar.classList.remove('bg-border', 'bg-accent', 'bg-danger', 'bg-warning');
-          bar.classList.add(p.failed > 0 ? 'bg-warning' : 'bg-success');
-        }
-        const icon = stageEl.querySelector('.ap-stage-state-icon');
-        if (icon) {
-          icon.innerHTML = `<svg class="w-5 h-5 text-success" fill="none"
-            stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
-            <polyline points="20 6 9 17 4 12"/></svg>`;
-        }
-      }
-    } else if (p.remaining > 0) {
-      const done = p.sent + p.failed;
-      // Borne basse fiable, valable des le 1er affichage : delai
-      // configure + 8s pour le SMTP, minimum 10s.
-      const floorPerMail = Math.max(10, (p.delaySec || 0) + 8);
-      let perMail = floorPerMail;
-      if (done > 0 && p.t0) {
-        const observed = ((Date.now() - p.t0) / 1000) / done;
-        // On garde la borne basse si l observation est plus optimiste
-        // (1er envoi tres rapide = echantillon non representatif).
-        perMail = Math.max(observed, floorPerMail);
-      }
-      etaText = this._formatDuration(p.remaining * perMail);
-    }
-    setText('ap-send-count-eta', etaText);
-    // Barre de progression dediee
-    const done = p.sent + p.failed;
-    const pct = p.total > 0
-      ? Math.min(100, Math.round((done / p.total) * 100))
-      : 0;
-    const barEl = document.getElementById('ap-send-progress-bar');
-    if (barEl) barEl.style.width = pct + '%';
-    setText('ap-send-progress-pct', pct + '%');
-    setText('ap-send-progress-label',
-      p.inFlight ? `Envoi vers ${p.inFlight}… (${done} / ${p.total})`
-                 : `${done} / ${p.total} traités`);
-  },
-
-  // ------------------------------------------------------------------
-  // Modale "Voir" : affiche le mail complet (rendu HTML si dispo, sinon
-  // texte brut joliment formaté) dans une lightbox. Lecture seule —
-  // pour éditer, c'est "Éditer en détail" qui amène sur la page brouillons.
-  _viewDraft(draft) {
-    if (!draft) return;
-    // Ferme une modale précédente s'il y en a une (clic rapide sur "Voir"
-    // de plusieurs brouillons).
-    this._closeDraftViewer();
-
-    const ts = (draft.ts || '').replace('T', ' ').slice(0, 16);
-    const hasHtml = !!(draft.body_html && String(draft.body_html).trim());
-    // Prefixe <base target="_blank"> pour que les liens du mail s ouvrent
-    // dans un nouvel onglet et pas dans l iframe sandbox (sinon les sites
-    // a X-Frame-Options DENY type Pixel Pros affichent erreur Firefox).
-    const htmlSrc = hasHtml
-      ? (`<base target="_blank">` + String(draft.body_html))
-          .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
-      : '';
-    const textBody = this._esc(draft.body || '').replace(/\n/g, '<br>');
-
-    const overlay = document.createElement('div');
-    overlay.id = 'ap-d-viewer';
-    overlay.className = 'fixed inset-0 z-[100] flex items-start justify-center p-4 sm:p-8';
-    overlay.style.background = 'rgba(0, 0, 0, 0.65)';
-    overlay.innerHTML = `
-      <div class="card w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden"
-           style="background: hsl(var(--bg-elev, var(--bg))); box-shadow: 0 20px 60px rgba(0,0,0,0.5);">
-        <!-- Header destinataire -->
-        <header class="px-5 sm:px-7 py-4 border-b border-border flex items-start justify-between gap-3">
-          <div class="min-w-0 flex-1">
-            <div class="text-xs font-bold uppercase tracking-widest text-text-muted mb-1.5">
-              Brouillon — lecture seule
-            </div>
-            <div class="font-semibold text-base truncate">${this._esc(draft.name || '(sans nom)')}</div>
-            <div class="text-xs text-text-muted break-all mt-0.5">
-              ${this._esc(draft.email || '')}${draft.city ? ' · ' + this._esc(draft.city) : ''}${ts ? ' · ' + this._esc(ts) : ''}
-            </div>
-          </div>
-          <button id="ap-d-viewer-close"
-                  class="text-text-muted hover:text-text transition-colors flex-shrink-0 p-1"
-                  title="Fermer (Échap)">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <line x1="6" y1="6" x2="18" y2="18"/>
-              <line x1="6" y1="18" x2="18" y2="6"/>
-            </svg>
-          </button>
-        </header>
-
-        <!-- Objet -->
-        <div class="px-5 sm:px-7 py-3 border-b border-border bg-bg/40">
-          <div class="text-[11px] uppercase tracking-widest text-text-muted mb-0.5">Objet</div>
-          <div class="text-sm font-semibold break-words">${this._esc(draft.subject || '(sans objet)')}</div>
-        </div>
-
-        <!-- Corps : iframe sandbox si HTML dispo, sinon texte joli -->
-        <div class="flex-1 overflow-y-auto p-5 sm:p-7">
-          ${hasHtml ? `
-            <iframe sandbox="allow-popups allow-popups-to-escape-sandbox"
-                    srcdoc="${htmlSrc}"
-                    style="width:100%; min-height:480px;
-                           border:1px solid hsl(var(--border));
-                           border-radius:12px; background:white;"></iframe>
-          ` : `
-            <div class="text-sm leading-relaxed text-text-secondary"
-                 style="text-wrap: pretty;">
-              ${textBody || '<span class="text-text-muted">(corps vide)</span>'}
-            </div>
-          `}
-        </div>
-
-        <!-- Footer : juste Fermer (les actions sont sur la carte d'origine) -->
-        <footer class="px-5 sm:px-7 py-4 border-t border-border flex justify-end">
-          <button id="ap-d-viewer-close-btn" class="btn btn-secondary">Fermer</button>
-        </footer>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-
-    // Bindings : fermeture par croix, bouton, clic en dehors, ou touche Échap
-    const close = () => this._closeDraftViewer();
-    overlay.querySelector('#ap-d-viewer-close').onclick = close;
-    overlay.querySelector('#ap-d-viewer-close-btn').onclick = close;
-    overlay.addEventListener('click', (ev) => {
-      if (ev.target === overlay) close();
-    });
-    this._draftViewerKeyHandler = (ev) => {
-      if (ev.key === 'Escape') close();
-    };
-    document.addEventListener('keydown', this._draftViewerKeyHandler);
-  },
-
-  _closeDraftViewer() {
-    const overlay = document.getElementById('ap-d-viewer');
-    if (overlay) overlay.remove();
-    if (this._draftViewerKeyHandler) {
-      document.removeEventListener('keydown', this._draftViewerKeyHandler);
-      this._draftViewerKeyHandler = null;
-    }
-  },
-
-  async _wipeAllDrafts() {
-    if (!App.api || !App.api.cleanup_all_pending_drafts) return;
-    const ok = confirm(
-      "ATTENTION : ça supprime TOUS les brouillons en attente "
-      + "(les bons comme les mauvais).\n\nContinuer ?"
-    );
-    if (!ok) return;
-    let r;
-    try { r = await App.api.cleanup_all_pending_drafts(); }
-    catch (e) { alert('Erreur : ' + String(e)); return; }
-    if (r && r.ok) {
-      alert(`${r.total} brouillon(s) supprimé(s).`);
-    } else {
-      alert('Reset partiel. Erreurs : ' + ((r && r.errors) || []).join(' ; '));
-    }
-    await this._refreshDraftsList();
-    await this._refreshDraftsCount();
-  },
-
-  async _cleanupBrokenDrafts() {
-    if (!App.api || !App.api.cleanup_broken_drafts) return;
-    const ok = confirm(
-      "Supprimer tous les brouillons où l'IA a refusé d'écrire "
-      + "(« Je ne peux pas rédiger… », « PROBLÈME MAJEUR… ») ?\n\n"
-      + "Les vrais brouillons (avec un mail bien rédigé) ne sont pas touchés."
-    );
-    if (!ok) return;
-    const btn = document.getElementById('ap-d-cleanup-broken');
-    if (btn) { btn.disabled = true; btn.textContent = 'Nettoyage…'; }
-    let r;
-    try { r = await App.api.cleanup_broken_drafts(); }
-    catch (e) {
-      alert('Erreur : ' + String(e));
-      if (btn) { btn.disabled = false; btn.textContent = 'Vider les brouillons cassés'; }
-      return;
-    }
-    if (btn) { btn.disabled = false; btn.textContent = 'Vider les brouillons cassés'; }
-    if (r && r.ok) {
-      alert(`${r.total} brouillon(s) cassé(s) supprimé(s).`);
-    } else {
-      alert('Nettoyage partiel. Erreurs : ' + ((r && r.errors) || []).join(' ; '));
-    }
-    await this._refreshDraftsList();
-    await this._refreshDraftsCount();
-  },
-
-  async _draftAction(draft, action) {
-    if (!App.api || !draft) return;
-    const fn = action === 'approve' ? 'draft_approve' : 'draft_reject';
-    if (!App.api[fn]) return;
-    if (action === 'reject') {
-      if (!confirm('Rejeter ce brouillon ?')) return;
-    }
-    try {
-      const r = await App.api[fn]({
-        source: draft.source || '',
-        id:     draft.id || draft.key || '',
-        key:    draft.key || draft.id || '',
-      });
-      if (r && r.ok) {
-        await this._refreshDraftsList();
-        await this._refreshDraftsCount();
-      } else {
-        alert((r && r.error) || 'Action impossible.');
-      }
-    } catch (e) {
-      alert('Erreur : ' + String(e));
-    }
-  },
 
   // ------------------------------------------------------------------
   // Compteurs des 5 maillons : appelle autopilot_pulse et met a jour
@@ -1800,10 +1224,15 @@ const Autopilot = {
           ['xai',       'xAI Grok'],
         ])}
         ${this._input('Modèle IA', 'ai_model', c.ai_model || 'claude-sonnet-4-5',
-          'ex : claude-sonnet-4-5 (Claude) ou gemini-2.5-flash (gratuit)')}
-        ${this._input('Règles d\'écriture (numéros séparés par virgules)',
+          'ex : claude-sonnet-4-5 (Claude — recommandé)')}
+        ${this._input('Règles d\'écriture à appliquer (numéros séparés par virgules)',
           'ai_mega_prompts_csv', (c.ai_mega_prompts || ['01']).join(','),
           'ex : 01,06,13')}
+        <div class="text-xs text-text-muted -mt-2 mb-3" style="text-wrap: pretty">
+          Liste numérotée des règles de style que l'IA doit suivre (ton, structure,
+          longueur, ce qu'il faut éviter). La règle 01 est la base universelle.
+          Pour voir la liste complète des règles, va dans Réglages → Règles d'écriture.
+        </div>
         ${this._textarea('Mes instructions à l\'IA', 'ai_template_brief',
           c.ai_template_brief || '', 6)}
         ${this._signaturePreview()}
@@ -1818,13 +1247,20 @@ const Autopilot = {
         `
         ${this._input('Plafond total d\'envois sur 24h',
           'daily_cap', String(c.daily_cap ?? 40))}
+        <div class="text-xs text-text-muted -mt-2 mb-3" style="text-wrap: pretty">
+          Limite de sécurité globale. Si tu mets 40, l'auto-pilote n'enverra
+          jamais plus de 40 mails dans une fenêtre de 24h, même si « Cherche-moi
+          X / run » (en haut) demande plus, et même si la somme des plafonds
+          de tes adresses expéditrices (plus haut) dépasse ce chiffre. <b>C'est
+          le plafond qui gagne sur tous les autres.</b>
+        </div>
         ${this._input('Espacement entre 2 envois (en secondes)',
           'send_delay_seconds', String(c.send_delay_seconds ?? 0))}
         <div class="text-xs text-text-muted -mt-2 mb-3" style="text-wrap: pretty">
           0 = pas d'attente (les mails partent à la chaîne). Mettre 30 à 60
           secondes pour étaler la cadence et protéger la réputation de tes
           adresses (anti-spam). S'applique aussi au bouton « Tout envoyer »
-          de l'onglet Brouillons.
+          de la page Brouillons.
         </div>
         <div class="grid grid-cols-2 gap-3">
           ${this._input('Heure de début (0-23)', 'send_hour_start',
@@ -1866,13 +1302,7 @@ const Autopilot = {
       sender_mon_prenom:  v('sender_mon_prenom'),
       daily_cap:          numI('daily_cap', 40),
       send_delay_seconds: numI('send_delay_seconds', 0),
-      // Auto-pilote v2 etape 6 : produit pousse + audience
-      // (autopilot_product/audience retires : les produits actifs viennent
-      // automatiquement du catalogue maintenant. On garde la conservation
-      // d'eventuelles valeurs heritees pour ne pas casser une config existante.)
       nightly_target:     numI('nightly_target', 50),
-      autopilot_product:  (this.cfg && this.cfg.autopilot_product) || '',
-      autopilot_audience: (this.cfg && this.cfg.autopilot_audience) || '',
       // Auto-pilote v2 etape 8 : plage horaire d'envoi (heure Paris)
       send_hour_start:    numI('send_hour_start', 8),
       send_hour_end:      numI('send_hour_end',   19),
@@ -2059,25 +1489,6 @@ const Autopilot = {
     if (box.textContent === '(en attente d\'un run…)') box.textContent = '';
     box.textContent += line + '\n';
     box.scrollTop = box.scrollHeight;
-  },
-
-  _renderStats(s) {
-    // Conserve l'ancien rendu KPI seul (utilisé nulle part en interne mais
-    // gardé pour rétrocompat éventuelle).
-    const wrap = document.getElementById('ap-stats');
-    if (!wrap) return;
-    wrap.classList.remove('hidden');
-    wrap.innerHTML = `
-      <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-        ${this._kpi('Mails envoyés', s.drafts_sent ?? 0, 'success')}
-        ${this._kpi('Brouillons à valider', s.drafts_pending ?? 0,
-          (s.drafts_pending > 0) ? 'accent' : '')}
-        ${this._kpi('Réponses détectées', s.replies_detected ?? 0,
-          (s.replies_detected > 0) ? 'success' : '')}
-        ${this._kpi('Erreurs', (s.errors || []).length,
-          ((s.errors || []).length > 0) ? 'danger' : '')}
-      </div>
-    `;
   },
 
   // ------------------------------------------------------------------

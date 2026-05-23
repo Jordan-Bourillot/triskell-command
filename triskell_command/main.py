@@ -22,7 +22,6 @@ from .views.compose import ComposeView
 from .views.config import ConfigView
 from .views.convoy import ConvoyView
 from .views.dashboard import DashboardView
-from .views.autopilot import AutopilotView
 from .views.billing import BillingView
 from .views.clients import ClientsView
 from .views.clients_master import ClientsMasterView
@@ -50,9 +49,10 @@ logger = logging.getLogger("triskell.command")
 
 
 # Ordre = ordre dans la sidebar
+# Vue "autopilot" retiree du registry desktop : on travaille en WEB
+# UNIQUEMENT (le code Python desktop de l'auto-pilote a ete supprime).
 VIEW_REGISTRY: dict[str, type[BaseView]] = {
     "morning":    MorningView,
-    "autopilot":  AutopilotView,
     "convoy":     ConvoyView,
     "drafts":     DraftsView,
     "replies":    RepliesView,
@@ -120,7 +120,7 @@ class TriskellCommandApp(ctk.CTk):
             self,
             colors=self.colors,
             on_navigate=self.show_view,
-            active_view=self.app_state.get("active_view", default="autopilot"),
+            active_view=self.app_state.get("active_view", default="morning"),
         )
         self.sidebar.grid(row=0, column=0, rowspan=3, sticky="ns")
 
@@ -364,11 +364,10 @@ class TriskellCommandApp(ctk.CTk):
             "drafts",      # 2 — porte d'entrée quotidienne
             "replies",     # 3 — réponses entrantes
             "prospects",   # 4 — recherche manuelle
-            "autopilot",   # 5
-            "convoy",      # 6
-            "compose",     # 7
-            "phare",       # 8 — promu vs ancien ordre (était hors raccourci)
-            "dashboard",   # 9
+            "convoy",      # 5
+            "compose",     # 6
+            "phare",       # 7 — promu vs ancien ordre (était hors raccourci)
+            "dashboard",   # 8
         ]
         for i, view_id in enumerate(ordered_views, 1):
             self.bind(

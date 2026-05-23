@@ -109,12 +109,17 @@ class Api:
             elif t == "activity":
                 self._autopilot_state["current_activity"] = ev.get("message", "")
             elif t == "prospect_touched":
-                self._autopilot_state["touched_prospects"].append({
+                buf = self._autopilot_state["touched_prospects"]
+                buf.append({
                     "id":     ev.get("id", ""),
                     "name":   ev.get("name", ""),
                     "action": ev.get("action", ""),
                     "reason": ev.get("reason", ""),
                 })
+                # Plafond pour eviter une fuite memoire sur les gros runs :
+                # on garde les 500 derniers prospects touches.
+                if len(buf) > 500:
+                    del buf[: len(buf) - 500]
 
         # État runtime des campagnes Convoi (génération de mails + envoi).
         # Clés = campaign_id ; valeur = dict {running, log, log_len, error, stats}.
@@ -5637,11 +5642,19 @@ class Api:
         L'Éclaireur passe ['search','enrich'] ; l'Auto-pilote passe
         ['imap','send','follow_up'].
         """
-        # Refuse si un run est déjà en cours
+        # Refuse si un run est déjà en cours -- check local (clic "Lancer"
+        # deja actif) ET global (worker nocturne en train de tourner).
+        from triskell_command.integrations import autopilot_runner as _apr
         with self._autopilot_lock:
             if self._autopilot_state.get("running"):
                 return {"ok": False, "error": "Un run est déjà en cours."}
-            # Reset état
+            if not _apr.acquire_run_lock():
+                return {
+                    "ok": False,
+                    "error": "Le run nocturne est en cours, attends la fin."
+                }
+            # Reset état + reset du flag stop global
+            _apr.clear_stop()
             from datetime import datetime
             self._autopilot_state.update({
                 "running": True,
@@ -5778,6 +5791,10 @@ class Api:
                     self._autopilot_state["finished_at"] = (
                         datetime.now().isoformat(timespec="seconds")
                     )
+                # Relache le lock global et reset le flag stop, dans tous
+                # les cas (succes, exception, stop demande).
+                _apr.release_run_lock()
+                _apr.clear_stop()
 
         threading.Thread(
             target=_worker, daemon=True, name="AutopilotRun",
@@ -5812,11 +5829,22 @@ class Api:
 
     def autopilot_stop(self, payload: dict | None = None) -> dict:
         """Demande l'arrêt du run en cours. Le pipeline lèvera _AutopilotStopped
-        à la prochaine émission de log (typiquement < 1s)."""
+        à la prochaine émission de log (typiquement < 1s).
+
+        Couvre les 2 declenchements : run via bouton "Lancer maintenant"
+        (state local) ET run nocturne (flag global du module runner)."""
+        from triskell_command.integrations import autopilot_runner as _apr
+        # Cas run via bouton "Lancer" : state local
         with self._autopilot_lock:
-            if not self._autopilot_state.get("running"):
-                return {"ok": False, "error": "Aucun run en cours."}
-            self._autopilot_state["stop_requested"] = True
+            local_running = bool(self._autopilot_state.get("running"))
+            if local_running:
+                self._autopilot_state["stop_requested"] = True
+        # Cas run nocturne : flag global du module runner
+        nightly_running = _apr.is_pipeline_running() and not local_running
+        if nightly_running:
+            _apr.request_stop()
+        if not (local_running or nightly_running):
+            return {"ok": False, "error": "Aucun run en cours."}
         return {"ok": True}
 
     # ------------------------------------------------------------------

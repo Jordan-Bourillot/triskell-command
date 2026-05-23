@@ -46,42 +46,54 @@ const Help = {
     // ---------------- Auto-pilote ----------------
     autopilot: {
       title: 'Auto-pilote',
-      lead: 'Décris ta cible une fois. L\'app fait tout.',
+      lead: 'La chaîne complète, sous tes ordres.',
       sections: [
         {
-          h: '🎯 Comment ça marche',
-          p: "Tu choisis : où chercher (Sirene / Google Maps / Obelisk), avec " +
-             "quels critères, et le mode d'envoi. Le pipeline complet tourne " +
-             "en arrière-plan : recherche → enrichissement web → rédaction IA " +
-             "→ envoi → suivi des réponses."
+          h: '🎯 Ce que fait l\'auto-pilote',
+          p: "Il pioche dans tes prospects existants, élimine ceux à ne pas " +
+             "recontacter, rédige un mail unique pour chacun avec l'IA, le " +
+             "fait relire par une 2è IA, puis envoie (ou met en brouillon " +
+             "si tu préfères valider à la main)."
         },
         {
-          h: '🇫🇷 Sirene = entreprises françaises (gratuit)',
-          p: "API publique INSEE, sans clé. Filtre par code activité (NAF), " +
-             "département, taille, date de création. Récupère SIREN, adresse, " +
-             "téléphone — l'enrichissement web ajoute les emails."
+          h: '⚠️ Il ne cherche PAS de nouveaux prospects',
+          p: "L'auto-pilote travaille uniquement sur ta base existante. Pour " +
+             "trouver de nouveaux contacts, utilise Le Chasseur (entreprises), " +
+             "L'Éclaireur (sites web) ou Obélisk (créateurs sur 9 plateformes)."
         },
         {
-          h: '📍 Google Maps = commerces locaux (clé requise)',
-          p: "Donne une recherche libre type « boulangerie Rennes » et un " +
-             "rayon. Demande une clé Google Places (~32$/1000 requêtes)."
+          h: '🎛️ Les 5 maillons',
+          p: "Cherche (pioche) → Trie (élimine doublons / déjà contactés / " +
+             "clients) → Rédige (IA + bon modèle) → Relit (2è IA avec note " +
+             "sur 10) → Envoie (ou met en brouillon). Les 3 derniers ont un " +
+             "interrupteur Auto / Manuel."
         },
         {
-          h: '🔮 Obelisk = créateurs/vendeurs déjà repérés',
-          p: "Pioche dans la base partagée Triskell les profils qu'Obelisk a " +
-             "déjà scrapé sur 9 plateformes (YouTube, TikTok, Insta…). " +
-             "Filtres par plateforme, taille d'audience, monétisation."
+          h: '✅ Auto vs Manuel sur chaque maillon',
+          p: "Auto = ça part tout seul. Manuel sur « Rédige » = aucun mail " +
+             "écrit. Manuel sur « Relit » = la 2è IA ne note rien. Manuel " +
+             "sur « Envoie » = chaque mail est mis en brouillon pour que " +
+             "tu valides toi-même dans la page Brouillons à valider."
         },
         {
-          h: '✅ Mode validation vs Mode auto',
-          p: "Validation = brouillons à approuver dans « À la main ». " +
-             "Auto = envoi direct sans demander. Conseil : valider les 50 " +
-             "premiers, puis auto."
+          h: '🌙 Pipeline auto à heure fixe',
+          p: "Coche « Pipeline auto » et choisis l'heure (3h par défaut, " +
+             "heure de Paris). Le robot tourne tout seul à cette heure-là " +
+             "chaque jour, même si tu n'es pas connecté. Tu te lèves, ton " +
+             "cockpit est déjà rempli."
         },
         {
-          h: '🌙 Auto-pilote programmé',
-          p: "Coche cette case : le pipeline tourne tout seul vers 3h du matin. " +
-             "Tu te lèves, ton Cockpit est déjà plein."
+          h: '🛑 Bouton Arrêter',
+          p: "Pendant un run (lancé à la main ou nocturne), le bouton rouge " +
+             "« Arrêter » coupe la chaîne. Les mails déjà envoyés restent " +
+             "envoyés ; le reste est abandonné."
+        },
+        {
+          h: '📮 Brouillons à valider',
+          p: "Quand l'auto-pilote met un mail en brouillon, il atterrit " +
+             "dans la page « Brouillons à valider » (barre de gauche). Le " +
+             "bandeau en haut de la page Auto-pilote te dit combien sont " +
+             "en attente et te renvoie direct là-bas."
         },
       ],
     },

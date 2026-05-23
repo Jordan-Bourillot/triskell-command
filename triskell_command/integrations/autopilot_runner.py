@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -41,12 +41,73 @@ DEFAULT_HOUR_PARIS = 3                    # déclenchement à 3h du matin
 WINDOW_MINUTES = 60                       # fenêtre [3h, 4h]
 CYCLE_INTERVAL_SECONDS = 5 * 60           # check toutes les 5 min
 INITIAL_DELAY_SECONDS = 120
+# Au-dela de ce delai, un run reste a status="started" est considere comme
+# orphelin (le processus a crashe sans rien finir, ou Supabase ko apres le
+# write "started"). On l'ignore et on retombe sur le flow normal.
+ORPHAN_STARTED_TIMEOUT_HOURS = 6
 
 _WORKER_THREAD: Optional[threading.Thread] = None
 _WORKER_STOP = threading.Event()
 _WORKER_LOCK = threading.Lock()
 _LAST_RUN_AT: str = ""
 _LAST_RUN_RESULT: dict = {}
+
+# Lock partage entre le worker nocturne et le bouton "Lancer maintenant" de
+# l'API. Empeche les deux runs simultanes. Acquis en non-bloquant : si un run
+# est deja en cours, l'autre refuse de partir.
+_PIPELINE_RUN_LOCK = threading.Lock()
+# Flag d'arret partage : set par autopilot_stop() cote API, lu en boucle par
+# le callback _progress du worker nocturne (et de l'API). Quand True, le
+# pipeline leve _AutopilotStopped a la prochaine emission de log (~1s).
+_STOP_REQUESTED = threading.Event()
+
+
+def acquire_run_lock() -> bool:
+    """Tente d'acquerir le lock global de pipeline. Renvoie True si on a pris
+    le lock (l'appelant doit relacher via release_run_lock() en fin de run),
+    False si un autre run tourne deja."""
+    return _PIPELINE_RUN_LOCK.acquire(blocking=False)
+
+
+def release_run_lock() -> None:
+    """Relache le lock acquis par acquire_run_lock()."""
+    try:
+        _PIPELINE_RUN_LOCK.release()
+    except RuntimeError:
+        # Deja relache, on ignore.
+        pass
+
+
+def is_pipeline_running() -> bool:
+    """True si un pipeline (nocturne ou bouton) tourne actuellement."""
+    # acquire non-bloquant : si on n'arrive pas a prendre = c'est qu'il
+    # tourne ailleurs. Si on arrive a prendre, on relache aussitot.
+    acquired = _PIPELINE_RUN_LOCK.acquire(blocking=False)
+    if acquired:
+        _PIPELINE_RUN_LOCK.release()
+        return False
+    return True
+
+
+def request_stop() -> None:
+    """Demande l'arret du pipeline en cours (nocturne ou via API). Le callback
+    _progress leve _AutopilotStopped a la prochaine emission de log."""
+    _STOP_REQUESTED.set()
+
+
+def clear_stop() -> None:
+    """Reset du flag stop (a appeler avant chaque debut de run)."""
+    _STOP_REQUESTED.clear()
+
+
+def is_stop_requested() -> bool:
+    return _STOP_REQUESTED.is_set()
+
+
+class NightlyStopped(Exception):
+    """Levee par le callback _progress du worker nocturne quand un stop a
+    ete demande via request_stop(). Interrompt run_full_pipeline proprement."""
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -356,9 +417,30 @@ def _do_one_tick(app_state) -> None:
     # par : status='started' qui n'a recu ni 'ok' ni 'failed', pour
     # AUJOURD'HUI. Si la date est plus ancienne, c'etait pour une autre
     # journee : on n'essaie pas de la rattraper.
+    #
+    # Garde-fou contre les "started" orphelins : si Supabase a ecrit
+    # "started" mais que rien n'a jamais ecrit "ok" ou "failed" depuis plus
+    # de ORPHAN_STARTED_TIMEOUT_HOURS, on considere le marqueur perime et
+    # on l'ignore (sinon, en cas de panne Supabase repetee, on relancerait
+    # en boucle "en reprise").
+    started_at_raw = state.get("last_run_at") or ""
+    started_too_old = False
+    if started_at_raw:
+        try:
+            started_dt = datetime.fromisoformat(started_at_raw)
+            # Si tz-naive, on compare en local (best-effort, pas grave)
+            if started_dt.tzinfo is None:
+                ref_now = datetime.now()
+            else:
+                ref_now = _now_paris()
+            if ref_now - started_dt > timedelta(hours=ORPHAN_STARTED_TIMEOUT_HOURS):
+                started_too_old = True
+        except Exception:
+            started_too_old = True
     interrupted = (
         state.get("last_run_status") == "started"
         and state.get("last_run_date") == today_iso
+        and not started_too_old
     )
 
     if not interrupted:
@@ -378,6 +460,17 @@ def _do_one_tick(app_state) -> None:
             _LAST_RUN_RESULT["skipped_reason"] = "already_ran_today"
             return
 
+    # Anti-double-run : si un pipeline tourne deja (bouton "Lancer
+    # maintenant" actif), on skip ce tick. Le pipeline reprendra au tick
+    # suivant si on est encore dans la fenetre horaire.
+    if not acquire_run_lock():
+        _LAST_RUN_RESULT.clear()
+        _LAST_RUN_RESULT["skipped_reason"] = "another_run_in_progress"
+        return
+
+    # Reset du flag stop avant de demarrer (au cas ou un ancien set traîne).
+    clear_stop()
+
     # On y va : trace la tentative AVANT de lancer (anti-double si
     # redemarrage pendant l'execution).
     _write_state({
@@ -389,8 +482,19 @@ def _do_one_tick(app_state) -> None:
 
     log_lines: list[str] = []
 
-    def _progress(msg: str) -> None:
-        log_lines.append(msg)
+    def _progress(msg) -> None:
+        # Stop demande via API -> on coupe court. Le pipeline rattrapera
+        # l'exception et terminera proprement (idempotent : ce qui a deja
+        # ete envoye reste envoye, le reste est mis en draft ou perdu).
+        if is_stop_requested():
+            raise NightlyStopped("Arret demande pendant le run nocturne.")
+        if isinstance(msg, dict):
+            txt = msg.get("message") or ""
+            if txt:
+                log_lines.append(txt)
+                logger.info("[autopilot_nightly] %s", txt)
+            return
+        log_lines.append(str(msg))
         logger.info("[autopilot_nightly] %s", msg)
 
     try:
@@ -418,6 +522,19 @@ def _do_one_tick(app_state) -> None:
             "last_run_status": "ok",
             "last_run_stats":  dict(_LAST_RUN_RESULT),
         })
+    except NightlyStopped as exc:
+        # Arret demande par l'utilisateur via le bouton Stop. On marque le
+        # run comme termine (status=stopped) pour ne pas declencher la
+        # logique de "reprise" au prochain tick.
+        logger.info("autopilot_nightly run stoppe par l'utilisateur")
+        _LAST_RUN_RESULT.clear()
+        _LAST_RUN_RESULT["stopped"] = True
+        _LAST_RUN_RESULT["log_tail"] = log_lines[-20:]
+        _write_state({
+            "last_run_date":   today_iso,
+            "last_run_at":     now.isoformat(timespec="seconds"),
+            "last_run_status": "stopped",
+        })
     except Exception as exc:
         logger.exception("autopilot_nightly run a échoué")
         _LAST_RUN_RESULT.clear()
@@ -429,3 +546,7 @@ def _do_one_tick(app_state) -> None:
             "last_run_status": "failed",
             "last_run_error":  str(exc),
         })
+    finally:
+        # Libere le lock global et reset le flag stop, quoi qu'il arrive.
+        release_run_lock()
+        clear_stop()
