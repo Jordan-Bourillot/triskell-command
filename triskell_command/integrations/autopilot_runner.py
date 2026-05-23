@@ -273,6 +273,11 @@ def run_pipeline_with_ui_modes(cfg, progress):
         do_search=do_search,
         do_enrich=do_enrich,
         do_send=do_send_stage,
+        # Pas de relance automatique pour le moment : le seul mail de relance
+        # codé en dur (tpe_relance_j5) parle d'un site et ne s'adapte pas aux
+        # autres produits du catalogue. On rebranche plus tard avec un vrai
+        # modèle de relance par produit.
+        do_follow_up=False,
         sender_pool_smtp=sender_pool_smtp,
         templates_override=templates_override,
     )
