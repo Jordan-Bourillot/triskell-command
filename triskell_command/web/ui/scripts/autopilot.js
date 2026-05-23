@@ -1232,12 +1232,29 @@ const Autopilot = {
         if (label) b.textContent = label;
       });
     };
+    // Sync visuelle de l'etape 5 (bloc detaille du pilotage) en LIVE
+    // pendant les envois manuels : sans ca, le bloc resterait fige sur
+    // l'etat du dernier run autopilote tant qu'on n'aura pas reclique
+    // "Lancer". Comme Jordan envoie via l'onglet Brouillons, le polling
+    // autopilot_status ne tourne pas -- on patche les DOM directement.
+    const totalToSend = rows.length;
+    this._showSendCountersManual(totalToSend, delaySec);
     setBusy(true, 'Envoi en cours…');
     let sent = 0;
+    let failed = 0;
     const errors = [];
+    const t0 = Date.now();
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       setBusy(true, `Envoi ${i + 1}/${rows.length}…`);
+      this._updateSendCountersManual({
+        sent, failed,
+        remaining: totalToSend - sent - failed,
+        total: totalToSend,
+        delaySec,
+        t0,
+        inFlight: r.name || r.email || '?',
+      });
       try {
         const res = await App.api.draft_approve({
           id: r.id || r.key,
@@ -1247,18 +1264,39 @@ const Autopilot = {
         });
         if (res && res.ok === false) {
           errors.push(`${r.name || r.email || '?'} : ${res.error || '?'}`);
+          failed += 1;
         } else {
           sent += 1;
         }
       } catch (e) {
         errors.push(`${r.name || r.email || '?'} : ${e}`);
+        failed += 1;
       }
+      // Refresh visuel apres chaque envoi (incrementiel)
+      this._updateSendCountersManual({
+        sent, failed,
+        remaining: totalToSend - sent - failed,
+        total: totalToSend,
+        delaySec,
+        t0,
+        inFlight: null,
+      });
       if (delaySec > 0 && i < rows.length - 1) {
         setBusy(true, `Attente ${delaySec}s avant le suivant…`);
         await new Promise(res => setTimeout(res, delaySec * 1000));
       }
     }
     setBusy(false, 'Tout envoyer');
+    // Etat final dans le bloc compteurs
+    this._updateSendCountersManual({
+      sent, failed,
+      remaining: 0,
+      total: totalToSend,
+      delaySec: 0,
+      t0,
+      inFlight: null,
+      done: true,
+    });
     if (errors.length) {
       alert(
         `${sent} envoye(s), ${errors.length} echec(s).\n\n`
@@ -1270,6 +1308,92 @@ const Autopilot = {
     }
     await this._refreshDraftsList();
     await this._refreshDraftsCount();
+  },
+
+  // Force l'apparition du bloc compteurs detaille de l'etape 5 (et le
+  // pre-remplit avec les valeurs initiales). Appele au DEMARRAGE d'un
+  // envoi manuel "Tout envoyer" depuis l'onglet Brouillons.
+  _showSendCountersManual(totalToSend, delaySec) {
+    const wrap = document.getElementById('ap-send-counters');
+    if (!wrap) return;
+    wrap.classList.remove('hidden');
+    // Bandeau d'etat de l'etape 5 : on force "running" (accent + spinner)
+    // pendant l'envoi manuel pour que ce soit visuellement coherent.
+    const stageEl = document.querySelector('[data-stage="send"]');
+    if (stageEl) {
+      const bar = stageEl.querySelector('.ap-stage-statusbar');
+      if (bar) {
+        bar.classList.remove('bg-border', 'bg-success', 'bg-danger', 'bg-warning');
+        bar.classList.add('bg-accent');
+      }
+      const icon = stageEl.querySelector('.ap-stage-state-icon');
+      if (icon) {
+        icon.innerHTML = `<span class="inline-block w-4 h-4 rounded-full
+          border-2 border-accent/30 border-t-accent animate-spin"></span>`;
+      }
+    }
+    this._updateSendCountersManual({
+      sent: 0, failed: 0,
+      remaining: totalToSend, total: totalToSend,
+      delaySec, t0: Date.now(), inFlight: null,
+    });
+  },
+
+  // Patch DIRECT des elements DOM du bloc compteurs etape 5, sans passer
+  // par les stats du polling autopilote. Sert pendant un envoi manuel
+  // "Tout envoyer" pour donner a Jordan le live qu'il attend.
+  _updateSendCountersManual(p) {
+    const setText = (id, txt) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = String(txt);
+    };
+    setText('ap-send-count-sent',      p.sent);
+    setText('ap-send-count-drafts',    Math.max(0, p.remaining)); // restants = pas encore envoyes
+    setText('ap-send-count-remaining', Math.max(0, p.remaining));
+    // Temps restant base sur la cadence reelle observee (si on a deja
+    // envoye au moins 1 mail), sinon estimation initiale.
+    let etaText = '—';
+    if (p.done) {
+      etaText = 'fini';
+      // En fin d'envoi, bascule le bandeau etape 5 en done (vert).
+      const stageEl = document.querySelector('[data-stage="send"]');
+      if (stageEl) {
+        const bar = stageEl.querySelector('.ap-stage-statusbar');
+        if (bar) {
+          bar.classList.remove('bg-border', 'bg-accent', 'bg-danger', 'bg-warning');
+          bar.classList.add(p.failed > 0 ? 'bg-warning' : 'bg-success');
+        }
+        const icon = stageEl.querySelector('.ap-stage-state-icon');
+        if (icon) {
+          icon.innerHTML = `<svg class="w-5 h-5 text-success" fill="none"
+            stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
+            <polyline points="20 6 9 17 4 12"/></svg>`;
+        }
+      }
+    } else if (p.remaining > 0) {
+      const done = p.sent + p.failed;
+      if (done > 0 && p.t0) {
+        const elapsedSec = (Date.now() - p.t0) / 1000;
+        const perMail = elapsedSec / done;
+        etaText = this._formatDuration(p.remaining * perMail);
+      } else {
+        // Estimation initiale avant le 1er envoi
+        const perMail = Math.max(8, (p.delaySec || 0) + 6);
+        etaText = this._formatDuration(p.remaining * perMail);
+      }
+    }
+    setText('ap-send-count-eta', etaText);
+    // Barre de progression dediee
+    const done = p.sent + p.failed;
+    const pct = p.total > 0
+      ? Math.min(100, Math.round((done / p.total) * 100))
+      : 0;
+    const barEl = document.getElementById('ap-send-progress-bar');
+    if (barEl) barEl.style.width = pct + '%';
+    setText('ap-send-progress-pct', pct + '%');
+    setText('ap-send-progress-label',
+      p.inFlight ? `Envoi vers ${p.inFlight}… (${done} / ${p.total})`
+                 : `${done} / ${p.total} traités`);
   },
 
   // ------------------------------------------------------------------
