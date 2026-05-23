@@ -450,8 +450,9 @@ const Drafts = {
             rejectBtn.textContent = 'Rejeter';
             return;
           }
+          console.log('[drafts] reponse draft_reject', r);
           if (!r || r.ok === false) {
-            const why = (r && r.error) || 'reponse vide du serveur';
+            const why = (r && (r.error || r.reason)) || 'reponse vide du serveur';
             alert('Rejet refuse : ' + why);
             setBusy(false);
             rejectBtn.textContent = 'Rejeter';
