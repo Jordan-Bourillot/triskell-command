@@ -425,10 +425,15 @@ const Drafts = {
       };
       const rejectBtn  = card.querySelector('[data-act="reject"]');
       const approveBtn = card.querySelector('[data-act="approve"]');
+      // Tag visuel : si tu vois ce title au survol, le binding a tourne.
+      if (rejectBtn) rejectBtn.title = 'Rejet v3 — clic enregistre';
+      if (approveBtn) approveBtn.title = 'Approuver v3 — clic enregistre';
+      console.log('[drafts] _bind card', { id, source, hasReject: !!rejectBtn, hasApprove: !!approveBtn });
       if (rejectBtn) {
         rejectBtn.addEventListener('click', async (ev) => {
           ev.preventDefault();
           ev.stopPropagation();
+          console.log('[drafts] clic Rejeter', { id, source });
           if (!App.api || !App.api.draft_reject) {
             alert('API indisponible — rafraichis la page.');
             return;
@@ -464,6 +469,7 @@ const Drafts = {
         approveBtn.addEventListener('click', async (ev) => {
           ev.preventDefault();
           ev.stopPropagation();
+          console.log('[drafts] clic Approuver', { id, source });
           if (!App.api || !App.api.draft_approve) {
             alert('API indisponible — rafraichis la page.');
             return;
