@@ -166,6 +166,10 @@ const Drafts = {
     const srcBadges = this._sourceBadges(r.prospect_sources);
     // Provenance précise de l'email choisi pour ce brouillon
     const emailOriginLine = this._emailOriginLine(r.email, r.email_meta);
+    // Bandeau "Note 2è IA" : visible si l'autopilote a fait passer le mail
+    // par la 2e IA de relecture. Aide Jordan a trier en un coup d'oeil
+    // les brouillons surs (vert >=7) vs douteux (orange 5-6, rouge <5).
+    const reviewBanner = this._reviewBanner(r);
     const hasHtml = !!(r.body_html && String(r.body_html).trim());
     // srcdoc encode automatiquement les entites quand on le passe en attribut
     const htmlSrc = hasHtml
@@ -189,6 +193,7 @@ const Drafts = {
             ${emailOriginLine}
           </div>
         </header>
+        ${reviewBanner}
         <div class="text-sm font-semibold text-accent mb-2 break-words">OBJET : ${this._esc(r.subject)}</div>
         ${hasHtml ? `
           <div class="flex gap-2 mb-2 text-xs">
@@ -281,6 +286,35 @@ const Drafts = {
   // Petite ligne d'info "Cet email vient de : …" sous les pastilles.
   // Précise pour chaque brouillon d'où vient exactement l'adresse choisie
   // (page mentions légales d'un site, bio YouTube, fiche Google Maps…).
+  // Rend la bannière "Note 2è IA : X/10 — commentaire" pour un brouillon.
+  // Couleur selon le score :
+  //  - >= 7 : vert (mail juge sur)
+  //  - 5-6  : orange (moyen, a relire)
+  //  - < 5  : rouge (douteux, attention)
+  // Renvoie '' si le brouillon n'a pas de review (ex: 2e IA desactivee).
+  _reviewBanner(r) {
+    if (!r || r.review_score == null) return '';
+    const score = Math.max(0, Math.min(10, parseInt(r.review_score, 10) || 0));
+    const comment = (r.review_comment || '').trim();
+    let cls = 'bg-success/10 border-success/30 text-success';
+    let label = 'OK';
+    if (score < 5) {
+      cls = 'bg-danger/10 border-danger/40 text-danger';
+      label = 'Attention';
+    } else if (score < 7) {
+      cls = 'bg-warning/10 border-warning/40 text-warning';
+      label = 'Moyen';
+    }
+    const commentPart = comment
+      ? ` <span class="text-text-secondary font-normal">— ${this._esc(comment)}</span>`
+      : '';
+    return `
+      <div class="mb-3 px-3 py-2 rounded-lg border text-xs sm:text-sm ${cls}"
+           style="text-wrap: pretty">
+        <span class="font-semibold">2è IA · ${label} · ${score}/10</span>${commentPart}
+      </div>`;
+  },
+
   _emailOriginLine(email, meta) {
     if (!email || !meta || typeof meta !== 'object') return '';
     // Préfère le `context` déjà rédigé pour humain, sinon traduit la source.

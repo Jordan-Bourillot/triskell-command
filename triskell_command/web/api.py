@@ -753,6 +753,13 @@ class Api:
                 "platform_url": platform_url,
                 "audience": self._audience_from_platform_url(platform_url),
                 "email_meta": local_email_meta,
+                # Note 2e IA (presente uniquement si la relecture a tourne
+                # avec autopilot_review_min_score > 0). Permet a l'UI
+                # Brouillons d'afficher la note + le commentaire pour aider
+                # Jordan a trier vite les mails surs vs douteux.
+                "review_score":   draft.get("review_score"),
+                "review_verdict": draft.get("review_verdict", ""),
+                "review_comment": draft.get("review_comment", ""),
             })
         return {"ok": True, "rows": rows}
 
