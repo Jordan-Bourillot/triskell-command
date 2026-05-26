@@ -141,6 +141,7 @@ const NewFeaturesSinceYesterday = {
     { selector: '[data-view="pixelpros"]', id: 'new-20260519:pixelpros-kanban' },
     { selector: '[data-view="phare"]',     id: 'new-20260520:phare-quickadd' },
     { selector: '[data-view="catalogue"]', id: 'new-20260519:catalogue-pixelpros' },
+    { selector: '[data-view="geo"]',       id: 'new-20260526:geo-module' },
     // Cockpit — citation du jour
     { selector: '.daily-quote',            id: 'new-20260520:cockpit-quote' },
     // Composer mail — autocomplétion du destinataire
