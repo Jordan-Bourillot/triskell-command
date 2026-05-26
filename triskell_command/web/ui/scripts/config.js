@@ -841,27 +841,121 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
         <div class="section-label">Services IA</div>
         <p class="text-sm text-text-muted mb-4">
           Tes clés sont stockées localement et jamais envoyées hors de l'app.
+          Bouton « Tester » pour vérifier que la clé fonctionne réellement.
         </p>
-        <div class="card p-6 space-y-4">
+        <div class="card p-6 space-y-5">
           ${providers.map(p => {
             const has = !!keys[p.id];
             return `
-              <div>
+              <div data-ai-row="${p.id}">
                 <label class="block text-sm font-semibold mb-1">
                   ${this._esc(p.label)}
                   ${p.recommended ? '<span class="ml-2 text-[10px] bg-success/15 text-success px-2 py-0.5 rounded-full font-bold">RECOMMANDÉ</span>' : ''}
                 </label>
-                <input type="password"
-                       data-save-path="ai.api_keys.${p.id}"
-                       placeholder="${has ? '(clé enregistrée — tape pour remplacer)' : 'Clé API…'}"
-                       class="w-full px-4 py-2.5 text-sm rounded-xl bg-bg border border-border
-                              focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent" />
+                <div class="flex gap-2 items-stretch">
+                  <input type="password"
+                         data-save-path="ai.api_keys.${p.id}"
+                         data-ai-key-input="${p.id}"
+                         placeholder="${has ? '(clé enregistrée — tape pour remplacer)' : 'Clé API…'}"
+                         class="flex-1 min-w-0 px-4 py-2.5 text-sm rounded-xl bg-bg border border-border
+                                focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent" />
+                  <button type="button"
+                          data-ai-save="${p.id}"
+                          class="px-4 py-2.5 text-sm font-semibold rounded-xl
+                                 bg-accent text-white hover:opacity-90 transition-opacity
+                                 disabled:opacity-50 disabled:cursor-not-allowed shrink-0">
+                    Enregistrer
+                  </button>
+                  <button type="button"
+                          data-ai-test="${p.id}"
+                          class="px-4 py-2.5 text-sm font-semibold rounded-xl
+                                 bg-surface-elevated text-text border border-border
+                                 hover:bg-bg transition-colors
+                                 disabled:opacity-50 disabled:cursor-not-allowed shrink-0">
+                    Tester
+                  </button>
+                </div>
+                <div data-ai-msg="${p.id}" class="text-xs mt-1.5 min-h-[18px] text-text-muted"></div>
               </div>
             `;
           }).join('')}
         </div>
       </section>
     `;
+  },
+
+  _wireAiButtons() {
+    // Bouton Enregistrer : sauve la clé tapée (si non vide)
+    document.querySelectorAll('[data-ai-save]').forEach(btn => {
+      btn.onclick = async () => {
+        const pid = btn.dataset.aiSave;
+        const input = document.querySelector(`[data-ai-key-input="${pid}"]`);
+        const msg = document.querySelector(`[data-ai-msg="${pid}"]`);
+        const v = (input?.value || '').trim();
+        if (!v) {
+          msg.textContent = '✗ Colle une clé d\'abord.';
+          msg.className = 'text-xs mt-1.5 min-h-[18px] text-danger';
+          return;
+        }
+        btn.disabled = true;
+        const oldTxt = btn.textContent;
+        btn.textContent = '…';
+        msg.textContent = 'Enregistrement…';
+        msg.className = 'text-xs mt-1.5 min-h-[18px] text-text-muted';
+        try {
+          const r = await App.api.save_setting({
+            path: ['ai', 'api_keys', pid], value: v,
+          });
+          if (r && r.ok !== false) {
+            msg.textContent = '✓ Clé enregistrée. Pense à tester avec le bouton « Tester ».';
+            msg.className = 'text-xs mt-1.5 min-h-[18px] text-success';
+            input.value = '';
+            input.placeholder = '(clé enregistrée — tape pour remplacer)';
+          } else {
+            msg.textContent = '✗ ' + ((r && r.error) || 'Erreur');
+            msg.className = 'text-xs mt-1.5 min-h-[18px] text-danger';
+          }
+        } catch (e) {
+          msg.textContent = '✗ ' + (e && e.message || e);
+          msg.className = 'text-xs mt-1.5 min-h-[18px] text-danger';
+        } finally {
+          btn.disabled = false;
+          btn.textContent = oldTxt;
+        }
+      };
+    });
+    // Bouton Tester : vérifie que la clé répond. Si pas de clé tapée,
+    // teste celle déjà sauvegardée.
+    document.querySelectorAll('[data-ai-test]').forEach(btn => {
+      btn.onclick = async () => {
+        const pid = btn.dataset.aiTest;
+        const input = document.querySelector(`[data-ai-key-input="${pid}"]`);
+        const msg = document.querySelector(`[data-ai-msg="${pid}"]`);
+        const v = (input?.value || '').trim();
+        btn.disabled = true;
+        const oldTxt = btn.textContent;
+        btn.textContent = '⏳';
+        msg.textContent = 'Test en cours (l\'IA doit répondre)…';
+        msg.className = 'text-xs mt-1.5 min-h-[18px] text-text-muted';
+        try {
+          const r = await App.api.test_ai_key({ provider: pid, key: v });
+          if (r && r.ok) {
+            msg.textContent = '✓ ' + (r.message || 'Clé valide.') +
+              (r.sample ? ' Réponse de l\'IA : « ' + r.sample + ' »' : '');
+            msg.className = 'text-xs mt-1.5 min-h-[18px] text-success';
+          } else {
+            msg.textContent = '✗ ' + ((r && r.error) || 'Clé invalide ou IA injoignable.');
+            msg.className = 'text-xs mt-1.5 min-h-[18px] text-danger';
+          }
+        } catch (e) {
+          msg.textContent = '✗ Erreur réseau : ' + (e && e.message || e);
+          msg.className = 'text-xs mt-1.5 min-h-[18px] text-danger';
+        } finally {
+          btn.disabled = false;
+          btn.textContent = oldTxt;
+        }
+      };
+    });
   },
 
   _renderOutreach(s) {
@@ -1524,8 +1618,10 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
       };
     });
 
-    // Auto-save sur blur pour chaque champ
+    // Auto-save sur blur pour chaque champ — SAUF les inputs IA, qui ont
+    // leur propre bouton Enregistrer (pour éviter de sauver une demi-clé)
     document.querySelectorAll('[data-save-path]').forEach(input => {
+      if (input.hasAttribute('data-ai-key-input')) return;
       input.addEventListener('blur', async () => {
         if (!App.api) return;
         const v = input.value;
@@ -1539,6 +1635,9 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
         catch (e) { console.warn('save_setting:', e); }
       });
     });
+
+    // Branche les boutons Enregistrer / Tester des clés IA
+    this._wireAiButtons();
   },
 
   _esc(s) {

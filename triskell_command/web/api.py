@@ -1427,6 +1427,79 @@ class Api:
             "ai": {"api_keys": keys_masked},
         }
 
+    def test_ai_key(self, payload: dict) -> dict:
+        """Teste qu'une clé API IA fonctionne en faisant un mini appel.
+        payload = {provider: 'anthropic'|'openai'|..., key: '...' (optionnel)}.
+        Si key vide, utilise la clé déjà enregistrée.
+        Renvoie {ok, message?, sample?, error?}.
+        """
+        p = payload or {}
+        prov_id = (p.get("provider") or "").strip().lower()
+        key = (p.get("key") or "").strip()
+        if not prov_id:
+            return {"ok": False, "error": "Provider requis"}
+        # Si pas de clé fournie, lit celle déjà sauvegardée
+        if not key:
+            try:
+                from ..integrations import shared_secrets
+                stored = shared_secrets.get_ai_keys(
+                    client=self._supabase(), app_state=self._app_state,
+                ) or {}
+                key = stored.get(prov_id) or ""
+            except Exception:
+                key = ""
+            if not key:
+                key = self._app_state.get("ai", "api_keys", prov_id, default="") or ""
+        if not key:
+            return {"ok": False, "error":
+                    "Aucune clé tapée et aucune clé enregistrée à tester."}
+        # Mini prompt très court
+        test_prompt = ("Réponds simplement par les deux lettres : OK. "
+                       "Rien d'autre.")
+        # Dispatch vers le bon backend selon le provider
+        try:
+            if prov_id == "perplexity":
+                txt = self._geo_ask_perplexity(
+                    {"key": key, "model": "sonar"}, test_prompt)
+            elif prov_id == "groq":
+                txt = self._geo_ask_groq(
+                    {"key": key, "model": "llama-3.3-70b-versatile"},
+                    test_prompt)
+            else:
+                # Anthropic / OpenAI / Google / Mistral / xAI : triskell_core
+                from triskell_core.ai.providers import (
+                    send_to_provider, PROVIDERS,
+                )
+                if prov_id not in PROVIDERS:
+                    return {"ok": False, "error":
+                            f"Provider inconnu : {prov_id}"}
+                default_model = PROVIDERS[prov_id]["models"][0]
+                txt = send_to_provider(
+                    prov_id, default_model, test_prompt, {prov_id: key},
+                ) or ""
+        except Exception as exc:
+            # Message d'erreur lisible (les SDK renvoient parfois 200 lignes)
+            msg = str(exc).strip()
+            if len(msg) > 200:
+                msg = msg[:200] + "…"
+            # Démasque les erreurs courantes (clé invalide, quota, etc.)
+            lower = msg.lower()
+            if "401" in msg or "unauthor" in lower or "invalid" in lower and "key" in lower:
+                return {"ok": False, "error":
+                        "Clé invalide ou expirée (l'éditeur refuse l'accès)."}
+            if "429" in msg or "rate" in lower or "quota" in lower:
+                return {"ok": False, "error":
+                        "Limite de débit atteinte (réessaie dans 1 min)."}
+            return {"ok": False, "error": f"L'IA a refusé : {msg}"}
+        sample = (txt or "").strip()
+        if not sample:
+            return {"ok": False, "error":
+                    "L'IA n'a renvoyé aucune réponse."}
+        # Limite l'echantillon affiché à 80 caractères
+        if len(sample) > 80:
+            sample = sample[:80] + "…"
+        return {"ok": True, "message": "Clé valide.", "sample": sample}
+
     def save_setting(self, payload: dict) -> dict:
         """Sauve UNE clé : payload = {path: ['ai','api_keys','anthropic'], value: '...'}
 
