@@ -11,39 +11,388 @@
  */
 
 const GEO = {
-  tab: 'audit',           // 'audit' | 'surveillance' | 'generator' | 'reputation'
+  view: 'home',           // 'home' | 'site' | 'advanced'
+  tab: 'audit',           // utilisé seulement en mode 'advanced'
   _state: null,           // état tableau de bord (cache)
-  _selectedSiteId: null,  // dans Surveillance, site ouvert
+  _selectedSiteId: null,  // site ouvert (vue 'site')
   _busy: false,           // évite double-clic sur les boutons
 
   // ════════════════════════════════════════════════════════════════════
-  // ENTRY POINT
+  // ENTRY POINT — un parcours unique : Home → Site → Analyse en 1 clic
   // ════════════════════════════════════════════════════════════════════
   async render(container) {
+    this._container = container;
+    if (this.view === 'site')     return this._renderSimpleSite(container);
+    if (this.view === 'advanced') return this._renderAdvanced(container);
+    return this._renderSimpleHome(container);
+  },
+
+  _goto(view, opts = {}) {
+    this.view = view;
+    if (opts.siteId !== undefined) this._selectedSiteId = opts.siteId;
+    this.render(this._container);
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  // VUE 1 — HOME : liste des sites + auto-pilote + ajouter
+  // ════════════════════════════════════════════════════════════════════
+  async _renderSimpleHome(container) {
     container.innerHTML = `
       <section class="geo-page animate-fade-in">
-        ${this._renderHeader()}
+        <header class="mb-6">
+          <div class="hero-kicker mb-2">LE GEO · AGENCE</div>
+          <h1 class="hero-title hero-title--md mb-2">Sois cité par les IA.</h1>
+          <p class="hero-subtitle">
+            Ajoute un site, clique « Analyser », tu reçois les améliorations à appliquer.
+          </p>
+        </header>
+        <div id="geo-home-content">
+          <div class="geo-loading">Chargement…</div>
+        </div>
+        <footer class="mt-12 text-center">
+          <button id="geo-go-advanced" class="geo-back">⚙️ Outils avancés (audits manuels, générateur libre, réputation…)</button>
+        </footer>
+      </section>
+    `;
+    document.getElementById('geo-go-advanced').onclick = () => this._goto('advanced');
+    let r;
+    try { r = await App.api.geo_state({}); }
+    catch (e) {
+      document.getElementById('geo-home-content').innerHTML =
+        `<div class="geo-card geo-card--err"><h3>Connexion impossible</h3><p>${this._esc(e && e.message || e)}</p></div>`;
+      return;
+    }
+    if (!r || !r.ok) {
+      document.getElementById('geo-home-content').innerHTML =
+        `<div class="geo-card geo-card--err"><h3>Pas pu charger</h3><p>${this._esc((r && r.error) || 'Erreur')}</p></div>`;
+      return;
+    }
+    // Charge auto-pilote en parallèle
+    let ap = null;
+    try {
+      const ar = await App.api.geo_autopilot_settings({});
+      if (ar && ar.ok) ap = ar.settings;
+    } catch (e) { /* tolère */ }
+    const sites = r.sites || [];
+    const providersInfo = r.providers_count > 0
+      ? `<span class="geo-pill geo-pill--ok">${r.providers_count} IA branchée${r.providers_count > 1 ? 's' : ''} : ${r.providers.map(p => p.label).join(', ')}</span>`
+      : `<span class="geo-pill geo-pill--warn">Aucune IA configurée — <a href="#" data-go-config>va dans Réglages</a></span>`;
+    document.getElementById('geo-home-content').innerHTML = `
+      <div class="geo-card">
+        <div class="geo-row-between">
+          <div>
+            <h2 class="geo-card-title">Tes sites</h2>
+            <p class="geo-card-sub">Clique sur un site pour l'analyser et appliquer les améliorations.</p>
+          </div>
+          <button id="geo-add-site" class="btn btn-primary">+ Ajouter un site</button>
+        </div>
+        <div class="geo-pills mt-3">${providersInfo}</div>
+      </div>
+      ${this._renderAutopilotCard(ap, sites.length)}
+      <div class="geo-sites-grid mt-6">
+        ${sites.length === 0
+          ? `<div class="geo-empty"><div class="geo-empty-icon">🌐</div><h3>Aucun site pour l'instant</h3><p>Clique sur « Ajouter un site » pour démarrer.</p></div>`
+          : sites.map(s => this._renderSiteCard(s)).join('')}
+      </div>
+    `;
+    document.getElementById('geo-add-site').onclick = () => this._openSiteDialog(null);
+    document.querySelectorAll('[data-geo-site]').forEach(card => {
+      card.onclick = (e) => {
+        if (e.target.closest('[data-del-site]')) return;
+        this._goto('site', { siteId: card.dataset.geoSite });
+      };
+    });
+    document.querySelectorAll('[data-del-site]').forEach(b => {
+      b.onclick = async (e) => {
+        e.stopPropagation();
+        const sid = b.dataset.delSite;
+        const s = sites.find(x => x.id === sid);
+        if (!confirm(`Supprimer ${s ? s.name : 'ce site'} ?`)) return;
+        const rr = await App.api.geo_site_remove({ id: sid });
+        if (rr && rr.ok) this._renderSimpleHome(container);
+        else alert((rr && rr.error) || 'Erreur');
+      };
+    });
+    this._wireAutopilot();
+    const cfg = container.querySelector('[data-go-config]');
+    if (cfg) cfg.onclick = (e) => { e.preventDefault(); App.show('config'); };
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  // VUE 2 — SITE : un seul bouton « Analyser », résultat consolidé
+  // ════════════════════════════════════════════════════════════════════
+  async _renderSimpleSite(container) {
+    container.innerHTML = `<section class="geo-page animate-fade-in" id="geo-site-area">
+      <div class="geo-loading">Chargement…</div></section>`;
+    const area = document.getElementById('geo-site-area');
+    let site = null;
+    try {
+      const r = await App.api.geo_sites({});
+      site = (r && r.ok ? (r.sites || []) : []).find(s => s.id === this._selectedSiteId);
+    } catch (e) { /* tolère */ }
+    if (!site) {
+      area.innerHTML = `<button class="geo-back" id="back-home">← Mes sites</button>
+        <div class="geo-card geo-card--err mt-3"><h3>Site introuvable</h3></div>`;
+      document.getElementById('back-home').onclick = () => this._goto('home');
+      return;
+    }
+    area.innerHTML = `
+      <button class="geo-back" id="back-home">← Mes sites</button>
+      <div class="geo-card mt-3">
+        <div class="geo-row-between">
+          <div>
+            <div class="hero-kicker">SITE SUIVI</div>
+            <h2 class="geo-card-title">${this._esc(site.name)}</h2>
+            <p class="geo-card-sub">${this._esc(site.url)}</p>
+          </div>
+          <div class="geo-site-actions">
+            <button id="geo-edit-site" class="btn btn-secondary">✎ Modifier</button>
+            <button id="geo-del-site"  class="btn btn-secondary geo-btn-danger">🗑 Supprimer</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="geo-bigcta mt-6">
+        <button id="geo-run-full" class="btn btn-primary geo-bigcta-btn">
+          🔍 Analyser ce site maintenant
+        </button>
+        <div class="geo-bigcta-sub">
+          On lit ta page, on demande aux IA si elles te citent, et on te donne les améliorations à appliquer. Compte 30 secondes à 2 minutes.
+        </div>
+      </div>
+
+      <div id="geo-full-result" class="mt-6"></div>
+    `;
+    document.getElementById('back-home').onclick = () => this._goto('home');
+    document.getElementById('geo-edit-site').onclick = () => this._openSiteDialog(site);
+    document.getElementById('geo-del-site').onclick = async () => {
+      if (!confirm(`Supprimer ${site.name} ?\n\nLes questions et l'historique seront effacés.`)) return;
+      const r = await App.api.geo_site_remove({ id: site.id });
+      if (r && r.ok) this._goto('home');
+      else alert((r && r.error) || 'Erreur');
+    };
+    document.getElementById('geo-run-full').onclick = () => this._runFullAnalysis(site);
+  },
+
+  async _runFullAnalysis(site) {
+    if (this._busy) return;
+    this._busy = true;
+    const btn = document.getElementById('geo-run-full');
+    const out = document.getElementById('geo-full-result');
+    btn.disabled = true;
+    btn.textContent = '⏳ Analyse en cours…';
+    const stepEl = (txt) => out.innerHTML = `
+      <div class="geo-card"><div class="geo-loading">${txt}</div></div>`;
+    let audit = null, surv = null, errMsg = '';
+    try {
+      // Étape 1 : audit IA (lecture de la page + suggestions)
+      stepEl('🤖 L\'IA lit ta page (titre, contenu, structure)…');
+      const r1 = await App.api.geo_audit_ai({ site_id: site.id });
+      if (r1 && r1.ok) audit = r1.audit;
+      else errMsg = (r1 && r1.error) || 'Audit IA impossible';
+      // Étape 2 : surveillance (uniquement si au moins une question)
+      // On suggère des questions si vide
+      stepEl('💬 On prépare les questions à poser aux IA…');
+      try {
+        const qs = await App.api.geo_questions({ site_id: site.id });
+        if (qs && qs.ok && (qs.questions || []).length === 0) {
+          await App.api.geo_suggest_questions({ site_id: site.id });
+        }
+      } catch (e) { /* tolère */ }
+      stepEl('👁 On demande à chaque IA si ton site est cité…');
+      const r2 = await App.api.geo_surveillance_run({ site_id: site.id });
+      if (r2 && r2.ok) surv = r2.run;
+    } catch (e) {
+      errMsg = (e && e.message || e) || 'Erreur réseau';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔍 Relancer l\'analyse';
+      this._busy = false;
+    }
+    out.innerHTML = this._renderFullResults(site, audit, surv, errMsg);
+    this._wireFullResults(out, site, audit, surv);
+  },
+
+  _renderFullResults(site, audit, surv, errMsg) {
+    const parts = [];
+    if (errMsg && !audit && !surv) {
+      parts.push(`<div class="geo-card geo-card--err">
+        <h3>L'analyse a échoué</h3>
+        <p>${this._esc(errMsg)}</p>
+      </div>`);
+      return parts.join('');
+    }
+    // Section 1 : présence dans les IA
+    if (surv) {
+      const cls = surv.score >= 60 ? 'ok' : surv.score >= 30 ? 'warn' : 'bad';
+      const verdict = surv.score >= 60
+        ? 'Bien présent dans les IA, garde la cadence.'
+        : surv.score >= 30
+        ? 'Présent par moments — il reste du potentiel.'
+        : 'Les IA ne te citent quasiment pas. C\'est là que les améliorations vont faire la différence.';
+      parts.push(`
+        <section class="geo-card geo-card--result">
+          <div class="hero-kicker">PRÉSENCE DANS LES IA</div>
+          <div class="geo-score-row mt-3">
+            <div class="geo-score geo-score--${cls === 'ok' ? 'success' : cls === 'warn' ? 'warning' : 'danger'}">
+              <div class="geo-score-value">${surv.score}%</div>
+              <div class="geo-score-max">${surv.cited}/${surv.total}</div>
+            </div>
+            <div class="geo-score-text">
+              <div class="geo-score-verdict">${verdict}</div>
+              <div class="geo-score-meta">${surv.providers_count || (surv.providers || []).length} IA interrogées · ${(surv.results || []).length} mesures · <a href="#" data-show-details>voir le détail</a></div>
+            </div>
+          </div>
+          <div id="geo-surv-details" hidden class="mt-4">
+            ${this._renderRunBody(surv)}
+          </div>
+        </section>
+      `);
+    }
+    // Section 2 : améliorations recommandées par l'IA
+    if (audit && audit.findings && audit.findings.length) {
+      parts.push(`
+        <section class="geo-card mt-5">
+          <div class="hero-kicker">AMÉLIORATIONS À APPLIQUER</div>
+          <h3 class="geo-card-title mt-1">${audit.findings.length} chose${audit.findings.length > 1 ? 's' : ''} à corriger pour grimper</h3>
+          <p class="geo-card-sub">${this._esc(audit.verdict || '')}</p>
+          <div class="geo-aifindings mt-4">
+            ${audit.findings.map((f, idx) => `
+              <div class="geo-aifinding" data-fid="${f.id}">
+                <div class="geo-aifinding-head">
+                  <div class="geo-aifinding-num">${idx + 1}</div>
+                  <div class="geo-aifinding-title">
+                    <div class="geo-aifinding-titletxt">${this._esc(f.title)}</div>
+                    <div class="geo-aifinding-problem">${this._esc(f.problem)}</div>
+                  </div>
+                </div>
+                <div class="geo-aifinding-fix">
+                  <div class="geo-aifinding-fixtitle">💡 ${this._esc(f.fix_title)}</div>
+                  <div class="geo-aifinding-actions">
+                    <button class="btn btn-secondary geo-btn-mini" data-preview-finding="${f.id}">👁 Aperçu</button>
+                    <button class="btn btn-primary geo-btn-mini" data-publish-finding="${f.id}">📤 Appliquer sur le site</button>
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </section>
+      `);
+    } else if (audit) {
+      parts.push(`<div class="geo-card mt-5">
+        <h3 class="geo-card-title">Aucune amélioration majeure</h3>
+        <p class="geo-card-sub">L'IA n'a pas trouvé de point critique à corriger pour le moment. ${this._esc(audit.verdict || '')}</p>
+      </div>`);
+    }
+    return parts.join('');
+  },
+
+  _wireFullResults(out, site, audit, surv) {
+    // Bouton "voir le détail" pour la section surveillance
+    const det = out.querySelector('[data-show-details]');
+    if (det) det.onclick = (e) => {
+      e.preventDefault();
+      const panel = document.getElementById('geo-surv-details');
+      panel.hidden = !panel.hidden;
+      det.textContent = panel.hidden ? 'voir le détail' : 'masquer le détail';
+    };
+    // Boutons Aperçu / Appliquer sur chaque finding
+    if (audit) {
+      out.querySelectorAll('[data-preview-finding]').forEach(b => {
+        b.onclick = () => {
+          const f = audit.findings.find(x => x.id === b.dataset.previewFinding);
+          if (f) this._openFindingPreview({ ...audit, site_id: site.id }, f);
+        };
+      });
+      out.querySelectorAll('[data-publish-finding]').forEach(b => {
+        b.onclick = () => {
+          const f = audit.findings.find(x => x.id === b.dataset.publishFinding);
+          if (f) this._publishFinding({ ...audit, site_id: site.id }, f, b);
+        };
+      });
+    }
+  },
+
+  _renderRunBody(run) {
+    // Petit rendu compact des résultats de surveillance
+    return (run.results || []).map(res => `
+      <div class="geo-run-line">
+        <div class="geo-run-line-head">
+          <span class="geo-run-prov">${this._esc(res.provider || '')}</span>
+          <span class="geo-run-cited ${res.cited ? 'is-cited' : 'is-not'}">${res.cited ? '✓ cité' : '✗ pas cité'}</span>
+        </div>
+        <div class="geo-run-q">« ${this._esc(res.question || '')} »</div>
+        ${res.snippet ? `<div class="geo-run-snip">${this._esc(res.snippet)}</div>` : ''}
+      </div>
+    `).join('') || '<div class="geo-empty">Pas de détail.</div>';
+  },
+
+  _wireAutopilot() {
+    const apEnabled = document.getElementById('geo-ap-enabled');
+    const apFreq    = document.getElementById('geo-ap-freq');
+    const apAuto    = document.getElementById('geo-ap-autogen');
+    const apPub     = document.getElementById('geo-ap-autopub');
+    const apRunNow  = document.getElementById('geo-ap-run-now');
+    const saveAp = async () => {
+      const payload = {
+        enabled:        !!apEnabled?.checked,
+        frequency_days: parseInt(apFreq?.value || '14', 10),
+        auto_generate:  !!apAuto?.checked,
+        auto_publish:   !!apPub?.checked,
+      };
+      try {
+        const rr = await App.api.geo_autopilot_settings_set(payload);
+        if (rr && rr.ok) this._renderSimpleHome(this._container);
+      } catch (e) { /* tolère */ }
+    };
+    if (apEnabled) apEnabled.onchange = saveAp;
+    if (apFreq)    apFreq.onchange    = saveAp;
+    if (apAuto)    apAuto.onchange    = saveAp;
+    if (apPub)     apPub.onchange     = saveAp;
+    if (apRunNow) {
+      apRunNow.onclick = async () => {
+        apRunNow.disabled = true;
+        apRunNow.textContent = '⏳ Lancement…';
+        try {
+          const rr = await App.api.geo_autopilot_run_now({});
+          if (rr && rr.ok) {
+            alert('Cycle lancé en arrière-plan. Reviens dans 5-10 min pour voir les résultats.');
+            this._renderSimpleHome(this._container);
+          } else {
+            alert((rr && rr.error) || 'Erreur');
+            apRunNow.disabled = false;
+            apRunNow.textContent = '🚀 Tout faire maintenant';
+          }
+        } catch (e) {
+          alert('Erreur réseau : ' + (e && e.message || e));
+          apRunNow.disabled = false;
+          apRunNow.textContent = '🚀 Tout faire maintenant';
+        }
+      };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  // VUE 3 — ADVANCED : ancien parcours 4 onglets (power users)
+  // ════════════════════════════════════════════════════════════════════
+  async _renderAdvanced(container) {
+    container.innerHTML = `
+      <section class="geo-page animate-fade-in">
+        <header class="mb-6">
+          <button class="geo-back" id="geo-back-simple">← Retour au mode simple</button>
+          <div class="hero-kicker mb-2 mt-2">LE GEO · MODE AVANCÉ</div>
+          <h1 class="hero-title hero-title--md mb-2">Outils détaillés</h1>
+          <p class="hero-subtitle">Audits manuels, générateur libre, réputation, gestion fine des questions.</p>
+        </header>
         ${this._renderTabs()}
         <div id="geo-body" class="mt-6"></div>
       </section>
     `;
+    document.getElementById('geo-back-simple').onclick = () => this._goto('home');
     container.querySelectorAll('[data-geo-tab]').forEach(b => {
-      b.onclick = () => { this.tab = b.dataset.geoTab; this.render(container); };
+      b.onclick = () => { this.tab = b.dataset.geoTab; this._renderAdvanced(container); };
     });
     await this._renderBody();
-  },
-
-  _renderHeader() {
-    return `
-      <header class="mb-6">
-        <div class="hero-kicker mb-2">LE GEO · AGENCE</div>
-        <h1 class="hero-title hero-title--md mb-2">Sois cité par les IA.</h1>
-        <p class="hero-subtitle">
-          Comme le SEO, mais pour ChatGPT, Claude, Gemini et Perplexity.
-          Analyse tes pages, surveille ce que les IA disent de toi, et rédige du contenu qu'elles adorent citer.
-        </p>
-      </header>
-    `;
   },
 
   _renderTabs() {

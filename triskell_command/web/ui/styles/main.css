@@ -4721,3 +4721,31 @@ select.geo-input:focus {
   border-radius: 8px; border-left: 3px solid hsl(var(--accent));
 }
 
+/* -- Gros bouton CTA central (mode simple) -- */
+.geo-bigcta {
+  text-align: center;
+  padding: 32px 24px;
+  background: linear-gradient(135deg,
+    hsl(var(--surface)) 0%,
+    hsl(var(--accent) / 0.06) 100%);
+  border: 1px dashed hsl(var(--accent) / 0.4);
+  border-radius: 18px;
+}
+.geo-bigcta-btn {
+  font-size: 17px !important;
+  padding: 16px 32px !important;
+  border-radius: 14px !important;
+  box-shadow: 0 6px 18px hsl(var(--accent) / 0.25);
+}
+.geo-bigcta-btn:hover {
+  box-shadow: 0 10px 28px hsl(var(--accent) / 0.35) !important;
+}
+.geo-bigcta-sub {
+  margin-top: 14px;
+  font-size: 13px;
+  color: hsl(var(--text-secondary));
+  max-width: 540px;
+  margin-left: auto; margin-right: auto;
+  text-wrap: pretty;
+}
+
