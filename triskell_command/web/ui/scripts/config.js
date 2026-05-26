@@ -828,11 +828,12 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
     const ai = (s && s.ai) || { api_keys: {} };
     const keys = ai.api_keys || {};
     const providers = [
-      { id: 'anthropic', label: 'Anthropic (Claude)', recommended: false },
-      { id: 'google',    label: 'Google (Gemini) — gratuit', recommended: true },
-      { id: 'openai',    label: 'OpenAI (GPT)',     recommended: false },
-      { id: 'mistral',   label: 'Mistral',          recommended: false },
-      { id: 'xai',       label: 'xAI (Grok)',       recommended: false },
+      { id: 'anthropic',  label: 'Anthropic (Claude)', recommended: false },
+      { id: 'google',     label: 'Google (Gemini) — gratuit', recommended: true },
+      { id: 'mistral',    label: 'Mistral — gratuit', recommended: true },
+      { id: 'perplexity', label: 'Perplexity (mode web) — clé en ligne', recommended: true },
+      { id: 'openai',     label: 'OpenAI (GPT)',     recommended: false },
+      { id: 'xai',        label: 'xAI (Grok)',       recommended: false },
     ];
     return `
       <section>

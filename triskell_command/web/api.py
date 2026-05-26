@@ -8429,28 +8429,40 @@ class Api:
 
     def _geo_ai_providers(self) -> list[dict]:
         """Renvoie la liste des providers IA configurés (clé présente)."""
+        import os as _os
         try:
             from ..integrations import shared_secrets
             keys = shared_secrets.get_ai_keys(
                 client=self._supabase(), app_state=self._app_state,
-            )
+            ) or {}
         except Exception:
             keys = (self._app_state.get("ai", "api_keys", default={}) or {})
+        # Perplexity n'est pas géré par shared_secrets / triskell_core,
+        # on le récupère depuis l'env ou directement depuis l'app_state.
+        if not (keys or {}).get("perplexity"):
+            pkey = (_os.environ.get("PERPLEXITY_API_KEY", "")
+                    or self._app_state.get("ai", "api_keys", "perplexity",
+                                           default=""))
+            if pkey:
+                keys = dict(keys or {})
+                keys["perplexity"] = pkey
         provs = []
         # Modèle par défaut par provider (rapide + bon marché)
         default_models = {
-            "anthropic": "claude-haiku-4-5",
-            "openai":    "gpt-4o-mini",
-            "google":    "gemini-2.5-flash",
-            "mistral":   "mistral-small-latest",
-            "xai":       "grok-2-latest",
+            "anthropic":  "claude-haiku-4-5",
+            "openai":     "gpt-4o-mini",
+            "google":     "gemini-2.5-flash",
+            "mistral":    "mistral-small-latest",
+            "xai":        "grok-2-latest",
+            "perplexity": "sonar",
         }
         labels = {
-            "anthropic": "Claude (Anthropic)",
-            "openai":    "ChatGPT (OpenAI)",
-            "google":    "Gemini (Google)",
-            "mistral":   "Mistral",
-            "xai":       "Grok (xAI)",
+            "anthropic":  "Claude (Anthropic)",
+            "openai":     "ChatGPT (OpenAI)",
+            "google":     "Gemini (Google)",
+            "mistral":    "Mistral",
+            "xai":        "Grok (xAI)",
+            "perplexity": "Perplexity (mode web)",
         }
         for prov_id, label in labels.items():
             key = (keys or {}).get(prov_id) or ""
@@ -8465,10 +8477,6 @@ class Api:
 
     def _geo_ask_provider(self, provider: dict, question: str) -> str:
         """Pose une question à un provider IA, renvoie la réponse texte."""
-        try:
-            from triskell_core.ai.providers import send_to_provider
-        except ImportError:
-            return ""
         prompt = (
             "Tu es une IA grand public que des utilisateurs interrogent "
             "tous les jours. Réponds à la question ci-dessous comme tu le "
@@ -8477,6 +8485,16 @@ class Api:
             "pas, ne flatte personne, sois utile.\n\n"
             f"Question : {question.strip()}\n\nTa réponse :"
         )
+        # Perplexity : appel direct (pas dans triskell_core), mode "sonar"
+        # qui fait une vraie recherche web — c'est l'IA la plus "fraîche"
+        # pour le GEO.
+        if provider["id"] == "perplexity":
+            return self._geo_ask_perplexity(provider, prompt)
+        # Autres providers : passe par le coeur partagé
+        try:
+            from triskell_core.ai.providers import send_to_provider
+        except ImportError:
+            return ""
         try:
             return send_to_provider(
                 provider["id"], provider["model"], prompt,
@@ -8484,6 +8502,37 @@ class Api:
             ) or ""
         except Exception as exc:
             logger.info("geo ask provider %s: %s", provider["id"], exc)
+            return ""
+
+    def _geo_ask_perplexity(self, provider: dict, prompt: str) -> str:
+        """Appel direct à l'API Perplexity (format compatible OpenAI).
+        Modèles : sonar, sonar-pro, sonar-reasoning.
+        Renvoie la réponse texte (vide si erreur)."""
+        try:
+            import requests
+            r = requests.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {provider['key']}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": provider.get("model") or "sonar",
+                    "messages": [{"role": "user", "content": prompt}],
+                    # Limite la réponse à un poil plus court pour économiser
+                    "max_tokens": 1200,
+                },
+                timeout=40,
+            )
+            if r.status_code >= 400:
+                logger.info("perplexity HTTP %s: %s",
+                            r.status_code, r.text[:200])
+                return ""
+            data = r.json()
+            return (data.get("choices", [{}])[0]
+                       .get("message", {}).get("content", "")) or ""
+        except Exception as exc:
+            logger.info("perplexity exception: %s", exc)
             return ""
 
     # -- Tableau de bord -----------------------------------------------
