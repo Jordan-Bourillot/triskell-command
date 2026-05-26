@@ -78,6 +78,23 @@ const NewBadge = {
         opacity: 0.92;
       }
       .new-badge.is-green:hover { opacity: 1; }
+      /* Variante rouge "gros" — pour signaler une nouveauté majeure dans la sidebar */
+      .new-badge.is-red-big {
+        font-size: 10.5px;
+        font-weight: 800;
+        padding: 2px 7px 2px 8px;
+        letter-spacing: 0.8px;
+        box-shadow: 0 2px 6px rgba(239,68,68,0.55);
+        animation: newBadgePulse 1.8s ease-in-out infinite;
+      }
+      .new-badge.is-red-big button {
+        font-size: 12px;
+        padding-left: 4px;
+      }
+      @keyframes newBadgePulse {
+        0%, 100% { box-shadow: 0 2px 6px rgba(239,68,68,0.55); transform: scale(1); }
+        50%      { box-shadow: 0 2px 12px rgba(239,68,68,0.85); transform: scale(1.05); }
+      }
     `;
     document.head.appendChild(s);
   },
@@ -95,7 +112,9 @@ const NewBadge = {
     if (existing) return existing;
 
     const badge = document.createElement('span');
-    const variantCls = options.variant === 'green' ? ' is-green' : '';
+    const variantCls = options.variant === 'green'   ? ' is-green'
+                     : options.variant === 'red-big' ? ' is-red-big'
+                     : '';
     badge.className = 'new-badge ' + (options.inline ? 'new-badge-inline' : 'new-badge-abs') + variantCls;
     badge.innerHTML = `<span>NEW</span><button type="button" title="Marquer comme vu">×</button>`;
     badge.dataset.newBadge = id;
@@ -141,7 +160,7 @@ const NewFeaturesSinceYesterday = {
     { selector: '[data-view="pixelpros"]', id: 'new-20260519:pixelpros-kanban' },
     { selector: '[data-view="phare"]',     id: 'new-20260520:phare-quickadd' },
     { selector: '[data-view="catalogue"]', id: 'new-20260519:catalogue-pixelpros' },
-    { selector: '[data-view="geo"]',       id: 'new-20260526:geo-module' },
+    { selector: '#nav-section-geo',        id: 'new-20260526:geo-module', inline: true, variant: 'red-big' },
     // Cockpit — citation du jour
     { selector: '.daily-quote',            id: 'new-20260520:cockpit-quote' },
     // Composer mail — autocomplétion du destinataire
@@ -155,7 +174,10 @@ const NewFeaturesSinceYesterday = {
   tryAttachAll() {
     this.features.forEach(f => {
       const el = document.querySelector(f.selector);
-      if (el) NewBadge.attach(el, f.id, { variant: 'green', inline: !!f.inline });
+      if (el) NewBadge.attach(el, f.id, {
+        variant: f.variant || 'green',
+        inline: !!f.inline,
+      });
     });
   },
 
