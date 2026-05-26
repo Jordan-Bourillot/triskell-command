@@ -85,11 +85,12 @@ const GEO = {
     body.innerHTML = `
       <div class="geo-card">
         <h2 class="geo-card-title">Analyser une page</h2>
-        <p class="geo-card-sub">Colle l'adresse d'une page. On regarde si elle est faite pour être citée par les IA, et on te dit ce qu'il faut corriger.</p>
+        <p class="geo-card-sub">Deux analyses : la <strong>technique</strong> (présence des bons éléments) et l'<strong>IA</strong> (lecture qualitative + propositions de blocs prêts à publier).</p>
         <div class="geo-form">
           <input id="geo-audit-url" type="url" placeholder="https://exemple.fr/ma-page"
                  class="geo-input geo-input--big" autocomplete="off" />
-          <button id="geo-audit-go" class="btn btn-primary geo-btn-big">Analyser</button>
+          <button id="geo-audit-go" class="btn btn-secondary geo-btn-big">📊 Analyse technique</button>
+          <button id="geo-audit-ai-go" class="btn btn-primary geo-btn-big">🤖 Audit IA + propositions</button>
         </div>
         <div id="geo-audit-msg" class="geo-msg"></div>
       </div>
@@ -97,10 +98,186 @@ const GEO = {
     `;
     const input = document.getElementById('geo-audit-url');
     const btn = document.getElementById('geo-audit-go');
+    const btnAi = document.getElementById('geo-audit-ai-go');
     const run = () => this._runAudit(input.value);
+    const runAi = () => this._runAuditAi(input.value);
     btn.onclick = run;
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+    btnAi.onclick = runAi;
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') runAi(); });
     input.focus();
+  },
+
+  async _runAuditAi(url) {
+    if (this._busy) return;
+    const msg = document.getElementById('geo-audit-msg');
+    const out = document.getElementById('geo-audit-result');
+    const btn = document.getElementById('geo-audit-ai-go');
+    url = (url || '').trim();
+    if (!url) { msg.textContent = 'Colle d\'abord une adresse de page.'; msg.className = 'geo-msg geo-msg--warn'; return; }
+    this._busy = true;
+    btn.disabled = true;
+    btn.textContent = '⏳ L\'IA analyse ta page…';
+    msg.textContent = 'L\'IA lit la page (titre, contenu, structure) et rédige les améliorations.';
+    msg.className = 'geo-msg';
+    out.innerHTML = '';
+    try {
+      // Cherche si l'URL correspond à un site déjà enregistré (pour proposer la publi)
+      let siteId = '';
+      try {
+        const sr = await App.api.geo_sites({});
+        if (sr && sr.ok) {
+          const m = (sr.sites || []).find(s => {
+            const u = (s.url || '').replace(/\/+$/, '');
+            const target = url.replace(/\/+$/, '');
+            return u === target || target.startsWith(u);
+          });
+          if (m) siteId = m.id;
+        }
+      } catch (e) { /* tolère */ }
+      const r = await App.api.geo_audit_ai({ url, site_id: siteId });
+      if (!r || !r.ok) {
+        msg.textContent = (r && r.error) || 'Erreur inconnue.';
+        msg.className = 'geo-msg geo-msg--err';
+        return;
+      }
+      msg.textContent = '';
+      out.innerHTML = this._renderAuditAiResult(r.audit);
+      this._wireAuditAi(out, r.audit);
+    } catch (e) {
+      msg.textContent = 'Erreur réseau : ' + (e && e.message || e);
+      msg.className = 'geo-msg geo-msg--err';
+    } finally {
+      this._busy = false;
+      btn.disabled = false;
+      btn.textContent = '🤖 Audit IA + propositions';
+    }
+  },
+
+  _renderAuditAiResult(a) {
+    const scoreColor = a.score_estimated >= 75 ? 'success'
+                     : a.score_estimated >= 50 ? 'warning' : 'danger';
+    return `
+      <div class="geo-card geo-card--result">
+        <div class="hero-kicker">AUDIT IA · ${this._esc(a.provider || '')}</div>
+        <div class="geo-score-row mt-3">
+          <div class="geo-score geo-score--${scoreColor}">
+            <div class="geo-score-value">${a.score_estimated}</div>
+            <div class="geo-score-max">/ 100</div>
+          </div>
+          <div class="geo-score-text">
+            <div class="geo-score-verdict">${this._esc(a.verdict || 'Analyse terminée.')}</div>
+            <div class="geo-score-url">${this._esc(a.url)}</div>
+            <div class="geo-score-meta">${a.findings.length} amélioration${a.findings.length > 1 ? 's' : ''} proposée${a.findings.length > 1 ? 's' : ''}</div>
+          </div>
+        </div>
+      </div>
+      <div class="geo-aifindings mt-4">
+        ${a.findings.map((f, idx) => `
+          <div class="geo-aifinding" data-fid="${f.id}">
+            <div class="geo-aifinding-head">
+              <div class="geo-aifinding-num">${idx + 1}</div>
+              <div class="geo-aifinding-title">
+                <div class="geo-aifinding-titletxt">${this._esc(f.title)}</div>
+                <div class="geo-aifinding-problem">${this._esc(f.problem)}</div>
+              </div>
+            </div>
+            <div class="geo-aifinding-fix">
+              <div class="geo-aifinding-fixtitle">💡 ${this._esc(f.fix_title)}</div>
+              <div class="geo-aifinding-actions">
+                <button class="btn btn-secondary geo-btn-mini" data-preview-finding="${f.id}">👁 Aperçu</button>
+                <button class="btn btn-primary geo-btn-mini" data-publish-finding="${f.id}">📤 Publier sur le site</button>
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  },
+
+  _wireAuditAi(out, audit) {
+    out.querySelectorAll('[data-preview-finding]').forEach(b => {
+      b.onclick = () => {
+        const f = audit.findings.find(x => x.id === b.dataset.previewFinding);
+        if (f) this._openFindingPreview(audit, f);
+      };
+    });
+    out.querySelectorAll('[data-publish-finding]').forEach(b => {
+      b.onclick = () => {
+        const f = audit.findings.find(x => x.id === b.dataset.publishFinding);
+        if (f) this._publishFinding(audit, f, b);
+      };
+    });
+  },
+
+  _openFindingPreview(audit, finding) {
+    const overlay = document.createElement('div');
+    overlay.className = 'geo-modal-overlay';
+    overlay.innerHTML = `
+      <div class="geo-modal geo-modal--xl">
+        <h3 class="geo-modal-title">Aperçu du bloc à publier</h3>
+        <p class="geo-modal-sub">Voilà à quoi va ressembler ce contenu une fois publié sur ton site.</p>
+        <div class="geo-preview-card">
+          <div class="geo-preview-label">PAGE QUI VA ÊTRE CRÉÉE</div>
+          <div class="geo-preview-content">
+            <h1>${this._esc(finding.fix_title)}</h1>
+            ${finding.fix_html}
+          </div>
+        </div>
+        <details class="geo-advanced mt-3">
+          <summary class="geo-details-sum">Voir le code HTML brut</summary>
+          <pre class="geo-gen-raw">${this._esc(finding.fix_html)}</pre>
+        </details>
+        <div class="geo-modal-actions">
+          <button class="btn btn-secondary" id="geo-preview-close">Fermer</button>
+          <button class="btn btn-primary" id="geo-preview-publish">📤 Publier maintenant</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+    document.getElementById('geo-preview-close').onclick = close;
+    document.getElementById('geo-preview-publish').onclick = () => {
+      close();
+      this._publishFinding(audit, finding, null);
+    };
+  },
+
+  async _publishFinding(audit, finding, btn) {
+    if (!audit.site_id) {
+      // Pas de site lié à l'audit → on demande lequel
+      let sites = [];
+      try {
+        const r = await App.api.geo_sites({});
+        if (r && r.ok) sites = (r.sites || []).filter(s => s.repo);
+      } catch (e) { /* tolère */ }
+      if (sites.length === 0) {
+        alert('Aucun site avec dépôt GitHub configuré. Va dans Surveillance pour en ajouter un.');
+        return;
+      }
+      // Choix simple via prompt
+      const choices = sites.map((s, i) => `${i + 1}. ${s.name} (${s.repo})`).join('\n');
+      const pick = prompt(`Sur quel site publier ?\n\n${choices}\n\nTape le numéro :`);
+      const idx = parseInt(pick, 10) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= sites.length) return;
+      audit.site_id = sites[idx].id;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Publication…'; }
+    try {
+      const r = await App.api.geo_publish_finding({
+        audit_id: audit.id, finding_id: finding.id, site_id: audit.site_id,
+      });
+      if (!r || !r.ok) {
+        alert((r && r.error) || 'Erreur de publication');
+        if (btn) { btn.disabled = false; btn.textContent = '📤 Publier sur le site'; }
+        return;
+      }
+      if (btn) { btn.disabled = true; btn.textContent = '✓ Publié'; btn.classList.remove('btn-primary'); btn.classList.add('btn-secondary'); }
+      alert(`✓ Publié à l'adresse : ${r.url}\n\nLe site se met à jour dans 1-3 minutes.`);
+    } catch (e) {
+      alert('Erreur réseau : ' + (e && e.message || e));
+      if (btn) { btn.disabled = false; btn.textContent = '📤 Publier sur le site'; }
+    }
   },
 
   async _runAudit(url) {

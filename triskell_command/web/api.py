@@ -8919,6 +8919,193 @@ class Api:
             items = root["audits"]
         return {"ok": True, "audits": items[:50]}
 
+    # -- Audit IA : analyse qualitative + suggestions de blocs HTML ----
+    def geo_audit_ai(self, payload: dict) -> dict:
+        """L'IA lit la page d'accueil du site et propose 3 à 5 ameliorations
+        concrètes pour le GEO, chacune avec un bloc HTML prêt à publier."""
+        p = payload or {}
+        sid = (p.get("site_id") or "").strip()
+        url = self._geo_normalize_url(p.get("url") or "")
+        root = self._geo_root()
+        site = None
+        if sid:
+            site = next((s for s in root["sites"] if s.get("id") == sid), None)
+            if site and not url:
+                url = site.get("url") or ""
+        if not url:
+            return {"ok": False, "error": "URL ou site_id requis"}
+        # IA configurée ?
+        provs = self._geo_ai_providers()
+        if not provs:
+            return {"ok": False, "error":
+                    "Aucune IA configurée. Va dans Réglages."}
+        prov = next((x for x in provs if x["id"] == "anthropic"), provs[0])
+        # Fetch + extraction du contenu propre
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            r = requests.get(url, timeout=15, headers={
+                "User-Agent": "Mozilla/5.0 (Triskell GEO AI Audit) requests",
+            })
+            html = r.text or ""
+            if r.status_code >= 400 or not html:
+                return {"ok": False, "error":
+                        f"Page inaccessible (HTTP {r.status_code})."}
+        except Exception as exc:
+            return {"ok": False, "error": f"Impossible de charger : {exc}"}
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "noscript", "svg"]):
+            tag.decompose()
+        title = soup.title.get_text(strip=True) if soup.title else ""
+        meta_desc = ""
+        m = soup.find("meta", attrs={"name": "description"})
+        if m and m.get("content"):
+            meta_desc = m["content"].strip()
+        # Garde le texte visible, plafonné à ~6000 caractères pour ne pas
+        # exploser les tokens
+        text = soup.get_text("\n", strip=True)
+        if len(text) > 6000:
+            text = text[:6000] + "\n\n[... contenu tronqué pour l'analyse]"
+        # Prompt structuré : on demande du JSON pour pouvoir afficher proprement
+        brand = (site or {}).get("brand", "")
+        prompt = (
+            "Tu es un expert GEO (Generative Engine Optimization).\n"
+            "Analyse la page web ci-dessous et identifie 3 à 5 améliorations "
+            "concrètes pour maximiser ses chances d'être citée par les IA "
+            "génératives (ChatGPT, Claude, Perplexity, Gemini).\n\n"
+            f"Adresse : {url}\n"
+            f"Marque : {brand or '(non précisée)'}\n"
+            f"Titre actuel : {title or '(absent)'}\n"
+            f"Meta description actuelle : {meta_desc or '(absente)'}\n\n"
+            "Contenu visible de la page :\n---\n"
+            f"{text}\n---\n\n"
+            "Renvoie STRICTEMENT un JSON valide, sans aucun texte avant ou "
+            "après, sans backticks. Format attendu :\n"
+            "{\n"
+            '  "verdict": "phrase courte qui résume le niveau GEO de la page",\n'
+            '  "score_estimated": entier 0-100,\n'
+            '  "findings": [\n'
+            "    {\n"
+            '      "title": "Titre court du problème (max 60 car)",\n'
+            '      "problem": "Pourquoi c\'est un problème pour le GEO (2 phrases)",\n'
+            '      "fix_title": "Titre court de la solution (max 50 car)",\n'
+            '      "fix_html": "Bloc HTML PRÊT À COLLER tel quel sur la page : utilise <section>, <h2>, <h3>, <p>, <ul>, <ol>, <table>. PAS de <html>/<body>/<head>. PAS de styles inline. Doit faire 200-500 mots. En français impeccable, factuel, citant des chiffres précis si possible."\n'
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "Concentre-toi sur les améliorations qui font vraiment bouger les "
+            "IA : FAQ visible, définition courte en tête, tableau "
+            "comparatif chiffré, liste à puces de critères, encadré de "
+            "réponse directe.\n"
+            "Ne propose PAS de refonte design. Tes 'fix_html' doivent être "
+            "des blocs auto-suffisants à AJOUTER à la page existante."
+        )
+        try:
+            from triskell_core.ai.providers import send_to_provider
+            raw = send_to_provider(
+                prov["id"], prov["model"], prompt,
+                {prov["id"]: prov["key"]},
+            ) or ""
+        except Exception as exc:
+            return {"ok": False, "error": f"L'IA n'a pas répondu : {exc}"}
+        # Parse JSON robuste : enlève d'éventuels backticks autour
+        import json as _json
+        import re as _re
+        cleaned = raw.strip()
+        cleaned = _re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned,
+                          flags=_re.IGNORECASE | _re.MULTILINE)
+        try:
+            data = _json.loads(cleaned)
+        except Exception:
+            # Tentative : extraire le bloc {...} le plus long
+            m2 = _re.search(r"\{[\s\S]*\}", cleaned)
+            if m2:
+                try:
+                    data = _json.loads(m2.group(0))
+                except Exception:
+                    return {"ok": False, "error":
+                            "L'IA a renvoyé une réponse non exploitable."}
+            else:
+                return {"ok": False, "error":
+                        "L'IA a renvoyé une réponse non exploitable."}
+        # Normalise et donne un id à chaque finding
+        findings = []
+        for i, f in enumerate(data.get("findings") or []):
+            findings.append({
+                "id":        self._geo_uid(),
+                "title":     (f.get("title") or "")[:80],
+                "problem":   (f.get("problem") or "")[:500],
+                "fix_title": (f.get("fix_title") or "")[:80],
+                "fix_html":  f.get("fix_html") or "",
+            })
+        ai_audit = {
+            "id":              self._geo_uid(),
+            "site_id":         sid or "",
+            "url":             url,
+            "ts":              self._geo_now(),
+            "verdict":         (data.get("verdict") or "")[:300],
+            "score_estimated": int(data.get("score_estimated") or 0),
+            "findings":        findings,
+            "provider":        prov["label"],
+        }
+        if not isinstance(root.get("ai_audits"), list):
+            root["ai_audits"] = []
+        root["ai_audits"].insert(0, ai_audit)
+        root["ai_audits"] = root["ai_audits"][:50]
+        self._geo_save()
+        return {"ok": True, "audit": ai_audit}
+
+    def geo_audit_ai_history(self, payload: dict | None = None) -> dict:
+        sid = ((payload or {}).get("site_id") or "").strip()
+        root = self._geo_root()
+        items = root.get("ai_audits") or []
+        if sid:
+            items = [a for a in items if a.get("site_id") == sid]
+        return {"ok": True, "audits": items[:20]}
+
+    def geo_publish_finding(self, payload: dict) -> dict:
+        """Publie un finding d'audit IA comme nouvelle page sur le site."""
+        p = payload or {}
+        audit_id   = (p.get("audit_id") or "").strip()
+        finding_id = (p.get("finding_id") or "").strip()
+        if not audit_id or not finding_id:
+            return {"ok": False, "error":
+                    "audit_id et finding_id requis"}
+        root = self._geo_root()
+        audit = next((a for a in (root.get("ai_audits") or [])
+                      if a.get("id") == audit_id), None)
+        if not audit:
+            return {"ok": False, "error": "Audit IA introuvable"}
+        finding = next((f for f in audit.get("findings", [])
+                        if f.get("id") == finding_id), None)
+        if not finding:
+            return {"ok": False, "error": "Suggestion introuvable"}
+        # Crée un item "generated" temporaire et publie via le flow existant
+        topic = finding.get("fix_title") or finding.get("title") or "amelioration"
+        # Convertit le bloc HTML en pseudo-markdown pour que la machinerie
+        # de publi le retraite proprement (titre + intro + contenu)
+        item = {
+            "id":      self._geo_uid(),
+            "topic":   topic,
+            "kind":    "ai_audit_fix",
+            "ts":      self._geo_now(),
+            "provider": audit.get("provider", ""),
+            "content": "## " + topic + "\n\n" + finding.get("fix_html", ""),
+            "auto_source": {
+                "audit_id": audit_id,
+                "finding_id": finding_id,
+                "from_audit": True,
+            },
+        }
+        root.setdefault("generated", []).insert(0, item)
+        root["generated"] = root["generated"][:200]
+        self._geo_save()
+        # Publie via le flow standard
+        return self.geo_publish_content({
+            "content_id": item["id"],
+            "site_id":    audit.get("site_id") or (p.get("site_id") or "").strip(),
+        })
+
     # -- Questions surveillées -----------------------------------------
     def geo_questions(self, payload: dict) -> dict:
         sid = ((payload or {}).get("site_id") or "").strip()
@@ -9418,7 +9605,16 @@ class Api:
         canonical = (pretty_base + "/" + slug) if pretty_base else (
             (site.get("url", "").rstrip("/")) + "/" + folder + slug)
         meta_desc = self._geo_extract_first_line(item.get("content", ""))
-        content_html = self._geo_md_to_html(item.get("content", ""))
+        # Contenu HTML brut (audit IA) vs markdown (générateur normal)
+        if item.get("kind") == "ai_audit_fix":
+            # On garde tel quel, juste un fallback <h1> si pas déjà présent
+            content_html = item.get("content", "")
+            # Retire le "## titre" markdown ajouté par publish_finding car
+            # le titre est déjà dans le <h1> de la page
+            import re as _re
+            content_html = _re.sub(r"^##\s+[^\n]+\n+", "", content_html)
+        else:
+            content_html = self._geo_md_to_html(item.get("content", ""))
         page_html = self._geo_build_html_page(
             title=item.get("topic", "Page"),
             content_html=content_html,
