@@ -8345,6 +8345,776 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    # ==================================================================
+    # GEO — Generative Engine Optimization
+    # Tableau de bord pour rendre un site visible des IA génératives
+    # (ChatGPT, Claude, Gemini…). Quatre briques :
+    #  1. Audit GEO d'une page (lecture HTML + scoring local)
+    #  2. Surveillance dans les IA (poser des questions à Claude/GPT/Gemini
+    #     et regarder si le site/la marque est cité)
+    #  3. Générateur de contenu prêt à être cité par les IA
+    #  4. Réputation : ce que les IA racontent d'une marque
+    #
+    # Stockage local via AppState (clé "geo"), persisté en JSON.
+    # ==================================================================
+
+    def _geo_root(self) -> dict:
+        """Renvoie le dict racine 'geo' depuis AppState, en l'initialisant
+        si besoin. Toute mutation doit appeler self._geo_save()."""
+        root = self._app_state.get("geo", default=None)
+        if not isinstance(root, dict):
+            root = {
+                "sites":              [],   # [{id, name, url, brand, created_at}]
+                "questions":          {},   # {site_id: [{id, text}]}
+                "audits":             [],   # [{id, site_id, ts, score, findings, url}]
+                "surveillance_runs":  [],   # [{id, site_id, ts, results, score}]
+                "reputation_runs":    [],   # [{id, brand, ts, results, score}]
+                "generated":          [],   # [{id, topic, kind, content, ts}]
+            }
+            self._app_state.set("geo", value=root)
+            self._app_state.save()
+        # Garantit toutes les clés (migration silencieuse)
+        for k, v in (("sites", []), ("questions", {}), ("audits", []),
+                     ("surveillance_runs", []), ("reputation_runs", []),
+                     ("generated", [])):
+            if k not in root:
+                root[k] = v
+        return root
+
+    def _geo_save(self) -> None:
+        try:
+            self._app_state.save()
+        except Exception as exc:
+            logger.debug("geo save: %s", exc)
+
+    @staticmethod
+    def _geo_uid() -> str:
+        import uuid
+        return uuid.uuid4().hex[:12]
+
+    @staticmethod
+    def _geo_now() -> str:
+        from datetime import datetime
+        return datetime.now().isoformat(timespec="seconds")
+
+    @staticmethod
+    def _geo_normalize_url(url: str) -> str:
+        url = (url or "").strip()
+        if not url:
+            return ""
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        return url
+
+    @staticmethod
+    def _geo_domain(url: str) -> str:
+        from urllib.parse import urlparse
+        try:
+            host = urlparse(url).hostname or ""
+        except Exception:
+            host = ""
+        if host.startswith("www."):
+            host = host[4:]
+        return host.lower()
+
+    def _geo_ai_providers(self) -> list[dict]:
+        """Renvoie la liste des providers IA configurés (clé présente)."""
+        try:
+            from ..integrations import shared_secrets
+            keys = shared_secrets.get_ai_keys(
+                client=self._supabase(), app_state=self._app_state,
+            )
+        except Exception:
+            keys = (self._app_state.get("ai", "api_keys", default={}) or {})
+        provs = []
+        # Modèle par défaut par provider (rapide + bon marché)
+        default_models = {
+            "anthropic": "claude-haiku-4-5",
+            "openai":    "gpt-4o-mini",
+            "google":    "gemini-2.5-flash",
+            "mistral":   "mistral-small-latest",
+            "xai":       "grok-2-latest",
+        }
+        labels = {
+            "anthropic": "Claude (Anthropic)",
+            "openai":    "ChatGPT (OpenAI)",
+            "google":    "Gemini (Google)",
+            "mistral":   "Mistral",
+            "xai":       "Grok (xAI)",
+        }
+        for prov_id, label in labels.items():
+            key = (keys or {}).get(prov_id) or ""
+            if key:
+                provs.append({
+                    "id":    prov_id,
+                    "label": label,
+                    "model": default_models.get(prov_id, ""),
+                    "key":   key,
+                })
+        return provs
+
+    def _geo_ask_provider(self, provider: dict, question: str) -> str:
+        """Pose une question à un provider IA, renvoie la réponse texte."""
+        try:
+            from triskell_core.ai.providers import send_to_provider
+        except ImportError:
+            return ""
+        prompt = (
+            "Tu es une IA grand public que des utilisateurs interrogent "
+            "tous les jours. Réponds à la question ci-dessous comme tu le "
+            "ferais normalement : librement, objectivement, en citant les "
+            "sources/marques que tu connais si c'est pertinent. Ne triche "
+            "pas, ne flatte personne, sois utile.\n\n"
+            f"Question : {question.strip()}\n\nTa réponse :"
+        )
+        try:
+            return send_to_provider(
+                provider["id"], provider["model"], prompt,
+                {provider["id"]: provider["key"]},
+            ) or ""
+        except Exception as exc:
+            logger.info("geo ask provider %s: %s", provider["id"], exc)
+            return ""
+
+    # -- Tableau de bord -----------------------------------------------
+    def geo_state(self, payload: dict | None = None) -> dict:
+        """Renvoie tout l'état GEO pour la home du module."""
+        root = self._geo_root()
+        provs = self._geo_ai_providers()
+        # Dernier audit / dernière surveillance par site
+        last_audit_by_site: dict[str, dict] = {}
+        for a in root["audits"]:
+            sid = a.get("site_id") or ""
+            cur = last_audit_by_site.get(sid)
+            if not cur or (a.get("ts", "") > cur.get("ts", "")):
+                last_audit_by_site[sid] = a
+        last_run_by_site: dict[str, dict] = {}
+        for r in root["surveillance_runs"]:
+            sid = r.get("site_id") or ""
+            cur = last_run_by_site.get(sid)
+            if not cur or (r.get("ts", "") > cur.get("ts", "")):
+                last_run_by_site[sid] = r
+        sites_out = []
+        for s in root["sites"]:
+            sid = s["id"]
+            la = last_audit_by_site.get(sid)
+            lr = last_run_by_site.get(sid)
+            sites_out.append({
+                **s,
+                "questions_count": len(root["questions"].get(sid, []) or []),
+                "last_audit_score": la.get("score") if la else None,
+                "last_audit_ts":    la.get("ts") if la else None,
+                "last_run_score":   lr.get("score") if lr else None,
+                "last_run_ts":      lr.get("ts") if lr else None,
+            })
+        return {
+            "ok": True,
+            "sites": sites_out,
+            "providers": [{"id": p["id"], "label": p["label"], "model": p["model"]} for p in provs],
+            "providers_count": len(provs),
+            "totals": {
+                "sites":       len(root["sites"]),
+                "audits":      len(root["audits"]),
+                "surveillance":len(root["surveillance_runs"]),
+                "reputation":  len(root["reputation_runs"]),
+                "generated":   len(root["generated"]),
+            },
+        }
+
+    # -- Sites suivis --------------------------------------------------
+    def geo_sites(self, payload: dict | None = None) -> dict:
+        return {"ok": True, "sites": self._geo_root()["sites"]}
+
+    def geo_site_add(self, payload: dict) -> dict:
+        p = payload or {}
+        url = self._geo_normalize_url(p.get("url") or "")
+        if not url:
+            return {"ok": False, "error": "URL requise"}
+        domain = self._geo_domain(url)
+        if not domain:
+            return {"ok": False, "error": "URL invalide"}
+        name = (p.get("name") or "").strip() or domain
+        brand = (p.get("brand") or "").strip() or domain.split(".")[0].capitalize()
+        root = self._geo_root()
+        # Refuse doublon URL
+        for s in root["sites"]:
+            if (s.get("url") or "").rstrip("/") == url.rstrip("/"):
+                return {"ok": False, "error": "Ce site est déjà dans ta liste."}
+        site = {
+            "id":         self._geo_uid(),
+            "name":       name,
+            "url":        url,
+            "brand":      brand,
+            "domain":     domain,
+            "created_at": self._geo_now(),
+        }
+        root["sites"].append(site)
+        self._geo_save()
+        return {"ok": True, "site": site}
+
+    def geo_site_remove(self, payload: dict) -> dict:
+        sid = (payload or {}).get("id") or ""
+        if not sid:
+            return {"ok": False, "error": "id requis"}
+        root = self._geo_root()
+        before = len(root["sites"])
+        root["sites"] = [s for s in root["sites"] if s.get("id") != sid]
+        if len(root["sites"]) == before:
+            return {"ok": False, "error": "Site introuvable"}
+        # Nettoie les questions associées
+        root["questions"].pop(sid, None)
+        self._geo_save()
+        return {"ok": True}
+
+    # -- Audit GEO d'une page ------------------------------------------
+    def geo_audit(self, payload: dict) -> dict:
+        """Analyse une URL et calcule un score GEO sur 100."""
+        p = payload or {}
+        url = self._geo_normalize_url(p.get("url") or "")
+        if not url:
+            return {"ok": False, "error": "URL requise"}
+        site_id = (p.get("site_id") or "").strip() or None
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+        except ImportError:
+            return {"ok": False, "error": "Modules requests/bs4 manquants côté serveur."}
+        # Fetch
+        try:
+            r = requests.get(url, timeout=15, headers={
+                "User-Agent": "Mozilla/5.0 (Triskell GEO Audit) requests",
+            })
+            html = r.text or ""
+            status = r.status_code
+        except Exception as exc:
+            return {"ok": False, "error": f"Impossible de charger la page : {exc}"}
+        if status >= 400 or not html:
+            return {"ok": False, "error": f"Page inaccessible (HTTP {status})."}
+        soup = BeautifulSoup(html, "html.parser")
+        # Retire scripts/styles pour analyse de texte
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        text = soup.get_text(" ", strip=True)
+        words = [w for w in text.split() if w]
+        word_count = len(words)
+        # Title / meta description
+        title = (soup.title.get_text(strip=True) if soup.title else "")
+        meta_desc = ""
+        m = soup.find("meta", attrs={"name": "description"})
+        if m and m.get("content"):
+            meta_desc = m["content"].strip()
+        # Headings
+        h1s = soup.find_all("h1")
+        h2s = soup.find_all("h2")
+        h3s = soup.find_all("h3")
+        # FAQ / questions
+        all_h = soup.find_all(["h1", "h2", "h3", "h4"])
+        question_headings = [h for h in all_h
+                             if (h.get_text(strip=True) or "").endswith("?")]
+        faq_block_present = any(
+            (h.get("id") or "").lower().find("faq") >= 0 or
+            "faq" in " ".join((h.get("class") or [])).lower()
+            for h in all_h
+        ) or len(question_headings) >= 2
+        # Listes / tables
+        lists = soup.find_all(["ul", "ol"])
+        tables = soup.find_all("table")
+        # JSON-LD structured data
+        jsonlds = soup.find_all("script", attrs={"type": "application/ld+json"})
+        has_faqpage = False
+        has_article = False
+        has_organization = False
+        for s in jsonlds:
+            t = (s.string or "").lower()
+            if "faqpage" in t: has_faqpage = True
+            if "\"article\"" in t or "newsarticle" in t: has_article = True
+            if "organization" in t: has_organization = True
+        # Chiffres / dates / sources
+        import re as _re
+        nb_numbers = len(_re.findall(r"\b\d{2,}(?:[.,]\d+)?\b", text))
+        nb_outlinks = 0
+        domain = self._geo_domain(url)
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if href.startswith(("http://", "https://")) and domain not in href:
+                nb_outlinks += 1
+        # OpenGraph + Twitter card
+        og_present = bool(soup.find("meta", attrs={"property": "og:title"}))
+        # ------- Scoring (0..100) ----------
+        findings: list[dict] = []
+        score = 0
+
+        def add(ok_level: str, label: str, advice: str, pts: int):
+            nonlocal score
+            findings.append({
+                "status": ok_level,  # "ok" | "warn" | "fail"
+                "label":  label,
+                "advice": advice,
+                "points": pts,
+            })
+            if ok_level == "ok":
+                score += pts
+            elif ok_level == "warn":
+                score += max(0, pts // 2)
+
+        # Titre
+        if title and 25 <= len(title) <= 75:
+            add("ok", f"Titre clair ({len(title)} caractères)",
+                "Ton titre est de bonne longueur.", 6)
+        elif title:
+            add("warn", f"Titre trop court ou trop long ({len(title)} caractères)",
+                "Vise entre 25 et 75 caractères pour un titre clair que les IA peuvent reprendre.", 6)
+        else:
+            add("fail", "Pas de titre <title>",
+                "Ajoute une balise <title> claire qui résume la page en une phrase.", 6)
+        # Meta description
+        if meta_desc and 80 <= len(meta_desc) <= 200:
+            add("ok", "Description résumée présente",
+                "Bonne longueur de meta description.", 6)
+        elif meta_desc:
+            add("warn", f"Description présente mais à ajuster ({len(meta_desc)} caractères)",
+                "Vise entre 80 et 200 caractères pour un résumé que les IA peuvent citer.", 6)
+        else:
+            add("fail", "Pas de meta description",
+                "Ajoute un résumé de la page en 80-200 caractères dans <meta name=\"description\">.", 6)
+        # H1
+        if len(h1s) == 1:
+            add("ok", "Un seul titre principal (H1)",
+                "Structure idéale.", 6)
+        elif len(h1s) == 0:
+            add("fail", "Pas de H1",
+                "Ajoute un titre principal H1 qui dit clairement de quoi parle la page.", 6)
+        else:
+            add("warn", f"{len(h1s)} H1 sur la page",
+                "Garde un seul H1 par page pour aider les IA à identifier le sujet principal.", 6)
+        # H2 / structure
+        if len(h2s) >= 2:
+            add("ok", f"{len(h2s)} sous-titres (H2)",
+                "Bonne structuration en sections.", 6)
+        elif len(h2s) == 1:
+            add("warn", "Un seul sous-titre H2",
+                "Ajoute des H2 pour découper ton contenu en sections claires.", 6)
+        else:
+            add("fail", "Pas de sous-titres H2",
+                "Découpe ton contenu en sections avec des H2 pour que les IA puissent extraire chaque sujet.", 6)
+        # FAQ
+        if faq_block_present:
+            add("ok", "FAQ détectée sur la page",
+                "Excellent format pour être cité par les IA.", 12)
+        else:
+            add("fail", "Pas de FAQ détectée",
+                "Ajoute une section FAQ avec 3-6 questions concrètes (titres terminant par '?'). Les IA adorent les citer.", 12)
+        # JSON-LD
+        if has_faqpage:
+            add("ok", "Balisage FAQPage (JSON-LD)",
+                "Tes questions sont reconnues comme une vraie FAQ structurée.", 10)
+        elif jsonlds:
+            add("warn", "Données structurées présentes mais pas de FAQPage",
+                "Ajoute un bloc JSON-LD de type FAQPage pour que ta FAQ soit lue comme une FAQ par les IA.", 10)
+        else:
+            add("fail", "Pas de données structurées (JSON-LD)",
+                "Ajoute un bloc JSON-LD (Article, Organization, ou FAQPage) pour décrire ta page aux IA.", 10)
+        # Listes
+        if len(lists) >= 1:
+            add("ok", f"{len(lists)} liste(s) à puces",
+                "Les listes à puces sont très bien reprises par les IA.", 6)
+        else:
+            add("fail", "Pas de liste à puces",
+                "Ajoute au moins une liste à puces (avantages, étapes, critères…) — les IA citent facilement les listes.", 6)
+        # Tables
+        if len(tables) >= 1:
+            add("ok", "Au moins un tableau",
+                "Les tableaux comparatifs sont très cités par les IA.", 4)
+        else:
+            add("warn", "Pas de tableau",
+                "Un tableau comparatif (prix, options, dates…) augmente fortement les chances d'être cité.", 4)
+        # Chiffres / faits
+        if nb_numbers >= 5:
+            add("ok", f"{nb_numbers} chiffres / dates dans le texte",
+                "Les IA adorent les chiffres et dates concrets.", 6)
+        elif nb_numbers >= 1:
+            add("warn", f"Peu de chiffres ({nb_numbers})",
+                "Ajoute plus de chiffres concrets (prix, années, statistiques) — c'est ce que les IA citent en premier.", 6)
+        else:
+            add("fail", "Aucun chiffre concret",
+                "Sans chiffres ni dates, ta page reste vague pour une IA. Ajoute des données factuelles.", 6)
+        # Liens sortants (sources)
+        if nb_outlinks >= 2:
+            add("ok", f"{nb_outlinks} sources externes citées",
+                "Citer ses sources renforce la confiance des IA.", 4)
+        elif nb_outlinks == 1:
+            add("warn", "Une seule source externe",
+                "Ajoute 2-3 liens vers des sources reconnues (Wikipedia, sites officiels) pour gagner en crédibilité IA.", 4)
+        else:
+            add("fail", "Aucune source externe",
+                "Cite 2-3 sources externes fiables pour que les IA voient ta page comme sourcée.", 4)
+        # Volume de texte
+        if word_count >= 600:
+            add("ok", f"Contenu fourni ({word_count} mots)",
+                "Bon volume.", 6)
+        elif word_count >= 250:
+            add("warn", f"Contenu un peu court ({word_count} mots)",
+                "Vise au moins 600 mots pour donner aux IA de la matière à citer.", 6)
+        else:
+            add("fail", f"Contenu très court ({word_count} mots)",
+                "Une page de moins de 250 mots est rarement citée. Étoffe ton contenu.", 6)
+        # OpenGraph (compte un peu)
+        if og_present:
+            add("ok", "Métas Open Graph présentes",
+                "Bien pour les partages et la cohérence des IA.", 4)
+        else:
+            add("warn", "Pas de métas Open Graph",
+                "Ajoute des balises og:title / og:description pour homogénéiser la lecture par les IA.", 4)
+        # Organization JSON-LD
+        if has_organization or has_article:
+            add("ok", "Schema Organization/Article détecté",
+                "Aide les IA à comprendre qui édite la page.", 4)
+        else:
+            add("warn", "Pas de schema Organization",
+                "Ajoute un JSON-LD Organization pour que les IA identifient clairement la marque éditrice.", 4)
+
+        score = max(0, min(100, score))
+        # Sauvegarde
+        root = self._geo_root()
+        audit = {
+            "id":       self._geo_uid(),
+            "site_id":  site_id,
+            "url":      url,
+            "ts":       self._geo_now(),
+            "score":    score,
+            "findings": findings,
+            "stats": {
+                "word_count": word_count,
+                "title_len":  len(title),
+                "meta_desc_len": len(meta_desc),
+                "h1": len(h1s), "h2": len(h2s), "h3": len(h3s),
+                "lists": len(lists), "tables": len(tables),
+                "numbers": nb_numbers, "outlinks": nb_outlinks,
+                "jsonld": len(jsonlds), "faqpage": has_faqpage,
+            },
+        }
+        root["audits"].insert(0, audit)
+        # Plafonne l'historique
+        root["audits"] = root["audits"][:200]
+        self._geo_save()
+        return {"ok": True, "audit": audit}
+
+    def geo_audit_history(self, payload: dict | None = None) -> dict:
+        sid = ((payload or {}).get("site_id") or "").strip()
+        root = self._geo_root()
+        if sid:
+            items = [a for a in root["audits"] if a.get("site_id") == sid]
+        else:
+            items = root["audits"]
+        return {"ok": True, "audits": items[:50]}
+
+    # -- Questions surveillées -----------------------------------------
+    def geo_questions(self, payload: dict) -> dict:
+        sid = ((payload or {}).get("site_id") or "").strip()
+        if not sid:
+            return {"ok": False, "error": "site_id requis"}
+        root = self._geo_root()
+        return {"ok": True, "questions": root["questions"].get(sid, []) or []}
+
+    def geo_question_add(self, payload: dict) -> dict:
+        p = payload or {}
+        sid = (p.get("site_id") or "").strip()
+        text = (p.get("text") or "").strip()
+        if not sid or not text:
+            return {"ok": False, "error": "site_id et text requis"}
+        root = self._geo_root()
+        if sid not in root["questions"]:
+            root["questions"][sid] = []
+        q = {"id": self._geo_uid(), "text": text}
+        root["questions"][sid].append(q)
+        self._geo_save()
+        return {"ok": True, "question": q}
+
+    def geo_question_remove(self, payload: dict) -> dict:
+        p = payload or {}
+        sid = (p.get("site_id") or "").strip()
+        qid = (p.get("id") or "").strip()
+        if not sid or not qid:
+            return {"ok": False, "error": "site_id et id requis"}
+        root = self._geo_root()
+        arr = root["questions"].get(sid) or []
+        before = len(arr)
+        root["questions"][sid] = [q for q in arr if q.get("id") != qid]
+        if len(root["questions"][sid]) == before:
+            return {"ok": False, "error": "Question introuvable"}
+        self._geo_save()
+        return {"ok": True}
+
+    # -- Surveillance dans les IA --------------------------------------
+    def geo_surveillance_run(self, payload: dict) -> dict:
+        """Pose toutes les questions du site à toutes les IA configurées,
+        et regarde si le site/la marque est cité dans la réponse."""
+        sid = ((payload or {}).get("site_id") or "").strip()
+        if not sid:
+            return {"ok": False, "error": "site_id requis"}
+        root = self._geo_root()
+        site = next((s for s in root["sites"] if s.get("id") == sid), None)
+        if not site:
+            return {"ok": False, "error": "Site introuvable"}
+        questions = root["questions"].get(sid) or []
+        if not questions:
+            return {"ok": False, "error":
+                    "Ajoute au moins une question à surveiller avant de lancer."}
+        providers = self._geo_ai_providers()
+        if not providers:
+            return {"ok": False, "error":
+                    "Aucune IA configurée. Va dans Réglages pour ajouter au moins une clé "
+                    "(Anthropic, OpenAI, Google…)."}
+        domain = (site.get("domain") or "").lower()
+        brand = (site.get("brand") or "").lower()
+        results: list[dict] = []
+        cited_count = 0
+        total = 0
+        for q in questions:
+            for prov in providers:
+                total += 1
+                answer = self._geo_ask_provider(prov, q["text"])
+                answer_lower = (answer or "").lower()
+                cited = bool(answer) and (
+                    (domain and domain in answer_lower) or
+                    (brand and len(brand) >= 3 and brand in answer_lower)
+                )
+                if cited:
+                    cited_count += 1
+                # Extrait un snippet autour de la mention
+                snippet = ""
+                if cited:
+                    idx = -1
+                    for needle in (domain, brand):
+                        if needle and needle in answer_lower:
+                            idx = answer_lower.find(needle)
+                            break
+                    if idx >= 0:
+                        start = max(0, idx - 80)
+                        end = min(len(answer), idx + 160)
+                        snippet = answer[start:end].strip()
+                        if start > 0:    snippet = "…" + snippet
+                        if end < len(answer): snippet = snippet + "…"
+                results.append({
+                    "question":  q["text"],
+                    "provider":  prov["id"],
+                    "provider_label": prov["label"],
+                    "cited":     cited,
+                    "snippet":   snippet,
+                    "answer_preview": (answer or "")[:400],
+                })
+        score = int(round((cited_count / total) * 100)) if total else 0
+        run = {
+            "id":      self._geo_uid(),
+            "site_id": sid,
+            "ts":      self._geo_now(),
+            "score":   score,
+            "cited":   cited_count,
+            "total":   total,
+            "results": results,
+        }
+        root["surveillance_runs"].insert(0, run)
+        root["surveillance_runs"] = root["surveillance_runs"][:200]
+        self._geo_save()
+        return {"ok": True, "run": run}
+
+    def geo_surveillance_history(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        sid = (p.get("site_id") or "").strip()
+        root = self._geo_root()
+        runs = root["surveillance_runs"]
+        if sid:
+            runs = [r for r in runs if r.get("site_id") == sid]
+        return {"ok": True, "runs": runs[:30]}
+
+    # -- Générateur de contenu GEO -------------------------------------
+    def geo_generate(self, payload: dict) -> dict:
+        p = payload or {}
+        topic = (p.get("topic") or "").strip()
+        kind = (p.get("kind") or "faq").strip().lower()
+        if not topic:
+            return {"ok": False, "error": "Sujet requis"}
+        providers = self._geo_ai_providers()
+        if not providers:
+            return {"ok": False, "error":
+                    "Aucune IA configurée. Va dans Réglages pour ajouter une clé "
+                    "(Anthropic en priorité)."}
+        # Priorise Anthropic
+        prov = next((p for p in providers if p["id"] == "anthropic"), providers[0])
+        kind_instructions = {
+            "faq": (
+                "Format : une FAQ de 5 à 7 questions concrètes que se posent "
+                "vraiment les internautes sur le sujet, avec une réponse "
+                "courte (3-5 phrases) pour chacune. Style direct, pas de "
+                "blabla marketing. Chiffres ou dates si pertinent."
+            ),
+            "definition": (
+                "Format : une définition claire en 1-2 phrases en tête, puis "
+                "un développement structuré : Pourquoi c'est important, Comment "
+                "ça marche, Limites/risques. Chaque section = 3-5 phrases. "
+                "Termine par 3 chiffres clés ou faits factuels."
+            ),
+            "guide": (
+                "Format : un guide pratique étape par étape. Introduction en "
+                "2 phrases. Puis 5-7 étapes numérotées avec un titre court et "
+                "une explication de 2-4 phrases. Termine par 3 erreurs à éviter."
+            ),
+            "comparison": (
+                "Format : un comparatif clair. Brève intro en 2 phrases. Puis "
+                "un tableau markdown avec 4-6 colonnes de critères et 2-4 "
+                "lignes. Pour chaque option, une recommandation finale en 2 "
+                "phrases. Pas de favoritisme."
+            ),
+        }.get(kind, "")
+        if not kind_instructions:
+            kind = "faq"
+            kind_instructions = (
+                "Format : une FAQ de 5 à 7 questions concrètes avec réponses "
+                "courtes et factuelles."
+            )
+        prompt = (
+            "Tu rédiges du contenu optimisé GEO (Generative Engine "
+            "Optimization) : du texte que les IA génératives comme ChatGPT, "
+            "Claude, Gemini ou Perplexity adorent citer dans leurs réponses.\n\n"
+            "Règles d'écriture GEO :\n"
+            "- Phrases courtes, claires, factuelles.\n"
+            "- Définitions nettes et chiffres concrets.\n"
+            "- Structure visible (titres, listes, tableaux).\n"
+            "- Pas de superlatifs marketing (« incroyable », « unique »).\n"
+            "- Réponses directes : la première phrase doit déjà répondre.\n"
+            "- Cite des sources ou des chiffres précis si tu en connais.\n\n"
+            f"Sujet : {topic}\n\n"
+            f"{kind_instructions}\n\n"
+            "Rends uniquement le contenu final, en Markdown propre, prêt à "
+            "coller sur un site. Pas d'introduction du genre « voici le "
+            "contenu » : juste le contenu."
+        )
+        try:
+            from triskell_core.ai.providers import send_to_provider
+            content = send_to_provider(
+                prov["id"], prov["model"], prompt,
+                {prov["id"]: prov["key"]},
+            ) or ""
+        except Exception as exc:
+            return {"ok": False, "error": f"L'IA n'a pas répondu : {exc}"}
+        content = (content or "").strip()
+        if not content:
+            return {"ok": False, "error": "L'IA a renvoyé un contenu vide."}
+        item = {
+            "id":      self._geo_uid(),
+            "topic":   topic,
+            "kind":    kind,
+            "content": content,
+            "ts":      self._geo_now(),
+            "provider": prov["label"],
+        }
+        root = self._geo_root()
+        root["generated"].insert(0, item)
+        root["generated"] = root["generated"][:50]
+        self._geo_save()
+        return {"ok": True, "item": item}
+
+    def geo_generated_list(self, payload: dict | None = None) -> dict:
+        return {"ok": True, "items": self._geo_root()["generated"][:30]}
+
+    def geo_generated_remove(self, payload: dict) -> dict:
+        gid = ((payload or {}).get("id") or "").strip()
+        if not gid:
+            return {"ok": False, "error": "id requis"}
+        root = self._geo_root()
+        before = len(root["generated"])
+        root["generated"] = [g for g in root["generated"] if g.get("id") != gid]
+        if len(root["generated"]) == before:
+            return {"ok": False, "error": "Contenu introuvable"}
+        self._geo_save()
+        return {"ok": True}
+
+    # -- Réputation -----------------------------------------------------
+    def geo_reputation_run(self, payload: dict) -> dict:
+        brand = ((payload or {}).get("brand") or "").strip()
+        if not brand:
+            return {"ok": False, "error": "Marque requise"}
+        providers = self._geo_ai_providers()
+        if not providers:
+            return {"ok": False, "error":
+                    "Aucune IA configurée. Va dans Réglages pour ajouter une clé."}
+        questions = [
+            f"Que sais-tu sur {brand} ? Décris cette marque/entreprise objectivement.",
+            f"Quelle est la réputation de {brand} ?",
+            f"Faut-il faire confiance à {brand} ? Y a-t-il des plaintes ou critiques publiques ?",
+            f"Quels sont les principaux concurrents de {brand} ?",
+            f"Que disent les avis clients sur {brand} ?",
+        ]
+        results: list[dict] = []
+        # Note de sentiment ultra-simple : mots positifs/négatifs
+        pos_words = ("recommandé", "sérieux", "fiable", "qualité", "rapide",
+                     "professionnel", "bon", "excellent", "positif", "satisfait",
+                     "apprécié", "leader", "innovant", "respecté")
+        neg_words = ("plainte", "arnaque", "scam", "frauduleux", "litige",
+                     "négatif", "mauvais", "déçu", "problème", "controverse",
+                     "critique", "douteux", "inconnu", "aucune information")
+        pos_hits = 0
+        neg_hits = 0
+        known_hits = 0
+        total = 0
+        for q in questions:
+            for prov in providers:
+                total += 1
+                ans = self._geo_ask_provider(prov, q)
+                low = (ans or "").lower()
+                # Considère "connu" si la réponse mentionne la marque ou n'est pas vide+courte
+                is_known = bool(ans) and (
+                    brand.lower() in low or len(low) > 200
+                )
+                if is_known and "ne connais pas" not in low and "aucune information" not in low:
+                    known_hits += 1
+                pos = sum(1 for w in pos_words if w in low)
+                neg = sum(1 for w in neg_words if w in low)
+                pos_hits += pos
+                neg_hits += neg
+                results.append({
+                    "question":       q,
+                    "provider":       prov["id"],
+                    "provider_label": prov["label"],
+                    "known":          is_known,
+                    "positive_hits":  pos,
+                    "negative_hits":  neg,
+                    "answer":         (ans or "")[:1200],
+                })
+        # Score de 0 à 100 : visibilité (50%) + sentiment (50%)
+        visibility = int(round((known_hits / total) * 50)) if total else 0
+        # Sentiment de -50 à +50 puis recentré à 0..50
+        diff = pos_hits - neg_hits
+        sentiment = max(-50, min(50, diff * 5))
+        sentiment_score = 25 + sentiment // 2  # 0..50
+        score = max(0, min(100, visibility + sentiment_score))
+        run = {
+            "id":       self._geo_uid(),
+            "brand":    brand,
+            "ts":       self._geo_now(),
+            "score":    score,
+            "visibility": visibility * 2,   # affiché /100
+            "positive_hits": pos_hits,
+            "negative_hits": neg_hits,
+            "known": known_hits,
+            "total": total,
+            "results": results,
+        }
+        root = self._geo_root()
+        root["reputation_runs"].insert(0, run)
+        root["reputation_runs"] = root["reputation_runs"][:100]
+        self._geo_save()
+        return {"ok": True, "run": run}
+
+    def geo_reputation_history(self, payload: dict | None = None) -> dict:
+        p = payload or {}
+        brand = (p.get("brand") or "").strip()
+        root = self._geo_root()
+        runs = root["reputation_runs"]
+        if brand:
+            runs = [r for r in runs if (r.get("brand") or "").lower() == brand.lower()]
+        return {"ok": True, "runs": runs[:30]}
+
 
 # Libellés humains pour les presets (séparés pour ne pas alourdir le module
 # intégration qui doit rester pur code métier).

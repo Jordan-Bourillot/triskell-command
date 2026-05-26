@@ -437,6 +437,7 @@ const App = {
       case 'eliks':     return this._renderEliksStudio(target);
       case 'clients_master': return ClientsMaster.render(target);
       case 'phare':     return Phare.render(target);
+      case 'geo':       return GEO.render(target);
       case 'wow':       return Wow.render(target);
       case 'rankus':    return Rankus.render(target);
       case 'lagriffe':  return Lagriffe.render(target);
