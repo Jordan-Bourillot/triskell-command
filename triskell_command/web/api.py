@@ -8459,7 +8459,7 @@ class Api:
         labels = {
             "anthropic":  "Claude (Anthropic)",
             "openai":     "ChatGPT (OpenAI)",
-            "google":     "Gemini (Google)",
+            "google":     "Gemini (Google, mode web)",
             "mistral":    "Mistral",
             "xai":        "Grok (xAI)",
             "perplexity": "Perplexity (mode web)",
@@ -8476,7 +8476,14 @@ class Api:
         return provs
 
     def _geo_ask_provider(self, provider: dict, question: str) -> str:
-        """Pose une question à un provider IA, renvoie la réponse texte."""
+        """Pose une question à un provider IA, renvoie la réponse texte.
+
+        Pour la surveillance GEO, on essaie d'utiliser la recherche web
+        quand le provider la supporte (Perplexity natif, Gemini via
+        Google Search Grounding), parce que c'est ça qu'on veut tester :
+        ce que voit un internaute qui pose la question dans une IA branchée
+        au web.
+        """
         prompt = (
             "Tu es une IA grand public que des utilisateurs interrogent "
             "tous les jours. Réponds à la question ci-dessous comme tu le "
@@ -8485,11 +8492,17 @@ class Api:
             "pas, ne flatte personne, sois utile.\n\n"
             f"Question : {question.strip()}\n\nTa réponse :"
         )
-        # Perplexity : appel direct (pas dans triskell_core), mode "sonar"
-        # qui fait une vraie recherche web — c'est l'IA la plus "fraîche"
-        # pour le GEO.
+        # Perplexity : appel direct, mode "sonar" qui fait une vraie
+        # recherche web — l'IA la plus "fraîche" pour le GEO.
         if provider["id"] == "perplexity":
             return self._geo_ask_perplexity(provider, prompt)
+        # Gemini : appel direct AVEC la recherche Google activée pour les
+        # surveillances (le "send_to_provider" standard n'expose pas l'option).
+        if provider["id"] == "google":
+            txt = self._geo_ask_gemini_with_search(provider, prompt)
+            if txt:
+                return txt
+            # Fallback : si la recherche échoue, on tente l'appel classique
         # Autres providers : passe par le coeur partagé
         try:
             from triskell_core.ai.providers import send_to_provider
@@ -8502,6 +8515,49 @@ class Api:
             ) or ""
         except Exception as exc:
             logger.info("geo ask provider %s: %s", provider["id"], exc)
+            return ""
+
+    def _geo_ask_gemini_with_search(self, provider: dict, prompt: str) -> str:
+        """Appel Gemini avec Google Search Grounding activé : Gemini va
+        chercher sur Google avant de répondre. Permet de tester le GEO
+        comme avec Perplexity, mais gratuit.
+        Modèles compatibles : gemini-2.0-* et gemini-2.5-*.
+        """
+        try:
+            import requests
+            model = provider.get("model") or "gemini-2.5-flash"
+            url = (f"https://generativelanguage.googleapis.com/v1beta/"
+                   f"models/{model}:generateContent")
+            r = requests.post(
+                url,
+                params={"key": provider["key"]},
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [
+                        {"parts": [{"text": prompt}], "role": "user"}
+                    ],
+                    # Tool "google_search" = recherche web native Gemini 2.x
+                    "tools": [{"google_search": {}}],
+                    "generationConfig": {
+                        "temperature": 0.4,
+                        "maxOutputTokens": 1500,
+                    },
+                },
+                timeout=40,
+            )
+            if r.status_code >= 400:
+                logger.info("gemini search HTTP %s: %s",
+                            r.status_code, r.text[:200])
+                return ""
+            data = r.json()
+            cands = data.get("candidates") or []
+            if not cands:
+                return ""
+            parts = (cands[0].get("content") or {}).get("parts") or []
+            text = "".join((p.get("text") or "") for p in parts)
+            return text or ""
+        except Exception as exc:
+            logger.info("gemini search exception: %s", exc)
             return ""
 
     def _geo_ask_perplexity(self, provider: dict, prompt: str) -> str:
