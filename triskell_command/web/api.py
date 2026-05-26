@@ -8566,6 +8566,41 @@ class Api:
         self._geo_save()
         return {"ok": True}
 
+    def geo_site_update(self, payload: dict) -> dict:
+        """Met à jour le nom, l'URL ou la marque d'un site déjà enregistré."""
+        p = payload or {}
+        sid = (p.get("id") or "").strip()
+        if not sid:
+            return {"ok": False, "error": "id requis"}
+        root = self._geo_root()
+        site = next((s for s in root["sites"] if s.get("id") == sid), None)
+        if not site:
+            return {"ok": False, "error": "Site introuvable"}
+        # URL : normalisée et validée
+        if "url" in p:
+            new_url = self._geo_normalize_url(p.get("url") or "")
+            if not new_url:
+                return {"ok": False, "error": "URL invalide"}
+            domain = self._geo_domain(new_url)
+            if not domain:
+                return {"ok": False, "error": "URL invalide"}
+            # Empêche les doublons (sauf le site lui-même)
+            for s in root["sites"]:
+                if s.get("id") == sid:
+                    continue
+                if (s.get("url") or "").rstrip("/") == new_url.rstrip("/"):
+                    return {"ok": False, "error":
+                            "Un autre site enregistré utilise déjà cette adresse."}
+            site["url"] = new_url
+            site["domain"] = domain
+        if "name" in p:
+            site["name"] = (p.get("name") or "").strip() or site.get("domain") or "Site"
+        if "brand" in p:
+            brand = (p.get("brand") or "").strip()
+            site["brand"] = brand or (site.get("domain", "").split(".")[0].capitalize())
+        self._geo_save()
+        return {"ok": True, "site": site}
+
     # -- Audit GEO d'une page ------------------------------------------
     def geo_audit(self, payload: dict) -> dict:
         """Analyse une URL et calcule un score GEO sur 100."""

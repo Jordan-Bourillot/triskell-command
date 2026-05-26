@@ -291,12 +291,16 @@ const GEO = {
           <div>
             <div class="hero-kicker">SITE SURVEILLÉ</div>
             <h2 class="geo-card-title">${this._esc(site.name)}</h2>
-            <p class="geo-card-sub">${this._esc(site.url)}</p>
+            <p class="geo-card-sub">${this._esc(site.url)} <span class="geo-site-brand-inline">· marque suivie : <strong>${this._esc(site.brand)}</strong></span></p>
           </div>
-          <button id="geo-run-now" class="btn btn-primary"
-                  ${qs.length === 0 ? 'disabled title="Ajoute au moins une question"' : ''}>
-            🚀 Lancer la surveillance maintenant
-          </button>
+          <div class="geo-site-actions">
+            <button id="geo-edit-site" class="btn btn-secondary" title="Modifier le site">✎ Modifier</button>
+            <button id="geo-del-site"  class="btn btn-secondary geo-btn-danger" title="Supprimer le site">🗑 Supprimer</button>
+            <button id="geo-run-now" class="btn btn-primary"
+                    ${qs.length === 0 ? 'disabled title="Ajoute au moins une question"' : ''}>
+              🚀 Lancer la surveillance
+            </button>
+          </div>
         </div>
         <div id="geo-run-msg" class="geo-msg"></div>
       </div>
@@ -344,6 +348,17 @@ const GEO = {
       this._renderBody();
     };
     document.getElementById('geo-run-now').onclick = () => this._runSurveillance(site);
+    document.getElementById('geo-edit-site').onclick = () => this._openSiteDialog(site);
+    document.getElementById('geo-del-site').onclick = async () => {
+      if (!confirm(`Supprimer définitivement ${site.name} ?\n\nLes questions et l'historique seront effacés.`)) return;
+      const r = await App.api.geo_site_remove({ id: site.id });
+      if (r && r.ok) {
+        this._selectedSiteId = null;
+        this._renderBody();
+      } else {
+        alert((r && r.error) || 'Erreur');
+      }
+    };
     const addBtn = document.getElementById('geo-qadd-btn');
     const addInp = document.getElementById('geo-qadd');
     const doAdd = async () => {
@@ -463,29 +478,33 @@ const GEO = {
     `;
   },
 
-  _openAddSiteDialog() {
-    // Simple dialog modal inline
+  _openAddSiteDialog() { this._openSiteDialog(null); },
+
+  _openSiteDialog(existing) {
+    // Si `existing` est fourni, on est en mode édition (préremplit, met à jour).
+    // Sinon on ajoute un nouveau site.
+    const isEdit = !!existing;
     const overlay = document.createElement('div');
     overlay.className = 'geo-modal-overlay';
     overlay.innerHTML = `
       <div class="geo-modal">
-        <h3 class="geo-modal-title">Ajouter un site</h3>
-        <p class="geo-modal-sub">Donne l'adresse du site à suivre. Tout le reste est optionnel.</p>
+        <h3 class="geo-modal-title">${isEdit ? 'Modifier le site' : 'Ajouter un site'}</h3>
+        <p class="geo-modal-sub">${isEdit ? 'Change ce que tu veux. Les questions et l\'historique restent.' : 'Donne l\'adresse du site à suivre. Tout le reste est optionnel.'}</p>
         <div class="geo-form-col">
           <label class="geo-label">Adresse du site</label>
           <input id="geo-newsite-url" type="url" class="geo-input"
-                 placeholder="https://exemple.fr" />
+                 placeholder="https://exemple.fr" value="${this._esc(existing?.url || '')}" />
           <label class="geo-label mt-3">Nom court (optionnel)</label>
           <input id="geo-newsite-name" type="text" class="geo-input"
-                 placeholder="ex : Mon café à Lyon" />
+                 placeholder="ex : Mon café à Lyon" value="${this._esc(existing?.name || '')}" />
           <label class="geo-label mt-3">Marque à surveiller (optionnel)</label>
           <input id="geo-newsite-brand" type="text" class="geo-input"
-                 placeholder="ex : Café du Centre" />
+                 placeholder="ex : Café du Centre" value="${this._esc(existing?.brand || '')}" />
         </div>
         <div id="geo-newsite-msg" class="geo-msg"></div>
         <div class="geo-modal-actions">
           <button class="btn btn-secondary" id="geo-newsite-cancel">Annuler</button>
-          <button class="btn btn-primary" id="geo-newsite-ok">Ajouter</button>
+          <button class="btn btn-primary" id="geo-newsite-ok">${isEdit ? 'Enregistrer' : 'Ajouter'}</button>
         </div>
       </div>
     `;
@@ -499,10 +518,21 @@ const GEO = {
       const brand = (document.getElementById('geo-newsite-brand').value || '').trim();
       const msg = document.getElementById('geo-newsite-msg');
       if (!url) { msg.textContent = 'L\'adresse est obligatoire.'; msg.className = 'geo-msg geo-msg--warn'; return; }
-      msg.textContent = 'Ajout…';
-      const r = await App.api.geo_site_add({ url, name, brand });
-      if (r && r.ok) { close(); this._renderBody(); }
-      else { msg.textContent = (r && r.error) || 'Erreur'; msg.className = 'geo-msg geo-msg--err'; }
+      msg.textContent = isEdit ? 'Enregistrement…' : 'Ajout…';
+      let r;
+      if (isEdit) {
+        r = await App.api.geo_site_update({ id: existing.id, url, name, brand });
+      } else {
+        r = await App.api.geo_site_add({ url, name, brand });
+      }
+      if (r && r.ok) {
+        close();
+        // En édition on garde le site ouvert (selectedSiteId reste valide)
+        this._renderBody();
+      } else {
+        msg.textContent = (r && r.error) || 'Erreur';
+        msg.className = 'geo-msg geo-msg--err';
+      }
     };
     setTimeout(() => document.getElementById('geo-newsite-url').focus(), 60);
   },

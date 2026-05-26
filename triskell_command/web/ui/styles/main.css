@@ -4430,3 +4430,20 @@ html, body {
 .geo-rep-score--warn { color: hsl(var(--warning)); background: hsl(var(--warning) / 0.12); }
 .geo-rep-score--bad  { color: hsl(var(--danger));  background: hsl(var(--danger)  / 0.12); }
 
+/* -- Actions sur la fiche d'un site suivi (modifier / supprimer / lancer) -- */
+.geo-site-actions {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  align-items: center; justify-content: flex-end;
+}
+.geo-btn-danger { color: hsl(var(--danger)); }
+.geo-btn-danger:hover {
+  background: hsl(var(--danger) / 0.10);
+  border-color: hsl(var(--danger));
+  color: hsl(var(--danger));
+}
+.geo-site-brand-inline {
+  color: hsl(var(--text-muted));
+  font-size: 13px;
+  margin-left: 8px;
+}
+
