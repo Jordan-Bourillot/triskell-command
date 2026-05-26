@@ -8547,6 +8547,32 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def chasseur_createurs_download_xlsx(self, payload: dict) -> dict:
+        """Génère un fichier Excel (.xlsx) et le renvoie en base64 pour
+        téléchargement côté navigateur.
+        """
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import chasseur_createurs
+            res = chasseur_createurs.export_xlsx(hid)
+            if not res.get("ok"):
+                return res
+            import base64
+            from pathlib import Path as _P
+            xlsx_path = _P(res["path"])
+            data = xlsx_path.read_bytes()
+            return {
+                "ok": True,
+                "filename": xlsx_path.name,
+                "content_b64": base64.b64encode(data).decode("ascii"),
+                "rows": res.get("rows", 0),
+                "path": res["path"],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ------------------------------------------------------------------
     # Prospecteur Google — recherche entreprises locales via Google Places
     # ------------------------------------------------------------------
@@ -8645,6 +8671,30 @@ class Api:
                 "ok": True,
                 "filename": csv_path.name,
                 "content": content,
+                "rows": res.get("rows", 0),
+                "path": res["path"],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def prospecteur_google_download_xlsx(self, payload: dict) -> dict:
+        """Génère un fichier Excel (.xlsx) et le renvoie en base64."""
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import prospecteur_google
+            res = prospecteur_google.export_xlsx(hid)
+            if not res.get("ok"):
+                return res
+            import base64
+            from pathlib import Path as _P
+            xlsx_path = _P(res["path"])
+            data = xlsx_path.read_bytes()
+            return {
+                "ok": True,
+                "filename": xlsx_path.name,
+                "content_b64": base64.b64encode(data).decode("ascii"),
                 "rows": res.get("rows", 0),
                 "path": res["path"],
             }

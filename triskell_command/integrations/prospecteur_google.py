@@ -406,6 +406,66 @@ def export_csv(hunt_id: str) -> dict:
     return {"ok": True, "path": str(out), "rows": len(rows)}
 
 
+def export_xlsx(hunt_id: str) -> dict:
+    """Exporte les entreprises d'une recherche en fichier Excel (.xlsx)."""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+    except ImportError:
+        return {"ok": False,
+                "error": "openpyxl manquant — `pip install openpyxl`"}
+    h = ProspectHunt.load(hunt_id)
+    if not h:
+        return {"ok": False, "error": "chasse introuvable"}
+    ensure_dirs()
+    out = EXPORTS_DIR / f"prospects_google_{h.id}.xlsx"
+    rows = h.prospects or []
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Entreprises"
+    headers = ["Nom", "Adresse", "Téléphone", "Site web",
+               "Email principal", "Emails secondaires",
+               "A un site ?", "Statut"]
+    ws.append(headers)
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="EA580C")
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+
+    # Couleur de fond pour mettre en évidence les boîtes SANS site
+    no_site_fill = PatternFill("solid", fgColor="FEF3C7")  # ambre clair
+
+    for p in rows:
+        has_site = bool(p.get("has_website"))
+        ws.append([
+            p.get("name", ""),
+            p.get("address", ""),
+            p.get("phone", ""),
+            p.get("website", ""),
+            p.get("email", ""),
+            "; ".join(p.get("emails_extra", []) or []),
+            "oui" if has_site else "NON",
+            p.get("status", ""),
+        ])
+        # Si pas de site, fond ambre clair pour toute la ligne
+        if not has_site:
+            for cell in ws[ws.max_row]:
+                cell.fill = no_site_fill
+
+    widths = [28, 38, 18, 32, 28, 28, 12, 18]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+
+    ws.freeze_panes = "A2"
+
+    wb.save(out)
+    return {"ok": True, "path": str(out), "rows": len(rows)}
+
+
 def delete_hunt(hunt_id: str) -> dict:
     h = ProspectHunt.load(hunt_id)
     if not h:

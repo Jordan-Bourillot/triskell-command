@@ -428,9 +428,13 @@ const ProspecteurGoogle = {
           <div class="flex items-center gap-2">
             ${this._statusBadge(h.status, isRunning)}
             ${isDone && prospects.length > 0 ? `
-              <button id="pg-export" class="btn btn-primary" title="Télécharger en CSV">
+              <button id="pg-export-xlsx" class="btn btn-primary" title="Télécharger en Excel (.xlsx)">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+                Excel
+              </button>
+              <button id="pg-export" class="btn btn-secondary" title="Télécharger en CSV">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Télécharger CSV
+                CSV
               </button>` : ''}
             <button id="pg-delete" class="btn btn-secondary text-xs">Supprimer</button>
           </div>
@@ -530,6 +534,8 @@ const ProspecteurGoogle = {
 
     const exportBtn = document.getElementById('pg-export');
     if (exportBtn) exportBtn.onclick = () => this._exportCsv();
+    const exportXlsxBtn = document.getElementById('pg-export-xlsx');
+    if (exportXlsxBtn) exportXlsxBtn.onclick = () => this._exportXlsx();
     const delBtn = document.getElementById('pg-delete');
     if (delBtn) delBtn.onclick = () => this._deleteHunt();
   },
@@ -581,6 +587,35 @@ const ProspecteurGoogle = {
       this._toast(`CSV exporté — ${r.rows} lignes`, 'success');
     } catch (e) {
       console.warn('CSV download:', e);
+      this._toast('Téléchargement bloqué par le navigateur', 'danger');
+    }
+  },
+
+  async _exportXlsx() {
+    if (!this.state.currentId) return;
+    const r = await this._api('download_xlsx', {hunt_id: this.state.currentId});
+    if (!r || !r.ok) {
+      this._toast((r && r.error) || 'Export Excel impossible', 'danger');
+      return;
+    }
+    try {
+      const binary = atob(r.content_b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = r.filename || `prospects_google_${this.state.currentId}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      this._toast(`Excel exporté — ${r.rows} lignes`, 'success');
+    } catch (e) {
+      console.warn('XLSX download:', e);
       this._toast('Téléchargement bloqué par le navigateur', 'danger');
     }
   },

@@ -691,6 +691,63 @@ def export_csv(hunt_id: str) -> dict:
     return {"ok": True, "path": str(out), "rows": len(rows)}
 
 
+def export_xlsx(hunt_id: str) -> dict:
+    """Exporte les créateurs d'une chasse en fichier Excel (.xlsx)."""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+    except ImportError as exc:
+        return {"ok": False,
+                "error": "openpyxl manquant — `pip install openpyxl`"}
+    h = CreatorHunt.load(hunt_id)
+    if not h:
+        return {"ok": False, "error": "chasse introuvable"}
+    ensure_dirs()
+    out = EXPORTS_DIR / f"createurs_{h.id}.xlsx"
+    rows = h.creators or []
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Créateurs"
+    headers = ["Plateforme", "Nom", "Abonnés", "Email principal",
+               "Emails secondaires", "URL", "Pays", "Vidéos",
+               "Date création", "Liens externes"]
+    ws.append(headers)
+
+    # Mise en forme de l'entête (gras blanc sur fond orange Triskell)
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="EA580C")
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+
+    for c in rows:
+        ws.append([
+            c.get("platform", ""),
+            c.get("name", ""),
+            c.get("subscribers", 0),
+            c.get("email", ""),
+            "; ".join(c.get("emails_extra", []) or []),
+            c.get("url", ""),
+            c.get("country", ""),
+            c.get("video_count", 0),
+            c.get("created_at", ""),
+            "; ".join(c.get("external_links", []) or []),
+        ])
+
+    # Largeurs de colonnes ajustées au contenu attendu
+    widths = [12, 32, 12, 30, 30, 40, 10, 10, 18, 40]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+
+    # Fige la première ligne pour qu'elle reste visible au scroll
+    ws.freeze_panes = "A2"
+
+    wb.save(out)
+    return {"ok": True, "path": str(out), "rows": len(rows)}
+
+
 def delete_hunt(hunt_id: str) -> dict:
     h = CreatorHunt.load(hunt_id)
     if not h:
