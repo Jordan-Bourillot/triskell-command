@@ -302,8 +302,17 @@ const GEO = {
       </div>
 
       <div class="geo-card mt-6">
-        <h3 class="geo-card-title">Questions à poser aux IA</h3>
-        <p class="geo-card-sub">Tape les questions que tes clients posent vraiment (ex : « meilleure agence web à Bordeaux »).</p>
+        <div class="geo-row-between">
+          <div>
+            <h3 class="geo-card-title">Questions à poser aux IA</h3>
+            <p class="geo-card-sub">Laisse l'IA te les proposer, ou tape les tiennes (ex : « meilleure agence web à Bordeaux »).</p>
+          </div>
+          <button id="geo-qsuggest" class="btn btn-secondary"
+                  title="L'IA regarde ton site et propose les questions à surveiller">
+            ✨ Suggérer avec l'IA
+          </button>
+        </div>
+        <div id="geo-qsuggest-msg" class="geo-msg"></div>
         <div class="geo-form">
           <input id="geo-qadd" type="text" placeholder="Ajoute une question…"
                  class="geo-input" autocomplete="off" />
@@ -311,7 +320,7 @@ const GEO = {
         </div>
         <div class="geo-questions mt-3">
           ${qs.length === 0
-            ? '<div class="geo-q-empty">Aucune question pour l\'instant.</div>'
+            ? '<div class="geo-q-empty">Aucune question pour l\'instant. Clique sur « ✨ Suggérer avec l\'IA » pour démarrer en deux secondes.</div>'
             : qs.map(q => `
               <div class="geo-question">
                 <span class="geo-q-text">${this._esc(q.text)}</span>
@@ -348,6 +357,8 @@ const GEO = {
     };
     addBtn.onclick = doAdd;
     addInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
+    const suggestBtn = document.getElementById('geo-qsuggest');
+    if (suggestBtn) suggestBtn.onclick = () => this._suggestQuestions(site);
     body.querySelectorAll('[data-del-q]').forEach(b => {
       b.onclick = async () => {
         const r = await App.api.geo_question_remove({ site_id: site.id, id: b.dataset.delQ });
@@ -362,6 +373,38 @@ const GEO = {
         if (card) card.classList.toggle('is-open');
       };
     });
+  },
+
+  async _suggestQuestions(site) {
+    if (this._busy) return;
+    const btn = document.getElementById('geo-qsuggest');
+    const msg = document.getElementById('geo-qsuggest-msg');
+    this._busy = true;
+    btn.disabled = true;
+    btn.textContent = '⏳ L\'IA analyse ton site…';
+    if (msg) { msg.textContent = 'On lit ta page et on demande à Claude de proposer 6-8 questions pertinentes.'; msg.className = 'geo-msg'; }
+    try {
+      const r = await App.api.geo_suggest_questions({ site_id: site.id });
+      if (!r || !r.ok) {
+        if (msg) { msg.textContent = (r && r.error) || 'Erreur'; msg.className = 'geo-msg geo-msg--err'; }
+        return;
+      }
+      this._renderBody();
+      // Le re-render écrase la zone msg, on annonce dans une notif éphémère
+      setTimeout(() => {
+        const m2 = document.getElementById('geo-qsuggest-msg');
+        if (m2) {
+          const skipTxt = r.skipped ? ` (${r.skipped} déjà présente${r.skipped > 1 ? 's' : ''} ignorée${r.skipped > 1 ? 's' : ''})` : '';
+          m2.textContent = `✓ ${r.count} question${r.count > 1 ? 's' : ''} ajoutée${r.count > 1 ? 's' : ''} par ${r.provider}${skipTxt}.`;
+          m2.className = 'geo-msg geo-msg--ok';
+        }
+      }, 100);
+    } catch (e) {
+      if (msg) { msg.textContent = 'Erreur réseau : ' + (e && e.message || e); msg.className = 'geo-msg geo-msg--err'; }
+    } finally {
+      this._busy = false;
+      if (btn) { btn.disabled = false; btn.textContent = '✨ Suggérer avec l\'IA'; }
+    }
   },
 
   async _runSurveillance(site) {

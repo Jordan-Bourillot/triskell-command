@@ -8845,6 +8845,110 @@ class Api:
         self._geo_save()
         return {"ok": True}
 
+    def geo_suggest_questions(self, payload: dict) -> dict:
+        """Demande à l'IA de proposer 6-8 questions pertinentes pour le site
+        (qu'un client potentiel taperait dans une IA), puis les ajoute toutes
+        à la liste de questions du site. Évite les doublons."""
+        sid = ((payload or {}).get("site_id") or "").strip()
+        if not sid:
+            return {"ok": False, "error": "site_id requis"}
+        root = self._geo_root()
+        site = next((s for s in root["sites"] if s.get("id") == sid), None)
+        if not site:
+            return {"ok": False, "error": "Site introuvable"}
+        providers = self._geo_ai_providers()
+        if not providers:
+            return {"ok": False, "error":
+                    "Aucune IA configurée. Va dans Réglages pour ajouter au "
+                    "moins une clé (Anthropic en priorité)."}
+        # Récupère un peu de contexte de la page (titre, H1, description)
+        title, h1, meta_desc = "", "", ""
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            r = requests.get(site["url"], timeout=10, headers={
+                "User-Agent": "Mozilla/5.0 (Triskell GEO Suggest) requests",
+            })
+            if r.status_code < 400 and r.text:
+                soup = BeautifulSoup(r.text, "html.parser")
+                title = soup.title.get_text(strip=True) if soup.title else ""
+                h1tag = soup.find("h1")
+                h1 = h1tag.get_text(" ", strip=True) if h1tag else ""
+                m = soup.find("meta", attrs={"name": "description"})
+                if m and m.get("content"):
+                    meta_desc = m["content"].strip()
+        except Exception as exc:
+            logger.info("geo suggest fetch: %s", exc)
+        # Priorise Anthropic
+        prov = next((p for p in providers if p["id"] == "anthropic"), providers[0])
+        prompt = (
+            "Tu aides à mettre en place une surveillance GEO (Generative Engine "
+            "Optimization) pour un site web.\n\n"
+            "Génère 6 à 8 questions courtes que de vrais clients potentiels "
+            "taperaient dans une IA générative (ChatGPT, Claude, Perplexity) "
+            "pour chercher ce que ce site propose, sans connaître la marque.\n\n"
+            f"Site : {site.get('name', '')}\n"
+            f"Marque : {site.get('brand', '')}\n"
+            f"Adresse : {site.get('url', '')}\n"
+            f"Titre de la page : {title or '(inconnu)'}\n"
+            f"H1 : {h1 or '(inconnu)'}\n"
+            f"Description : {meta_desc or '(inconnue)'}\n\n"
+            "Règles pour les questions :\n"
+            "- En français, claires, naturelles.\n"
+            "- Courtes (idéalement 4 à 12 mots).\n"
+            "- Du type \"recherche de fournisseur\" : "
+            "\"meilleur X à Y\", \"comment trouver un X\", \"X pas cher\", "
+            "\"où acheter X\", \"X recommandé\", etc.\n"
+            "- Variées : géo, prix, qualité, conseils, comparatif.\n"
+            "- INTERDIT : ne JAMAIS inclure le nom de la marque "
+            f"(\"{site.get('brand', '')}\") dans une question. Le but est "
+            "de voir si le site est cité quand on cherche le SERVICE, "
+            "pas la marque elle-même.\n\n"
+            "Renvoie UNIQUEMENT les questions, une par ligne, sans numérotation, "
+            "sans guillemets, sans tirets, sans introduction ni conclusion."
+        )
+        try:
+            from triskell_core.ai.providers import send_to_provider
+            text = send_to_provider(
+                prov["id"], prov["model"], prompt,
+                {prov["id"]: prov["key"]},
+            ) or ""
+        except Exception as exc:
+            return {"ok": False, "error": f"L'IA n'a pas répondu : {exc}"}
+        # Parse les lignes : retire numéros, tirets, guillemets, espaces
+        import re as _re
+        lines = [l.strip() for l in (text or "").splitlines()]
+        cleaned: list[str] = []
+        for l in lines:
+            # Retire numérotation et puces du début
+            l = _re.sub(r"^\s*[-*•·]\s*", "", l)
+            l = _re.sub(r"^\s*\d+[.)]\s*", "", l)
+            # Retire guillemets
+            l = l.strip().strip('"').strip("«»").strip()
+            if l and 6 <= len(l) <= 140:
+                cleaned.append(l)
+        if not cleaned:
+            return {"ok": False, "error":
+                    "L'IA n'a pas renvoyé de questions exploitables."}
+        # Ajoute en évitant les doublons avec ce qui existe déjà
+        existing = [q.get("text", "").lower().strip()
+                    for q in (root["questions"].get(sid) or [])]
+        if sid not in root["questions"]:
+            root["questions"][sid] = []
+        added: list[dict] = []
+        skipped = 0
+        for q in cleaned[:8]:
+            if q.lower().strip() in existing:
+                skipped += 1
+                continue
+            item = {"id": self._geo_uid(), "text": q}
+            root["questions"][sid].append(item)
+            existing.append(q.lower().strip())
+            added.append(item)
+        self._geo_save()
+        return {"ok": True, "added": added, "count": len(added),
+                "skipped": skipped, "provider": prov["label"]}
+
     # -- Surveillance dans les IA --------------------------------------
     def geo_surveillance_run(self, payload: dict) -> dict:
         """Pose toutes les questions du site à toutes les IA configurées,
