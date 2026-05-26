@@ -3,6 +3,8 @@ Pillow>=10.0
 pyperclip>=1.8
 requests>=2.31
 beautifulsoup4>=4.12
+# Chasseur Créateur — recherche YouTube (Data API v3)
+google-api-python-client>=2.0
 # Facturation Stripe (SaaS Command + abonnements clients SEO/etc.)
 stripe>=11.0
 # Studio — pipeline Agent SDK pour création de site auto (optionnel ;

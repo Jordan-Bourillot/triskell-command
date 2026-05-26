@@ -18,6 +18,7 @@ supabase>=2.4
 anthropic>=0.40
 claude-agent-sdk>=0.1.0
 chevron>=0.14   # Mustache renderer pour le builder Pixel Pros
+google-api-python-client>=2.0   # Chasseur Créateur — recherche YouTube
 
 # --- Parsers fichiers (Convoi, etc.) ---
 Pillow>=10.0

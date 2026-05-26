@@ -51,6 +51,16 @@ const Morning = {
           ${typeof DailyQuote !== 'undefined' ? DailyQuote.renderHTML() : ''}
         </div>
         <div class="cockpit-quickbar">
+          <button id="m-chasseur-createurs" class="btn btn-primary"
+                  title="Aller chercher des créateurs YouTube, Instagram, Facebook">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="8" r="4"/>
+              <path d="M4 21v-1a8 8 0 0 1 16 0v1"/>
+              <circle cx="18" cy="6" r="2"/>
+              <circle cx="6" cy="6" r="2"/>
+            </svg>
+            Chasseur Créateur
+          </button>
           <button id="m-refresh" class="btn btn-secondary" title="Rafraîchir les chiffres">
             <svg class="w-4 h-4" style="color:#3b82f6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0114-7.4M21 12a9 9 0 01-14 7.4"/><path d="M21 4v5h-5M3 20v-5h5"/></svg>
             Rafraîchir
@@ -121,6 +131,8 @@ const Morning = {
 
     // Bindings boutons quickbar
     document.getElementById('m-refresh').onclick = () => this.render(container);
+    const chasseurCBtn = document.getElementById('m-chasseur-createurs');
+    if (chasseurCBtn) chasseurCBtn.onclick = () => App.show('chasseur_createurs');
     document.getElementById('m-brain').onclick = () => {
       if (typeof Brain !== 'undefined' && Brain._openNew) Brain._openNew();
     };

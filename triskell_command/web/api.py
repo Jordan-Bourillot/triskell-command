@@ -8419,6 +8419,134 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    # ------------------------------------------------------------------
+    # Chasseur Créateur — chasse aux créateurs YouTube/Instagram/Facebook
+    # ------------------------------------------------------------------
+    def chasseur_createurs_list_hunts(self, payload: dict | None = None) -> dict:
+        try:
+            from ..integrations import chasseur_createurs
+            limit = int((payload or {}).get("limit") or 20)
+            return {"ok": True, "hunts": chasseur_createurs.list_hunts(limit=limit)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "hunts": []}
+
+    def chasseur_createurs_get_hunt(self, payload: dict) -> dict:
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import chasseur_createurs
+            h = chasseur_createurs.CreatorHunt.load(hid)
+            if not h:
+                return {"ok": False, "error": "chasse introuvable"}
+            return {
+                "ok": True,
+                "hunt": {
+                    "id":         h.id,
+                    "label":      h.label,
+                    "created_at": h.created_at,
+                    "status":     h.status,
+                    "progress":   h.progress,
+                    "stats":      h.stats,
+                    "filters":    h.filters,
+                    "error":      h.error,
+                    "log_tail":   h.log[-30:],
+                    "creators":   h.creators,
+                    "running":    chasseur_createurs.is_running(hid),
+                },
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def chasseur_createurs_start_hunt(self, payload: dict) -> dict:
+        """Lance une chasse aux créateurs.
+
+        payload = {
+            platform: "youtube" | "instagram" | "facebook",
+            niche: str,
+            min_subs: int,
+            max_subs: int,
+            num_results: int,
+            youtube_api_key?: str,
+            instagram_login?: str,
+            instagram_password?: str,
+        }
+        """
+        p = payload or {}
+        platform = (p.get("platform") or "youtube").strip().lower()
+        niche = (p.get("niche") or "").strip()
+        if not niche:
+            return {"ok": False, "error": "Précise une niche / mot-clé."}
+        try:
+            min_subs = int(p.get("min_subs") or 0)
+            max_subs = int(p.get("max_subs") or 1_000_000)
+            num_results = int(p.get("num_results") or 50)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Valeurs numériques invalides."}
+        try:
+            from ..integrations import chasseur_createurs
+            hunt = chasseur_createurs.start_hunt(
+                platform=platform,
+                niche=niche,
+                min_subs=min_subs,
+                max_subs=max_subs,
+                num_results=num_results,
+                youtube_api_key=p.get("youtube_api_key") or None,
+                instagram_login=p.get("instagram_login") or None,
+                instagram_password=p.get("instagram_password") or None,
+            )
+            return {"ok": True, "hunt_id": hunt.id, "label": hunt.label}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def chasseur_createurs_export_csv(self, payload: dict) -> dict:
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import chasseur_createurs
+            return chasseur_createurs.export_csv(hid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def chasseur_createurs_delete_hunt(self, payload: dict) -> dict:
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import chasseur_createurs
+            return chasseur_createurs.delete_hunt(hid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def chasseur_createurs_download_csv(self, payload: dict) -> dict:
+        """Renvoie le contenu d'un CSV pour téléchargement direct dans le navigateur.
+
+        L'UI déclenche un download client-side via Blob, donc on renvoie le
+        contenu en string + nom de fichier (pas un chemin local qui ne marche
+        qu'en mode desktop).
+        """
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import chasseur_createurs
+            res = chasseur_createurs.export_csv(hid)
+            if not res.get("ok"):
+                return res
+            from pathlib import Path as _P
+            csv_path = _P(res["path"])
+            content = csv_path.read_text(encoding="utf-8")
+            return {
+                "ok": True,
+                "filename": csv_path.name,
+                "content": content,
+                "rows": res.get("rows", 0),
+                "path": res["path"],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ==================================================================
     # GEO — Generative Engine Optimization
     # Tableau de bord pour rendre un site visible des IA génératives
