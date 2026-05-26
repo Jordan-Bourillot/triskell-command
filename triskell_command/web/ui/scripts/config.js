@@ -831,7 +831,8 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
       { id: 'anthropic',  label: 'Anthropic (Claude)', recommended: false },
       { id: 'google',     label: 'Google (Gemini) — gratuit', recommended: true },
       { id: 'mistral',    label: 'Mistral — gratuit', recommended: true },
-      { id: 'perplexity', label: 'Perplexity (mode web) — clé en ligne', recommended: true },
+      { id: 'groq',       label: 'Groq (Llama / Meta AI) — gratuit', recommended: true },
+      { id: 'perplexity', label: 'Perplexity (mode web) — payant', recommended: false },
       { id: 'openai',     label: 'OpenAI (GPT)',     recommended: false },
       { id: 'xai',        label: 'xAI (Grok)',       recommended: false },
     ];

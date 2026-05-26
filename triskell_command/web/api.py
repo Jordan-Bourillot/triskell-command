@@ -8437,15 +8437,18 @@ class Api:
             ) or {}
         except Exception:
             keys = (self._app_state.get("ai", "api_keys", default={}) or {})
-        # Perplexity n'est pas géré par shared_secrets / triskell_core,
-        # on le récupère depuis l'env ou directement depuis l'app_state.
-        if not (keys or {}).get("perplexity"):
-            pkey = (_os.environ.get("PERPLEXITY_API_KEY", "")
-                    or self._app_state.get("ai", "api_keys", "perplexity",
-                                           default=""))
-            if pkey:
+        # Perplexity et Groq ne sont pas dans shared_secrets / triskell_core,
+        # on les récupère depuis l'env ou directement depuis l'app_state.
+        for extra in ("perplexity", "groq"):
+            if (keys or {}).get(extra):
+                continue
+            env_name = {"perplexity": "PERPLEXITY_API_KEY",
+                        "groq":       "GROQ_API_KEY"}[extra]
+            xkey = (_os.environ.get(env_name, "")
+                    or self._app_state.get("ai", "api_keys", extra, default=""))
+            if xkey:
                 keys = dict(keys or {})
-                keys["perplexity"] = pkey
+                keys[extra] = xkey
         provs = []
         # Modèle par défaut par provider (rapide + bon marché)
         default_models = {
@@ -8455,6 +8458,7 @@ class Api:
             "mistral":    "mistral-small-latest",
             "xai":        "grok-2-latest",
             "perplexity": "sonar",
+            "groq":       "llama-3.3-70b-versatile",
         }
         labels = {
             "anthropic":  "Claude (Anthropic)",
@@ -8463,6 +8467,7 @@ class Api:
             "mistral":    "Mistral",
             "xai":        "Grok (xAI)",
             "perplexity": "Perplexity (mode web)",
+            "groq":       "Llama via Groq (proche Meta AI)",
         }
         for prov_id, label in labels.items():
             key = (keys or {}).get(prov_id) or ""
@@ -8503,6 +8508,10 @@ class Api:
             if txt:
                 return txt
             # Fallback : si la recherche échoue, on tente l'appel classique
+        # Groq : appel direct (API compatible OpenAI). Donne accès aux
+        # modèles Llama qui font tourner Meta AI.
+        if provider["id"] == "groq":
+            return self._geo_ask_groq(provider, prompt)
         # Autres providers : passe par le coeur partagé
         try:
             from triskell_core.ai.providers import send_to_provider
@@ -8515,6 +8524,36 @@ class Api:
             ) or ""
         except Exception as exc:
             logger.info("geo ask provider %s: %s", provider["id"], exc)
+            return ""
+
+    def _geo_ask_groq(self, provider: dict, prompt: str) -> str:
+        """Appel direct à l'API Groq (format compatible OpenAI).
+        Groq héberge les modèles Llama de Meta, gratuits et très rapides.
+        Modèles : llama-3.3-70b-versatile, llama-3.1-8b-instant, etc."""
+        try:
+            import requests
+            r = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {provider['key']}",
+                    "Content-Type":  "application/json",
+                },
+                json={
+                    "model":    provider.get("model") or "llama-3.3-70b-versatile",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 1200,
+                    "temperature": 0.4,
+                },
+                timeout=40,
+            )
+            if r.status_code >= 400:
+                logger.info("groq HTTP %s: %s", r.status_code, r.text[:200])
+                return ""
+            data = r.json()
+            return (data.get("choices", [{}])[0]
+                       .get("message", {}).get("content", "")) or ""
+        except Exception as exc:
+            logger.info("groq exception: %s", exc)
             return ""
 
     def _geo_ask_gemini_with_search(self, provider: dict, prompt: str) -> str:
