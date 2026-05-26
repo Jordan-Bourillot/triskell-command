@@ -6947,6 +6947,15 @@ class Api:
                 logger.debug("worker %s : %s", label, exc)
                 worker_status[label] = False
 
+        # Auto-pilote GEO : thread interne (pas dans integrations/ car il
+        # utilise des méthodes de l'instance Api directement).
+        try:
+            self._geo_autopilot_start_worker()
+            worker_status["geo_autopilot"] = True
+        except Exception as exc:
+            logger.debug("geo_autopilot : %s", exc)
+            worker_status["geo_autopilot"] = False
+
         # Bridge proactive notifications → front
         try:
             from ..integrations import claude_proactive
@@ -9253,6 +9262,218 @@ class Api:
         if brand:
             runs = [r for r in runs if (r.get("brand") or "").lower() == brand.lower()]
         return {"ok": True, "runs": runs[:30]}
+
+    # ------------------------------------------------------------------
+    # Auto-pilote GEO
+    # ------------------------------------------------------------------
+    def _geo_autopilot_settings(self) -> dict:
+        """Renvoie les réglages de l'auto-pilote (avec valeurs par défaut)."""
+        root = self._geo_root()
+        s = root.get("autopilot") or {}
+        return {
+            "enabled":        bool(s.get("enabled", False)),
+            "frequency_days": int(s.get("frequency_days", 14)),
+            "auto_generate":  bool(s.get("auto_generate", True)),
+            "last_run_at":    s.get("last_run_at", ""),
+            "last_run_summary": s.get("last_run_summary", ""),
+            "running":        bool(s.get("running", False)),
+        }
+
+    def geo_autopilot_settings(self, payload: dict | None = None) -> dict:
+        return {"ok": True, "settings": self._geo_autopilot_settings()}
+
+    def geo_autopilot_settings_set(self, payload: dict) -> dict:
+        """Met à jour les réglages de l'auto-pilote.
+        Champs acceptés : enabled (bool), frequency_days (7|14|30), auto_generate (bool)."""
+        p = payload or {}
+        root = self._geo_root()
+        if not isinstance(root.get("autopilot"), dict):
+            root["autopilot"] = {}
+        cur = root["autopilot"]
+        if "enabled" in p:
+            cur["enabled"] = bool(p["enabled"])
+        if "frequency_days" in p:
+            try:
+                f = int(p["frequency_days"])
+            except (TypeError, ValueError):
+                f = 14
+            cur["frequency_days"] = max(1, min(90, f))
+        if "auto_generate" in p:
+            cur["auto_generate"] = bool(p["auto_generate"])
+        self._geo_save()
+        return {"ok": True, "settings": self._geo_autopilot_settings()}
+
+    def geo_autopilot_run_now(self, payload: dict | None = None) -> dict:
+        """Lance un cycle complet maintenant, en arrière-plan, sur tous les
+        sites enregistrés (ou un seul si site_id fourni)."""
+        p = payload or {}
+        site_id = (p.get("site_id") or "").strip() or None
+        root = self._geo_root()
+        ap = root.get("autopilot") or {}
+        if ap.get("running"):
+            return {"ok": False, "error":
+                    "Un cycle est déjà en cours, patiente quelques minutes."}
+        # Démarre dans un thread, ne bloque pas l'UI
+        threading.Thread(
+            target=self._geo_autopilot_run_safe,
+            kwargs={"site_id": site_id, "force": True},
+            name="geo-autopilot-manual",
+            daemon=True,
+        ).start()
+        return {"ok": True, "started": True}
+
+    def _geo_autopilot_run_safe(self, site_id: str | None = None,
+                                force: bool = False) -> None:
+        """Wrapper qui pose un flag 'running', exécute le tick, et nettoie."""
+        root = self._geo_root()
+        if not isinstance(root.get("autopilot"), dict):
+            root["autopilot"] = {}
+        if root["autopilot"].get("running"):
+            return
+        root["autopilot"]["running"] = True
+        self._geo_save()
+        try:
+            self._geo_autopilot_tick(site_id=site_id, force=force)
+        except Exception as exc:
+            logger.exception("geo autopilot tick: %s", exc)
+        finally:
+            root["autopilot"]["running"] = False
+            self._geo_save()
+
+    def _geo_autopilot_tick(self, site_id: str | None = None,
+                            force: bool = False) -> dict:
+        """Cycle complet de l'auto-pilote :
+        - Pour chaque site éligible (ou un seul si site_id) :
+            1. Suggère les questions s'il n'y en a aucune
+            2. Lance la surveillance (toutes IA configurées)
+            3. Si auto_generate ON : pour chaque question non citée par AUCUNE IA,
+               génère un contenu prêt à coller (FAQ ou guide selon longueur)
+        - Met à jour last_run_at et un résumé exploitable côté UI.
+        """
+        import time as _time
+        root = self._geo_root()
+        ap = root.get("autopilot") or {}
+        freq_days = int(ap.get("frequency_days") or 14)
+        auto_gen = bool(ap.get("auto_generate", True))
+        sites = root["sites"]
+        if site_id:
+            sites = [s for s in sites if s.get("id") == site_id]
+        # Filtre par ancienneté (sauf si force = True)
+        if not force:
+            from datetime import datetime, timedelta
+            cutoff = datetime.now() - timedelta(days=freq_days)
+            cutoff_iso = cutoff.isoformat(timespec="seconds")
+            last_by_site = {}
+            for r in root["surveillance_runs"]:
+                sid = r.get("site_id")
+                if not sid:
+                    continue
+                ts = r.get("ts", "")
+                if sid not in last_by_site or ts > last_by_site[sid]:
+                    last_by_site[sid] = ts
+            sites = [s for s in sites
+                     if last_by_site.get(s["id"], "") < cutoff_iso]
+        if not sites:
+            return {"ok": True, "skipped": True, "reason": "no_site_due"}
+        summary_lines: list[str] = []
+        total_runs = 0
+        total_generated = 0
+        for site in sites:
+            sid = site["id"]
+            # 1) Suggère des questions si vide
+            existing_qs = root["questions"].get(sid) or []
+            if not existing_qs:
+                try:
+                    self.geo_suggest_questions({"site_id": sid})
+                    existing_qs = root["questions"].get(sid) or []
+                except Exception as exc:
+                    logger.info("geo autopilot suggest %s: %s", sid, exc)
+            if not existing_qs:
+                summary_lines.append(
+                    f"⚠ {site.get('name')} : pas de question (IA non configurée ?)")
+                continue
+            # 2) Surveillance
+            try:
+                r = self.geo_surveillance_run({"site_id": sid})
+                if r and r.get("ok"):
+                    total_runs += 1
+                    run = r["run"]
+                    summary_lines.append(
+                        f"{site.get('name')} : {run['cited']}/{run['total']} "
+                        f"citations ({run['score']}%)")
+                else:
+                    summary_lines.append(
+                        f"⚠ {site.get('name')} : {r.get('error') if r else 'erreur'}")
+                    continue
+            except Exception as exc:
+                logger.info("geo autopilot surveillance %s: %s", sid, exc)
+                continue
+            # 3) Génération auto pour les questions où le site est cité 0 fois
+            if auto_gen:
+                run = r["run"]
+                # Regroupe par question : quelles questions n'ont eu AUCUNE citation ?
+                cited_by_q: dict[str, int] = {}
+                for res in run.get("results", []):
+                    q = res.get("question", "")
+                    cited_by_q[q] = cited_by_q.get(q, 0) + (1 if res.get("cited") else 0)
+                uncited = [q for q, n in cited_by_q.items() if n == 0]
+                # Limite à 3 générations par site et par cycle (évite l'explosion de tokens)
+                for q in uncited[:3]:
+                    try:
+                        # Kind : FAQ par défaut, sauf si la question commence par "comment"
+                        # (alors guide)
+                        kind = "guide" if q.lower().startswith("comment") else "faq"
+                        gr = self.geo_generate({"topic": q, "kind": kind})
+                        if gr and gr.get("ok"):
+                            total_generated += 1
+                            # Tag le contenu généré pour qu'on retrouve la source
+                            it = gr.get("item") or {}
+                            it["auto_source"] = {
+                                "site_id": sid,
+                                "site_name": site.get("name"),
+                                "question": q,
+                            }
+                            # Petit délai pour ne pas bombarder l'API IA
+                            _time.sleep(1.5)
+                    except Exception as exc:
+                        logger.info("geo autopilot generate %s: %s", sid, exc)
+        # Sauvegarde du résumé
+        from datetime import datetime as _dt
+        ap = root.get("autopilot") or {}
+        ap["last_run_at"] = _dt.now().isoformat(timespec="seconds")
+        gen_part = (f", {total_generated} contenu(s) rédigé(s)"
+                    if total_generated else "")
+        ap["last_run_summary"] = (
+            f"{total_runs} site(s) surveillé(s){gen_part}. "
+            + " · ".join(summary_lines[:6])
+        )
+        root["autopilot"] = ap
+        self._geo_save()
+        return {"ok": True, "runs": total_runs, "generated": total_generated,
+                "summary": ap["last_run_summary"]}
+
+    def _geo_autopilot_start_worker(self) -> None:
+        """Démarre le thread de fond qui vérifie toutes les heures si un
+        cycle auto est dû. Idempotent."""
+        if getattr(self, "_geo_autopilot_thread", None) is not None:
+            return
+        import time as _time
+
+        def loop():
+            logger.info("geo_autopilot: thread démarré (check 60min)")
+            _time.sleep(120)   # delai initial pour ne pas surcharger le boot
+            while True:
+                try:
+                    s = self._geo_autopilot_settings()
+                    if s.get("enabled") and not s.get("running"):
+                        self._geo_autopilot_run_safe(force=False)
+                except Exception as exc:
+                    logger.exception("geo_autopilot loop: %s", exc)
+                _time.sleep(3600)  # 1 heure entre les checks
+        self._geo_autopilot_thread = threading.Thread(
+            target=loop, name="geo_autopilot", daemon=True,
+        )
+        self._geo_autopilot_thread.start()
 
 
 # Libellés humains pour les presets (séparés pour ne pas alourdir le module

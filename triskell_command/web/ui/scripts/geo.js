@@ -197,6 +197,13 @@ const GEO = {
       ? `<span class="geo-pill geo-pill--ok">${r.providers_count} IA configurée${r.providers_count > 1 ? 's' : ''} : ${r.providers.map(p => p.label).join(', ')}</span>`
       : `<span class="geo-pill geo-pill--warn">Aucune IA configurée — <a href="#" data-go-config>va dans Réglages</a></span>`;
 
+    // Charge les réglages auto-pilote en parallèle
+    let ap = null;
+    try {
+      const ar = await App.api.geo_autopilot_settings({});
+      if (ar && ar.ok) ap = ar.settings;
+    } catch (e) { /* tolère */ }
+
     const sites = r.sites || [];
     body.innerHTML = `
       <div class="geo-card">
@@ -209,6 +216,8 @@ const GEO = {
         </div>
         <div class="geo-pills mt-3">${providersInfo}</div>
       </div>
+
+      ${this._renderAutopilotCard(ap, sites.length)}
 
       <div id="geo-sites-grid" class="geo-sites-grid mt-6">
         ${sites.length === 0
@@ -246,6 +255,112 @@ const GEO = {
     });
     const cfg = body.querySelector('[data-go-config]');
     if (cfg) cfg.onclick = (e) => { e.preventDefault(); App.show('config'); };
+
+    // -- Auto-pilote : handlers --
+    const apEnabled = document.getElementById('geo-ap-enabled');
+    const apFreq    = document.getElementById('geo-ap-freq');
+    const apAuto    = document.getElementById('geo-ap-autogen');
+    const apRunNow  = document.getElementById('geo-ap-run-now');
+    const saveAp = async () => {
+      const payload = {
+        enabled:        !!apEnabled?.checked,
+        frequency_days: parseInt(apFreq?.value || '14', 10),
+        auto_generate:  !!apAuto?.checked,
+      };
+      try {
+        const rr = await App.api.geo_autopilot_settings_set(payload);
+        if (rr && rr.ok) this._renderBody();
+      } catch (e) { /* tolère */ }
+    };
+    if (apEnabled) apEnabled.onchange = saveAp;
+    if (apFreq)    apFreq.onchange    = saveAp;
+    if (apAuto)    apAuto.onchange    = saveAp;
+    if (apRunNow) {
+      apRunNow.onclick = async () => {
+        apRunNow.disabled = true;
+        apRunNow.textContent = '⏳ Lancement…';
+        try {
+          const rr = await App.api.geo_autopilot_run_now({});
+          if (rr && rr.ok) {
+            alert('Cycle lancé en arrière-plan. Tu peux fermer cette page, le travail continue. Re-viens dans quelques minutes pour voir les résultats.');
+            this._renderBody();
+          } else {
+            alert((rr && rr.error) || 'Erreur');
+            apRunNow.disabled = false;
+            apRunNow.textContent = '🚀 Tout faire maintenant';
+          }
+        } catch (e) {
+          alert('Erreur réseau : ' + (e && e.message || e));
+          apRunNow.disabled = false;
+          apRunNow.textContent = '🚀 Tout faire maintenant';
+        }
+      };
+    }
+  },
+
+  _renderAutopilotCard(ap, sitesCount) {
+    if (!ap) {
+      return `<div class="geo-card mt-6 geo-ap-card">
+        <h3 class="geo-card-title">⚡ Auto-pilote GEO</h3>
+        <p class="geo-card-sub">Chargement…</p>
+      </div>`;
+    }
+    const enabled = !!ap.enabled;
+    const running = !!ap.running;
+    const freq = ap.frequency_days || 14;
+    const auto = !!ap.auto_generate;
+    const last = ap.last_run_at;
+    const summary = ap.last_run_summary || '';
+    return `
+      <div class="geo-card mt-6 geo-ap-card ${enabled ? 'is-on' : ''}">
+        <div class="geo-row-between">
+          <div>
+            <div class="hero-kicker">⚡ AUTO-PILOTE GEO</div>
+            <h3 class="geo-card-title">${enabled ? 'L\'app fait tout, toute seule' : 'Active l\'auto-pilote pour tout automatiser'}</h3>
+            <p class="geo-card-sub">
+              ${enabled
+                ? `Toutes les <strong>${freq} jours</strong>, l'app relance la surveillance sur tous tes sites${auto ? ' et fait <strong>rédiger automatiquement</strong> par l\'IA un contenu pour chaque question où tu n\'es pas cité' : ''}. Tu n'as plus rien à faire.`
+                : 'Une fois activé, l\'app surveille tes sites, refait le tour des IA à la fréquence choisie, et fait rédiger automatiquement des contenus pour les questions où tu n\'es pas cité.'}
+            </p>
+          </div>
+          <div class="geo-ap-actions">
+            <label class="geo-toggle">
+              <input type="checkbox" id="geo-ap-enabled" ${enabled ? 'checked' : ''}/>
+              <span class="geo-toggle-slider"></span>
+              <span class="geo-toggle-label">${enabled ? 'Actif' : 'Inactif'}</span>
+            </label>
+          </div>
+        </div>
+        <div class="geo-ap-grid mt-4">
+          <label class="geo-ap-field">
+            <span class="geo-label">Fréquence</span>
+            <select id="geo-ap-freq" class="geo-input">
+              <option value="7"  ${freq === 7  ? 'selected' : ''}>Tous les 7 jours</option>
+              <option value="14" ${freq === 14 ? 'selected' : ''}>Tous les 14 jours</option>
+              <option value="30" ${freq === 30 ? 'selected' : ''}>Tous les 30 jours</option>
+            </select>
+          </label>
+          <label class="geo-ap-field geo-ap-check">
+            <input type="checkbox" id="geo-ap-autogen" ${auto ? 'checked' : ''}/>
+            <span>Rédiger automatiquement les contenus manquants</span>
+          </label>
+          <div class="geo-ap-field">
+            <span class="geo-label">Dernier passage</span>
+            <div class="geo-ap-last">${last ? this._fmtDate(last) : '—'}</div>
+          </div>
+        </div>
+        ${summary ? `<div class="geo-ap-summary mt-3">${this._esc(summary)}</div>` : ''}
+        <div class="geo-ap-bottom mt-4">
+          <button id="geo-ap-run-now" class="btn btn-primary" ${sitesCount === 0 || running ? 'disabled' : ''}
+                  title="${sitesCount === 0 ? 'Ajoute un site d\'abord' : (running ? 'Cycle en cours' : 'Lance un cycle tout de suite')}">
+            ${running ? '⏳ Cycle en cours…' : '🚀 Tout faire maintenant'}
+          </button>
+          <span class="geo-ap-hint">${running
+            ? 'L\'app travaille en arrière-plan. Tu peux fermer cette page, ça continue.'
+            : (enabled ? 'Tu peux aussi déclencher un cycle à la main si tu veux pas attendre.' : '')}</span>
+        </div>
+      </div>
+    `;
   },
 
   _renderSiteCard(s) {
