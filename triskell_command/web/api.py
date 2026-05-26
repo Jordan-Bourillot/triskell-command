@@ -6950,6 +6950,7 @@ class Api:
         # Auto-pilote GEO : thread interne (pas dans integrations/ car il
         # utilise des méthodes de l'instance Api directement).
         try:
+            self._geo_migrate_publishing_defaults()
             self._geo_autopilot_start_worker()
             worker_status["geo_autopilot"] = True
         except Exception as exc:
@@ -9712,6 +9713,89 @@ class Api:
         self._geo_save()
         return {"ok": True, "runs": total_runs, "generated": total_generated,
                 "summary": ap["last_run_summary"]}
+
+    def _geo_migrate_publishing_defaults(self) -> None:
+        """Renseigne automatiquement les réglages GitHub de publication
+        pour les sites Triskell connus (Lagriffe, Pixel Pros, Rankus) la
+        première fois qu'on les détecte. Idempotent : si Jordan a déjà
+        renseigné un champ, on ne l'écrase pas.
+        """
+        try:
+            root = self._geo_root()
+        except Exception:
+            return
+        # Domaine canonique → fiche complète (création + publication)
+        defaults = {
+            "lagriffe-studio.fr": {
+                "url":             "https://lagriffe-studio.fr",
+                "name":            "Lagriffe Studio",
+                "brand":           "Lagriffe Studio",
+                "repo":            "Jordan-Bourillot/lagriffe-studio",
+                "target_folder":   "geo/",
+                "branch":          "main",
+                "css_path":        "css/style.css",
+                "pretty_url_base": "https://lagriffe-studio.fr/geo",
+            },
+            "pixel-pros.fr": {
+                "url":             "https://pixel-pros.fr",
+                "name":            "Pixel Pros",
+                "brand":           "Pixel Pros",
+                "repo":            "Jordan-Bourillot/pixel-studio",
+                "target_folder":   "geo/",
+                "branch":          "main",
+                "css_path":        "css/style.css",
+                "pretty_url_base": "https://pixel-pros.fr/geo",
+            },
+            "rankus-studio.fr": {
+                "url":             "https://rankus-studio.fr",
+                "name":            "Rankus Studio",
+                "brand":           "Rankus Studio",
+                "repo":            "Jordan-Bourillot/rankus-studio",
+                "target_folder":   "geo/",
+                "branch":          "main",
+                "css_path":        "style.css",
+                "pretty_url_base": "https://rankus-studio.fr/geo",
+            },
+        }
+        changed = False
+        # 1) Met à jour les sites existants qui n'ont pas encore leur conf
+        existing_domains: set[str] = set()
+        for site in root.get("sites", []):
+            dom = (site.get("domain") or "").lower()
+            existing_domains.add(dom)
+            if dom not in defaults:
+                continue
+            for k, v in defaults[dom].items():
+                if k in ("url", "name", "brand"):
+                    continue  # ne touche pas aux champs qui peuvent etre perso
+                if not (site.get(k) or "").strip():
+                    site[k] = v
+                    changed = True
+        # 2) Crée les sites manquants parmi les 3 connus
+        for dom, conf in defaults.items():
+            if dom in existing_domains:
+                continue
+            site = {
+                "id":         self._geo_uid(),
+                "name":       conf["name"],
+                "url":        conf["url"],
+                "brand":      conf["brand"],
+                "domain":     dom,
+                "created_at": self._geo_now(),
+                "repo":            conf["repo"],
+                "target_folder":   conf["target_folder"],
+                "branch":          conf["branch"],
+                "css_path":        conf["css_path"],
+                "pretty_url_base": conf["pretty_url_base"],
+            }
+            root["sites"].append(site)
+            changed = True
+            logger.info("geo: site Triskell « %s » ajouté automatiquement.",
+                        conf["name"])
+        if changed:
+            self._geo_save()
+            logger.info("geo: réglages de publication GitHub renseignés "
+                        "automatiquement pour les sites Triskell connus.")
 
     def _geo_autopilot_start_worker(self) -> None:
         """Démarre le thread de fond qui vérifie toutes les heures si un
