@@ -8547,6 +8547,110 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    # ------------------------------------------------------------------
+    # Prospecteur Google — recherche entreprises locales via Google Places
+    # ------------------------------------------------------------------
+    def prospecteur_google_list_hunts(self, payload: dict | None = None) -> dict:
+        try:
+            from ..integrations import prospecteur_google
+            limit = int((payload or {}).get("limit") or 20)
+            return {"ok": True, "hunts": prospecteur_google.list_hunts(limit=limit)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "hunts": []}
+
+    def prospecteur_google_get_hunt(self, payload: dict) -> dict:
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import prospecteur_google
+            h = prospecteur_google.ProspectHunt.load(hid)
+            if not h:
+                return {"ok": False, "error": "chasse introuvable"}
+            return {
+                "ok": True,
+                "hunt": {
+                    "id":         h.id,
+                    "label":      h.label,
+                    "created_at": h.created_at,
+                    "status":     h.status,
+                    "progress":   h.progress,
+                    "stats":      h.stats,
+                    "filters":    h.filters,
+                    "error":      h.error,
+                    "log_tail":   h.log[-30:],
+                    "prospects":  h.prospects,
+                    "running":    prospecteur_google.is_running(hid),
+                },
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def prospecteur_google_start_hunt(self, payload: dict) -> dict:
+        """Lance une recherche Google Places.
+
+        payload = {
+            metier: str (ex "plombier"),
+            zone: str (ex "Brest" / "Finistère" / "Bretagne"),
+            num_results: int (par défaut 60, max 200),
+            only_no_site: bool (filtre boîtes sans site web),
+            api_key?: str (surcharge la clé par défaut),
+        }
+        """
+        p = payload or {}
+        metier = (p.get("metier") or "").strip()
+        zone = (p.get("zone") or "").strip()
+        if not metier or not zone:
+            return {"ok": False, "error": "Métier et zone requis."}
+        try:
+            num = int(p.get("num_results") or 60)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Nombre de résultats invalide."}
+        only_no_site = bool(p.get("only_no_site", False))
+        try:
+            from ..integrations import prospecteur_google
+            hunt = prospecteur_google.start_hunt(
+                metier=metier, zone=zone, num_results=num,
+                only_no_site=only_no_site,
+                api_key=p.get("api_key") or None,
+            )
+            return {"ok": True, "hunt_id": hunt.id, "label": hunt.label}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def prospecteur_google_delete_hunt(self, payload: dict) -> dict:
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import prospecteur_google
+            return prospecteur_google.delete_hunt(hid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def prospecteur_google_download_csv(self, payload: dict) -> dict:
+        """Renvoie le contenu d'un CSV pour téléchargement direct."""
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import prospecteur_google
+            res = prospecteur_google.export_csv(hid)
+            if not res.get("ok"):
+                return res
+            from pathlib import Path as _P
+            csv_path = _P(res["path"])
+            content = csv_path.read_text(encoding="utf-8")
+            return {
+                "ok": True,
+                "filename": csv_path.name,
+                "content": content,
+                "rows": res.get("rows", 0),
+                "path": res["path"],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ==================================================================
     # GEO — Generative Engine Optimization
     # Tableau de bord pour rendre un site visible des IA génératives

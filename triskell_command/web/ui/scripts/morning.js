@@ -51,16 +51,6 @@ const Morning = {
           ${typeof DailyQuote !== 'undefined' ? DailyQuote.renderHTML() : ''}
         </div>
         <div class="cockpit-quickbar">
-          <button id="m-chasseur-createurs" class="btn btn-primary"
-                  title="Aller chercher des créateurs YouTube, Instagram, Facebook">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="8" r="4"/>
-              <path d="M4 21v-1a8 8 0 0 1 16 0v1"/>
-              <circle cx="18" cy="6" r="2"/>
-              <circle cx="6" cy="6" r="2"/>
-            </svg>
-            Chasseur Créateur
-          </button>
           <button id="m-refresh" class="btn btn-secondary" title="Rafraîchir les chiffres">
             <svg class="w-4 h-4" style="color:#3b82f6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0114-7.4M21 12a9 9 0 01-14 7.4"/><path d="M21 4v5h-5M3 20v-5h5"/></svg>
             Rafraîchir
@@ -117,6 +107,37 @@ const Morning = {
           </button>
         </div>
 
+        <!-- Outils bêta — tirés d'outils open source, intégrés à Triskell.
+             Volontairement à part de la quickbar pour bien signaler leur
+             statut "à tester, peut évoluer". -->
+        <div class="cockpit-beta-tools mt-5">
+          <div class="text-[10px] font-bold tracking-widest text-orange-500 mb-2">
+            OUTILS BÊTA
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button id="m-chasseur-createurs" class="btn-beta-orange"
+                    title="Aller chercher des créateurs YouTube, Instagram, Facebook">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="8" r="4"/>
+                <path d="M4 21v-1a8 8 0 0 1 16 0v1"/>
+                <circle cx="18" cy="6" r="2"/>
+                <circle cx="6" cy="6" r="2"/>
+              </svg>
+              Chasseur Créateur
+              <span class="btn-beta-orange-tag">(bêta · tiré d'open source)</span>
+            </button>
+            <button id="m-prospecteur-google" class="btn-beta-orange"
+                    title="Trouver des entreprises locales via Google Maps + leurs mails">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                <circle cx="12" cy="10" r="3"/>
+              </svg>
+              Prospecteur Google
+              <span class="btn-beta-orange-tag">(bêta · tiré d'open source)</span>
+            </button>
+          </div>
+        </div>
+
         <!-- Encadré "auto-pilote en cours" : visible UNIQUEMENT pendant un
              run. Polling toutes les 3s. Cliquable pour ouvrir la page complète. -->
         <div id="m-autopilot-live" class="mt-6 hidden"></div>
@@ -131,8 +152,51 @@ const Morning = {
 
     // Bindings boutons quickbar
     document.getElementById('m-refresh').onclick = () => this.render(container);
+    // Boutons "Outils bêta" (sous la quickbar) — outils tirés de programmes
+    // open source, intégrés à Triskell Command.
     const chasseurCBtn = document.getElementById('m-chasseur-createurs');
     if (chasseurCBtn) chasseurCBtn.onclick = () => App.show('chasseur_createurs');
+    const prospGoogleBtn = document.getElementById('m-prospecteur-google');
+    if (prospGoogleBtn) prospGoogleBtn.onclick = () => App.show('prospecteur_google');
+
+    // Styles spécifiques aux boutons bêta (orange) — injectés une seule fois
+    if (!document.getElementById('m-beta-tools-styles')) {
+      const s = document.createElement('style');
+      s.id = 'm-beta-tools-styles';
+      s.textContent = `
+        .btn-beta-orange {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 9px 16px;
+          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+          color: white;
+          border: 1px solid #c2410c;
+          border-radius: 10px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: transform 120ms, box-shadow 120ms, filter 120ms;
+          box-shadow: 0 1px 2px rgba(234, 88, 12, 0.20);
+        }
+        .btn-beta-orange:hover {
+          transform: translateY(-1px);
+          filter: brightness(1.06);
+          box-shadow: 0 4px 12px rgba(234, 88, 12, 0.30);
+        }
+        .btn-beta-orange:active {
+          transform: translateY(0);
+          filter: brightness(0.96);
+        }
+        .btn-beta-orange-tag {
+          font-size: 10.5px;
+          font-weight: 500;
+          opacity: 0.85;
+          margin-left: 2px;
+        }
+      `;
+      document.head.appendChild(s);
+    }
     document.getElementById('m-brain').onclick = () => {
       if (typeof Brain !== 'undefined' && Brain._openNew) Brain._openNew();
     };
