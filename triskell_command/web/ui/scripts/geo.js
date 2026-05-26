@@ -261,11 +261,13 @@ const GEO = {
     const apFreq    = document.getElementById('geo-ap-freq');
     const apAuto    = document.getElementById('geo-ap-autogen');
     const apRunNow  = document.getElementById('geo-ap-run-now');
+    const apPub  = document.getElementById('geo-ap-autopub');
     const saveAp = async () => {
       const payload = {
         enabled:        !!apEnabled?.checked,
         frequency_days: parseInt(apFreq?.value || '14', 10),
         auto_generate:  !!apAuto?.checked,
+        auto_publish:   !!apPub?.checked,
       };
       try {
         const rr = await App.api.geo_autopilot_settings_set(payload);
@@ -275,6 +277,7 @@ const GEO = {
     if (apEnabled) apEnabled.onchange = saveAp;
     if (apFreq)    apFreq.onchange    = saveAp;
     if (apAuto)    apAuto.onchange    = saveAp;
+    if (apPub)     apPub.onchange     = saveAp;
     if (apRunNow) {
       apRunNow.onclick = async () => {
         apRunNow.disabled = true;
@@ -309,6 +312,7 @@ const GEO = {
     const running = !!ap.running;
     const freq = ap.frequency_days || 14;
     const auto = !!ap.auto_generate;
+    const pub  = !!ap.auto_publish;
     const last = ap.last_run_at;
     const summary = ap.last_run_summary || '';
     return `
@@ -343,6 +347,10 @@ const GEO = {
           <label class="geo-ap-field geo-ap-check">
             <input type="checkbox" id="geo-ap-autogen" ${auto ? 'checked' : ''}/>
             <span>Rédiger automatiquement les contenus manquants</span>
+          </label>
+          <label class="geo-ap-field geo-ap-check">
+            <input type="checkbox" id="geo-ap-autopub" ${pub ? 'checked' : ''}/>
+            <span>Publier automatiquement sur les sites (GitHub configuré requis)</span>
           </label>
           <div class="geo-ap-field">
             <span class="geo-label">Dernier passage</span>
@@ -616,6 +624,28 @@ const GEO = {
           <input id="geo-newsite-brand" type="text" class="geo-input"
                  placeholder="ex : Café du Centre" value="${this._esc(existing?.brand || '')}" />
         </div>
+
+        <details class="geo-advanced mt-4" ${existing?.repo ? 'open' : ''}>
+          <summary class="geo-details-sum">⚙️ Publication automatique sur le site (GitHub)</summary>
+          <div class="geo-form-col mt-2">
+            <p class="geo-advanced-sub">Si tu remplis ces champs, l'app pourra publier les contenus générés directement sur ton site via GitHub.</p>
+            <label class="geo-label mt-2">Dépôt GitHub</label>
+            <input id="geo-newsite-repo" type="text" class="geo-input"
+                   placeholder="ex : Jordan-Bourillot/lagriffe-studio" value="${this._esc(existing?.repo || '')}" />
+            <label class="geo-label mt-3">Dossier cible dans le dépôt</label>
+            <input id="geo-newsite-folder" type="text" class="geo-input"
+                   placeholder="geo/" value="${this._esc(existing?.target_folder || 'geo/')}" />
+            <label class="geo-label mt-3">Branche (en général « main »)</label>
+            <input id="geo-newsite-branch" type="text" class="geo-input"
+                   placeholder="main" value="${this._esc(existing?.branch || 'main')}" />
+            <label class="geo-label mt-3">Chemin du CSS du site (pour habillage)</label>
+            <input id="geo-newsite-css" type="text" class="geo-input"
+                   placeholder="style.css" value="${this._esc(existing?.css_path || 'style.css')}" />
+            <label class="geo-label mt-3">URL publique du dossier (optionnel, pour le canonical)</label>
+            <input id="geo-newsite-pretty" type="text" class="geo-input"
+                   placeholder="https://exemple.fr/geo" value="${this._esc(existing?.pretty_url_base || '')}" />
+          </div>
+        </details>
         <div id="geo-newsite-msg" class="geo-msg"></div>
         <div class="geo-modal-actions">
           <button class="btn btn-secondary" id="geo-newsite-cancel">Annuler</button>
@@ -631,14 +661,20 @@ const GEO = {
       const url = (document.getElementById('geo-newsite-url').value || '').trim();
       const name = (document.getElementById('geo-newsite-name').value || '').trim();
       const brand = (document.getElementById('geo-newsite-brand').value || '').trim();
+      const repo = (document.getElementById('geo-newsite-repo')?.value || '').trim();
+      const target_folder = (document.getElementById('geo-newsite-folder')?.value || '').trim();
+      const branch = (document.getElementById('geo-newsite-branch')?.value || '').trim();
+      const css_path = (document.getElementById('geo-newsite-css')?.value || '').trim();
+      const pretty_url_base = (document.getElementById('geo-newsite-pretty')?.value || '').trim();
       const msg = document.getElementById('geo-newsite-msg');
       if (!url) { msg.textContent = 'L\'adresse est obligatoire.'; msg.className = 'geo-msg geo-msg--warn'; return; }
       msg.textContent = isEdit ? 'Enregistrement…' : 'Ajout…';
+      const payload = { url, name, brand, repo, target_folder, branch, css_path, pretty_url_base };
       let r;
       if (isEdit) {
-        r = await App.api.geo_site_update({ id: existing.id, url, name, brand });
+        r = await App.api.geo_site_update({ id: existing.id, ...payload });
       } else {
-        r = await App.api.geo_site_add({ url, name, brand });
+        r = await App.api.geo_site_add(payload);
       }
       if (r && r.ok) {
         close();
@@ -711,18 +747,31 @@ const GEO = {
         box.innerHTML = '<div class="geo-q-empty">Aucun contenu généré pour l\'instant.</div>';
         return;
       }
-      box.innerHTML = r.items.map(it => `
+      box.innerHTML = r.items.map(it => {
+        const pubs = it.publications || [];
+        const pubBadge = pubs.length
+          ? `<span class="geo-pub-badge">✓ publié sur ${pubs.length} site${pubs.length > 1 ? 's' : ''}</span>`
+          : '';
+        return `
         <div class="geo-history-row">
           <div class="geo-history-meta">
-            <div class="geo-history-topic">${this._esc(it.topic)}</div>
+            <div class="geo-history-topic">${this._esc(it.topic)} ${pubBadge}</div>
             <div class="geo-history-sub">${this._kindLabel(it.kind)} · ${this._fmtDate(it.ts)} · ${this._esc(it.provider || '')}</div>
+            ${pubs.map(p => `<div class="geo-pub-url"><a href="${this._esc(p.url)}" target="_blank" rel="noopener">↗ ${this._esc(p.url)}</a></div>`).join('')}
           </div>
           <div class="geo-history-actions">
             <button class="btn btn-secondary geo-btn-mini" data-show-gen="${it.id}">Voir</button>
+            <button class="btn btn-primary geo-btn-mini" data-publish-gen="${it.id}">📤 Publier</button>
             <button class="btn btn-secondary geo-btn-mini" data-del-gen="${it.id}">Supprimer</button>
           </div>
-        </div>
-      `).join('');
+        </div>`;
+      }).join('');
+      box.querySelectorAll('[data-publish-gen]').forEach(b => {
+        b.onclick = () => {
+          const it = r.items.find(x => x.id === b.dataset.publishGen);
+          if (it) this._openPublishDialog(it);
+        };
+      });
       box.querySelectorAll('[data-show-gen]').forEach(b => {
         b.onclick = () => {
           const it = r.items.find(x => x.id === b.dataset.showGen);
@@ -773,6 +822,73 @@ const GEO = {
       btn.disabled = false;
       btn.textContent = '✍️ Rédiger';
     }
+  },
+
+  async _openPublishDialog(item) {
+    // Charge la liste des sites pour proposer une cible
+    let sites = [];
+    try {
+      const r = await App.api.geo_sites({});
+      if (r && r.ok) sites = (r.sites || []).filter(s => s.repo);
+    } catch (e) { /* tolère */ }
+    if (sites.length === 0) {
+      alert('Aucun site avec un dépôt GitHub configuré. Modifie un site et remplis la section « Publication automatique sur le site (GitHub) ».');
+      return;
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'geo-modal-overlay';
+    overlay.innerHTML = `
+      <div class="geo-modal">
+        <h3 class="geo-modal-title">Publier sur un site</h3>
+        <p class="geo-modal-sub">Le contenu sera créé en page HTML dans le dossier choisi, et le site se mettra à jour tout seul.</p>
+        <div class="geo-form-col">
+          <label class="geo-label">Contenu à publier</label>
+          <div class="geo-pub-topic">${this._esc(item.topic)}</div>
+          <label class="geo-label mt-3">Site cible</label>
+          <select id="geo-pub-target" class="geo-input">
+            ${sites.map(s => `<option value="${s.id}">${this._esc(s.name)} — ${this._esc(s.repo)}</option>`).join('')}
+          </select>
+        </div>
+        <div id="geo-pub-msg" class="geo-msg"></div>
+        <div class="geo-modal-actions">
+          <button class="btn btn-secondary" id="geo-pub-cancel">Annuler</button>
+          <button class="btn btn-primary" id="geo-pub-ok">📤 Publier maintenant</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+    document.getElementById('geo-pub-cancel').onclick = close;
+    document.getElementById('geo-pub-ok').onclick = async () => {
+      const sid = document.getElementById('geo-pub-target').value;
+      const msg = document.getElementById('geo-pub-msg');
+      const btn = document.getElementById('geo-pub-ok');
+      btn.disabled = true;
+      btn.textContent = '⏳ Publication en cours…';
+      msg.textContent = 'Clone du dépôt, écriture de la page, envoi sur GitHub…';
+      msg.className = 'geo-msg';
+      try {
+        const r = await App.api.geo_publish_content({ content_id: item.id, site_id: sid });
+        if (!r || !r.ok) {
+          msg.textContent = (r && r.error) || 'Erreur';
+          msg.className = 'geo-msg geo-msg--err';
+          btn.disabled = false;
+          btn.textContent = '📤 Publier maintenant';
+          return;
+        }
+        msg.textContent = `✓ Publié à l'adresse : ${r.url}. Le site se met à jour dans 1-3 minutes.`;
+        msg.className = 'geo-msg geo-msg--ok';
+        btn.textContent = '✓ Fermer';
+        btn.onclick = () => { close(); this._loadGenHistory(); };
+        btn.disabled = false;
+      } catch (e) {
+        msg.textContent = 'Erreur réseau : ' + (e && e.message || e);
+        msg.className = 'geo-msg geo-msg--err';
+        btn.disabled = false;
+        btn.textContent = '📤 Publier maintenant';
+      }
+    };
   },
 
   _showGenerated(item) {

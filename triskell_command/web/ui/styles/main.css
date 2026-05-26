@@ -4552,3 +4552,48 @@ select.geo-input:focus {
   cursor: pointer;
 }
 
+/* -- Publication GitHub -- */
+.geo-advanced { border-top: 1px dashed hsl(var(--border)); padding-top: 12px; }
+.geo-advanced > summary {
+  cursor: pointer; user-select: none;
+  font-size: 13.5px; font-weight: 700;
+  color: hsl(var(--text-secondary));
+  padding: 4px 0;
+}
+.geo-advanced > summary:hover { color: hsl(var(--text)); }
+.geo-advanced-sub {
+  font-size: 12.5px;
+  color: hsl(var(--text-muted));
+  margin: 0 0 8px;
+  text-wrap: pretty;
+}
+.geo-pub-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: hsl(var(--success) / 0.15);
+  color: hsl(var(--success));
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.geo-pub-url {
+  font-size: 11.5px;
+  margin-top: 4px;
+}
+.geo-pub-url a {
+  color: hsl(var(--accent));
+  text-decoration: none;
+}
+.geo-pub-url a:hover { text-decoration: underline; }
+.geo-pub-topic {
+  padding: 10px 12px;
+  background: hsl(var(--surface-elevated));
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  font-weight: 600;
+  color: hsl(var(--text));
+  margin-top: 4px;
+}
+

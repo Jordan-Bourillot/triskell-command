@@ -8556,6 +8556,12 @@ class Api:
             "brand":      brand,
             "domain":     domain,
             "created_at": self._geo_now(),
+            # Réglages de publication (optionnels — vides = pas de publi auto)
+            "repo":           (p.get("repo") or "").strip(),
+            "target_folder":  (p.get("target_folder") or "geo/").strip().strip("/") + "/",
+            "branch":         (p.get("branch") or "main").strip(),
+            "css_path":       (p.get("css_path") or "style.css").strip(),
+            "pretty_url_base": (p.get("pretty_url_base") or "").strip(),
         }
         root["sites"].append(site)
         self._geo_save()
@@ -8607,6 +8613,17 @@ class Api:
         if "brand" in p:
             brand = (p.get("brand") or "").strip()
             site["brand"] = brand or (site.get("domain", "").split(".")[0].capitalize())
+        # Champs de publication
+        for k in ("repo", "branch", "css_path", "pretty_url_base"):
+            if k in p:
+                site[k] = (p.get(k) or "").strip()
+        if "target_folder" in p:
+            tf = (p.get("target_folder") or "geo/").strip().strip("/")
+            site["target_folder"] = (tf + "/") if tf else "geo/"
+        # Défauts si vides après update
+        site.setdefault("target_folder", "geo/")
+        site.setdefault("branch", "main")
+        site.setdefault("css_path", "style.css")
         self._geo_save()
         return {"ok": True, "site": site}
 
@@ -9177,6 +9194,231 @@ class Api:
         self._geo_save()
         return {"ok": True}
 
+    # -- Publication automatique sur un site (push GitHub) -------------
+    @staticmethod
+    def _geo_slugify(text: str) -> str:
+        import re as _re, unicodedata as _ud
+        s = _ud.normalize("NFD", text or "")
+        s = "".join(c for c in s if not _ud.combining(c))
+        s = _re.sub(r"[^a-zA-Z0-9]+", "-", s).strip("-").lower()
+        return s[:60] or "page"
+
+    @staticmethod
+    def _geo_md_to_html(md: str) -> str:
+        """Convertit le Markdown du contenu généré en HTML simple pour la page."""
+        import re as _re
+        if not md:
+            return ""
+        esc = lambda s: (s.replace("&", "&amp;").replace("<", "&lt;")
+                          .replace(">", "&gt;"))
+        # Échappe d'abord
+        out = esc(md)
+        # Tableaux markdown (avant les autres remplacements)
+        def _tbl(m):
+            block = m.group(1)
+            lines = block.strip().split("\n")
+            if len(lines) < 2:
+                return block
+            head = [c.strip() for c in lines[0].split("|")[1:-1]]
+            rows = [[c.strip() for c in l.split("|")[1:-1]] for l in lines[2:]]
+            return ("<table><thead><tr>"
+                    + "".join(f"<th>{c}</th>" for c in head)
+                    + "</tr></thead><tbody>"
+                    + "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>"
+                              for r in rows)
+                    + "</tbody></table>")
+        out = _re.sub(
+            r"((?:^\|[^\n]+\|\n)(?:^\|[\s:|-]+\|\n)(?:^\|[^\n]+\|\n?)+)",
+            _tbl, out, flags=_re.MULTILINE,
+        )
+        # Titres
+        out = _re.sub(r"^### (.+)$", r"<h3>\1</h3>", out, flags=_re.MULTILINE)
+        out = _re.sub(r"^## (.+)$",  r"<h2>\1</h2>", out, flags=_re.MULTILINE)
+        out = _re.sub(r"^# (.+)$",   r"<h1>\1</h1>", out, flags=_re.MULTILINE)
+        # Listes
+        def _ul(m):
+            lines = m.group(0).strip().split("\n")
+            return "<ul>" + "".join("<li>" + l.lstrip("- ").strip() + "</li>"
+                                    for l in lines) + "</ul>"
+        out = _re.sub(r"(?:^- .+(?:\n|$))+", _ul, out, flags=_re.MULTILINE)
+        def _ol(m):
+            lines = m.group(0).strip().split("\n")
+            return "<ol>" + "".join(
+                "<li>" + _re.sub(r"^\d+\. ", "", l).strip() + "</li>"
+                for l in lines
+            ) + "</ol>"
+        out = _re.sub(r"(?:^\d+\. .+(?:\n|$))+", _ol, out, flags=_re.MULTILINE)
+        # Inline
+        out = _re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", out)
+        out = _re.sub(r"\*([^*]+)\*",     r"<em>\1</em>", out)
+        out = _re.sub(r"`([^`]+)`",       r"<code>\1</code>", out)
+        # Paragraphes : double saut → </p><p>
+        paras = []
+        for block in _re.split(r"\n{2,}", out):
+            b = block.strip()
+            if not b:
+                continue
+            if _re.match(r"^<(h\d|ul|ol|table|pre|blockquote)", b):
+                paras.append(b)
+            else:
+                paras.append("<p>" + b.replace("\n", "<br/>") + "</p>")
+        return "\n".join(paras)
+
+    @staticmethod
+    def _geo_extract_first_line(md: str) -> str:
+        """Récupère la première phrase pour la meta-description."""
+        import re as _re
+        if not md:
+            return ""
+        # Retire les # de titre éventuels
+        for line in md.splitlines():
+            l = _re.sub(r"^#+\s*", "", line).strip()
+            l = _re.sub(r"[*_`]+", "", l).strip()
+            if l and len(l) > 30:
+                return l[:200]
+        return md.strip().replace("\n", " ")[:200]
+
+    def _geo_build_html_page(self, *, title: str, content_html: str,
+                             css_href: str, site_name: str,
+                             meta_description: str, canonical: str) -> str:
+        """Construit une page HTML autonome stylée par le CSS du site."""
+        ts = self._geo_now()
+        # FAQPage JSON-LD si le contenu contient des H3 finissant par "?"
+        # (heuristique simple — pas obligatoire)
+        return f"""<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title} · {site_name}</title>
+  <meta name="description" content="{meta_description}" />
+  {f'<link rel="canonical" href="{canonical}" />' if canonical else ''}
+  <meta property="og:title" content="{title}" />
+  <meta property="og:description" content="{meta_description}" />
+  <meta property="og:type" content="article" />
+  <link rel="stylesheet" href="/{css_href.lstrip('/')}" />
+  <style>
+    /* Habillage minimal pour les pages GEO (le CSS du site fait le reste) */
+    .geo-page-wrap {{ max-width: 800px; margin: 60px auto; padding: 0 24px;
+                      line-height: 1.7; }}
+    .geo-page-wrap h1 {{ font-size: 2.2rem; margin-bottom: 0.3em; }}
+    .geo-page-wrap h2 {{ font-size: 1.5rem; margin-top: 1.8em; }}
+    .geo-page-wrap h3 {{ font-size: 1.15rem; margin-top: 1.4em; }}
+    .geo-page-wrap p, .geo-page-wrap li {{ font-size: 1.02rem; }}
+    .geo-page-wrap table {{ border-collapse: collapse; margin: 1em 0;
+                              width: 100%; }}
+    .geo-page-wrap th, .geo-page-wrap td {{
+      border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left;
+    }}
+    .geo-page-wrap th {{ background: #f8fafc; font-weight: 600; }}
+    .geo-page-wrap a {{ text-decoration: underline; }}
+    .geo-page-foot {{ margin-top: 60px; padding-top: 24px;
+                       border-top: 1px solid #e2e8f0; font-size: 0.85rem;
+                       color: #64748b; }}
+  </style>
+</head>
+<body>
+  <main class="geo-page-wrap">
+    <h1>{title}</h1>
+    {content_html}
+    <div class="geo-page-foot">
+      Page mise à jour le {ts[:10]} — {site_name}.
+    </div>
+  </main>
+</body>
+</html>
+"""
+
+    def geo_publish_content(self, payload: dict) -> dict:
+        """Publie un contenu généré sur le site cible :
+        clone du dépôt, création de la page HTML, commit + push."""
+        p = payload or {}
+        gid = (p.get("content_id") or "").strip()
+        sid = (p.get("site_id") or "").strip()
+        if not gid or not sid:
+            return {"ok": False, "error": "content_id et site_id requis"}
+        root = self._geo_root()
+        item = next((g for g in root["generated"] if g.get("id") == gid), None)
+        site = next((s for s in root["sites"] if s.get("id") == sid), None)
+        if not item: return {"ok": False, "error": "Contenu introuvable"}
+        if not site: return {"ok": False, "error": "Site introuvable"}
+        repo = (site.get("repo") or "").strip()
+        if not repo:
+            return {"ok": False, "error":
+                    "Le site n'a pas de dépôt GitHub configuré. Modifie le "
+                    "site et renseigne le champ « Dépôt GitHub »."}
+        # Vérifie le token GitHub
+        try:
+            from .. integrations.phare import git_pipeline as gitp
+            token = gitp._github_token()
+        except Exception:
+            return {"ok": False, "error":
+                    "Module GitHub indisponible côté serveur."}
+        if not token:
+            return {"ok": False, "error":
+                    "Pas de token GitHub configuré (variable GITHUB_TOKEN). "
+                    "Va sur Coolify pour l'ajouter."}
+        # Slug + chemin cible
+        slug = self._geo_slugify(item.get("topic", "page"))
+        folder = (site.get("target_folder") or "geo/").strip("/") + "/"
+        branch = (site.get("branch") or "main").strip() or "main"
+        css_path = (site.get("css_path") or "style.css").strip()
+        pretty_base = (site.get("pretty_url_base") or "").strip().rstrip("/")
+        # HTML construit
+        canonical = (pretty_base + "/" + slug) if pretty_base else (
+            (site.get("url", "").rstrip("/")) + "/" + folder + slug)
+        meta_desc = self._geo_extract_first_line(item.get("content", ""))
+        content_html = self._geo_md_to_html(item.get("content", ""))
+        page_html = self._geo_build_html_page(
+            title=item.get("topic", "Page"),
+            content_html=content_html,
+            css_href=css_path,
+            site_name=site.get("name", site.get("brand", "")),
+            meta_description=meta_desc,
+            canonical=canonical,
+        )
+        # Clone -> écriture -> commit -> push
+        import tempfile, os as _os, shutil
+        workdir = tempfile.mkdtemp(prefix="geo-publish-")
+        try:
+            ok_clone = gitp.clone_repo(repo, workdir, branch=branch)
+            if not ok_clone:
+                return {"ok": False, "error":
+                        f"Impossible de cloner {repo}. Vérifie le nom du "
+                        "dépôt et que le token GitHub a accès."}
+            target_dir = _os.path.join(workdir, folder.strip("/"))
+            _os.makedirs(target_dir, exist_ok=True)
+            target_file = _os.path.join(target_dir, slug + ".html")
+            with open(target_file, "w", encoding="utf-8") as fh:
+                fh.write(page_html)
+            # Commit
+            ok_commit = gitp.commit_all(
+                workdir,
+                f"GEO: nouvelle page « {item.get('topic', '')[:60]} »",
+            )
+            if not ok_commit:
+                return {"ok": False, "error":
+                        "Rien à pousser (le fichier était déjà identique)."}
+            ok_push = gitp.push_branch(workdir, branch)
+            if not ok_push:
+                return {"ok": False, "error":
+                        f"Échec du push sur {repo} (branche {branch})."}
+            # Met à jour l'item généré avec son URL de publication
+            item.setdefault("publications", []).append({
+                "site_id":  sid,
+                "site_name": site.get("name", ""),
+                "url":      canonical,
+                "ts":       self._geo_now(),
+                "repo":     repo,
+                "branch":   branch,
+                "path":     folder + slug + ".html",
+            })
+            self._geo_save()
+            return {"ok": True, "url": canonical, "path": folder + slug + ".html"}
+        finally:
+            try: shutil.rmtree(workdir, ignore_errors=True)
+            except Exception: pass
+
     # -- Réputation -----------------------------------------------------
     def geo_reputation_run(self, payload: dict) -> dict:
         brand = ((payload or {}).get("brand") or "").strip()
@@ -9274,6 +9516,7 @@ class Api:
             "enabled":        bool(s.get("enabled", False)),
             "frequency_days": int(s.get("frequency_days", 14)),
             "auto_generate":  bool(s.get("auto_generate", True)),
+            "auto_publish":   bool(s.get("auto_publish", False)),
             "last_run_at":    s.get("last_run_at", ""),
             "last_run_summary": s.get("last_run_summary", ""),
             "running":        bool(s.get("running", False)),
@@ -9300,6 +9543,8 @@ class Api:
             cur["frequency_days"] = max(1, min(90, f))
         if "auto_generate" in p:
             cur["auto_generate"] = bool(p["auto_generate"])
+        if "auto_publish" in p:
+            cur["auto_publish"] = bool(p["auto_publish"])
         self._geo_save()
         return {"ok": True, "settings": self._geo_autopilot_settings()}
 
@@ -9355,6 +9600,7 @@ class Api:
         ap = root.get("autopilot") or {}
         freq_days = int(ap.get("frequency_days") or 14)
         auto_gen = bool(ap.get("auto_generate", True))
+        auto_pub = bool(ap.get("auto_publish", False))
         sites = root["sites"]
         if site_id:
             sites = [s for s in sites if s.get("id") == site_id]
@@ -9433,6 +9679,21 @@ class Api:
                                 "site_name": site.get("name"),
                                 "question": q,
                             }
+                            # Publication auto sur le site (si activée et site configuré)
+                            if auto_pub and site.get("repo"):
+                                try:
+                                    pr = self.geo_publish_content({
+                                        "content_id": it.get("id"),
+                                        "site_id": sid,
+                                    })
+                                    if pr and pr.get("ok"):
+                                        summary_lines.append(
+                                            f"  ✓ publié : {pr.get('url', '')}")
+                                    else:
+                                        summary_lines.append(
+                                            f"  ⚠ publi échouée : {pr.get('error') if pr else 'inconnu'}")
+                                except Exception as exc:
+                                    logger.info("geo autopilot publish %s: %s", sid, exc)
                             # Petit délai pour ne pas bombarder l'API IA
                             _time.sleep(1.5)
                     except Exception as exc:
