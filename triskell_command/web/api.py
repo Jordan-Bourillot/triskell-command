@@ -272,16 +272,15 @@ class Api:
     # Réponses entrantes
     # ------------------------------------------------------------------
     def get_replies(self, payload: dict | None = None) -> dict:
-        """Renvoie les réponses + mails entrants non traités.
+        """Renvoie uniquement les vraies reponses : mails entrants matches
+        a un prospect a qui on a deja ecrit (kind=reply_received).
 
-        Inclut maintenant :
-        - les reply_received (reponses matchees a un prospect, classees IA)
-        - les inbox_received (mails entrants non matches : permet de ne plus
-          perdre les mails recus depuis une adresse inconnue)
+        Les mails entrants d'adresses inconnues (kind=inbox_received) sont
+        volontairement exclus ici — ils restent visibles dans l'onglet
+        Boite de reception via mails_list(kind='inbound').
 
         Filtre optionnel par account_id (compte mail) : si fourni, ne montre
-        que les entrants de ce compte. Resoud le bug du multi-comptes ou
-        on melangeait les boites.
+        que les entrants de ce compte.
         """
         p = payload or {}
         category = p.get("category") or "all"
@@ -292,7 +291,7 @@ class Api:
         try:
             sb = client.raw
             res = (sb.table("email_history").select("*")
-                   .in_("kind", ["reply_received", "inbox_received"])
+                   .eq("kind", "reply_received")
                    .order("ts", desc=True).limit(300).execute())
             rows = res.data or []
             out = []
@@ -306,17 +305,9 @@ class Api:
                         extra = {}
                 if extra.get("handled"):
                     continue
-                # Filtre compte mail (si demande explicitement)
                 if account_id and extra.get("account_id") != account_id:
                     continue
-                # Filtre categorie : exclut les inbox_received (pas de
-                # classification IA) et filtre les reply_received par
-                # catégorie demandée — sinon le filtre "interested" laisse
-                # passer les mails inconnus et la liste ne colle plus au
-                # chiffre affiché sur la carte Matinale.
                 if category != "all":
-                    if r.get("kind") != "reply_received":
-                        continue
                     cat = (extra.get("classification") or {}).get(
                         "category", "unknown")
                     if cat != category:
