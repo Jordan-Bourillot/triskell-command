@@ -455,27 +455,31 @@ const Thomas = {
       // — masquées pour un message supprimé.
       const reactionsHtml = isDeleted ? '' : this._renderReactionChips(m);
 
+      // Actions (🗑 ✎ 😊 ↩) regroupées dans un overlay positionné en
+      // absolu à côté de la bulle — comme ça, elles ne réservent plus
+      // de place horizontale dans la rangée et la bulle peut prendre
+      // toute la largeur disponible. Elles n'apparaissent qu'au survol.
+      const actionsHtml = isFromMe
+        ? `<div class="thomas-actions thomas-actions-mine">${deleteBtn}${editBtn}${reactBtn}${replyBtn}</div>`
+        : `<div class="thomas-actions thomas-actions-theirs">${reactBtn}${replyBtn}</div>`;
+
+      const wrapSideClass = isFromMe ? 'thomas-bubble-wrap-mine' : 'thomas-bubble-wrap-theirs';
       const bubble = `
-        <div class="thomas-bubble-wrap">
+        <div class="thomas-bubble-wrap ${wrapSideClass}">
           ${claudeLabelHtml}
-          <div class="max-w-[88%] sm:max-w-[75%] px-3 py-2 rounded-2xl ${corner} text-white"
+          <div class="max-w-[92%] sm:max-w-[88%] px-3 py-2 rounded-2xl ${corner} text-white relative"
                data-msg-id="${this._escape(m.id || '')}"
                style="background:${this._escape(bgColor)};">
             ${quoteHtml}
             ${attachHtml}
             ${bodyHtml}
             <div class="text-[10px] opacity-70 mt-1 text-right">${time}${editedTag}</div>
+            ${actionsHtml}
           </div>
           ${reactionsHtml}
         </div>`;
 
-      // Pour mes bulles (droite), les boutons 🗑 ✎ 😊 ↩ sont avant ;
-      // pour celles de l'autre (gauche), 😊 ↩ après — les actions
-      // restent toujours du côté "extérieur" de la bulle.
-      const inner = isFromMe
-        ? `${deleteBtn}${editBtn}${reactBtn}${replyBtn}${bubble}`
-        : `${bubble}${reactBtn}${replyBtn}`;
-      return `<div class="flex ${align} items-start gap-1.5 thomas-msg-row">${inner}</div>`;
+      return `<div class="flex ${align} items-start thomas-msg-row">${bubble}</div>`;
     }).join('');
 
     el.innerHTML = html || `
