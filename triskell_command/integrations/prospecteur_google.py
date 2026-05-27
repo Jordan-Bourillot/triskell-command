@@ -63,6 +63,28 @@ UA_WEB = {
     "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
 }
 
+# Codes ISO acceptés pour le filtre francophone. "ALL" = on itère sur les
+# principaux pays francophones (FR, BE, CH, CA, LU, MC) et on dédoublonne.
+FRANCOPHONE_COUNTRIES = {
+    "FR", "BE", "CH", "CA", "LU", "MC",
+    "MA", "DZ", "TN", "SN", "CI",
+}
+
+# Itération "tous francophones" : on couvre les principaux marchés où Triskell
+# vend ses sites. Les pays du Maghreb / Afrique francophone sont volontairement
+# exclus de la boucle ALL pour ne pas exploser le quota Places.
+ALL_FRANCOPHONE_ITER = ["FR", "BE", "CH", "CA", "LU", "MC"]
+
+
+def _normalize_pays(pays: str | None) -> str:
+    """Renvoie un code ISO valide en majuscules, ou 'FR' par défaut."""
+    code = (pays or "FR").strip().upper()
+    if code == "ALL":
+        return "ALL"
+    if code not in FRANCOPHONE_COUNTRIES:
+        return "FR"
+    return code
+
 # Mails techniques / faux positifs à jeter
 EMAIL_BLACKLIST = [
     "@example.", "noreply", "no-reply", "@wix.com", "@sentry",
@@ -219,9 +241,14 @@ def _build_label(metier: str, zone: str, only_no_site: bool) -> str:
 def start_hunt(metier: str, zone: str, num_results: int = 60,
                only_no_site: bool = False,
                api_key: str | None = None,
+               pays: str = "FR",
                progress_cb: Callable[[ProspectHunt], None] | None = None,
                ) -> ProspectHunt:
-    """Lance une chasse Google Places en arrière-plan."""
+    """Lance une chasse Google Places en arrière-plan.
+
+    `pays` : code ISO francophone (FR par défaut). "ALL" itère sur les
+    principaux pays francophones et dédoublonne les résultats.
+    """
     ensure_dirs()
     if not metier or not metier.strip():
         raise ValueError("Indique un métier ou un type d'entreprise.")
@@ -231,6 +258,7 @@ def start_hunt(metier: str, zone: str, num_results: int = 60,
         num_results = 60
     if num_results > 200:
         num_results = 200
+    pays = _normalize_pays(pays)
 
     hunt_id = uuid.uuid4().hex[:12]
     hunt = ProspectHunt(
@@ -242,6 +270,7 @@ def start_hunt(metier: str, zone: str, num_results: int = 60,
         filters={
             "metier": metier, "zone": zone,
             "num_results": num_results, "only_no_site": only_no_site,
+            "pays": pays,
         },
     )
     hunt.save()
@@ -250,7 +279,7 @@ def start_hunt(metier: str, zone: str, num_results: int = 60,
         try:
             _run_hunt(hunt, metier=metier, zone=zone,
                       num_results=num_results, only_no_site=only_no_site,
-                      api_key=_get_api_key(api_key),
+                      api_key=_get_api_key(api_key), pays=pays,
                       progress_cb=progress_cb)
             hunt.status = "done"
             hunt.progress = 100
@@ -268,9 +297,50 @@ def start_hunt(metier: str, zone: str, num_results: int = 60,
     return hunt
 
 
+def _fetch_places(region_code: str, metier: str, zone: str, num_results: int,
+                  api_key: str, log: Callable[[str], None]) -> list[dict]:
+    """Interroge l'API Places pour un seul `regionCode`. Renvoie la liste
+    brute des places (max `num_results`).
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": PLACES_FIELDS,
+    }
+    body: dict[str, Any] = {
+        "textQuery": f"{metier} {zone}",
+        "pageSize": 20,
+        "languageCode": "fr",
+        "regionCode": region_code,
+    }
+
+    places: list[dict] = []
+    page_token: str | None = None
+    while len(places) < num_results:
+        if page_token:
+            body["pageToken"] = page_token
+        try:
+            r = requests.post(PLACES_URL, headers=headers, json=body, timeout=15)
+            if r.status_code != 200:
+                log(f"⚠️ Erreur API {region_code} ({r.status_code}) : {r.text[:300]}")
+                break
+            data = r.json()
+            batch = data.get("places", []) or []
+            places.extend(batch)
+            log(f"📄 [{region_code}] +{len(batch)} entreprise(s) (total {len(places)})")
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+            time.sleep(2)
+        except Exception as exc:
+            log(f"⚠️ Erreur réseau {region_code} : {exc}")
+            break
+    return places[:num_results]
+
+
 def _run_hunt(hunt: ProspectHunt, metier: str, zone: str, num_results: int,
-              only_no_site: bool, api_key: str,
-              progress_cb: Callable[[ProspectHunt], None] | None) -> None:
+              only_no_site: bool, api_key: str, pays: str = "FR",
+              progress_cb: Callable[[ProspectHunt], None] | None = None) -> None:
     def log(msg: str) -> None:
         hunt.log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
         if len(hunt.log) > 200:
@@ -282,36 +352,31 @@ def _run_hunt(hunt: ProspectHunt, metier: str, zone: str, num_results: int,
 
     hunt.status = "searching"
     hunt.save()
-    log(f"🔎 Recherche Google Places : '{metier}' à '{zone}' (max {num_results})")
-
-    headers = {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": PLACES_FIELDS,
-    }
-    body: dict[str, Any] = {"textQuery": f"{metier} {zone}", "pageSize": 20}
+    zone_label = "tous francophones" if pays == "ALL" else pays
+    log(f"🔎 Recherche Google Places : '{metier}' à '{zone}' — {zone_label} (max {num_results})")
 
     all_places: list[dict] = []
-    page_token: str | None = None
-    while len(all_places) < num_results:
-        if page_token:
-            body["pageToken"] = page_token
-        try:
-            r = requests.post(PLACES_URL, headers=headers, json=body, timeout=15)
-            if r.status_code != 200:
-                log(f"⚠️ Erreur API ({r.status_code}) : {r.text[:300]}")
+    seen_ids: set[str] = set()
+    if pays == "ALL":
+        # On répartit le quota num_results sur les pays itérés.
+        per_country = max(num_results // len(ALL_FRANCOPHONE_ITER), 10)
+        for rc in ALL_FRANCOPHONE_ITER:
+            if len(all_places) >= num_results:
                 break
-            data = r.json()
-            places = data.get("places", []) or []
-            all_places.extend(places)
-            log(f"📄 +{len(places)} entreprise(s) (total {len(all_places)})")
-            page_token = data.get("nextPageToken")
-            if not page_token:
-                break
-            time.sleep(2)
-        except Exception as exc:
-            log(f"⚠️ Erreur réseau : {exc}")
-            break
+            batch = _fetch_places(rc, metier, zone, per_country, api_key, log)
+            for pl in batch:
+                key = pl.get("id") or (
+                    (pl.get("displayName") or {}).get("text", "") +
+                    "|" + (pl.get("formattedAddress") or "")
+                )
+                if key in seen_ids:
+                    continue
+                seen_ids.add(key)
+                all_places.append(pl)
+                if len(all_places) >= num_results:
+                    break
+    else:
+        all_places = _fetch_places(pays, metier, zone, num_results, api_key, log)
 
     all_places = all_places[:num_results]
     hunt.stats["candidats"] = len(all_places)

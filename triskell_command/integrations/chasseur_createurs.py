@@ -79,6 +79,41 @@ UA_WEB = {
     "Cookie": "CONSENT=YES+",
 }
 
+# Codes ISO acceptés pour le filtre francophone. "ALL" = tous francophones
+# (pas de regionCode côté API, on s'appuie alors sur relevanceLanguage='fr'
+# + filtre langdetect côté Python).
+FRANCOPHONE_COUNTRIES = {
+    "FR", "BE", "CH", "CA", "LU", "MC",
+    "MA", "DZ", "TN", "SN", "CI",
+}
+
+
+def _normalize_pays(pays: str | None) -> str:
+    """Renvoie un code ISO valide en majuscules, ou 'FR' par défaut."""
+    code = (pays or "FR").strip().upper()
+    if code == "ALL":
+        return "ALL"
+    if code not in FRANCOPHONE_COUNTRIES:
+        return "FR"
+    return code
+
+
+def _is_french_text(text: str) -> bool:
+    """Détecte si un texte est en français. Si langdetect indisponible ou
+    en erreur, renvoie True (on garde la chaîne pour ne pas écarter à tort).
+    """
+    sample = (text or "").strip()
+    if not sample:
+        return True
+    try:
+        from langdetect import detect, DetectorFactory
+        DetectorFactory.seed = 0  # détection déterministe
+        return detect(sample) == "fr"
+    except ImportError:
+        return True
+    except Exception:
+        return True
+
 
 def ensure_dirs() -> None:
     HUNTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -177,11 +212,17 @@ def _get_youtube_api_key(payload_key: str | None = None) -> str:
 # YouTube scraping
 # ---------------------------------------------------------------------------
 def _scrap_youtube(hunt: CreatorHunt, niche: str, min_subs: int, max_subs: int,
-                    num_results: int, api_key: str,
-                    progress_cb: Callable[[CreatorHunt], None] | None) -> list[Creator]:
+                    num_results: int, api_key: str, pays: str = "FR",
+                    progress_cb: Callable[[CreatorHunt], None] | None = None) -> list[Creator]:
     """Cherche des chaînes YouTube dans une niche, dans une fourchette d'abonnés,
     et tente d'extraire leur mail public.
+
+    `pays` : code ISO (FR, BE, CH, CA, LU, MC, MA, DZ, TN, SN, CI) ou "ALL"
+    pour tous les francophones. Limite l'API YouTube via `regionCode` +
+    `relevanceLanguage='fr'`, puis filtre les chaînes non-francophones via
+    langdetect (si installé) sur titre + description.
     """
+    pays = _normalize_pays(pays)
     try:
         from googleapiclient.discovery import build
     except ImportError as exc:
@@ -201,7 +242,8 @@ def _scrap_youtube(hunt: CreatorHunt, niche: str, min_subs: int, max_subs: int,
 
     youtube = build("youtube", "v3", developerKey=api_key)
 
-    log(f"🔎 Recherche YouTube : '{niche}' ({min_subs}-{max_subs} abonnés)…")
+    zone_label = "tous francophones" if pays == "ALL" else pays
+    log(f"🔎 Recherche YouTube : '{niche}' ({min_subs}-{max_subs} abonnés) — {zone_label}…")
     hunt.status = "searching"
     hunt.save()
 
@@ -216,7 +258,10 @@ def _scrap_youtube(hunt: CreatorHunt, niche: str, min_subs: int, max_subs: int,
             "part": "id,snippet",
             "type": "channel",
             "maxResults": 50,
+            "relevanceLanguage": "fr",
         }
+        if pays != "ALL":
+            params["regionCode"] = pays
         if next_page_token:
             params["pageToken"] = next_page_token
 
@@ -243,11 +288,18 @@ def _scrap_youtube(hunt: CreatorHunt, niche: str, min_subs: int, max_subs: int,
                 info = ch_resp["items"][0]
                 sub_count = int(info["statistics"].get("subscriberCount", 0))
                 if min_subs <= sub_count <= max_subs:
+                    title = info["snippet"]["title"]
+                    desc = info["snippet"].get("description", "")
+                    # Filtre langue : si le titre + description ne sont pas
+                    # en français, on écarte (langdetect ; en cas d'erreur
+                    # ou de lib absente, on garde).
+                    if not _is_french_text(f"{title} {desc}"):
+                        continue
                     channels.append({
                         "id": channel_id,
-                        "title": info["snippet"]["title"],
+                        "title": title,
                         "subs": sub_count,
-                        "description": info["snippet"].get("description", ""),
+                        "description": desc,
                         "country": info["snippet"].get("country", ""),
                         "created": info["snippet"].get("publishedAt", ""),
                         "video_count": int(info["statistics"].get("videoCount", 0)),
@@ -598,9 +650,14 @@ def start_hunt(platform: str, niche: str, min_subs: int, max_subs: int,
                youtube_api_key: str | None = None,
                instagram_login: str | None = None,
                instagram_password: str | None = None,
+               pays: str = "FR",
                progress_cb: Callable[[CreatorHunt], None] | None = None,
                ) -> CreatorHunt:
-    """Lance une chasse aux créateurs en arrière-plan."""
+    """Lance une chasse aux créateurs en arrière-plan.
+
+    `pays` : code ISO francophone (FR par défaut). Voir FRANCOPHONE_COUNTRIES.
+    "ALL" = tous francophones (pas de regionCode, filtre langue uniquement).
+    """
     ensure_dirs()
     if platform not in ("youtube", "instagram", "facebook"):
         raise ValueError(f"Plateforme inconnue : {platform}")
@@ -614,6 +671,7 @@ def start_hunt(platform: str, niche: str, min_subs: int, max_subs: int,
         num_results = 50
     if num_results > 500:
         num_results = 500
+    pays = _normalize_pays(pays)
 
     hunt_id = uuid.uuid4().hex[:12]
     label = _build_label(platform, niche, min_subs, max_subs)
@@ -626,7 +684,7 @@ def start_hunt(platform: str, niche: str, min_subs: int, max_subs: int,
         filters={
             "platform": platform, "niche": niche,
             "min_subs": min_subs, "max_subs": max_subs,
-            "num_results": num_results,
+            "num_results": num_results, "pays": pays,
         },
     )
     hunt.save()
@@ -636,7 +694,7 @@ def start_hunt(platform: str, niche: str, min_subs: int, max_subs: int,
             if platform == "youtube":
                 key = _get_youtube_api_key(youtube_api_key)
                 _scrap_youtube(hunt, niche, min_subs, max_subs, num_results,
-                               key, progress_cb)
+                               key, pays=pays, progress_cb=progress_cb)
             elif platform == "instagram":
                 _scrap_instagram(hunt, niche, min_subs, max_subs, num_results,
                                  instagram_login or "", instagram_password or "",

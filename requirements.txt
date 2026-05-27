@@ -5,6 +5,8 @@ requests>=2.31
 beautifulsoup4>=4.12
 # Chasseur Créateur — recherche YouTube (Data API v3)
 google-api-python-client>=2.0
+# Filtre langue française (Chasseur Créateur + Prospecteur Google)
+langdetect>=1.0.9
 # Facturation Stripe (SaaS Command + abonnements clients SEO/etc.)
 stripe>=11.0
 # Studio — pipeline Agent SDK pour création de site auto (optionnel ;

@@ -24,6 +24,7 @@ const ProspecteurGoogle = {
       const f = {
         metier:     document.getElementById('pg-metier')?.value || '',
         zone:       document.getElementById('pg-zone')?.value || '',
+        pays:       document.getElementById('pg-pays')?.value || 'FR',
         num:        document.getElementById('pg-num')?.value || '60',
         onlyNoSite: !!document.getElementById('pg-only-nosite')?.checked,
         apikey:     document.getElementById('pg-apikey')?.value || '',
@@ -43,6 +44,7 @@ const ProspecteurGoogle = {
     const set = (id, v) => { const el = document.getElementById(id); if (el != null && v != null) el.value = v; };
     set('pg-metier', f.metier);
     set('pg-zone', f.zone);
+    set('pg-pays', f.pays);
     set('pg-num', f.num);
     set('pg-apikey', f.apikey);
     if (f.onlyNoSite != null) {
@@ -108,6 +110,24 @@ const ProspecteurGoogle = {
                   <label class="block text-xs font-semibold mb-1">Zone géographique</label>
                   <input id="pg-zone" type="text" class="w-full input"
                          placeholder="ex : Brest, Finistère, Bretagne" />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold mb-1">Pays / Langue</label>
+                  <select id="pg-pays" class="w-full input">
+                    <option value="FR" selected>🇫🇷 France</option>
+                    <option value="BE">🇧🇪 Belgique</option>
+                    <option value="CH">🇨🇭 Suisse</option>
+                    <option value="CA">🇨🇦 Québec / Canada FR</option>
+                    <option value="LU">🇱🇺 Luxembourg</option>
+                    <option value="MC">🇲🇨 Monaco</option>
+                    <option value="MA">🇲🇦 Maroc</option>
+                    <option value="DZ">🇩🇿 Algérie</option>
+                    <option value="TN">🇹🇳 Tunisie</option>
+                    <option value="SN">🇸🇳 Sénégal</option>
+                    <option value="CI">🇨🇮 Côte d'Ivoire</option>
+                    <option value="ALL">🌍 Tous les francophones</option>
+                  </select>
                 </div>
 
                 <div>
@@ -342,6 +362,7 @@ const ProspecteurGoogle = {
   async _launchHunt() {
     const metier = document.getElementById('pg-metier').value.trim();
     const zone = document.getElementById('pg-zone').value.trim();
+    const pays = document.getElementById('pg-pays')?.value || 'FR';
     const num = parseInt(document.getElementById('pg-num').value, 10) || 60;
     const onlyNoSite = document.getElementById('pg-only-nosite').checked;
     const apiKey = document.getElementById('pg-apikey').value.trim();
@@ -356,7 +377,7 @@ const ProspecteurGoogle = {
     }
 
     const payload = {
-      metier, zone, num_results: num, only_no_site: onlyNoSite,
+      metier, zone, pays, num_results: num, only_no_site: onlyNoSite,
     };
     if (apiKey) payload.api_key = apiKey;
 

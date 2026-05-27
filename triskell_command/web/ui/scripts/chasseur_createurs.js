@@ -24,6 +24,7 @@ const ChasseurCreateurs = {
       const f = {
         platform: document.getElementById('cc-platform')?.value || 'youtube',
         niche:    document.getElementById('cc-niche')?.value || '',
+        pays:     document.getElementById('cc-pays')?.value || 'FR',
         min:      document.getElementById('cc-min')?.value || '10000',
         max:      document.getElementById('cc-max')?.value || '1000000',
         num:      document.getElementById('cc-num')?.value || '50',
@@ -45,6 +46,7 @@ const ChasseurCreateurs = {
     const set = (id, v) => { const el = document.getElementById(id); if (el != null && v != null) el.value = v; };
     set('cc-platform', f.platform);
     set('cc-niche', f.niche);
+    set('cc-pays', f.pays);
     set('cc-min', f.min);
     set('cc-max', f.max);
     set('cc-num', f.num);
@@ -122,6 +124,24 @@ const ChasseurCreateurs = {
                   <label class="block text-xs font-semibold mb-1">Niche / mots-clés</label>
                   <input id="cc-niche" type="text" class="w-full input"
                          placeholder="ex : cuisine, gaming, fitness…" />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold mb-1">Pays / Langue</label>
+                  <select id="cc-pays" class="w-full input">
+                    <option value="FR" selected>🇫🇷 France</option>
+                    <option value="BE">🇧🇪 Belgique</option>
+                    <option value="CH">🇨🇭 Suisse</option>
+                    <option value="CA">🇨🇦 Québec / Canada FR</option>
+                    <option value="LU">🇱🇺 Luxembourg</option>
+                    <option value="MC">🇲🇨 Monaco</option>
+                    <option value="MA">🇲🇦 Maroc</option>
+                    <option value="DZ">🇩🇿 Algérie</option>
+                    <option value="TN">🇹🇳 Tunisie</option>
+                    <option value="SN">🇸🇳 Sénégal</option>
+                    <option value="CI">🇨🇮 Côte d'Ivoire</option>
+                    <option value="ALL">🌍 Tous les francophones</option>
+                  </select>
                 </div>
 
                 <div class="grid grid-cols-2 gap-2">
@@ -398,6 +418,7 @@ const ChasseurCreateurs = {
   async _launchHunt() {
     const platform = document.getElementById('cc-platform').value;
     const niche = document.getElementById('cc-niche').value.trim();
+    const pays = document.getElementById('cc-pays')?.value || 'FR';
     const minSubs = parseInt(document.getElementById('cc-min').value, 10) || 0;
     const maxSubs = parseInt(document.getElementById('cc-max').value, 10) || 1_000_000;
     const num = parseInt(document.getElementById('cc-num').value, 10) || 50;
@@ -412,7 +433,7 @@ const ChasseurCreateurs = {
     }
 
     const payload = {
-      platform, niche, min_subs: minSubs, max_subs: maxSubs, num_results: num,
+      platform, niche, pays, min_subs: minSubs, max_subs: maxSubs, num_results: num,
     };
     if (platform === 'youtube') {
       const k = document.getElementById('cc-apikey').value.trim();

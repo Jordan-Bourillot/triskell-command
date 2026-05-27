@@ -8520,6 +8520,7 @@ class Api:
             youtube_api_key?: str,
             instagram_login?: str,
             instagram_password?: str,
+            pays?: str (code ISO francophone — FR par défaut, ALL = tous),
         }
         """
         p = payload or {}
@@ -8533,6 +8534,7 @@ class Api:
             num_results = int(p.get("num_results") or 50)
         except (TypeError, ValueError):
             return {"ok": False, "error": "Valeurs numériques invalides."}
+        pays = (p.get("pays") or "FR").strip().upper() or "FR"
         try:
             from ..integrations import chasseur_createurs
             # Clé YouTube : payload prioritaire, sinon clé enregistrée dans
@@ -8550,6 +8552,7 @@ class Api:
                 youtube_api_key=yt_key or None,
                 instagram_login=p.get("instagram_login") or None,
                 instagram_password=p.get("instagram_password") or None,
+                pays=pays,
             )
             return {"ok": True, "hunt_id": hunt.id, "label": hunt.label}
         except Exception as exc:
@@ -8677,6 +8680,7 @@ class Api:
             num_results: int (par défaut 60, max 200),
             only_no_site: bool (filtre boîtes sans site web),
             api_key?: str (surcharge la clé par défaut),
+            pays?: str (code ISO francophone — FR par défaut, ALL = tous),
         }
         """
         p = payload or {}
@@ -8689,6 +8693,7 @@ class Api:
         except (TypeError, ValueError):
             return {"ok": False, "error": "Nombre de résultats invalide."}
         only_no_site = bool(p.get("only_no_site", False))
+        pays = (p.get("pays") or "FR").strip().upper() or "FR"
         try:
             from ..integrations import prospecteur_google
             # Clé Google Places : payload prioritaire, sinon clé enregistrée
@@ -8701,6 +8706,7 @@ class Api:
                 metier=metier, zone=zone, num_results=num,
                 only_no_site=only_no_site,
                 api_key=places_key or None,
+                pays=pays,
             )
             return {"ok": True, "hunt_id": hunt.id, "label": hunt.label}
         except Exception as exc:
