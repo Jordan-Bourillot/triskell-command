@@ -8770,6 +8770,97 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     # ==================================================================
+    # Argus — récupération de mails B2B
+    # Aspire des emails publics depuis Pages Jaunes, Europages, OpenStreetMap,
+    # DuckDuckGo, puis aspire les pages Contact des sites trouvés.
+    # Une seule session active à la fois (état global en mémoire + JSON disque).
+    # ==================================================================
+
+    def argus_start(self, payload: dict) -> dict:
+        """Lance une session de scraping.
+
+        payload = {
+            sources: [str]           # ex: ["pagesjaunes", "europages", "websites"]
+            query: str               # secteur / mot-clé (ex: "plombier")
+            location: str            # ville ou département (ex: "Lyon")
+            max_emails: int          # plafond par source (défaut: 200)
+            include_personal: bool   # accepter gmail/yahoo/orange/...
+            test_mode: bool          # limite à 10 emails/source pour test
+            seed_urls: [str]         # sites supplémentaires à scraper
+        }
+        """
+        try:
+            from ..integrations import argus
+            return argus.start_session(payload or {})
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def argus_pause(self, payload: dict | None = None) -> dict:
+        try:
+            from ..integrations import argus
+            return argus.pause_session()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def argus_resume(self, payload: dict | None = None) -> dict:
+        try:
+            from ..integrations import argus
+            return argus.resume_session()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def argus_stop(self, payload: dict | None = None) -> dict:
+        try:
+            from ..integrations import argus
+            return argus.stop_session()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def argus_status(self, payload: dict | None = None) -> dict:
+        """Snapshot complet pour l'UI : état, sources, logs."""
+        try:
+            from ..integrations import argus
+            log_tail = int((payload or {}).get("log_tail") or 200)
+            return argus.get_status(log_tail=log_tail)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def argus_set_reference(self, payload: dict | None = None) -> dict:
+        """Configure une liste d'emails à exclure du run en cours.
+
+        payload = { emails: [str] }  ou  { content_b64: <fichier xlsx> }
+        """
+        p = payload or {}
+        emails = list(p.get("emails") or [])
+        if not emails and p.get("content_b64"):
+            # Décodage d'un fichier xlsx uploadé (base64) → extraction colonne A.
+            try:
+                import base64
+                import tempfile
+                from pathlib import Path as _P
+                from ..integrations.argus.exporter import read_reference_emails
+                data = base64.b64decode(p["content_b64"])
+                tmp = _P(tempfile.gettempdir()) / "argus_ref.xlsx"
+                tmp.write_bytes(data)
+                emails = list(read_reference_emails(tmp))
+                tmp.unlink(missing_ok=True)
+            except Exception as exc:
+                return {"ok": False, "error": f"Lecture fichier échouée : {exc}"}
+        try:
+            from ..integrations import argus
+            return argus.set_reference_emails(emails)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def argus_download_xlsx(self, payload: dict | None = None) -> dict:
+        """Génère le fichier Excel des emails collectés et le renvoie en base64."""
+        try:
+            from ..integrations import argus
+            return argus.export_xlsx()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ==================================================================
     # GEO — Generative Engine Optimization
     # Tableau de bord pour rendre un site visible des IA génératives
     # (ChatGPT, Claude, Gemini…). Quatre briques :

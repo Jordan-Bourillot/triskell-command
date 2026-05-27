@@ -26,6 +26,7 @@ const VIEW_COLOR_MAP = {
   chasseur: 'fuchsia',
   chasseur_createurs: 'fuchsia',
   prospecteur_google: 'fuchsia',
+  argus: 'fuchsia',
   eclaireur: 'fuchsia',
   eliks: 'pink',
   revenue: 'rose',
@@ -495,6 +496,7 @@ const App = {
       case 'chasseur':  return Chasseur.render(target);
       case 'chasseur_createurs': return ChasseurCreateurs.render(target);
       case 'prospecteur_google': return ProspecteurGoogle.render(target);
+      case 'argus':     return Argus.render(target);
       case 'eclaireur': return Eclaireur.render(target);
       case 'delivery':  return Delivery.render(target);
       case 'health':    return Health.render(target);

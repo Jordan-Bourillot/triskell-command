@@ -22,12 +22,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Deps système nécessaires (build tools pour packages C, git pour cloner triskell-core)
+# Deps système nécessaires (build tools pour packages C, git pour cloner triskell-core,
+# + libs natives nécessaires à Chromium headless utilisé par Argus via Playwright).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
     libxml2-dev libxslt-dev \
     curl \
+    # Chromium runtime deps (Playwright)
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 libwayland-client0 \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone triskell-core (sibling repo). Le SHA peut être pinné via build-arg si besoin.
@@ -47,6 +53,11 @@ RUN git clone --depth=1 --branch ${TRISKELL_CORE_REF} \
 # install supplémentaire.
 COPY requirements-http.txt ./
 RUN pip install -r requirements-http.txt
+
+# Argus utilise Playwright pour scraper Pages Jaunes / Europages.
+# On télécharge UNIQUEMENT Chromium (pas Firefox/Webkit) pour économiser ~400 Mo.
+RUN python -m playwright install chromium --with-deps || \
+    python -m playwright install chromium
 
 # Copie le code app (.dockerignore exclut .git, .venv, node_modules, etc.)
 COPY . .

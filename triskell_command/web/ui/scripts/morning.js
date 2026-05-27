@@ -148,6 +148,15 @@ const Morning = {
               Prospecteur Google
               <span class="btn-beta-orange-tag">(bêta · tiré d'open source)</span>
             </button>
+            <button id="m-argus" class="btn-beta-orange"
+                    title="Récupérer des mails d'entreprises françaises par secteur et ville (Pages Jaunes, Europages, sites web)">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              Argus
+              <span class="btn-beta-orange-tag">(bêta · tiré d'open source)</span>
+            </button>
           </div>
         </div>
 
@@ -171,6 +180,9 @@ const Morning = {
     if (chasseurCBtn) chasseurCBtn.onclick = () => App.show('chasseur_createurs');
     const prospGoogleBtn = document.getElementById('m-prospecteur-google');
     if (prospGoogleBtn) prospGoogleBtn.onclick = () => App.show('prospecteur_google');
+    // Argus : récupération de mails B2B intégrée au cockpit (vue dédiée).
+    const argusBtn = document.getElementById('m-argus');
+    if (argusBtn) argusBtn.onclick = () => App.show('argus');
 
     // Ambiance poste de pilotage : grille HUD très fine en fond, halos
     // sobres aux couleurs des voyants d'un cockpit (ambre instrumentation,
