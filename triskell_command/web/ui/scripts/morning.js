@@ -34,6 +34,18 @@ const Morning = {
     container.innerHTML = `
       <section class="cockpit-shell animate-slide-up max-w-[1280px]">
 
+        <!-- Effet "boule disco" — taches de lumière colorées qui flottent
+             doucement en arrière-plan. Uniquement sur le Cockpit. -->
+        <div class="cockpit-disco" aria-hidden="true">
+          <div class="cockpit-disco-spot cockpit-disco-spot-1"></div>
+          <div class="cockpit-disco-spot cockpit-disco-spot-2"></div>
+          <div class="cockpit-disco-spot cockpit-disco-spot-3"></div>
+          <div class="cockpit-disco-spot cockpit-disco-spot-4"></div>
+          <div class="cockpit-disco-spot cockpit-disco-spot-5"></div>
+          <div class="cockpit-disco-spot cockpit-disco-spot-6"></div>
+          <div class="cockpit-disco-spot cockpit-disco-spot-7"></div>
+        </div>
+
         <!-- Bandeau STATUT — voyants live -->
         <div class="cockpit-status-bar" id="m-statusbar">
           <span class="cockpit-led" id="m-led-system">SYSTÈME</span>
@@ -158,6 +170,138 @@ const Morning = {
     if (chasseurCBtn) chasseurCBtn.onclick = () => App.show('chasseur_createurs');
     const prospGoogleBtn = document.getElementById('m-prospecteur-google');
     if (prospGoogleBtn) prospGoogleBtn.onclick = () => App.show('prospecteur_google');
+
+    // Styles "boule disco" — taches de lumière colorées qui flottent
+    // doucement en arrière-plan du Cockpit. Injectés une seule fois.
+    if (!document.getElementById('m-disco-styles')) {
+      const s = document.createElement('style');
+      s.id = 'm-disco-styles';
+      s.textContent = `
+        /* La section Cockpit doit être un repère de positionnement pour
+           que les spots disco soient contenus à l'intérieur. */
+        .cockpit-shell {
+          position: relative;
+          overflow: hidden;
+          isolation: isolate;
+        }
+        .cockpit-disco {
+          position: absolute;
+          inset: 0;
+          z-index: 0;
+          pointer-events: none;
+          overflow: hidden;
+        }
+        /* Tout le contenu textuel du Cockpit passe au-dessus des spots */
+        .cockpit-shell > *:not(.cockpit-disco) { position: relative; z-index: 1; }
+
+        .cockpit-disco-spot {
+          position: absolute;
+          width: 380px;
+          height: 380px;
+          border-radius: 50%;
+          filter: blur(70px);
+          opacity: 0.55;
+          mix-blend-mode: screen;
+          will-change: transform;
+        }
+        /* En thème clair, "screen" éclaircit trop et lave les couleurs.
+           On bascule en "multiply" pour que les couleurs restent vives
+           tout en colorant doucement le fond blanc. */
+        [data-theme="light"] .cockpit-disco-spot {
+          mix-blend-mode: multiply;
+          opacity: 0.22;
+          filter: blur(60px);
+        }
+        [data-theme="mid"] .cockpit-disco-spot {
+          opacity: 0.38;
+        }
+
+        /* 7 spots aux couleurs et trajectoires différentes pour donner
+           l'impression d'une vraie boule disco qui tourne. */
+        .cockpit-disco-spot-1 {
+          background: radial-gradient(circle, #ff3b6b 0%, rgba(255,59,107,0) 70%);
+          top: -10%; left: -8%;
+          animation: cockpit-disco-move-1 18s ease-in-out infinite alternate;
+        }
+        .cockpit-disco-spot-2 {
+          background: radial-gradient(circle, #4cc9ff 0%, rgba(76,201,255,0) 70%);
+          top: -15%; right: -10%;
+          animation: cockpit-disco-move-2 22s ease-in-out infinite alternate;
+        }
+        .cockpit-disco-spot-3 {
+          background: radial-gradient(circle, #a855f7 0%, rgba(168,85,247,0) 70%);
+          top: 30%; left: 40%;
+          animation: cockpit-disco-move-3 25s ease-in-out infinite alternate;
+        }
+        .cockpit-disco-spot-4 {
+          background: radial-gradient(circle, #facc15 0%, rgba(250,204,21,0) 70%);
+          bottom: -10%; left: 10%;
+          width: 320px; height: 320px;
+          animation: cockpit-disco-move-4 20s ease-in-out infinite alternate;
+        }
+        .cockpit-disco-spot-5 {
+          background: radial-gradient(circle, #10b981 0%, rgba(16,185,129,0) 70%);
+          bottom: -5%; right: 5%;
+          width: 340px; height: 340px;
+          animation: cockpit-disco-move-5 28s ease-in-out infinite alternate;
+        }
+        .cockpit-disco-spot-6 {
+          background: radial-gradient(circle, #f97316 0%, rgba(249,115,22,0) 70%);
+          top: 55%; left: 8%;
+          width: 280px; height: 280px;
+          animation: cockpit-disco-move-6 24s ease-in-out infinite alternate;
+        }
+        .cockpit-disco-spot-7 {
+          background: radial-gradient(circle, #ec4899 0%, rgba(236,72,153,0) 70%);
+          top: 15%; right: 30%;
+          width: 300px; height: 300px;
+          animation: cockpit-disco-move-7 21s ease-in-out infinite alternate;
+        }
+
+        @keyframes cockpit-disco-move-1 {
+          0%   { transform: translate3d(0, 0, 0) scale(1); }
+          50%  { transform: translate3d(180px, 120px, 0) scale(1.15); }
+          100% { transform: translate3d(80px, 300px, 0) scale(0.9); }
+        }
+        @keyframes cockpit-disco-move-2 {
+          0%   { transform: translate3d(0, 0, 0) scale(1); }
+          50%  { transform: translate3d(-160px, 180px, 0) scale(0.85); }
+          100% { transform: translate3d(-60px, 360px, 0) scale(1.1); }
+        }
+        @keyframes cockpit-disco-move-3 {
+          0%   { transform: translate3d(0, 0, 0) scale(1); }
+          50%  { transform: translate3d(-220px, -120px, 0) scale(1.2); }
+          100% { transform: translate3d(140px, 80px, 0) scale(0.95); }
+        }
+        @keyframes cockpit-disco-move-4 {
+          0%   { transform: translate3d(0, 0, 0) scale(1); }
+          50%  { transform: translate3d(220px, -160px, 0) scale(1.1); }
+          100% { transform: translate3d(80px, -260px, 0) scale(0.95); }
+        }
+        @keyframes cockpit-disco-move-5 {
+          0%   { transform: translate3d(0, 0, 0) scale(1); }
+          50%  { transform: translate3d(-260px, -80px, 0) scale(0.9); }
+          100% { transform: translate3d(-120px, -240px, 0) scale(1.15); }
+        }
+        @keyframes cockpit-disco-move-6 {
+          0%   { transform: translate3d(0, 0, 0) scale(1); }
+          50%  { transform: translate3d(200px, -120px, 0) scale(1.05); }
+          100% { transform: translate3d(360px, 60px, 0) scale(0.9); }
+        }
+        @keyframes cockpit-disco-move-7 {
+          0%   { transform: translate3d(0, 0, 0) scale(1); }
+          50%  { transform: translate3d(-180px, 200px, 0) scale(1.1); }
+          100% { transform: translate3d(60px, 340px, 0) scale(0.85); }
+        }
+
+        /* Respect du choix utilisateur "réduire les animations" — coupe
+           les keyframes mais garde les spots immobiles pour l'ambiance. */
+        @media (prefers-reduced-motion: reduce) {
+          .cockpit-disco-spot { animation: none; opacity: 0.18; }
+        }
+      `;
+      document.head.appendChild(s);
+    }
 
     // Styles spécifiques aux boutons bêta (orange) — injectés une seule fois
     if (!document.getElementById('m-beta-tools-styles')) {
