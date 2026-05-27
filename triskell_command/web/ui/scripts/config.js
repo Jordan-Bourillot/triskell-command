@@ -832,9 +832,18 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
       { id: 'google',     label: 'Google (Gemini) — gratuit', recommended: true },
       { id: 'mistral',    label: 'Mistral — gratuit', recommended: true },
       { id: 'groq',       label: 'Groq (Llama / Meta AI) — gratuit', recommended: true },
+      { id: 'deepseek',   label: 'DeepSeek — très bon marché', recommended: true },
       { id: 'perplexity', label: 'Perplexity (mode web) — payant', recommended: false },
       { id: 'openai',     label: 'OpenAI (GPT)',     recommended: false },
       { id: 'xai',        label: 'xAI (Grok)',       recommended: false },
+    ];
+    // Clés "Services Google" — utilisées par les outils bêta (Chasseur
+    // Créateur, Prospecteur Google). Ces clés sont stockées dans le même
+    // namespace que les clés IA pour réutiliser le même mécanisme de
+    // sauvegarde côté serveur. Pré-remplies en dur si non configurées.
+    const googleApis = [
+      { id: 'youtube_data',  label: 'YouTube Data API — utilisée par le Chasseur Créateur', recommended: false },
+      { id: 'google_places', label: 'Google Places API — utilisée par le Prospecteur Google', recommended: false },
     ];
     return `
       <section>
@@ -873,6 +882,43 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
                                  hover:bg-bg transition-colors
                                  disabled:opacity-50 disabled:cursor-not-allowed shrink-0">
                     Tester
+                  </button>
+                </div>
+                <div data-ai-msg="${p.id}" class="text-xs mt-1.5 min-h-[18px] text-text-muted"></div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </section>
+
+      <section class="mt-8">
+        <div class="section-label">Services Google</div>
+        <p class="text-sm text-text-muted mb-4">
+          Clés utilisées par les outils bêta (Chasseur Créateur, Prospecteur
+          Google). Si tu as ta propre clé Google Cloud, colle-la ici pour
+          remplacer celle partagée par défaut.
+        </p>
+        <div class="card p-6 space-y-5">
+          ${googleApis.map(p => {
+            const has = !!keys[p.id];
+            return `
+              <div data-ai-row="${p.id}">
+                <label class="block text-sm font-semibold mb-1">
+                  ${this._esc(p.label)}
+                </label>
+                <div class="flex gap-2 items-stretch">
+                  <input type="password"
+                         data-save-path="ai.api_keys.${p.id}"
+                         data-ai-key-input="${p.id}"
+                         placeholder="${has ? '(clé enregistrée — tape pour remplacer)' : 'Clé API…'}"
+                         class="flex-1 min-w-0 px-4 py-2.5 text-sm rounded-xl bg-bg border border-border
+                                focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent" />
+                  <button type="button"
+                          data-ai-save="${p.id}"
+                          class="px-4 py-2.5 text-sm font-semibold rounded-xl
+                                 bg-accent text-white hover:opacity-90 transition-opacity
+                                 disabled:opacity-50 disabled:cursor-not-allowed shrink-0">
+                    Enregistrer
                   </button>
                 </div>
                 <div data-ai-msg="${p.id}" class="text-xs mt-1.5 min-h-[18px] text-text-muted"></div>

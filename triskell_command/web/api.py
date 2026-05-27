@@ -27,6 +27,19 @@ from ..state import AppState
 logger = logging.getLogger(__name__)
 
 
+# Clé DeepSeek par défaut, injectée au boot si l'utilisateur n'en a pas
+# enregistré une. DeepSeek a une API compatible OpenAI, modèle deepseek-chat
+# très bon marché ; utile en complément des autres providers IA.
+DEFAULT_DEEPSEEK_KEY = "sk-1899aa9f51be40c1a6e658cf9d39231d"
+
+# Clés Google des outils bêta : YouTube Data API (Chasseur Créateur) et
+# Google Places API (Prospecteur Google). Injectées au boot si pas encore
+# enregistrées, pour que les outils marchent "out of the box". Jordan peut
+# les remplacer par les siennes via Réglages → Services Google.
+DEFAULT_YOUTUBE_DATA_KEY  = "AIzaSyCu8xcAyxf091ureRYpaqzMtIKda6TAg10"
+DEFAULT_GOOGLE_PLACES_KEY = "AIzaSyAhOg-mJY2TTOnl4mUKi_FCRt2b__jHd2I"
+
+
 class _AutopilotStopped(Exception):
     """Levée dans _push_log quand le bouton Stop a été cliqué."""
 
@@ -1411,6 +1424,14 @@ class Api:
         # On garantit la présence des providers connus dans l'UI
         for p in shared_secrets.PROVIDERS:
             keys_masked.setdefault(p, "")
+        # Providers "extras" (pas dans shared_secrets) : Perplexity, Groq, DeepSeek,
+        # + clés Google des outils bêta (YouTube Data, Google Places).
+        # On affiche leur statut "enregistré ou pas" en lisant app_state.
+        for extra in ("perplexity", "groq", "deepseek",
+                      "youtube_data", "google_places"):
+            local_extra = (self._app_state.get(
+                "ai", "api_keys", extra, default="") or "")
+            keys_masked[extra] = ("•" * 8) if local_extra else ""
         return {
             "ok": True,
             "appearance_mode": self.get_theme_mode(),
@@ -1455,6 +1476,10 @@ class Api:
             elif prov_id == "groq":
                 txt = self._geo_ask_groq(
                     {"key": key, "model": "llama-3.3-70b-versatile"},
+                    test_prompt)
+            elif prov_id == "deepseek":
+                txt = self._geo_ask_deepseek(
+                    {"key": key, "model": "deepseek-chat"},
                     test_prompt)
             else:
                 # Anthropic / OpenAI / Google / Mistral / xAI : triskell_core
@@ -6984,6 +7009,31 @@ class Api:
         except Exception as exc:
             logger.debug("migration secrets: %s", exc)
 
+        # Injection des clés par défaut si l'utilisateur n'en a pas encore
+        # enregistré une — DeepSeek + YouTube Data + Google Places (les
+        # clés non-partagées via shared_secrets). Permet à l'app de marcher
+        # "out of the box" tout en laissant la possibilité de remplacer les
+        # clés via Réglages.
+        default_extras = [
+            ("deepseek",      DEFAULT_DEEPSEEK_KEY),
+            ("youtube_data",  DEFAULT_YOUTUBE_DATA_KEY),
+            ("google_places", DEFAULT_GOOGLE_PLACES_KEY),
+        ]
+        for slot, default_val in default_extras:
+            if not default_val:
+                continue
+            try:
+                existing = (self._app_state.get(
+                    "ai", "api_keys", slot, default="") or "").strip()
+                if not existing:
+                    self._app_state.set(
+                        "ai", "api_keys", slot, value=default_val,
+                    )
+                    self._app_state.save()
+                    logger.info("Clé '%s' par défaut injectée.", slot)
+            except Exception as exc:
+                logger.debug("injection %s: %s", slot, exc)
+
         # Démarrage des workers (best-effort, no-op si dépendances absentes)
         worker_status = {}
         for mod_name, starter, label in [
@@ -8485,13 +8535,19 @@ class Api:
             return {"ok": False, "error": "Valeurs numériques invalides."}
         try:
             from ..integrations import chasseur_createurs
+            # Clé YouTube : payload prioritaire, sinon clé enregistrée dans
+            # Réglages, sinon fallback constante dans le module.
+            yt_key = (p.get("youtube_api_key") or "").strip()
+            if not yt_key:
+                yt_key = (self._app_state.get(
+                    "ai", "api_keys", "youtube_data", default="") or "")
             hunt = chasseur_createurs.start_hunt(
                 platform=platform,
                 niche=niche,
                 min_subs=min_subs,
                 max_subs=max_subs,
                 num_results=num_results,
-                youtube_api_key=p.get("youtube_api_key") or None,
+                youtube_api_key=yt_key or None,
                 instagram_login=p.get("instagram_login") or None,
                 instagram_password=p.get("instagram_password") or None,
             )
@@ -8635,10 +8691,16 @@ class Api:
         only_no_site = bool(p.get("only_no_site", False))
         try:
             from ..integrations import prospecteur_google
+            # Clé Google Places : payload prioritaire, sinon clé enregistrée
+            # dans Réglages, sinon fallback constante dans le module.
+            places_key = (p.get("api_key") or "").strip()
+            if not places_key:
+                places_key = (self._app_state.get(
+                    "ai", "api_keys", "google_places", default="") or "")
             hunt = prospecteur_google.start_hunt(
                 metier=metier, zone=zone, num_results=num,
                 only_no_site=only_no_site,
-                api_key=p.get("api_key") or None,
+                api_key=places_key or None,
             )
             return {"ok": True, "hunt_id": hunt.id, "label": hunt.label}
         except Exception as exc:
@@ -8783,13 +8845,14 @@ class Api:
             ) or {}
         except Exception:
             keys = (self._app_state.get("ai", "api_keys", default={}) or {})
-        # Perplexity et Groq ne sont pas dans shared_secrets / triskell_core,
-        # on les récupère depuis l'env ou directement depuis l'app_state.
-        for extra in ("perplexity", "groq"):
+        # Perplexity, Groq et DeepSeek ne sont pas dans shared_secrets /
+        # triskell_core, on les récupère depuis l'env ou app_state.
+        for extra in ("perplexity", "groq", "deepseek"):
             if (keys or {}).get(extra):
                 continue
             env_name = {"perplexity": "PERPLEXITY_API_KEY",
-                        "groq":       "GROQ_API_KEY"}[extra]
+                        "groq":       "GROQ_API_KEY",
+                        "deepseek":   "DEEPSEEK_API_KEY"}[extra]
             xkey = (_os.environ.get(env_name, "")
                     or self._app_state.get("ai", "api_keys", extra, default=""))
             if xkey:
@@ -8805,6 +8868,7 @@ class Api:
             "xai":        "grok-2-latest",
             "perplexity": "sonar",
             "groq":       "llama-3.3-70b-versatile",
+            "deepseek":   "deepseek-chat",
         }
         labels = {
             "anthropic":  "Claude (Anthropic)",
@@ -8814,6 +8878,7 @@ class Api:
             "xai":        "Grok (xAI)",
             "perplexity": "Perplexity (mode web)",
             "groq":       "Llama via Groq (proche Meta AI)",
+            "deepseek":   "DeepSeek",
         }
         for prov_id, label in labels.items():
             key = (keys or {}).get(prov_id) or ""
@@ -8858,6 +8923,10 @@ class Api:
         # modèles Llama qui font tourner Meta AI.
         if provider["id"] == "groq":
             return self._geo_ask_groq(provider, prompt)
+        # DeepSeek : appel direct (API compatible OpenAI), modèle deepseek-chat
+        # très bon marché — utile en complément des autres providers.
+        if provider["id"] == "deepseek":
+            return self._geo_ask_deepseek(provider, prompt)
         # Autres providers : passe par le coeur partagé
         try:
             from triskell_core.ai.providers import send_to_provider
@@ -8900,6 +8969,36 @@ class Api:
                        .get("message", {}).get("content", "")) or ""
         except Exception as exc:
             logger.info("groq exception: %s", exc)
+            return ""
+
+    def _geo_ask_deepseek(self, provider: dict, prompt: str) -> str:
+        """Appel direct à l'API DeepSeek (format compatible OpenAI).
+        Modèles : deepseek-chat (général), deepseek-reasoner (raisonnement).
+        Très bon marché — environ 10x moins cher que GPT-4o-mini."""
+        try:
+            import requests
+            r = requests.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {provider['key']}",
+                    "Content-Type":  "application/json",
+                },
+                json={
+                    "model":    provider.get("model") or "deepseek-chat",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 1200,
+                    "temperature": 0.4,
+                },
+                timeout=40,
+            )
+            if r.status_code >= 400:
+                logger.info("deepseek HTTP %s: %s", r.status_code, r.text[:200])
+                return ""
+            data = r.json()
+            return (data.get("choices", [{}])[0]
+                       .get("message", {}).get("content", "")) or ""
+        except Exception as exc:
+            logger.info("deepseek exception: %s", exc)
             return ""
 
     def _geo_ask_gemini_with_search(self, provider: dict, prompt: str) -> str:
