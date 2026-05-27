@@ -4763,41 +4763,42 @@ select.geo-input:focus {
 #main::after {
   content: "";
   position: absolute;
-  width: 720px;
-  height: 720px;
+  width: 880px;
+  height: 880px;
   border-radius: 50%;
-  filter: blur(120px);
+  filter: blur(130px);
   pointer-events: none;
   z-index: 0;
-  opacity: 0.18;
+  opacity: 0.45;
   background: radial-gradient(circle,
-    rgb(var(--page-glow, 148 163 184) / 0.55) 0%,
+    rgb(var(--page-glow, 148 163 184) / 0.85) 0%,
     rgb(var(--page-glow, 148 163 184) / 0) 70%);
   transition: opacity 400ms ease, background 400ms ease;
 }
 #main::before {
-  top: -180px;
-  left: -180px;
+  top: -240px;
+  left: -220px;
 }
 #main::after {
-  bottom: -240px;
-  right: -200px;
-  width: 820px;
-  height: 820px;
+  bottom: -300px;
+  right: -240px;
+  width: 980px;
+  height: 980px;
 }
 
 /* #content (et toute la page) passe au-dessus du halo */
 #main > #content { position: relative; z-index: 1; }
 
-/* Thème clair : halos très discrets (sinon ça lave le fond blanc) */
+/* Thème clair : un peu plus tamisé pour ne pas laver le fond blanc,
+   mais reste bien visible. */
 [data-theme="light"] #main::before,
 [data-theme="light"] #main::after {
-  opacity: 0.10;
-  filter: blur(110px);
+  opacity: 0.28;
+  filter: blur(120px);
 }
 [data-theme="mid"] #main::before,
 [data-theme="mid"] #main::after {
-  opacity: 0.14;
+  opacity: 0.36;
 }
 
 /* Cockpit : ambiance dédiée → on coupe le halo générique */
