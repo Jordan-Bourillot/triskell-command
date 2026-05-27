@@ -55,7 +55,10 @@ COPY requirements-http.txt ./
 RUN pip install -r requirements-http.txt
 
 # Argus utilise Playwright pour scraper Pages Jaunes / Europages.
-# On télécharge UNIQUEMENT Chromium (pas Firefox/Webkit) pour économiser ~400 Mo.
+# IMPORTANT : on place Chromium dans un chemin partagé indépendant de $HOME,
+# parce que $HOME sera remappé sur /data (volume Coolify) au runtime — un
+# install dans ~/.cache/ms-playwright serait perdu au redéploiement.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 RUN python -m playwright install chromium --with-deps || \
     python -m playwright install chromium
 
