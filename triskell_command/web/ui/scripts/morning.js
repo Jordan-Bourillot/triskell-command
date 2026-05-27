@@ -34,16 +34,17 @@ const Morning = {
     container.innerHTML = `
       <section class="cockpit-shell animate-slide-up max-w-[1280px]">
 
-        <!-- Effet "boule disco" — taches de lumière colorées qui flottent
-             doucement en arrière-plan. Uniquement sur le Cockpit. -->
-        <div class="cockpit-disco" aria-hidden="true">
-          <div class="cockpit-disco-spot cockpit-disco-spot-1"></div>
-          <div class="cockpit-disco-spot cockpit-disco-spot-2"></div>
-          <div class="cockpit-disco-spot cockpit-disco-spot-3"></div>
-          <div class="cockpit-disco-spot cockpit-disco-spot-4"></div>
-          <div class="cockpit-disco-spot cockpit-disco-spot-5"></div>
-          <div class="cockpit-disco-spot cockpit-disco-spot-6"></div>
-          <div class="cockpit-disco-spot cockpit-disco-spot-7"></div>
+        <!-- Ambiance poste de pilotage : grille HUD discrète, halos
+             couleur voyants (ambre / cyan / vert), ligne de scan et
+             vignette périphérique pour donner la sensation d'être
+             "dans" le poste de contrôle. -->
+        <div class="cockpit-ambience" aria-hidden="true">
+          <div class="cockpit-ambience-grid"></div>
+          <div class="cockpit-ambience-glow cockpit-ambience-glow-amber"></div>
+          <div class="cockpit-ambience-glow cockpit-ambience-glow-cyan"></div>
+          <div class="cockpit-ambience-glow cockpit-ambience-glow-green"></div>
+          <div class="cockpit-ambience-scan"></div>
+          <div class="cockpit-ambience-vignette"></div>
         </div>
 
         <!-- Bandeau STATUT — voyants live -->
@@ -171,133 +172,158 @@ const Morning = {
     const prospGoogleBtn = document.getElementById('m-prospecteur-google');
     if (prospGoogleBtn) prospGoogleBtn.onclick = () => App.show('prospecteur_google');
 
-    // Styles "boule disco" — taches de lumière colorées qui flottent
-    // doucement en arrière-plan du Cockpit. Injectés une seule fois.
-    if (!document.getElementById('m-disco-styles')) {
+    // Ambiance poste de pilotage : grille HUD très fine en fond, halos
+    // sobres aux couleurs des voyants d'un cockpit (ambre instrumentation,
+    // cyan HUD, vert système OK), ligne de scan qui descend lentement,
+    // vignette périphérique qui assombrit les bords. Tout est sobre et
+    // pulse très lentement — l'idée est de SENTIR le poste, pas de voir
+    // une boule disco. Injecté une seule fois.
+    if (!document.getElementById('m-ambience-styles')) {
       const s = document.createElement('style');
-      s.id = 'm-disco-styles';
+      s.id = 'm-ambience-styles';
       s.textContent = `
-        /* La section Cockpit doit être un repère de positionnement pour
-           que les spots disco soient contenus à l'intérieur. */
+        /* La section Cockpit est le repère de positionnement pour que
+           toute l'ambiance soit contenue à l'intérieur. */
         .cockpit-shell {
           position: relative;
           overflow: hidden;
           isolation: isolate;
         }
-        .cockpit-disco {
+        .cockpit-ambience {
           position: absolute;
           inset: 0;
           z-index: 0;
           pointer-events: none;
           overflow: hidden;
         }
-        /* Tout le contenu textuel du Cockpit passe au-dessus des spots */
-        .cockpit-shell > *:not(.cockpit-disco) { position: relative; z-index: 1; }
+        /* Tout le contenu du Cockpit passe au-dessus de l'ambiance */
+        .cockpit-shell > *:not(.cockpit-ambience) { position: relative; z-index: 1; }
 
-        .cockpit-disco-spot {
+        /* --- Grille HUD : lignes très fines, atténuées vers les bords --- */
+        .cockpit-ambience-grid {
           position: absolute;
-          width: 380px;
-          height: 380px;
+          inset: 0;
+          background-image:
+            linear-gradient(to right, rgba(148,163,184,0.07) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(148,163,184,0.07) 1px, transparent 1px);
+          background-size: 64px 64px;
+          -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 85%);
+                  mask-image: radial-gradient(ellipse at center, black 30%, transparent 85%);
+        }
+        [data-theme="light"] .cockpit-ambience-grid {
+          background-image:
+            linear-gradient(to right, rgba(71,85,105,0.06) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(71,85,105,0.06) 1px, transparent 1px);
+        }
+        [data-theme="mid"] .cockpit-ambience-grid {
+          background-image:
+            linear-gradient(to right, rgba(148,163,184,0.09) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(148,163,184,0.09) 1px, transparent 1px);
+        }
+
+        /* --- Halos couleur voyants : ambre, cyan, vert OK --- */
+        .cockpit-ambience-glow {
+          position: absolute;
+          width: 540px;
+          height: 540px;
           border-radius: 50%;
-          filter: blur(70px);
-          opacity: 0.55;
-          mix-blend-mode: screen;
-          will-change: transform;
-        }
-        /* En thème clair, "screen" éclaircit trop et lave les couleurs.
-           On bascule en "multiply" pour que les couleurs restent vives
-           tout en colorant doucement le fond blanc. */
-        [data-theme="light"] .cockpit-disco-spot {
-          mix-blend-mode: multiply;
-          opacity: 0.22;
-          filter: blur(60px);
-        }
-        [data-theme="mid"] .cockpit-disco-spot {
+          filter: blur(95px);
           opacity: 0.38;
+          mix-blend-mode: screen;
+          will-change: opacity;
         }
-
-        /* 7 spots aux couleurs et trajectoires différentes pour donner
-           l'impression d'une vraie boule disco qui tourne. */
-        .cockpit-disco-spot-1 {
-          background: radial-gradient(circle, #ff3b6b 0%, rgba(255,59,107,0) 70%);
-          top: -10%; left: -8%;
-          animation: cockpit-disco-move-1 18s ease-in-out infinite alternate;
+        /* Coin haut-gauche : ambre chaud, lumière d'instrumentation */
+        .cockpit-ambience-glow-amber {
+          background: radial-gradient(circle, #f59e0b 0%, rgba(245,158,11,0) 70%);
+          top: -15%; left: -12%;
+          animation: cockpit-pulse-slow 9s ease-in-out infinite;
         }
-        .cockpit-disco-spot-2 {
-          background: radial-gradient(circle, #4cc9ff 0%, rgba(76,201,255,0) 70%);
-          top: -15%; right: -10%;
-          animation: cockpit-disco-move-2 22s ease-in-out infinite alternate;
+        /* Coin haut-droit : cyan glacial, écran HUD */
+        .cockpit-ambience-glow-cyan {
+          background: radial-gradient(circle, #38bdf8 0%, rgba(56,189,248,0) 70%);
+          top: -18%; right: -14%;
+          animation: cockpit-pulse-slow 11s ease-in-out infinite 1.5s;
         }
-        .cockpit-disco-spot-3 {
-          background: radial-gradient(circle, #a855f7 0%, rgba(168,85,247,0) 70%);
-          top: 30%; left: 40%;
-          animation: cockpit-disco-move-3 25s ease-in-out infinite alternate;
-        }
-        .cockpit-disco-spot-4 {
-          background: radial-gradient(circle, #facc15 0%, rgba(250,204,21,0) 70%);
-          bottom: -10%; left: 10%;
-          width: 320px; height: 320px;
-          animation: cockpit-disco-move-4 20s ease-in-out infinite alternate;
-        }
-        .cockpit-disco-spot-5 {
+        /* Bas-centre : vert tendre, voyant système OK */
+        .cockpit-ambience-glow-green {
           background: radial-gradient(circle, #10b981 0%, rgba(16,185,129,0) 70%);
-          bottom: -5%; right: 5%;
-          width: 340px; height: 340px;
-          animation: cockpit-disco-move-5 28s ease-in-out infinite alternate;
+          bottom: -22%; left: 30%;
+          width: 640px; height: 640px;
+          opacity: 0.28;
+          animation: cockpit-pulse-slow 13s ease-in-out infinite 3s;
         }
-        .cockpit-disco-spot-6 {
-          background: radial-gradient(circle, #f97316 0%, rgba(249,115,22,0) 70%);
-          top: 55%; left: 8%;
-          width: 280px; height: 280px;
-          animation: cockpit-disco-move-6 24s ease-in-out infinite alternate;
+        /* Thème clair : screen lave les couleurs. On bascule en multiply
+           et on baisse fort l'opacité pour rester sobre. */
+        [data-theme="light"] .cockpit-ambience-glow {
+          mix-blend-mode: multiply;
+          opacity: 0.12;
+          filter: blur(80px);
         }
-        .cockpit-disco-spot-7 {
-          background: radial-gradient(circle, #ec4899 0%, rgba(236,72,153,0) 70%);
-          top: 15%; right: 30%;
-          width: 300px; height: 300px;
-          animation: cockpit-disco-move-7 21s ease-in-out infinite alternate;
+        [data-theme="light"] .cockpit-ambience-glow-green {
+          opacity: 0.10;
         }
-
-        @keyframes cockpit-disco-move-1 {
-          0%   { transform: translate3d(0, 0, 0) scale(1); }
-          50%  { transform: translate3d(180px, 120px, 0) scale(1.15); }
-          100% { transform: translate3d(80px, 300px, 0) scale(0.9); }
+        [data-theme="mid"] .cockpit-ambience-glow {
+          opacity: 0.25;
         }
-        @keyframes cockpit-disco-move-2 {
-          0%   { transform: translate3d(0, 0, 0) scale(1); }
-          50%  { transform: translate3d(-160px, 180px, 0) scale(0.85); }
-          100% { transform: translate3d(-60px, 360px, 0) scale(1.1); }
-        }
-        @keyframes cockpit-disco-move-3 {
-          0%   { transform: translate3d(0, 0, 0) scale(1); }
-          50%  { transform: translate3d(-220px, -120px, 0) scale(1.2); }
-          100% { transform: translate3d(140px, 80px, 0) scale(0.95); }
-        }
-        @keyframes cockpit-disco-move-4 {
-          0%   { transform: translate3d(0, 0, 0) scale(1); }
-          50%  { transform: translate3d(220px, -160px, 0) scale(1.1); }
-          100% { transform: translate3d(80px, -260px, 0) scale(0.95); }
-        }
-        @keyframes cockpit-disco-move-5 {
-          0%   { transform: translate3d(0, 0, 0) scale(1); }
-          50%  { transform: translate3d(-260px, -80px, 0) scale(0.9); }
-          100% { transform: translate3d(-120px, -240px, 0) scale(1.15); }
-        }
-        @keyframes cockpit-disco-move-6 {
-          0%   { transform: translate3d(0, 0, 0) scale(1); }
-          50%  { transform: translate3d(200px, -120px, 0) scale(1.05); }
-          100% { transform: translate3d(360px, 60px, 0) scale(0.9); }
-        }
-        @keyframes cockpit-disco-move-7 {
-          0%   { transform: translate3d(0, 0, 0) scale(1); }
-          50%  { transform: translate3d(-180px, 200px, 0) scale(1.1); }
-          100% { transform: translate3d(60px, 340px, 0) scale(0.85); }
+        [data-theme="mid"] .cockpit-ambience-glow-green {
+          opacity: 0.20;
         }
 
-        /* Respect du choix utilisateur "réduire les animations" — coupe
-           les keyframes mais garde les spots immobiles pour l'ambiance. */
+        /* --- Ligne de scan : barre fine cyan qui descend très lentement
+               comme sur un écran de surveillance --- */
+        .cockpit-ambience-scan {
+          position: absolute;
+          top: 0; left: 0; right: 0;
+          height: 2px;
+          background: linear-gradient(to bottom,
+            transparent,
+            rgba(56,189,248,0.22) 50%,
+            transparent);
+          filter: blur(1.2px);
+          animation: cockpit-scan 16s linear infinite;
+        }
+        [data-theme="light"] .cockpit-ambience-scan {
+          background: linear-gradient(to bottom,
+            transparent,
+            rgba(14,165,233,0.12) 50%,
+            transparent);
+        }
+
+        /* --- Vignette : assombrit doucement les bords pour donner la
+               sensation d'être "dans" le poste --- */
+        .cockpit-ambience-vignette {
+          position: absolute;
+          inset: 0;
+          background: radial-gradient(ellipse at center,
+            transparent 55%,
+            rgba(0,0,0,0.22) 100%);
+        }
+        [data-theme="light"] .cockpit-ambience-vignette {
+          background: radial-gradient(ellipse at center,
+            transparent 62%,
+            rgba(15,23,42,0.06) 100%);
+        }
+        [data-theme="mid"] .cockpit-ambience-vignette {
+          background: radial-gradient(ellipse at center,
+            transparent 58%,
+            rgba(0,0,0,0.14) 100%);
+        }
+
+        /* Pulsation très lente, presque imperceptible — battement du poste */
+        @keyframes cockpit-pulse-slow {
+          0%, 100% { opacity: var(--cockpit-glow-min, 0.32); }
+          50%      { opacity: var(--cockpit-glow-max, 0.48); }
+        }
+        @keyframes cockpit-scan {
+          0%   { transform: translateY(-10%); }
+          100% { transform: translateY(120vh); }
+        }
+
+        /* Respect "réduire les animations" : on garde les lumières
+           statiques pour l'ambiance, on coupe pulsation et scan. */
         @media (prefers-reduced-motion: reduce) {
-          .cockpit-disco-spot { animation: none; opacity: 0.18; }
+          .cockpit-ambience-glow { animation: none; }
+          .cockpit-ambience-scan { display: none; }
         }
       `;
       document.head.appendChild(s);

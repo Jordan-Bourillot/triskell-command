@@ -5,6 +5,43 @@
  * - Helpers d'API
  */
 
+// Couleur d'ambiance par vue — doit correspondre aux titres de section
+// de la sidebar (index.html). Quand on entre dans une vue, on pose
+// document.body.dataset.viewColor = <couleur> et le CSS allume des halos
+// sobres dans cette teinte sur le fond de la zone main. Le cockpit a sa
+// propre ambiance dédiée (3 voyants ambre/cyan/vert) — on le marque
+// "cockpit" pour que le CSS coupe le halo générique.
+const VIEW_COLOR_MAP = {
+  morning: 'cockpit',
+  mails: 'sky',
+  brain: 'indigo',
+  clients: 'violet',
+  clients_master: 'violet',
+  autopilot: 'purple',
+  convoy: 'purple',
+  drafts: 'purple',
+  replies: 'purple',
+  prospects_crm: 'fuchsia',
+  obelisk: 'fuchsia',
+  chasseur: 'fuchsia',
+  chasseur_createurs: 'fuchsia',
+  prospecteur_google: 'fuchsia',
+  eclaireur: 'fuchsia',
+  eliks: 'pink',
+  revenue: 'rose',
+  funnel: 'rose',
+  phare: 'orange',
+  geo: 'red',
+  lagriffe: 'amber',
+  rankus: 'amber',
+  wow: 'amber',
+  pixelpros: 'amber',
+  'pixelpros-affiliates': 'yellow',
+  catalogue: 'lime',
+  mail_templates: 'green',
+  health: 'emerald',
+};
+
 const App = {
   api: null,
   currentView: 'morning',
@@ -409,6 +446,10 @@ const App = {
     }
     this.currentView = viewId;
     this.currentParams = params || null;
+    // Pose la couleur d'ambiance sur <body> — consommée par le CSS pour
+    // colorer le halo de fond de la zone main. Fallback "slate" pour les
+    // vues utilitaires qui n'ont pas de section dans la sidebar.
+    document.body.dataset.viewColor = VIEW_COLOR_MAP[viewId] || 'slate';
     // Active state sidebar
     document.querySelectorAll('[data-view]').forEach(btn => {
       const matchesView = btn.dataset.view === viewId;

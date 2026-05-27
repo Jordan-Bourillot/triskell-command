@@ -4749,3 +4749,77 @@ select.geo-input:focus {
   text-wrap: pretty;
 }
 
+/* =====================================================================
+   AMBIANCE DE PAGE — un halo coloré au fond de la zone main qui prend
+   la teinte de la section sidebar courante.
+   Le routeur (app.js → show()) pose document.body.dataset.viewColor
+   selon la vue. Le cockpit a son ambiance dédiée (3 voyants ambre/cyan/
+   vert injectés dans morning.js) → on coupe le halo générique pour lui.
+   ===================================================================== */
+
+#main { isolation: isolate; }
+
+#main::before,
+#main::after {
+  content: "";
+  position: absolute;
+  width: 720px;
+  height: 720px;
+  border-radius: 50%;
+  filter: blur(120px);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.18;
+  background: radial-gradient(circle,
+    rgb(var(--page-glow, 148 163 184) / 0.55) 0%,
+    rgb(var(--page-glow, 148 163 184) / 0) 70%);
+  transition: opacity 400ms ease, background 400ms ease;
+}
+#main::before {
+  top: -180px;
+  left: -180px;
+}
+#main::after {
+  bottom: -240px;
+  right: -200px;
+  width: 820px;
+  height: 820px;
+}
+
+/* #content (et toute la page) passe au-dessus du halo */
+#main > #content { position: relative; z-index: 1; }
+
+/* Thème clair : halos très discrets (sinon ça lave le fond blanc) */
+[data-theme="light"] #main::before,
+[data-theme="light"] #main::after {
+  opacity: 0.10;
+  filter: blur(110px);
+}
+[data-theme="mid"] #main::before,
+[data-theme="mid"] #main::after {
+  opacity: 0.14;
+}
+
+/* Cockpit : ambiance dédiée → on coupe le halo générique */
+body[data-view-color="cockpit"] #main::before,
+body[data-view-color="cockpit"] #main::after {
+  opacity: 0;
+}
+
+/* --- Couleurs par section sidebar (RGB des teintes Tailwind -400) --- */
+body[data-view-color="sky"]      { --page-glow:  56 189 248; }
+body[data-view-color="indigo"]   { --page-glow: 129 140 248; }
+body[data-view-color="violet"]   { --page-glow: 167 139 250; }
+body[data-view-color="purple"]   { --page-glow: 192 132 252; }
+body[data-view-color="fuchsia"]  { --page-glow: 232 121 249; }
+body[data-view-color="pink"]     { --page-glow: 244 114 182; }
+body[data-view-color="rose"]     { --page-glow: 251 113 133; }
+body[data-view-color="red"]      { --page-glow: 248 113 113; }
+body[data-view-color="orange"]   { --page-glow: 251 146  60; }
+body[data-view-color="amber"]    { --page-glow: 251 191  36; }
+body[data-view-color="yellow"]   { --page-glow: 250 204  21; }
+body[data-view-color="lime"]     { --page-glow: 163 230  53; }
+body[data-view-color="green"]    { --page-glow:  74 222 128; }
+body[data-view-color="emerald"]  { --page-glow:  52 211 153; }
+body[data-view-color="slate"]    { --page-glow: 148 163 184; }
+
