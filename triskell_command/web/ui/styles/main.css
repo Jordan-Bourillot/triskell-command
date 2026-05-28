@@ -589,49 +589,36 @@ html, body {
    Petit bouton ↩ au bord de chaque bulle, citation rendue en haut d'une
    bulle qui répond, et bannière au-dessus du composer pendant qu'on
    prépare la réponse. */
-/* Conteneur des actions (corbeille, modifier, réagir, répondre).
-   Positionné en absolu à côté de la bulle (extérieur), donc ne réserve
-   plus de place horizontale dans la rangée — la bulle peut s'étendre
-   sur toute la largeur du chat. */
-.thomas-actions {
-  position: absolute;
-  top: 4px;
-  display: flex;
-  gap: 2px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  pointer-events: none;
-  z-index: 2;
-}
-.thomas-actions-mine { right: calc(100% + 4px); }
-.thomas-actions-theirs { left: calc(100% + 4px); }
-.thomas-msg-row:hover .thomas-actions,
-.thomas-actions:focus-within {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 .thomas-reply-btn,
 .thomas-edit-btn,
 .thomas-react-btn,
 .thomas-delete-btn {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
   color: hsl(var(--text-secondary));
-  background: hsl(var(--surface));
-  border: 1px solid hsl(var(--border));
-  transition: background-color 0.15s ease, color 0.15s ease;
+  background: transparent;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
   cursor: pointer;
+  margin-top: 4px;
 }
 .thomas-reply-btn svg,
 .thomas-edit-btn svg,
 .thomas-react-btn svg,
-.thomas-delete-btn svg { width: 14px; height: 14px; }
+.thomas-delete-btn svg { width: 13px; height: 13px; }
+.thomas-msg-row:hover .thomas-reply-btn,
+.thomas-msg-row:hover .thomas-edit-btn,
+.thomas-msg-row:hover .thomas-react-btn,
+.thomas-msg-row:hover .thomas-delete-btn,
+.thomas-reply-btn:focus-visible,
+.thomas-edit-btn:focus-visible,
+.thomas-react-btn:focus-visible,
+.thomas-delete-btn:focus-visible { opacity: 1; }
 .thomas-reply-btn:hover,
 .thomas-edit-btn:hover,
 .thomas-react-btn:hover {
@@ -642,23 +629,22 @@ html, body {
   background: hsl(var(--danger) / 0.15);
   color: hsl(var(--danger));
 }
-/* Tactile : pas de hover fiable → on garde les actions toujours visibles
-   (à faible opacité) pour qu'elles restent découvrables. */
+/* Tactile : pas de hover fiable → on garde le bouton toujours visible
+   (à faible opacité) pour qu'il reste découvrable. */
 @media (hover: none) {
-  .thomas-actions { opacity: 0.5; pointer-events: auto; }
+  .thomas-reply-btn,
+  .thomas-edit-btn,
+  .thomas-react-btn,
+  .thomas-delete-btn { opacity: 0.45; }
 }
 
-/* Wrapper bulle + ses réactions empilées dessous.
-   Prend toute la largeur disponible de la rangée (flex:1), avec
-   alignement de la bulle à gauche ou à droite selon l'expéditeur. */
+/* Wrapper bulle + ses réactions empilées dessous. */
 .thomas-bubble-wrap {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  align-items: inherit;  /* hérite du flex parent (justify-end/start) */
   min-width: 0;
 }
-.thomas-bubble-wrap-mine { align-items: flex-end; }
-.thomas-bubble-wrap-theirs { align-items: flex-start; }
 /* Pastilles de réactions (chips) sous la bulle. */
 .thomas-reactions {
   display: flex;
