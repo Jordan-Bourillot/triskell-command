@@ -210,6 +210,11 @@ const Argus = {
               ⬇ Télécharger Excel
             </button>
 
+            <button id="argus-btn-push" class="w-full px-4 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+              📥 Envoyer dans le fichier prospect
+            </button>
+            <p id="argus-push-feedback" class="text-[11px] leading-relaxed hidden"></p>
+
             <p class="text-[11px] opacity-50 leading-relaxed">
               Tous les mails affichés sont extraits du HTML de pages réellement
               visitées. Aucune adresse n'est devinée.
@@ -258,6 +263,7 @@ const Argus = {
     document.getElementById('argus-btn-pause').onclick = () => this._togglePause();
     document.getElementById('argus-btn-stop').onclick = () => this._stop();
     document.getElementById('argus-btn-export').onclick = () => this._export();
+    document.getElementById('argus-btn-push').onclick = () => this._pushToProspects();
     document.getElementById('argus-ref-file').onchange = (e) => this._uploadReference(e);
 
     this._applyForm();
@@ -341,6 +347,79 @@ const Argus = {
     }
   },
 
+  /**
+   * Pousse tous les emails collectés dans la base prospects partagée.
+   * Anti-doublon géré côté serveur (upsert sur l'email) : un prospect
+   * déjà connu sera enrichi, pas dupliqué.
+   */
+  async _pushToProspects() {
+    const total = this._lastTotalEmails || 0;
+    if (total === 0) {
+      alert('Aucun email à envoyer.');
+      return;
+    }
+    const msg =
+      'Envoyer ' + total + ' email(s) collecté(s) par Argus dans le ' +
+      'fichier prospect ?\n\n' +
+      'Les emails déjà connus seront fusionnés (pas de doublons), ' +
+      'les nouveaux seront créés avec le tag "argus".\n\n' +
+      'Continuer ?';
+    if (!confirm(msg)) return;
+
+    const btn = document.getElementById('argus-btn-push');
+    const feedback = document.getElementById('argus-push-feedback');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Envoi en cours…';
+    }
+    if (feedback) {
+      feedback.classList.add('hidden');
+      feedback.textContent = '';
+    }
+
+    let res;
+    try {
+      res = await this._api('push_to_prospects');
+    } catch (e) {
+      res = { ok: false, error: String(e) };
+    }
+
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '📥 Envoyer dans le fichier prospect';
+    }
+
+    if (!res || !res.ok) {
+      const err = res?.error || 'erreur inconnue';
+      if (feedback) {
+        feedback.classList.remove('hidden');
+        feedback.className = 'text-[11px] leading-relaxed text-red-400';
+        feedback.textContent = '❌ Envoi échoué : ' + err;
+      } else {
+        alert('Envoi échoué : ' + err);
+      }
+      return;
+    }
+
+    const created = res.created || 0;
+    const merged = res.merged || 0;
+    const skipped = res.skipped || 0;
+    const pushed = res.pushed || 0;
+    const parts = [];
+    parts.push('✅ ' + pushed + ' email(s) envoyé(s)');
+    parts.push(created + ' nouveau(x), ' + merged + ' déjà connu(s)');
+    if (skipped > 0) parts.push(skipped + ' ignoré(s) (format invalide)');
+    if (res.backend === 'local') parts.push('(stockage local, pas en ligne)');
+
+    if (feedback) {
+      feedback.classList.remove('hidden');
+      feedback.className = 'text-[11px] leading-relaxed text-emerald-400';
+      feedback.textContent = parts.join(' · ');
+    } else {
+      alert(parts.join('\n'));
+    }
+  },
+
   async _uploadReference(ev) {
     const file = ev.target.files?.[0];
     if (!file) return;
@@ -386,6 +465,7 @@ const Argus = {
     if (!s || !s.ok) return;
 
     document.getElementById('argus-total').textContent = s.total_emails || 0;
+    this._lastTotalEmails = s.total_emails || 0;
 
     // Sources
     const sourcesEl = document.getElementById('argus-sources');
@@ -486,6 +566,7 @@ const Argus = {
     const pause = document.getElementById('argus-btn-pause');
     const stop = document.getElementById('argus-btn-stop');
     const exp = document.getElementById('argus-btn-export');
+    const push = document.getElementById('argus-btn-push');
     if (start) start.disabled = !!running;
     if (pause) {
       pause.disabled = !running;
@@ -493,6 +574,7 @@ const Argus = {
     }
     if (stop) stop.disabled = !running;
     if (exp && hasEmails !== undefined) exp.disabled = !hasEmails;
+    if (push && hasEmails !== undefined) push.disabled = !hasEmails;
   },
 
   _escape(s) {

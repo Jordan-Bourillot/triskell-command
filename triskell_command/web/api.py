@@ -8860,6 +8860,20 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def argus_push_to_prospects(self, payload: dict | None = None) -> dict:
+        """Envoie tous les emails collectés par Argus dans la base prospects
+        partagée Triskell (table Supabase `prospects`). Anti-doublon géré
+        côté CRM via upsert sur l'email — un prospect déjà connu sera
+        enrichi, pas dupliqué.
+
+        Renvoie {ok, backend, pushed, created, merged, skipped, total_db, error}.
+        """
+        try:
+            from ..integrations import argus
+            return argus.push_to_prospects()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ==================================================================
     # GEO — Generative Engine Optimization
     # Tableau de bord pour rendre un site visible des IA génératives

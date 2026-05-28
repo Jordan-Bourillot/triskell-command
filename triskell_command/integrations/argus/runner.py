@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -162,6 +164,191 @@ def export_xlsx() -> dict:
         }
     except Exception as exc:
         return {"ok": False, "error": f"Export échoué : {exc}"}
+
+
+# ----------------------------------------------------------------------
+# Push vers le fichier prospect partagé (table Supabase `prospects`)
+# ----------------------------------------------------------------------
+
+# Domaines de messageries perso : on ne les transforme pas en "nom d'entreprise"
+# parce que `jean@gmail.com` ne dit rien sur l'entreprise.
+_PERSONAL_DOMAINS = {
+    "gmail.com", "yahoo.com", "yahoo.fr", "hotmail.com", "hotmail.fr",
+    "outlook.com", "outlook.fr", "live.com", "live.fr", "orange.fr",
+    "free.fr", "sfr.fr", "laposte.net", "wanadoo.fr", "neuf.fr",
+    "bbox.fr", "icloud.com", "me.com", "aol.com", "aol.fr",
+    "protonmail.com", "proton.me", "gmx.com", "gmx.fr",
+}
+
+
+def _name_from_domain(domain: str) -> str:
+    """Tente de deviner un nom propre depuis un domaine.
+    boulangerie-dupont.fr → "Boulangerie Dupont"
+    Renvoie "" si le domaine est trop générique pour en tirer quoi que ce soit.
+    """
+    if not domain:
+        return ""
+    base = domain.lower()
+    # Enlever sous-domaines courants
+    for prefix in ("www.", "mail.", "smtp.", "mx.", "imap.", "pop."):
+        if base.startswith(prefix):
+            base = base[len(prefix):]
+            break
+    # Enlever le TLD
+    parts = base.split(".")
+    if len(parts) < 2:
+        return ""
+    core = parts[0]
+    if not core or len(core) < 2:
+        return ""
+    # boulangerie-dupont → ["boulangerie", "dupont"]
+    words = re.split(r"[-_]", core)
+    words = [w for w in words if w]
+    if not words:
+        return ""
+    return " ".join(w.capitalize() for w in words)
+
+
+def push_to_prospects() -> dict:
+    """Pousse tous les emails de la session courante dans la table prospects
+    de Triskell. Anti-doublon géré côté CRM (upsert sur l'email).
+
+    Renvoie {ok, pushed, created, merged, skipped, total_db, error}.
+      - pushed   : nombre de prospects envoyés au CRM
+      - created  : nouveaux prospects créés
+      - merged   : prospects existants enrichis (doublons sur l'email)
+      - skipped  : emails ignorés côté Argus (format invalide)
+      - total_db : total après opération
+    """
+    emails = sorted(state.emails)
+    if not emails:
+        return {"ok": False, "error": "Aucun email à envoyer."}
+
+    # Lazy imports — triskell_core est packagé séparément.
+    try:
+        from triskell_core.prospect.core.crm import get_crm
+        from triskell_core.prospect.core.prospect import (
+            Prospect as CoreProspect,
+            Source,
+        )
+    except ImportError as exc:
+        return {
+            "ok": False,
+            "error": f"triskell_core absent — impossible de pousser ({exc})",
+        }
+
+    try:
+        crm = get_crm()
+    except Exception as exc:
+        return {"ok": False, "error": f"connexion CRM impossible : {exc}"}
+    backend = "remote" if crm.__class__.__name__ == "RemoteCRM" else "local"
+
+    # Métadonnées de la session pour traçabilité.
+    params = dict(state.params or {})
+    query = (params.get("query") or "").strip()
+    location = (params.get("location") or "").strip()
+    found_at = datetime.now(timezone.utc).isoformat()
+
+    # Tag spécifique à la cohorte. Permet à Jordan de filtrer "tous les
+    # prospects ramenés par Argus le run X" dans le CRM.
+    base_tags = ["argus"]
+    if query:
+        # Tag secteur : "argus:plombier", "argus:restaurant"…
+        safe_q = re.sub(r"\s+", "-", query.lower())[:40]
+        base_tags.append(f"argus:{safe_q}")
+    if location:
+        safe_l = re.sub(r"\s+", "-", location.lower())[:40]
+        base_tags.append(f"argus:loc:{safe_l}")
+
+    context_msg = "trouvé par Argus"
+    if query and location:
+        context_msg = f"trouvé par Argus ({query} · {location})"
+    elif query:
+        context_msg = f"trouvé par Argus ({query})"
+
+    core_prospects: list = []
+    skipped = 0
+    for email in emails:
+        email = email.strip().lower()
+        if "@" not in email:
+            skipped += 1
+            continue
+        local_part, _, domain = email.partition("@")
+        domain = domain.strip()
+        if not domain:
+            skipped += 1
+            continue
+
+        # Si l'email est sur un domaine pro (pas gmail/yahoo), on peut tenter
+        # de deviner le nom de l'entreprise + le site web.
+        is_personal = domain in _PERSONAL_DOMAINS
+        guessed_name = "" if is_personal else _name_from_domain(domain)
+        website = "" if is_personal else f"https://{domain}"
+
+        emails_meta = [{
+            "email": email,
+            "source": "argus",
+            "source_id": "",
+            "url": website,
+            "context": context_msg,
+            "found_at": found_at,
+        }]
+
+        cp = CoreProspect(
+            name=guessed_name,
+            legal_name=guessed_name,
+            siren="",
+            emails=[email],
+            emails_meta=emails_meta,
+            website=website,
+            address="",
+            city=location if location else "",
+            postal_code="",
+            country="FR",
+            naf_code="",
+            industry=query if query else "",
+            language="fr",
+            tags=list(base_tags),
+            notes=context_msg,
+            sources=[Source(
+                name="argus",
+                source_id="",
+                url=website,
+            )],
+            status="new",
+        )
+        core_prospects.append(cp)
+
+    if not core_prospects:
+        return {
+            "ok": False,
+            "error": "Aucun email valide à envoyer.",
+            "skipped": skipped,
+        }
+
+    try:
+        result = crm.upsert_many(core_prospects)
+        if hasattr(crm, "save"):
+            try:
+                crm.save()
+            except Exception:
+                pass
+        state.log(
+            "success", "system",
+            f"Envoi prospects : {result.get('created', 0)} créé(s), "
+            f"{result.get('merged', 0)} fusionné(s) (déjà connus).",
+        )
+        return {
+            "ok": True,
+            "backend": backend,
+            "pushed": len(core_prospects),
+            "created": int(result.get("created") or 0),
+            "merged": int(result.get("merged") or 0),
+            "total_db": int(result.get("total") or 0),
+            "skipped": skipped,
+        }
+    except Exception as exc:
+        return {"ok": False, "error": f"Envoi au CRM échoué : {exc}"}
 
 
 # ----------------------------------------------------------------------

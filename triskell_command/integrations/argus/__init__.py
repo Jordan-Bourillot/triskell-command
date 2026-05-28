@@ -16,6 +16,7 @@ from .runner import (
     stop_session,
     get_status,
     export_xlsx,
+    push_to_prospects,
     set_reference_emails,
     is_running,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "stop_session",
     "get_status",
     "export_xlsx",
+    "push_to_prospects",
     "set_reference_emails",
     "is_running",
 ]
