@@ -223,7 +223,7 @@ def _do_one_poll(app_state) -> dict:
 
 
 def _log_inbox_mail(client, account_id: str, *, from_addr: str, subject: str,
-                     body: str, in_reply_to: str) -> None:
+                     body: str, in_reply_to: str, body_html: str = "") -> None:
     """Loggue dans email_history un mail entrant qui n'est pas une réponse
     prospect (kind='inbox_received'). Anti-doublon : si un mail avec même
     sujet + même from + même in_reply_to existe déjà sur ce compte, on saute.
@@ -246,6 +246,7 @@ def _log_inbox_mail(client, account_id: str, *, from_addr: str, subject: str,
         "from": from_addr,
         "in_reply_to": in_reply_to,
         "body_excerpt": (body or "")[:1500],
+        "body_html": (body_html or "")[:80_000],
     }
     row = {
         "kind": "inbox_received",
@@ -345,7 +346,7 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                     if typ != "OK" or not msg_data:
                         counters["errors"] += 1
                         continue
-                    headers, body = _parse_fetch_response(msg_data)
+                    headers, body, body_html = _parse_fetch_response(msg_data)
                     in_reply_to = _extract_msg_id(headers.get("In-Reply-To", ""))
                     references = headers.get("References", "") or ""
                     from_addr = _from_address(headers.get("From", ""))
@@ -375,7 +376,8 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                                                  from_addr=from_addr,
                                                  subject=f"[BOUNCE] {subject}",
                                                  body=body,
-                                                 in_reply_to=in_reply_to)
+                                                 in_reply_to=in_reply_to,
+                                                 body_html=body_html)
                             except Exception:
                                 pass
                             counters["skipped"] += 1
@@ -392,7 +394,8 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                                              from_addr=from_addr,
                                              subject=f"[AUTO] {subject}",
                                              body=body,
-                                             in_reply_to=in_reply_to)
+                                             in_reply_to=in_reply_to,
+                                             body_html=body_html)
                         except Exception as exc:
                             logger.debug("log_inbox_mail (auto) KO: %s", exc)
                         counters["skipped"] += 1
@@ -417,7 +420,8 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                                 _log_inbox_mail(client, account_id,
                                                  from_addr=from_addr,
                                                  subject=subject, body=body,
-                                                 in_reply_to=in_reply_to)
+                                                 in_reply_to=in_reply_to,
+                                                 body_html=body_html)
                             except Exception as exc:
                                 logger.debug("log_inbox_mail KO: %s", exc)
                         counters["skipped"] += 1
@@ -437,6 +441,7 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                     extra = {
                         "classification": classification,
                         "body_excerpt": (body or "")[:1500],
+                        "body_html": (body_html or "")[:80_000],
                         "from": from_addr,
                         "in_reply_to": in_reply_to,
                         "handled": False,
@@ -602,12 +607,15 @@ def _extract_plain_body(raw: str) -> str:
     return text
 
 
-def _parse_fetch_response(msg_data) -> tuple[dict, str]:
+def _parse_fetch_response(msg_data) -> tuple[dict, str, str]:
     """Parse une réponse IMAP `BODY.PEEK[]` (message complet : headers + body).
-    Renvoie (dict_headers, str_body_text).
+    Renvoie (dict_headers, str_body_text, str_body_html).
 
     Les en-têtes (Subject, From) sont décodés depuis le MIME (RFC 2047).
-    Le body est extrait de la partie text/plain si multipart.
+    - body_text : version texte brut (text/plain de préférence, fallback HTML
+      strippé). Sert à la classification IA et au snippet d'aperçu.
+    - body_html : version HTML d'origine si le mail en a une, sinon "".
+      Sert à afficher le mail avec sa mise en page dans l'iframe sandbox.
     """
     # Concatène tous les chunks de la réponse IMAP en une seule string
     raw_full = ""
@@ -620,7 +628,7 @@ def _parse_fetch_response(msg_data) -> tuple[dict, str]:
         elif chunk:
             raw_full += str(chunk)
     if not raw_full:
-        return {}, ""
+        return {}, "", ""
 
     headers: dict = {}
     try:
@@ -641,21 +649,31 @@ def _parse_fetch_response(msg_data) -> tuple[dict, str]:
     except Exception:
         pass
 
-    # Body : extraction text/plain avec Content-Type connu
+    # Body : extraction text/plain + text/html en parallèle
     try:
         msg = email.message_from_string(raw_full)
-        body = ""
+        body_text = ""
+        body_html = ""
         if msg.is_multipart():
             for sub in msg.walk():
                 ctype = (sub.get_content_type() or "").lower()
-                if ctype == "text/plain":
+                if not body_text and ctype == "text/plain":
                     payload = sub.get_payload(decode=True)
                     if payload:
                         charset = sub.get_content_charset() or "utf-8"
-                        body = payload.decode(charset, errors="replace").strip()
-                        break
-            # Fallback : prendre le premier text/* trouvé
-            if not body:
+                        body_text = payload.decode(charset, errors="replace").strip()
+                elif not body_html and ctype == "text/html":
+                    payload = sub.get_payload(decode=True)
+                    if payload:
+                        charset = sub.get_content_charset() or "utf-8"
+                        body_html = payload.decode(charset, errors="replace").strip()
+                if body_text and body_html:
+                    break
+            # Si pas de text/plain trouvé mais HTML dispo, on dérive le texte du HTML
+            if not body_text and body_html:
+                body_text = re.sub(r"<[^>]+>", " ", body_html).strip()
+            # Fallback ultime : premier text/* trouvé
+            if not body_text:
                 for sub in msg.walk():
                     ctype = (sub.get_content_type() or "").lower()
                     if ctype.startswith("text/"):
@@ -664,23 +682,26 @@ def _parse_fetch_response(msg_data) -> tuple[dict, str]:
                             charset = sub.get_content_charset() or "utf-8"
                             text = payload.decode(charset, errors="replace")
                             text = re.sub(r"<[^>]+>", " ", text)
-                            body = text.strip()
+                            body_text = text.strip()
                             break
         else:
             payload = msg.get_payload(decode=True)
             if payload:
                 charset = msg.get_content_charset() or "utf-8"
                 text = payload.decode(charset, errors="replace")
-                if (msg.get_content_type() or "").lower() == "text/html":
-                    text = re.sub(r"<[^>]+>", " ", text)
-                body = text.strip()
-        # Compact whitespace
-        body = re.sub(r"\n{3,}", "\n\n", body)
-        body = re.sub(r"[ \t]+", " ", body).strip()
-        return headers, body
+                ctype = (msg.get_content_type() or "").lower()
+                if ctype == "text/html":
+                    body_html = text.strip()
+                    body_text = re.sub(r"<[^>]+>", " ", text).strip()
+                else:
+                    body_text = text.strip()
+        # Compact whitespace sur le texte (pas sur le HTML, qu'on garde tel quel)
+        body_text = re.sub(r"\n{3,}", "\n\n", body_text)
+        body_text = re.sub(r"[ \t]+", " ", body_text).strip()
+        return headers, body_text, body_html
     except Exception as exc:
         logger.debug("parse body failed: %s", exc)
-        return headers, ""
+        return headers, "", ""
 
 
 def _extract_msg_id(raw: str) -> str:

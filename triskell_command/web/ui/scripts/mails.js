@@ -555,9 +555,10 @@ const Mails = {
     const accountEmail = (this.state.accounts.find(a => a.id === accountId) || {}).from_email || '';
     const ts = this._fmtDateLong(m.ts);
     const isSent = m.kind === 'email_sent';
-    // Pour les mails envoyés, on préfère le HTML complet stocké dans extra
-    // (gras / couleurs / liens) — fallback sur le texte si absent (anciens logs).
-    const body = (isSent && extra.body_html)
+    // On préfère toujours le HTML complet stocké dans extra (gras / couleurs
+    // / liens / mise en page) — fallback sur le texte si absent (anciens
+    // logs ou mails sans partie HTML). Vrai pour les envoyés ET les reçus.
+    const body = extra.body_html
       ? extra.body_html
       : (extra.body_excerpt || m.body || '(corps vide)');
     const attachmentsMeta = Array.isArray(extra.attachments_meta)
