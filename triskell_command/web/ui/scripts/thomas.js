@@ -455,10 +455,22 @@ const Thomas = {
       // — masquées pour un message supprimé.
       const reactionsHtml = isDeleted ? '' : this._renderReactionChips(m);
 
+      // Les boutons d'action (corbeille, modifier, réagir, répondre)
+      // sont placés SOUS la bulle plutôt qu'à côté — comme ça la bulle
+      // peut prendre toute la largeur disponible. Ils apparaissent au
+      // survol de la rangée.
+      const actionsHtml = isFromMe
+        ? `<div class="thomas-actions">${deleteBtn}${editBtn}${reactBtn}${replyBtn}</div>`
+        : `<div class="thomas-actions">${reactBtn}${replyBtn}</div>`;
+
+      const wrapClass = isFromMe
+        ? 'thomas-bubble-wrap thomas-bubble-wrap-mine'
+        : 'thomas-bubble-wrap thomas-bubble-wrap-theirs';
+
       const bubble = `
-        <div class="thomas-bubble-wrap">
+        <div class="${wrapClass}">
           ${claudeLabelHtml}
-          <div class="max-w-[94%] sm:max-w-[88%] px-3 py-2 rounded-2xl ${corner} text-white"
+          <div class="max-w-[96%] sm:max-w-[94%] px-3 py-2 rounded-2xl ${corner} text-white"
                data-msg-id="${this._escape(m.id || '')}"
                style="background:${this._escape(bgColor)};">
             ${quoteHtml}
@@ -466,16 +478,11 @@ const Thomas = {
             ${bodyHtml}
             <div class="text-[10px] opacity-70 mt-1 text-right">${time}${editedTag}</div>
           </div>
+          ${actionsHtml}
           ${reactionsHtml}
         </div>`;
 
-      // Pour mes bulles (droite), les boutons 🗑 ✎ 😊 ↩ sont avant ;
-      // pour celles de l'autre (gauche), 😊 ↩ après — les actions
-      // restent toujours du côté "extérieur" de la bulle.
-      const inner = isFromMe
-        ? `${deleteBtn}${editBtn}${reactBtn}${replyBtn}${bubble}`
-        : `${bubble}${reactBtn}${replyBtn}`;
-      return `<div class="flex ${align} items-start gap-0.5 thomas-msg-row">${inner}</div>`;
+      return `<div class="flex ${align} items-start thomas-msg-row">${bubble}</div>`;
     }).join('');
 
     el.innerHTML = html || `

@@ -589,12 +589,27 @@ html, body {
    Petit bouton ↩ au bord de chaque bulle, citation rendue en haut d'une
    bulle qui répond, et bannière au-dessus du composer pendant qu'on
    prépare la réponse. */
+/* Conteneur des boutons d'action, placé SOUS la bulle. Apparaît au
+   survol de la rangée. L'alignement (à droite pour moi, à gauche pour
+   l'autre) est géré par `align-items` du wrapper. */
+.thomas-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 3px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.thomas-msg-row:hover .thomas-actions,
+.thomas-actions:focus-within {
+  opacity: 1;
+}
+
 .thomas-reply-btn,
 .thomas-edit-btn,
 .thomas-react-btn,
 .thomas-delete-btn {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -602,23 +617,13 @@ html, body {
   border-radius: 999px;
   color: hsl(var(--text-secondary));
   background: transparent;
-  opacity: 0;
-  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
   cursor: pointer;
-  margin-top: 4px;
 }
 .thomas-reply-btn svg,
 .thomas-edit-btn svg,
 .thomas-react-btn svg,
-.thomas-delete-btn svg { width: 13px; height: 13px; }
-.thomas-msg-row:hover .thomas-reply-btn,
-.thomas-msg-row:hover .thomas-edit-btn,
-.thomas-msg-row:hover .thomas-react-btn,
-.thomas-msg-row:hover .thomas-delete-btn,
-.thomas-reply-btn:focus-visible,
-.thomas-edit-btn:focus-visible,
-.thomas-react-btn:focus-visible,
-.thomas-delete-btn:focus-visible { opacity: 1; }
+.thomas-delete-btn svg { width: 14px; height: 14px; }
 .thomas-reply-btn:hover,
 .thomas-edit-btn:hover,
 .thomas-react-btn:hover {
@@ -629,22 +634,22 @@ html, body {
   background: hsl(var(--danger) / 0.15);
   color: hsl(var(--danger));
 }
-/* Tactile : pas de hover fiable → on garde le bouton toujours visible
-   (à faible opacité) pour qu'il reste découvrable. */
+/* Tactile : pas de hover fiable → on garde les actions toujours
+   visibles (à faible opacité) pour qu'elles restent découvrables. */
 @media (hover: none) {
-  .thomas-reply-btn,
-  .thomas-edit-btn,
-  .thomas-react-btn,
-  .thomas-delete-btn { opacity: 0.45; }
+  .thomas-actions { opacity: 0.5; }
 }
 
-/* Wrapper bulle + ses réactions empilées dessous. */
+/* Wrapper bulle + actions + réactions empilées en colonne dessous.
+   L'alignement (gauche/droite) suit l'expéditeur via les classes
+   `-mine` / `-theirs` posées par le JS. */
 .thomas-bubble-wrap {
   display: flex;
   flex-direction: column;
-  align-items: inherit;  /* hérite du flex parent (justify-end/start) */
   min-width: 0;
 }
+.thomas-bubble-wrap-mine { align-items: flex-end; }
+.thomas-bubble-wrap-theirs { align-items: flex-start; }
 /* Pastilles de réactions (chips) sous la bulle. */
 .thomas-reactions {
   display: flex;
