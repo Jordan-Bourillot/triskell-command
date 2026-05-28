@@ -235,6 +235,9 @@ const Autopilot = {
     // L'auto-pilote détecte les produits actifs du catalogue tout seul.)
     // Charge la liste des comptes mail pour le pool d'adresses expeditrices
     this._loadMailAccountsAndRender();
+    // Charge produits actifs + modeles de prospection, et rend la carte
+    // "Produits & modeles".
+    this._loadActiveProductsAndTemplates();
     // Compteurs : appel asynchrone, met a jour quand l'API repond
     this._refreshPulse();
     // Combien de prospects dans la liste cible (étape 1 "Cherche")
@@ -323,15 +326,15 @@ const Autopilot = {
             <div class="text-xs font-bold uppercase tracking-widest text-text-muted mb-2">
               Quels produits l'IA va vendre ?
             </div>
-            <div class="text-sm text-text px-3 py-2 rounded-lg bg-bg border border-border"
+            <div id="ap-products-summary"
+                 class="text-sm text-text px-3 py-2 rounded-lg bg-bg border border-border"
                  style="text-wrap: pretty">
-              Tous les produits <b>actifs</b> de ton catalogue.
+              Chargement…
             </div>
             <div class="text-[11px] text-text-muted mt-1.5 leading-snug"
                  style="text-wrap: pretty">
-              L'IA pioche automatiquement dans tes <b>modèles d'emails</b> existants
-              pour chaque produit actif. Pour ajouter, retirer ou désactiver un produit,
-              va dans la section <b>Catalogue</b>.
+              Les produits <b>actifs</b> de ton catalogue (juste en dessous). Pour
+              ajouter, retirer ou désactiver un produit, va dans <b>Catalogue</b>.
             </div>
           </div>
 
@@ -354,6 +357,28 @@ const Autopilot = {
               </div>
             </div>
           </label>
+        </div>
+      </div>
+
+      <!-- Produits & modèles d'emails utilisés par l'autopilote.
+           Une ligne par produit actif. Clic = déplie la liste des modèles
+           de prospection avec une case à cocher par modèle. -->
+      <div class="card p-5 mb-4">
+        <div class="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+          <div>
+            <div class="text-xs font-bold uppercase tracking-widest text-text-muted mb-1">
+              Produits & modèles
+            </div>
+            <div class="text-xs text-text-muted" style="text-wrap: pretty">
+              Clique sur un produit pour choisir les modèles d'emails que
+              l'autopilote a le droit d'utiliser pour lui. Décoche ceux que
+              tu ne veux pas voir partir.
+            </div>
+          </div>
+          <div id="ap-products-counter" class="text-xs text-text-muted whitespace-nowrap"></div>
+        </div>
+        <div id="ap-products-list" class="space-y-2">
+          <div class="text-xs text-text-muted px-3 py-2">Chargement…</div>
         </div>
       </div>
 
@@ -850,6 +875,234 @@ const Autopilot = {
     try {
       App.api.autopilot_set_stage_mode({ stage, mode }).catch(() => {});
     } catch (e) {}
+  },
+
+  // ------------------------------------------------------------------
+  // Produits actifs + modèles d'emails de prospection : charge depuis
+  // l'API, croise les deux listes et rend la carte interactive. Chaque
+  // produit actif devient une ligne dépliable ; chaque modèle de prosp.
+  // est une checkbox qui pilote son champ `enabled` en base.
+  async _loadActiveProductsAndTemplates() {
+    const wrap = document.getElementById('ap-products-list');
+    if (!wrap) return;
+    if (!App.api || !App.api.catalog_get_full || !App.api.mail_templates_list) {
+      wrap.innerHTML = `<div class="text-xs text-text-muted px-3 py-2">
+        Liste des produits indisponible.</div>`;
+      return;
+    }
+    let cat, tpls;
+    try {
+      [cat, tpls] = await Promise.all([
+        App.api.catalog_get_full(),
+        App.api.mail_templates_list(),
+      ]);
+    } catch (e) {
+      wrap.innerHTML = `<div class="text-xs text-danger px-3 py-2">
+        Erreur de chargement (${this._esc(String(e))}).</div>`;
+      return;
+    }
+    const products = (cat && cat.ok && cat.products) ? cat.products : [];
+    const activeProducts = products.filter(p => p && p.is_active !== false);
+    const tplProducts = (tpls && tpls.ok && tpls.products) ? tpls.products : {};
+
+    // Pour chaque produit actif : tableau de modeles de prospection
+    // (categorie='prospection'). On ignore les transactionnels (mails type
+    // "site livre"), ce ne sont pas ceux que l'autopilote utilise.
+    this.productsWithTemplates = activeProducts.map(prod => {
+      const pid = prod.id;
+      const bucket = tplProducts[pid] || { templates: [] };
+      const prospection = (bucket.templates || []).filter(t =>
+        (t.category || 'transactionnel') === 'prospection'
+      );
+      return {
+        id:        pid,
+        label:     prod.label || pid,
+        templates: prospection,
+      };
+    });
+
+    this._renderProductsList();
+    this._refreshProductsSummary();
+  },
+
+  _renderProductsList() {
+    const wrap = document.getElementById('ap-products-list');
+    if (!wrap) return;
+    const items = this.productsWithTemplates || [];
+    if (items.length === 0) {
+      wrap.innerHTML = `
+        <div class="text-xs text-text-muted px-3 py-2 rounded-lg bg-bg border border-border">
+          Aucun produit actif dans le catalogue. Va dans Catalogue pour en activer.
+        </div>`;
+      return;
+    }
+    const rows = items.map(p => this._renderProductRow(p)).join('');
+    wrap.innerHTML = rows;
+    // Branche les clics de chaque entete (pour ouvrir/fermer)
+    wrap.querySelectorAll('[data-ap-product-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const pid = btn.dataset.apProductToggle;
+        this._toggleProductPanel(pid);
+      });
+    });
+    // Branche les checkbox de chaque modele
+    wrap.querySelectorAll('.ap-tpl-check').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const pid = cb.dataset.product;
+        const key = cb.dataset.tplKey;
+        this._setTemplateEnabled(pid, key, cb.checked);
+      });
+    });
+  },
+
+  _renderProductRow(prod) {
+    const total   = prod.templates.length;
+    const enabled = prod.templates.filter(t => t.enabled !== false).length;
+    const hasTpl  = total > 0;
+    const warnNone = hasTpl && enabled === 0;
+    const tplRows = prod.templates.map(t => {
+      const isOn = t.enabled !== false;
+      const label = this._esc(t.label || t.key || 'modèle sans nom');
+      const subj  = this._esc(t.subject || '');
+      const desc  = this._esc(t.description || '');
+      const aud   = (t.audience === 'pro') ? 'Pros'
+                  : (t.audience === 'creator') ? 'Créateurs' : '';
+      return `
+        <label class="flex items-start gap-3 p-3 rounded-lg bg-bg border border-border
+                       hover:border-accent/40 transition-colors cursor-pointer">
+          <input type="checkbox" class="ap-tpl-check mt-1 w-4 h-4 accent-accent flex-shrink-0"
+                 ${isOn ? 'checked' : ''}
+                 data-product="${this._esc(prod.id)}"
+                 data-tpl-key="${this._esc(t.key)}">
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold flex items-center gap-2 flex-wrap">
+              <span class="truncate">${label}</span>
+              ${aud ? `<span class="text-[10px] uppercase tracking-wider
+                                    px-1.5 py-0.5 rounded bg-accent/10 text-accent">
+                ${aud}</span>` : ''}
+            </div>
+            ${subj ? `<div class="text-xs text-text-secondary mt-0.5 truncate"
+                            style="text-wrap: pretty">
+                       <span class="text-text-muted">Sujet :</span> ${subj}
+                     </div>` : ''}
+            ${desc ? `<div class="text-[11px] text-text-muted mt-0.5"
+                            style="text-wrap: pretty">${desc}</div>` : ''}
+          </div>
+        </label>`;
+    }).join('');
+
+    return `
+      <div class="rounded-lg bg-bg border border-border overflow-hidden"
+           data-ap-product="${this._esc(prod.id)}">
+        <button type="button"
+                class="w-full flex items-center gap-3 px-3 py-2.5 text-left
+                       hover:bg-bg-secondary transition-colors"
+                data-ap-product-toggle="${this._esc(prod.id)}">
+          <span class="ap-product-chevron flex-shrink-0 text-text-muted transition-transform">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                 stroke-width="2.5" viewBox="0 0 24 24">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold truncate">${this._esc(prod.label)}</div>
+            <div class="text-xs ${warnNone ? 'text-danger font-semibold' : 'text-text-muted'}">
+              ${hasTpl
+                ? `<span class="ap-product-counter">${enabled}</span>
+                   sur ${total} modèle(s) actif(s)
+                   ${warnNone ? ' — l’IA écrira en libre' : ''}`
+                : '<span>aucun modèle de prospection — l’IA écrira en libre</span>'}
+            </div>
+          </div>
+        </button>
+        <div class="ap-product-panel hidden border-t border-border p-3 space-y-2">
+          ${hasTpl ? tplRows : `
+            <div class="text-xs text-text-muted px-3 py-2"
+                 style="text-wrap: pretty">
+              Ce produit n'a pas encore de modèle d'email de prospection.
+              Va dans <b>Modèles d'emails</b> pour en créer.
+            </div>`}
+        </div>
+      </div>`;
+  },
+
+  _toggleProductPanel(pid) {
+    const root = document.querySelector(`[data-ap-product="${CSS.escape(pid)}"]`);
+    if (!root) return;
+    const panel = root.querySelector('.ap-product-panel');
+    const chev  = root.querySelector('.ap-product-chevron');
+    if (!panel) return;
+    const opening = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !opening);
+    if (chev) chev.style.transform = opening ? 'rotate(90deg)' : '';
+  },
+
+  async _setTemplateEnabled(productId, key, enabled) {
+    if (!App.api || !App.api.mail_templates_save) return;
+    // Optimistic : on met a jour la memoire locale + l'affichage tout de
+    // suite, et on rollback si l'API renvoie une erreur.
+    const prod = (this.productsWithTemplates || []).find(p => p.id === productId);
+    if (prod) {
+      const t = prod.templates.find(x => x.key === key);
+      if (t) t.enabled = enabled;
+    }
+    this._refreshProductSummaryLine(productId);
+    this._refreshProductsSummary();
+    try {
+      const r = await App.api.mail_templates_save({
+        product: productId,
+        key,
+        fields: { enabled },
+      });
+      if (!r || !r.ok) throw new Error((r && r.error) || 'erreur');
+    } catch (e) {
+      // Rollback
+      if (prod) {
+        const t = prod.templates.find(x => x.key === key);
+        if (t) t.enabled = !enabled;
+      }
+      this._renderProductsList();
+      this._refreshProductsSummary();
+    }
+  },
+
+  // Met a jour juste la ligne de compteurs d'un produit (sans tout redessiner)
+  _refreshProductSummaryLine(pid) {
+    const prod = (this.productsWithTemplates || []).find(p => p.id === pid);
+    if (!prod) return;
+    const root = document.querySelector(`[data-ap-product="${CSS.escape(pid)}"]`);
+    if (!root) return;
+    const cnt = root.querySelector('.ap-product-counter');
+    if (cnt) {
+      const enabled = prod.templates.filter(t => t.enabled !== false).length;
+      cnt.textContent = String(enabled);
+    }
+  },
+
+  _refreshProductsSummary() {
+    const items = this.productsWithTemplates || [];
+    const nProducts = items.length;
+    let totalEnabled = 0, totalAll = 0;
+    items.forEach(p => {
+      totalAll += p.templates.length;
+      totalEnabled += p.templates.filter(t => t.enabled !== false).length;
+    });
+    const counter = document.getElementById('ap-products-counter');
+    if (counter) {
+      counter.textContent = nProducts === 0
+        ? ''
+        : `${nProducts} produit(s) actif(s) · ${totalEnabled} / ${totalAll} modèle(s) cochés`;
+    }
+    const summary = document.getElementById('ap-products-summary');
+    if (summary) {
+      if (nProducts === 0) {
+        summary.innerHTML =
+          `<span class="text-warning font-semibold">Aucun produit actif</span>`;
+      } else {
+        summary.innerHTML =
+          `<b>${nProducts}</b> produit(s) actif(s) · <b>${totalEnabled}</b> modèle(s) cochés`;
+      }
+    }
   },
 
   // ------------------------------------------------------------------
