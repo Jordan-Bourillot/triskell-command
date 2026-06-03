@@ -193,9 +193,9 @@ const PixelPros = {
         <!-- Section Échecs (apparaît seulement s'il y a des failed) -->
         <div id="pp-failures" class="mt-7"></div>
 
-        <!-- Panneau de détail (slide-in à droite, vide par défaut) -->
-        <div id="pp-detail-overlay" class="pp-detail-overlay" hidden></div>
-        <aside id="pp-detail" class="pp-detail-panel" hidden></aside>
+        <!-- Panneau de détail : créé dans <body> par _ensureDetailEls() pour
+             que son plein écran se cale sur la fenêtre entière, et non sur
+             cette section animée (transform) qui le confinerait. -->
       </section>
     `;
     this._injectStyles();
@@ -206,7 +206,7 @@ const PixelPros = {
       this._renderKanban();
       this._renderFailures();
     };
-    document.getElementById('pp-detail-overlay').onclick = () => this._closeDetail();
+    this._ensureDetailEls();
 
     await this.refresh();
   },
@@ -405,7 +405,7 @@ const PixelPros = {
       /* === PANNEAU DE DÉTAIL (slide-in droite) === */
       .pp-detail-overlay { position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:998; backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); animation: pp-fadein .2s ease; }
       /* Fond opaque solide, pas de var() qui pourrait être transparente. */
-      .pp-detail-panel { position:fixed; top:0; right:0; bottom:0; width:min(960px, 95vw); background:#0b1020; border-left:1px solid #1e293b; z-index:999; overflow-y:auto; padding:24px; box-shadow:-12px 0 30px rgba(0,0,0,.5); animation: pp-slidein .25s cubic-bezier(.2,.7,.3,1); color:#e2e8f0; }
+      .pp-detail-panel { position:fixed; top:0; right:0; bottom:0; width:min(1120px, 94vw); background:#0b1020; border-left:1px solid #1e293b; z-index:1000; overflow-y:auto; padding:24px; box-shadow:-12px 0 30px rgba(0,0,0,.5); animation: pp-slidein .25s cubic-bezier(.2,.7,.3,1); color:#e2e8f0; }
       @keyframes pp-fadein { from { opacity:0; } to { opacity:1; } }
       @keyframes pp-slidein { from { transform:translateX(100%); } to { transform:translateX(0); } }
 
@@ -905,9 +905,39 @@ const PixelPros = {
   },
 
   // ----- PANNEAU DE DÉTAIL -----
+  // Crée (une fois) l'overlay + le panneau de détail directement dans <body>.
+  // Indispensable : en position:fixed, un parent animé par transform devient
+  // le repère du plein écran et "rapetisse" le panneau. Dans <body>, il se
+  // cale sur la fenêtre entière.
+  _ensureDetailEls() {
+    let overlay = document.getElementById('pp-detail-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'pp-detail-overlay';
+      overlay.className = 'pp-detail-overlay';
+      overlay.hidden = true;
+      document.body.appendChild(overlay);
+    } else if (overlay.parentElement !== document.body) {
+      document.body.appendChild(overlay);
+    }
+    overlay.onclick = () => this._closeDetail();
+
+    let panel = document.getElementById('pp-detail');
+    if (!panel) {
+      panel = document.createElement('aside');
+      panel.id = 'pp-detail';
+      panel.className = 'pp-detail-panel';
+      panel.hidden = true;
+      document.body.appendChild(panel);
+    } else if (panel.parentElement !== document.body) {
+      document.body.appendChild(panel);
+    }
+  },
+
   async _loadDetail(id) {
     this.state.edit = null;
     this.state.editRows = null;
+    this._ensureDetailEls();
     document.getElementById('pp-detail-overlay').hidden = false;
     const panel = document.getElementById('pp-detail');
     panel.hidden = false;
