@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import os
+import secrets
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -339,6 +342,146 @@ def delete_intake(intake_id: str) -> tuple[bool, str]:
         return False, "Brouillon introuvable (déjà supprimé ?)."
     except Exception as exc:
         logger.warning("pixelpros.delete_intake: %s", exc)
+        return False, str(exc)
+
+
+# ---------------------------------------------------------------------------
+# Édition des données du formulaire + gestion des photos
+# ---------------------------------------------------------------------------
+PHOTO_BUCKET = "pp-client-photos"
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def update_intake_data(intake_id: str, patch: dict) -> tuple[bool, str]:
+    """Met à jour des champs du formulaire (colonne data) d'un intake.
+
+    `patch` = dict {clé: valeur}. Les clés fournies remplacent celles de
+    data ; une valeur None retire la clé. Les colonnes dédiées email /
+    business_name sont resynchronisées si elles changent (cohérence des
+    listes et des cartes Kanban qui lisent ces colonnes).
+    """
+    sb = _sb()
+    if sb is None:
+        return False, "Supabase non configuré."
+    if not isinstance(patch, dict) or not patch:
+        return False, "Rien à modifier."
+    intake = get_intake(intake_id)
+    if intake is None:
+        return False, "Intake introuvable."
+    data = intake.get("data") or {}
+    if not isinstance(data, dict):
+        data = {}
+    for key, value in patch.items():
+        if value is None:
+            data.pop(key, None)
+        else:
+            data[key] = value
+    row: dict[str, Any] = {"data": data, "updated_at": _now_iso()}
+    bn = patch.get("business-name") or patch.get("business_name")
+    if bn:
+        row["business_name"] = bn
+    if patch.get("email"):
+        row["email"] = patch["email"]
+    try:
+        sb.table(TABLE).update(row).eq("id", intake_id).execute()
+        return True, "Modifications enregistrées."
+    except Exception as exc:
+        logger.warning("pixelpros.update_intake_data: %s", exc)
+        return False, str(exc)
+
+
+def _photo_public_url(path: str) -> str:
+    """URL publique d'un objet du bucket pp-client-photos (bucket public)."""
+    cfg = _load_service_config() or {}
+    base = (cfg.get("url") or os.environ.get("PIXEL_PROS_SUPABASE_URL")
+            or os.environ.get("SUPABASE_URL") or "").rstrip("/")
+    if base:
+        return f"{base}/storage/v1/object/public/{PHOTO_BUCKET}/{path}"
+    return ""
+
+
+def add_photo(intake_id: str, kind: str, *, filename: str,
+              content: bytes) -> tuple[bool, str, Optional[dict]]:
+    """Envoie une image dans le bucket et l'ajoute à la colonne photos.
+
+    kind : hero-photo | about-photo | gallery | logo (le « type » de photo).
+    Renvoie (ok, message, objet_photo).
+    """
+    sb = _sb()
+    if sb is None:
+        return False, "Supabase non configuré.", None
+    if not content:
+        return False, "Fichier vide.", None
+    kind = (kind or "photo").strip() or "photo"
+    ext = ""
+    if filename and "." in filename:
+        ext = filename.rsplit(".", 1)[-1].lower()
+    if not ext or len(ext) > 5 or not ext.isalnum():
+        ext = "jpg"
+    ts = int(time.time() * 1000)
+    rand = secrets.token_hex(3)
+    path = f"{intake_id}/{kind}-{ts}-{rand}.{ext}"
+    mime = mimetypes.guess_type(filename or f"x.{ext}")[0] or "image/jpeg"
+    try:
+        sb.storage.from_(PHOTO_BUCKET).upload(
+            path=path,
+            file=content,
+            file_options={"content-type": mime, "upsert": "false"},
+        )
+    except Exception as exc:
+        logger.warning("pixelpros.add_photo upload: %s", exc)
+        return False, f"Envoi de l'image échoué : {exc}", None
+
+    photo = {
+        "url": _photo_public_url(path),
+        "kind": kind,
+        "path": path,
+        "original_name": filename or "",
+    }
+    intake = get_intake(intake_id) or {}
+    photos = intake.get("photos") or []
+    if not isinstance(photos, list):
+        photos = []
+    photos.append(photo)
+    try:
+        sb.table(TABLE).update(
+            {"photos": photos, "updated_at": _now_iso()}
+        ).eq("id", intake_id).execute()
+    except Exception as exc:
+        logger.warning("pixelpros.add_photo db: %s", exc)
+        return False, f"Image envoyée mais non enregistrée : {exc}", None
+    return True, "Photo ajoutée.", photo
+
+
+def delete_photo(intake_id: str, path: str) -> tuple[bool, str]:
+    """Retire une photo : du bucket (best-effort) et de la colonne photos."""
+    sb = _sb()
+    if sb is None:
+        return False, "Supabase non configuré."
+    if not path:
+        return False, "Chemin de photo manquant."
+    intake = get_intake(intake_id)
+    if intake is None:
+        return False, "Intake introuvable."
+    photos = intake.get("photos") or []
+    if not isinstance(photos, list):
+        photos = []
+    new_photos = [p for p in photos if (p or {}).get("path") != path]
+    try:
+        sb.storage.from_(PHOTO_BUCKET).remove([path])
+    except Exception as exc:
+        # Le fichier a pu déjà disparaître : on n'échoue pas la requête.
+        logger.warning("pixelpros.delete_photo storage: %s", exc)
+    try:
+        sb.table(TABLE).update(
+            {"photos": new_photos, "updated_at": _now_iso()}
+        ).eq("id", intake_id).execute()
+        return True, "Photo supprimée."
+    except Exception as exc:
+        logger.warning("pixelpros.delete_photo db: %s", exc)
         return False, str(exc)
 
 

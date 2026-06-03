@@ -3994,6 +3994,74 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def pixelpros_update_data(self, payload: dict) -> dict:
+        """Modifie des champs du formulaire (textes, listes) d'un intake.
+
+        payload : { id, patch: {clé: valeur, ...} }. Une valeur None retire
+        la clé. Les tableaux (services, avis, horaires…) sont remplacés en
+        entier par la version envoyée.
+        """
+        p = payload or {}
+        iid = (p.get("id") or "").strip()
+        patch = p.get("patch")
+        if not iid:
+            return {"ok": False, "error": "id manquant"}
+        if not isinstance(patch, dict) or not patch:
+            return {"ok": False, "error": "rien à modifier"}
+        try:
+            from ..integrations.pixelpros import repo as r
+            ok, msg = r.update_intake_data(iid, patch)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_upload_photo(self, payload: dict) -> dict:
+        """Ajoute une photo à un intake (logo, hero, à-propos, galerie).
+
+        payload : { id, kind, filename, content_base64 }. content_base64 peut
+        être une data-URL ("data:image/png;base64,…") ou du base64 brut.
+        """
+        import base64
+        p = payload or {}
+        iid = (p.get("id") or "").strip()
+        kind = (p.get("kind") or "").strip()
+        filename = (p.get("filename") or "").strip()
+        b64 = p.get("content_base64") or ""
+        if not iid:
+            return {"ok": False, "error": "id manquant"}
+        if not b64:
+            return {"ok": False, "error": "aucune image reçue"}
+        if b64.strip().startswith("data:") and "," in b64:
+            b64 = b64.split(",", 1)[1]
+        try:
+            content = base64.b64decode(b64)
+        except Exception as exc:
+            return {"ok": False, "error": f"image illisible : {exc}"}
+        if len(content) > 10 * 1024 * 1024:
+            return {"ok": False, "error": "image trop lourde (10 Mo max)"}
+        try:
+            from ..integrations.pixelpros import repo as r
+            ok, msg, photo = r.add_photo(iid, kind, filename=filename, content=content)
+            return {"ok": bool(ok), "message": msg, "photo": photo}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_delete_photo(self, payload: dict) -> dict:
+        """Supprime une photo d'un intake (repérée par son chemin de stockage)."""
+        p = payload or {}
+        iid = (p.get("id") or "").strip()
+        path = (p.get("path") or "").strip()
+        if not iid:
+            return {"ok": False, "error": "id manquant"}
+        if not path:
+            return {"ok": False, "error": "chemin photo manquant"}
+        try:
+            from ..integrations.pixelpros import repo as r
+            ok, msg = r.delete_photo(iid, path)
+            return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def pixelpros_mail_auto_get(self, payload: dict | None = None) -> dict:
         """Renvoie l'état auto/manuel des mails 'paid' et 'live'."""
         try:

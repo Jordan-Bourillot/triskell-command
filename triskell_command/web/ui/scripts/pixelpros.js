@@ -49,12 +49,122 @@ const PixelPros = {
   ],
 
   FORMULES: {
-    base:        { label: 'Site seul',                 price: '24,90 €', color: '#94a3b8' },
-    base_domain: { label: 'Site + domaine',            price: '33,90 €', color: '#0ea5e9' },
-    base_seo:    { label: 'Site + SEO',                price: '59,80 €', color: '#a855f7' },
-    base_all:    { label: 'Site + domaine + SEO',      price: '68,80 €', color: '#ec4899' },
-    combo:       { label: 'Pack TOUT-EN-UN',           price: '49,90 €', color: '#facc15' },
+    base:        { label: 'Site seul',            price: '24,90 €/mois', color: '#94a3b8',
+                   includes: ['Site web pro'] },
+    base_domain: { label: 'Site + domaine',       price: '33,90 €/mois', color: '#0ea5e9',
+                   includes: ['Site web pro', 'Nom de domaine + adresse mail pro'] },
+    base_seo:    { label: 'Site + référencement', price: '59,80 €/mois', color: '#a855f7',
+                   includes: ['Site web pro', 'Référencement Google + IA'] },
+    base_all:    { label: 'Site + domaine + référencement', price: '68,80 €/mois', color: '#ec4899',
+                   includes: ['Site web pro', 'Nom de domaine + adresse mail pro', 'Référencement Google + IA'] },
+    combo:       { label: 'Pack TOUT-EN-UN',      price: '49,90 €/mois', color: '#facc15',
+                   includes: ['Site web pro', 'Nom de domaine + adresse mail pro', 'Référencement Google + IA'] },
   },
+
+  // Couleur dominante choisie par le client (valeur technique → libellé clair).
+  COLOR_LABELS: {
+    'electric-blue':   'Bleu électrique',
+    'electric-yellow': 'Jaune solaire',
+    'electric-green':  'Vert électrique',
+    'warm-red':        'Rouge chaleur',
+    'royal-purple':    'Violet royal',
+    'warm-orange':     'Orange terre',
+    'sober':           'Sobre / foncé',
+    'surprise':        'Surprenez-moi',
+  },
+
+  // Réseaux sociaux : pour chacun, le client coche (social-X-on) et donne une URL (social-X-url).
+  SOCIALS: [
+    { key: 'instagram',   label: 'Instagram' },
+    { key: 'facebook',    label: 'Facebook' },
+    { key: 'linkedin',    label: 'LinkedIn' },
+    { key: 'tiktok',      label: 'TikTok' },
+    { key: 'youtube',     label: 'YouTube' },
+    { key: 'whatsapp',    label: 'WhatsApp' },
+    { key: 'tripadvisor', label: 'TripAdvisor' },
+    { key: 'google',      label: 'Avis Google' },
+  ],
+
+  // Photos : les 4 « types » envoyés par le client, avec un max indicatif.
+  PHOTO_GROUPS: [
+    { kind: 'logo',       label: 'Logo',               max: 1  },
+    { kind: 'hero-photo', label: 'Photo principale',   max: 3  },
+    { kind: 'about-photo', label: 'Photo « à propos »', max: 2  },
+    { kind: 'gallery',    label: 'Galerie',            max: 10 },
+  ],
+
+  // Rubriques du formulaire, dans l'ordre, avec les libellés humains.
+  // key = case d'activation de la rubrique (null = rubrique toujours là).
+  // fields = champs simples ; list = liste répétable (colonnes parallèles) ;
+  // socials = bloc réseaux ; photoKind = type de photo rattaché à la rubrique.
+  SECTIONS: [
+    { key: null, title: 'Entreprise', icon: '🏢', fields: [
+        { key: 'business-name', label: 'Nom de l’entreprise', type: 'text' },
+        { key: 'business-type', label: 'Type d’activité',     type: 'text' },
+        { key: 'tagline',       label: 'Phrase d’accroche',   type: 'text' },
+        { key: 'city',          label: 'Ville',               type: 'text' },
+        { key: 'zone',          label: 'Zone d’intervention', type: 'text' },
+    ] },
+    { key: null, title: 'Photo principale', icon: '🖼️', photoKind: 'hero-photo', fields: [
+        { key: 'hero-headline', label: 'Grand titre sur la photo', type: 'long' },
+    ] },
+    { key: 'section-trust', title: 'Bandeau de confiance', icon: '📊',
+      list: { addLabel: 'Ajouter un chiffre', cols: [
+        { key: 'trust-num', label: 'Chiffre', type: 'text' },
+        { key: 'trust-lbl', label: 'Texte',   type: 'text' },
+      ] } },
+    { key: 'section-about', title: 'À propos', icon: '👤', photoKind: 'about-photo', fields: [
+        { key: 'about-title', label: 'Titre',                 type: 'text' },
+        { key: 'about',       label: 'Texte de présentation', type: 'long' },
+    ] },
+    { key: 'section-services', title: 'Prestations', icon: '🧰',
+      list: { addLabel: 'Ajouter une prestation', cols: [
+        { key: 'service-name',  label: 'Nom',         type: 'text' },
+        { key: 'service-desc',  label: 'Description', type: 'text' },
+        { key: 'service-price', label: 'Prix',        type: 'text' },
+      ] } },
+    { key: 'section-gallery', title: 'Galerie photos', icon: '📸', photoKind: 'gallery' },
+    { key: 'section-reviews', title: 'Avis clients', icon: '⭐',
+      list: { addLabel: 'Ajouter un avis', cols: [
+        { key: 'review-text',   label: 'Avis',   type: 'long' },
+        { key: 'review-author', label: 'Auteur', type: 'text' },
+      ] } },
+    { key: 'section-zone', title: 'Où nous trouver', icon: '📍',
+      fields: [
+        { key: 'zone-text', label: 'Texte d’accroche',             type: 'long' },
+        { key: 'zone-map',  label: 'Afficher la carte Google Maps', type: 'bool' },
+      ],
+      list: { addLabel: 'Ajouter une info pratique', cols: [
+        { key: 'zone-key', label: 'Titre',  type: 'text' },
+        { key: 'zone-val', label: 'Valeur', type: 'text' },
+      ] } },
+    { key: 'section-faq', title: 'Questions fréquentes', icon: '❓',
+      list: { addLabel: 'Ajouter une question', cols: [
+        { key: 'faq-q', label: 'Question', type: 'text' },
+        { key: 'faq-a', label: 'Réponse',  type: 'long' },
+      ] } },
+    { key: null, title: 'Contact & horaires', icon: '☎️',
+      fields: [
+        { key: 'phone',             label: 'Téléphone',              type: 'text' },
+        { key: 'email',             label: 'Adresse mail',           type: 'text' },
+        { key: 'address',           label: 'Adresse',                type: 'text' },
+        { key: 'contact-form',      label: 'Formulaire de contact',  type: 'bool' },
+        { key: 'contact-phone-cta', label: 'Bouton « Appeler »',     type: 'bool' },
+      ],
+      list: { addLabel: 'Ajouter un horaire', cols: [
+        { key: 'hours-day',  label: 'Jour(s)',  type: 'text' },
+        { key: 'hours-time', label: 'Horaires', type: 'text' },
+      ] } },
+    { key: 'section-socials', title: 'Réseaux sociaux', icon: '🌐', socials: true },
+    { key: 'section-style', title: 'Style visuel', icon: '🎨', photoKind: 'logo',
+      fields: [
+        { key: 'color', label: 'Couleur dominante',     type: 'color' },
+        { key: 'extra', label: 'Demandes particulières', type: 'long' },
+      ] },
+    { key: null, title: 'Nom de domaine souhaité', icon: '🌍', onlyIf: 'domain-wanted', fields: [
+        { key: 'domain-wanted', label: 'Domaine souhaité par le client', type: 'text' },
+    ] },
+  ],
 
   URGENT_THRESHOLD_H: 6,   // un draft "paid" depuis +6h sans build = urgent
 
@@ -331,6 +441,95 @@ const PixelPros = {
       .pp-data-toggle { background:rgba(148,163,184,.08); border:1px solid var(--border, #1e293b); border-radius:8px; padding:8px 12px; cursor:pointer; font-size:12px; color:#94a3b8; user-select:none; }
       .pp-data-toggle:hover { color:#cbd5e1; }
       .pp-data-pre { margin-top:10px; padding:12px; background:#020617; border-radius:8px; font-size:11px; color:#cbd5e1; overflow:auto; max-height:340px; }
+
+      /* === BLOC PAIEMENT === */
+      .pp-pay-status { display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:10px; margin-bottom:10px; }
+      .pp-pay-status.ok { background:rgba(34,197,94,.1); border:1px solid rgba(34,197,94,.35); }
+      .pp-pay-status.wait { background:rgba(250,204,21,.08); border:1px solid rgba(250,204,21,.3); }
+      .pp-pay-ico { font-size:26px; line-height:1; }
+      .pp-pay-status-main { font-size:15px; font-weight:800; color:#e2e8f0; }
+      .pp-pay-status.ok .pp-pay-status-main { color:#4ade80; }
+      .pp-pay-status.wait .pp-pay-status-main { color:#facc15; }
+      .pp-pay-status-sub { font-size:12px; color:#94a3b8; margin-top:1px; }
+      .pp-pay-formule { border:1px solid var(--border,#1e293b); border-left:4px solid var(--fc,#94a3b8); border-radius:10px; padding:12px 14px; background:rgba(255,255,255,.02); }
+      .pp-pay-formule-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+      .pp-pay-formule-name { font-size:15px; font-weight:800; color:#e2e8f0; }
+      .pp-pay-formule-price { font-size:15px; font-weight:800; color:var(--fc,#cbd5e1); white-space:nowrap; }
+      .pp-pay-includes { list-style:none; margin:8px 0 0; padding:0; color:#cbd5e1; font-size:12.5px; line-height:1.8; }
+      .pp-pay-includes li { position:relative; padding-left:20px; }
+      .pp-pay-includes li::before { content:'✓'; position:absolute; left:2px; color:#4ade80; font-weight:800; }
+
+      /* === RUBRIQUES DU FORMULAIRE === */
+      .pp-form-hint { font-size:12px; color:#94a3b8; background:rgba(148,163,184,.07); border:1px solid var(--border,#1e293b); border-radius:8px; padding:8px 11px; margin-bottom:12px; line-height:1.5; }
+      .pp-rub { border:1px solid var(--border,#1e293b); border-radius:10px; margin-bottom:10px; overflow:hidden; }
+      .pp-rub.off { opacity:.6; }
+      .pp-rub-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; background:rgba(148,163,184,.05); border-bottom:1px solid var(--border,#1e293b); }
+      .pp-rub.off .pp-rub-head { border-bottom:none; }
+      .pp-rub-title { font-size:13.5px; font-weight:800; color:#e2e8f0; }
+      .pp-rub-toggle { font-size:11px; font-weight:700; padding:4px 9px; border-radius:999px; cursor:pointer; border:1px solid transparent; }
+      .pp-rub-toggle.on { background:rgba(34,197,94,.12); border-color:rgba(34,197,94,.35); color:#4ade80; }
+      .pp-rub-toggle.off { background:rgba(148,163,184,.12); border-color:rgba(148,163,184,.3); color:#94a3b8; }
+      .pp-rub-toggle:hover { filter:brightness(1.15); }
+      .pp-rub-body { padding:6px 12px 12px; }
+      .pp-rub-off-note { padding:10px 12px; font-size:12px; color:#64748b; font-style:italic; }
+      .pp-rub-photonote { font-size:11.5px; color:#64748b; margin-top:8px; }
+
+      /* Champ « libellé : valeur » */
+      .pp-field { display:flex; gap:12px; align-items:flex-start; padding:7px 0; border-bottom:1px dashed rgba(148,163,184,.12); }
+      .pp-field:last-child { border-bottom:none; }
+      .pp-field-label { flex:0 0 38%; max-width:210px; font-size:12px; font-weight:700; color:#94a3b8; padding-top:2px; }
+      .pp-field-val { flex:1; min-width:0; display:flex; align-items:flex-start; gap:8px; font-size:13.5px; color:#e2e8f0; }
+      .pp-field-text { flex:1; word-break:break-word; }
+      .pp-field-text.multiline { white-space:pre-wrap; }
+      .pp-empty { color:#64748b; font-style:italic; font-size:12.5px; }
+      .pp-bool { font-weight:700; }
+      .pp-bool.on { color:#4ade80; }
+      .pp-bool.off { color:#94a3b8; }
+      .pp-mini-btn { flex-shrink:0; background:rgba(148,163,184,.12); border:1px solid var(--border,#1e293b); color:#94a3b8; border-radius:6px; padding:3px 8px; font-size:11.5px; cursor:pointer; }
+      .pp-mini-btn:hover { background:rgba(250,204,21,.16); border-color:rgba(250,204,21,.45); color:#facc15; }
+      .pp-mini-btn.danger:hover { background:rgba(239,68,68,.18); border-color:rgba(239,68,68,.45); color:#fca5a5; }
+      .pp-field.editing { flex-direction:column; gap:6px; }
+      .pp-field-edit { width:100%; }
+      .pp-edit-row-actions { display:flex; gap:8px; margin-top:8px; }
+
+      /* Listes (services, avis, horaires…) */
+      .pp-list { margin-top:4px; }
+      .pp-list-row { display:flex; flex-wrap:wrap; gap:6px 16px; padding:8px 10px; border:1px solid var(--border,#1e293b); border-radius:8px; margin-bottom:6px; background:rgba(255,255,255,.015); }
+      .pp-list-cell { display:flex; flex-direction:column; gap:1px; min-width:0; }
+      .pp-list-cell-lbl { font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:#64748b; }
+      .pp-list-cell-val { font-size:13px; color:#e2e8f0; word-break:break-word; }
+      .pp-list-cell-val.multiline { white-space:pre-wrap; }
+      .pp-list-edit-row { display:flex; gap:6px; align-items:flex-start; margin-bottom:6px; }
+      .pp-list-edit-row > input, .pp-list-edit-row > textarea { flex:1; min-width:0; }
+      .pp-list-edit-actions { display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
+
+      /* Réseaux sociaux (édition) */
+      .pp-social-edit-row { display:flex; gap:10px; align-items:center; margin-bottom:7px; }
+      .pp-social-check { flex:0 0 150px; display:flex; align-items:center; gap:7px; font-size:13px; color:#cbd5e1; cursor:pointer; }
+      .pp-social-edit-row > input[type=text] { flex:1; min-width:0; }
+
+      /* === PHOTOS === */
+      .pp-photos { display:flex; flex-direction:column; gap:14px; }
+      .pp-photo-group-head { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+      .pp-photo-group-title { font-size:12.5px; font-weight:800; color:#cbd5e1; }
+      .pp-photo-group-count { font-size:11px; color:#64748b; background:rgba(148,163,184,.1); padding:1px 8px; border-radius:999px; }
+      .pp-photo-grid { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+      .pp-photo-thumb { position:relative; width:96px; height:96px; border-radius:9px; overflow:hidden; border:1px solid var(--border,#1e293b); background:#020617; }
+      .pp-photo-thumb img { width:100%; height:100%; object-fit:cover; cursor:zoom-in; display:block; }
+      .pp-photo-acts { position:absolute; top:4px; right:4px; display:flex; gap:4px; opacity:0; transition:opacity .15s; }
+      .pp-photo-thumb:hover .pp-photo-acts { opacity:1; }
+      .pp-photo-act { width:24px; height:24px; border-radius:6px; border:none; cursor:pointer; font-size:12px; background:rgba(15,23,42,.85); color:#e2e8f0; display:flex; align-items:center; justify-content:center; }
+      .pp-photo-act:hover { background:#facc15; color:#0f172a; }
+      .pp-photo-act.danger:hover { background:#ef4444; color:#fff; }
+      .pp-photo-add { width:96px; height:96px; border-radius:9px; border:1.5px dashed rgba(148,163,184,.4); background:rgba(148,163,184,.05); color:#94a3b8; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; font-size:20px; }
+      .pp-photo-add span { font-size:11px; font-weight:700; }
+      .pp-photo-add:hover { border-color:#facc15; color:#facc15; background:rgba(250,204,21,.07); }
+      .pp-photo-empty { font-size:12px; color:#64748b; font-style:italic; }
+
+      /* Lightbox (photo agrandie) */
+      .pp-lightbox { position:fixed; inset:0; z-index:2000; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; padding:30px; cursor:zoom-out; animation:pp-fadein .15s ease; }
+      .pp-lightbox img { max-width:92vw; max-height:92vh; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+      .pp-lightbox-close { position:fixed; top:18px; right:24px; width:42px; height:42px; border-radius:50%; border:none; background:rgba(255,255,255,.15); color:#fff; font-size:24px; cursor:pointer; }
 
       .pp-toast { position:fixed; bottom:30px; right:30px; padding:14px 18px; border-radius:10px; font-weight:700; font-size:13px; z-index:9999; box-shadow:0 6px 20px rgba(0,0,0,.4); animation: pp-toastin .2s ease; }
       .pp-toast.ok { background:#facc15; color:#0f172a; }
@@ -684,7 +883,7 @@ const PixelPros = {
     const email = data.email || it.contact_email || '—';
     const initial = name.trim().charAt(0).toUpperCase() || '?';
     const color = this._colorFromName(name);
-    const option = it.option || data.option || '';
+    const option = it.selected_option || data.selected_option || it.option || '';
     const formule = this.FORMULES[option] || null;
     const isUrgent = it.status === 'paid' && this._hoursSince(it.updated_at || it.stripe_paid_at || it.created_at) > this.URGENT_THRESHOLD_H;
     const selected = this.state.selectedId === it.id ? 'selected' : '';
@@ -707,6 +906,8 @@ const PixelPros = {
 
   // ----- PANNEAU DE DÉTAIL -----
   async _loadDetail(id) {
+    this.state.edit = null;
+    this.state.editRows = null;
     document.getElementById('pp-detail-overlay').hidden = false;
     const panel = document.getElementById('pp-detail');
     panel.hidden = false;
@@ -729,6 +930,9 @@ const PixelPros = {
     panel.innerHTML = '';
     this.state.selectedId = null;
     this.state.detail = null;
+    this.state.edit = null;
+    this.state.editRows = null;
+    this._photoCtx = null;
     this._renderKanban();
   },
 
@@ -736,15 +940,14 @@ const PixelPros = {
     const panel = document.getElementById('pp-detail');
     const { intake, timeline } = this.state.detail;
     const data = intake.data || {};
-    const name = data.business_name || data['business-name'] || '(sans nom)';
-    const email = data.email || '—';
+    const name = data.business_name || data['business-name'] || intake.business_name || '(sans nom)';
+    const email = data.email || intake.email || '—';
     const phone = data.phone || '';
-    const initial = name.trim().charAt(0).toUpperCase() || '?';
+    const initial = (name.trim().charAt(0) || '?').toUpperCase();
     const color = this._colorFromName(name);
     const col = this.COLUMNS.find(c => c.status === intake.status) ||
                 { label: intake.status, accent: '#94a3b8', icon: '?' };
-    const errMsg = data.error || (intake.data && intake.data.error);
-
+    const errMsg = data.error;
     const actions = this._availableActions(intake);
 
     panel.innerHTML = `
@@ -764,6 +967,8 @@ const PixelPros = {
 
       ${errMsg ? `<div class="pp-detail-section"><div class="pp-error-box">⚠ ${this._escape(errMsg)}</div></div>` : ''}
 
+      ${this._paymentBlock(intake)}
+
       <div class="pp-detail-section">
         <div class="pp-detail-section-title">Actions</div>
         <div class="pp-actions">${actions.join('')}</div>
@@ -774,6 +979,10 @@ const PixelPros = {
           <div class="pp-detail-section-title">Site en ligne</div>
           <a class="pp-detail-link" href="${this._escape(intake.site_url)}" target="_blank" rel="noopener">${this._escape(intake.site_url)} →</a>
         </div>` : ''}
+
+      ${this._formBlock(intake)}
+
+      ${this._photosBlock(intake)}
 
       <div class="pp-detail-section">
         <div class="pp-detail-section-title">Chronologie</div>
@@ -787,29 +996,500 @@ const PixelPros = {
         </div>
       </div>
 
-      ${intake.stripe_session_id ? `
-        <div class="pp-detail-section">
-          <div class="pp-detail-section-title">Stripe</div>
-          <div style="font-size:12px; color:#94a3b8;">Session : <code style="color:#cbd5e1;">${this._escape(intake.stripe_session_id)}</code></div>
-        </div>` : ''}
-
       <div class="pp-detail-section">
-        <div class="pp-detail-section-title">Données du formulaire</div>
         <details>
-          <summary class="pp-data-toggle">Voir le JSON brut (${Object.keys(data).length} champs)</summary>
+          <summary class="pp-data-toggle">Voir les données techniques brutes (${Object.keys(data).length} champs)</summary>
+          ${intake.stripe_session_id ? `<div style="font-size:12px; color:#94a3b8; margin:8px 0;">Référence Stripe : <code style="color:#cbd5e1;">${this._escape(intake.stripe_session_id)}</code></div>` : ''}
           <pre class="pp-data-pre">${this._escape(JSON.stringify(data, null, 2))}</pre>
         </details>
       </div>
+
+      <input type="file" id="pp-photo-file" accept="image/*" hidden />
     `;
 
+    this._bindDetail(panel, intake);
+  },
+
+  // ----- BINDINGS du panneau de détail -----
+  _bindDetail(panel, intake) {
+    const id = intake.id;
+
     panel.querySelector('[data-pp-close]').onclick = () => this._closeDetail();
+
     panel.querySelectorAll('[data-pp-action]').forEach(b => {
       b.onclick = () => this._doAction(b.dataset.ppAction, intake);
     });
-    const editBtn = panel.querySelector('[data-pp-edit-contact]');
-    if (editBtn) {
-      editBtn.onclick = () => this._editContact(intake);
+
+    const editContact = panel.querySelector('[data-pp-edit-contact]');
+    if (editContact) editContact.onclick = () => this._editContact(intake);
+
+    // --- Champs simples ---
+    panel.querySelectorAll('[data-pp-edit-field]').forEach(b => {
+      b.onclick = () => { this.state.edit = { kind: 'field', key: b.dataset.ppEditField }; this._renderDetail(); };
+    });
+    panel.querySelectorAll('[data-pp-field-save]').forEach(b => {
+      b.onclick = () => this._saveField(id, b.dataset.ppFieldSave);
+    });
+    panel.querySelectorAll('[data-pp-field-cancel]').forEach(b => {
+      b.onclick = () => { this.state.edit = null; this._renderDetail(); };
+    });
+    panel.querySelectorAll('[data-pp-toggle-bool]').forEach(b => {
+      b.onclick = () => this._toggleBool(id, b.dataset.ppToggleBool);
+    });
+    panel.querySelectorAll('[data-pp-toggle-section]').forEach(b => {
+      b.onclick = () => this._toggleBool(id, b.dataset.ppToggleSection);
+    });
+
+    // --- Listes ---
+    panel.querySelectorAll('[data-pp-edit-list]').forEach(b => {
+      b.onclick = () => {
+        const idx = parseInt(b.dataset.ppEditList, 10);
+        const sec = this.SECTIONS[idx];
+        this.state.edit = { kind: 'list', sectionIdx: idx };
+        this.state.editRows = this._listRows(sec.list.cols, intake.data || {});
+        this._renderDetail();
+      };
+    });
+    panel.querySelectorAll('[data-pp-list-add]').forEach(b => {
+      b.onclick = () => {
+        const sec = this.SECTIONS[this.state.edit.sectionIdx];
+        this._syncListBuffer(panel, sec.list.cols.length);
+        this.state.editRows.push(sec.list.cols.map(() => ''));
+        this._renderDetail();
+      };
+    });
+    panel.querySelectorAll('[data-pp-list-del]').forEach(b => {
+      b.onclick = () => {
+        const sec = this.SECTIONS[this.state.edit.sectionIdx];
+        this._syncListBuffer(panel, sec.list.cols.length);
+        this.state.editRows.splice(parseInt(b.dataset.ppListDel, 10), 1);
+        this._renderDetail();
+      };
+    });
+    panel.querySelectorAll('[data-pp-list-save]').forEach(b => {
+      b.onclick = () => this._saveList(id);
+    });
+    panel.querySelectorAll('[data-pp-list-cancel]').forEach(b => {
+      b.onclick = () => { this.state.edit = null; this.state.editRows = null; this._renderDetail(); };
+    });
+
+    // --- Réseaux sociaux ---
+    panel.querySelectorAll('[data-pp-edit-socials]').forEach(b => {
+      b.onclick = () => { this.state.edit = { kind: 'socials' }; this._renderDetail(); };
+    });
+    panel.querySelectorAll('[data-pp-socials-save]').forEach(b => {
+      b.onclick = () => this._saveSocials(id);
+    });
+    panel.querySelectorAll('[data-pp-socials-cancel]').forEach(b => {
+      b.onclick = () => { this.state.edit = null; this._renderDetail(); };
+    });
+
+    // --- Photos ---
+    const fileInput = panel.querySelector('#pp-photo-file');
+    panel.querySelectorAll('[data-pp-photo-add]').forEach(b => {
+      b.onclick = () => { this._photoCtx = { id, kind: b.dataset.ppPhotoAdd, replacePath: null }; if (fileInput) fileInput.click(); };
+    });
+    panel.querySelectorAll('[data-pp-photo-replace]').forEach(b => {
+      b.onclick = () => { this._photoCtx = { id, kind: b.dataset.kind, replacePath: b.dataset.ppPhotoReplace }; if (fileInput) fileInput.click(); };
+    });
+    panel.querySelectorAll('[data-pp-photo-del]').forEach(b => {
+      b.onclick = () => this._deletePhoto(id, b.dataset.ppPhotoDel);
+    });
+    panel.querySelectorAll('[data-pp-photo-zoom]').forEach(b => {
+      b.onclick = () => this._zoomPhoto(b.dataset.ppPhotoZoom);
+    });
+    if (fileInput) {
+      fileInput.onchange = (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (f) this._onPhotoChosen(f);
+      };
     }
+
+    // Focus auto sur le champ en cours d'édition
+    if (this.state.edit && this.state.edit.kind === 'field') {
+      const focusEl = panel.querySelector('[data-pp-field-input]');
+      if (focusEl) {
+        focusEl.focus();
+        try { if (focusEl.setSelectionRange) focusEl.setSelectionRange(focusEl.value.length, focusEl.value.length); } catch (e) {}
+      }
+    }
+  },
+
+  // ----- BLOC PAIEMENT -----
+  _paymentBlock(intake) {
+    const data = intake.data || {};
+    const opt = intake.selected_option || data.selected_option || 'base';
+    const f = this.FORMULES[opt] || null;
+    const paid = !!intake.stripe_paid_at || ['paid', 'building', 'live'].indexOf(intake.status) !== -1;
+    const paidWhen = intake.stripe_paid_at ? this._fmtDate(intake.stripe_paid_at) : '';
+    const manual = paid && !intake.stripe_session_id;
+
+    const status = paid
+      ? `<div class="pp-pay-status ok">
+           <span class="pp-pay-ico">✅</span>
+           <div><div class="pp-pay-status-main">Paiement reçu</div>
+           <div class="pp-pay-status-sub">${paidWhen ? 'Le ' + this._escape(paidWhen) : ''}${manual ? ' · encaissé à la main' : ''}</div></div>
+         </div>`
+      : `<div class="pp-pay-status wait">
+           <span class="pp-pay-ico">⏳</span>
+           <div><div class="pp-pay-status-main">Pas encore payé</div>
+           <div class="pp-pay-status-sub">Le client a rempli le formulaire mais n’a pas réglé.</div></div>
+         </div>`;
+
+    const includes = (f && f.includes)
+      ? `<ul class="pp-pay-includes">${f.includes.map(i => `<li>${this._escape(i)}</li>`).join('')}</ul>` : '';
+
+    return `
+      <div class="pp-detail-section">
+        <div class="pp-detail-section-title">Paiement &amp; formule</div>
+        ${status}
+        <div class="pp-pay-formule" style="--fc:${f ? f.color : '#94a3b8'};">
+          <div class="pp-pay-formule-head">
+            <span class="pp-pay-formule-name">${f ? this._escape(f.label) : this._escape(opt)}</span>
+            <span class="pp-pay-formule-price">${f ? this._escape(f.price) : ''}</span>
+          </div>
+          ${includes}
+        </div>
+      </div>`;
+  },
+
+  // ----- BLOC INFOS DU FORMULAIRE -----
+  _formBlock(intake) {
+    const data = intake.data || {};
+    const sections = this.SECTIONS.map((sec, idx) => this._sectionHtml(sec, idx, data)).join('');
+    return `
+      <div class="pp-detail-section">
+        <div class="pp-detail-section-title">Tout ce que le client a rempli</div>
+        <div class="pp-form-hint">✏️ Tu peux corriger chaque texte. C’est enregistré aussitôt — pour que ça passe sur le site en ligne, clique ensuite sur « Reconstruire le site » plus haut.</div>
+        ${sections}
+      </div>`;
+  },
+
+  _sectionHtml(sec, idx, data) {
+    if (sec.onlyIf) {
+      const v = data[sec.onlyIf];
+      if (v == null || String(v).trim() === '') return '';
+    }
+    const hasToggle = !!sec.key;
+    const active = !hasToggle || data[sec.key] === 'on';
+
+    const head = `
+      <div class="pp-rub-head">
+        <span class="pp-rub-title">${sec.icon} ${this._escape(sec.title)}</span>
+        ${hasToggle ? `<button class="pp-rub-toggle ${active ? 'on' : 'off'}" data-pp-toggle-section="${sec.key}" title="${active ? 'Affichée sur le site — clique pour masquer' : 'Masquée — clique pour afficher'}">${active ? '👁 Affichée' : '🚫 Masquée'}</button>` : ''}
+      </div>`;
+
+    if (hasToggle && !active) {
+      return `<div class="pp-rub off">${head}<div class="pp-rub-off-note">Rubrique non affichée sur le site du client.</div></div>`;
+    }
+
+    let body = '';
+    if (sec.fields) body += sec.fields.map(f => this._fieldHtml(f, data)).join('');
+    if (sec.list) body += this._listHtml(sec, idx, data);
+    if (sec.socials) body += this._socialsHtml(data);
+    if (sec.photoKind) body += `<div class="pp-rub-photonote">📷 Photos de cette rubrique : voir « Photos envoyées par le client » plus bas.</div>`;
+
+    return `<div class="pp-rub">${head}<div class="pp-rub-body">${body}</div></div>`;
+  },
+
+  _fieldHtml(field, data) {
+    const raw = data[field.key];
+    const editing = this.state.edit && this.state.edit.kind === 'field' && this.state.edit.key === field.key;
+    if (editing) return this._fieldEditor(field, raw);
+
+    if (field.type === 'bool') {
+      const on = raw === 'on' || raw === true;
+      return `
+        <div class="pp-field">
+          <div class="pp-field-label">${this._escape(field.label)}</div>
+          <div class="pp-field-val">
+            <span class="pp-bool ${on ? 'on' : 'off'}">${on ? '✓ Oui' : 'Non'}</span>
+            <button class="pp-mini-btn" data-pp-toggle-bool="${field.key}" title="Changer">${on ? 'Mettre Non' : 'Mettre Oui'}</button>
+          </div>
+        </div>`;
+    }
+
+    let display;
+    if (field.type === 'color') {
+      display = raw
+        ? `<span class="pp-field-text">${this._escape(this.COLOR_LABELS[raw] || raw)}</span>`
+        : '<span class="pp-empty">— vide</span>';
+    } else {
+      const v = (raw == null ? '' : String(raw)).trim();
+      display = v
+        ? `<span class="pp-field-text ${field.type === 'long' ? 'multiline' : ''}">${this._escape(v)}</span>`
+        : '<span class="pp-empty">— vide</span>';
+    }
+    return `
+      <div class="pp-field">
+        <div class="pp-field-label">${this._escape(field.label)}</div>
+        <div class="pp-field-val">
+          ${display}
+          <button class="pp-mini-btn" data-pp-edit-field="${field.key}" title="Modifier">✏️</button>
+        </div>
+      </div>`;
+  },
+
+  _fieldEditor(field, raw) {
+    const v = raw == null ? '' : String(raw);
+    let input;
+    if (field.type === 'color') {
+      const opts = Object.keys(this.COLOR_LABELS).map(k =>
+        `<option value="${k}" ${k === raw ? 'selected' : ''}>${this._escape(this.COLOR_LABELS[k])}</option>`).join('');
+      input = `<select class="pp-edit-input" data-pp-field-input>${opts}</select>`;
+    } else if (field.type === 'long') {
+      input = `<textarea class="pp-mail-textarea" rows="4" data-pp-field-input>${this._escape(v)}</textarea>`;
+    } else {
+      input = `<input type="text" class="pp-edit-input" value="${this._escape(v)}" data-pp-field-input />`;
+    }
+    return `
+      <div class="pp-field editing">
+        <div class="pp-field-label">${this._escape(field.label)}</div>
+        <div class="pp-field-edit">
+          ${input}
+          <div class="pp-edit-row-actions">
+            <button class="pp-action-btn primary" data-pp-field-save="${field.key}">Enregistrer</button>
+            <button class="pp-action-btn secondary" data-pp-field-cancel>Annuler</button>
+          </div>
+        </div>
+      </div>`;
+  },
+
+  // ----- LISTES (services, avis, horaires…) -----
+  _listRows(cols, data) {
+    const arrays = cols.map(c => {
+      const v = data[c.key];
+      if (Array.isArray(v)) return v;
+      if (v == null || v === '') return [];
+      return [v];
+    });
+    const n = arrays.reduce((m, a) => Math.max(m, a.length), 0);
+    const rows = [];
+    for (let i = 0; i < n; i++) {
+      rows.push(cols.map((c, ci) => {
+        const cell = arrays[ci][i];
+        return cell == null ? '' : String(cell);
+      }));
+    }
+    return rows;
+  },
+
+  _listHtml(sec, idx, data) {
+    const cols = sec.list.cols;
+    const editing = this.state.edit && this.state.edit.kind === 'list' && this.state.edit.sectionIdx === idx;
+
+    if (editing) {
+      const rows = this.state.editRows || [];
+      const rowsHtml = rows.map((row, ri) => `
+        <div class="pp-list-edit-row" data-row="${ri}">
+          ${cols.map((c, ci) => c.type === 'long'
+            ? `<textarea class="pp-mail-textarea" rows="2" data-pp-list-cell data-ci="${ci}" placeholder="${this._escape(c.label)}">${this._escape(row[ci] || '')}</textarea>`
+            : `<input type="text" class="pp-edit-input" data-pp-list-cell data-ci="${ci}" placeholder="${this._escape(c.label)}" value="${this._escape(row[ci] || '')}" />`).join('')}
+          <button class="pp-mini-btn danger" data-pp-list-del="${ri}" title="Retirer cette ligne">🗑</button>
+        </div>`).join('');
+      return `
+        <div class="pp-list editing">
+          ${rowsHtml || '<div class="pp-empty">Aucune ligne — ajoutes-en une.</div>'}
+          <div class="pp-list-edit-actions">
+            <button class="pp-mini-btn" data-pp-list-add>＋ ${this._escape(sec.list.addLabel || 'Ajouter')}</button>
+            <div style="flex:1"></div>
+            <button class="pp-action-btn primary" data-pp-list-save>Enregistrer la liste</button>
+            <button class="pp-action-btn secondary" data-pp-list-cancel>Annuler</button>
+          </div>
+        </div>`;
+    }
+
+    const rows = this._listRows(cols, data).filter(r => r.some(c => c.trim() !== ''));
+    const body = rows.length
+      ? rows.map(row => `
+          <div class="pp-list-row">
+            ${cols.map((c, ci) => {
+              const val = (row[ci] || '').trim();
+              if (!val) return '';
+              return `<div class="pp-list-cell"><span class="pp-list-cell-lbl">${this._escape(c.label)}</span><span class="pp-list-cell-val ${c.type === 'long' ? 'multiline' : ''}">${this._escape(val)}</span></div>`;
+            }).join('')}
+          </div>`).join('')
+      : '<div class="pp-empty">Aucune entrée.</div>';
+    return `
+      <div class="pp-list">
+        ${body}
+        <button class="pp-mini-btn" data-pp-edit-list="${idx}" title="Modifier la liste">✏️ Modifier la liste</button>
+      </div>`;
+  },
+
+  // ----- RÉSEAUX SOCIAUX -----
+  _socialsHtml(data) {
+    const editing = this.state.edit && this.state.edit.kind === 'socials';
+    if (editing) {
+      const rows = this.SOCIALS.map(s => {
+        const on = data['social-' + s.key + '-on'] === 'on';
+        const url = data['social-' + s.key + '-url'] || '';
+        return `
+          <div class="pp-social-edit-row">
+            <label class="pp-social-check"><input type="checkbox" data-pp-social-on="${s.key}" ${on ? 'checked' : ''} /> ${this._escape(s.label)}</label>
+            <input type="text" class="pp-edit-input" data-pp-social-url="${s.key}" placeholder="Lien / numéro" value="${this._escape(url)}" />
+          </div>`;
+      }).join('');
+      return `
+        <div class="pp-socials editing">
+          ${rows}
+          <div class="pp-list-edit-actions">
+            <div style="flex:1"></div>
+            <button class="pp-action-btn primary" data-pp-socials-save>Enregistrer</button>
+            <button class="pp-action-btn secondary" data-pp-socials-cancel>Annuler</button>
+          </div>
+        </div>`;
+    }
+    const active = this.SOCIALS.filter(s => data['social-' + s.key + '-on'] === 'on');
+    const body = active.length
+      ? active.map(s => {
+          const url = (data['social-' + s.key + '-url'] || '').trim();
+          return `<div class="pp-list-row"><div class="pp-list-cell"><span class="pp-list-cell-lbl">${this._escape(s.label)}</span><span class="pp-list-cell-val">${url ? this._escape(url) : '<span class="pp-empty">activé, sans lien</span>'}</span></div></div>`;
+        }).join('')
+      : '<div class="pp-empty">Aucun réseau activé.</div>';
+    return `<div class="pp-socials">${body}<button class="pp-mini-btn" data-pp-edit-socials>✏️ Modifier les réseaux</button></div>`;
+  },
+
+  // ----- BLOC PHOTOS -----
+  _photosBlock(intake) {
+    const photos = Array.isArray(intake.photos) ? intake.photos : [];
+    const groups = this.PHOTO_GROUPS.map(g => {
+      const items = photos.filter(p => p && p.kind === g.kind);
+      return this._photoGroupHtml(g, items);
+    }).join('');
+    return `
+      <div class="pp-detail-section">
+        <div class="pp-detail-section-title">Photos envoyées par le client (${photos.length})</div>
+        <div class="pp-photos">${groups}</div>
+      </div>`;
+  },
+
+  _photoGroupHtml(g, items) {
+    const thumbs = items.map(p => `
+      <div class="pp-photo-thumb">
+        <img src="${this._escape(p.url)}" alt="${this._escape(p.original_name || g.label)}" loading="lazy" data-pp-photo-zoom="${this._escape(p.url)}" />
+        <div class="pp-photo-acts">
+          <button class="pp-photo-act" data-pp-photo-replace="${this._escape(p.path)}" data-kind="${this._escape(g.kind)}" title="Remplacer">🔁</button>
+          <button class="pp-photo-act danger" data-pp-photo-del="${this._escape(p.path)}" title="Supprimer">🗑</button>
+        </div>
+      </div>`).join('');
+    const canAdd = items.length < (g.max || 99);
+    const addBtn = canAdd
+      ? `<button class="pp-photo-add" data-pp-photo-add="${this._escape(g.kind)}" title="Ajouter une photo">＋<span>Ajouter</span></button>` : '';
+    return `
+      <div class="pp-photo-group">
+        <div class="pp-photo-group-head">
+          <span class="pp-photo-group-title">${this._escape(g.label)}</span>
+          <span class="pp-photo-group-count">${items.length}${g.max ? ' / ' + g.max : ''}</span>
+        </div>
+        <div class="pp-photo-grid">
+          ${thumbs}${addBtn}${items.length === 0 ? '<span class="pp-photo-empty">Aucune photo</span>' : ''}
+        </div>
+      </div>`;
+  },
+
+  // ----- SAUVEGARDES -----
+  async _saveField(id, key) {
+    const panel = document.getElementById('pp-detail');
+    const input = panel.querySelector('[data-pp-field-input]');
+    if (!input) return;
+    const res = await this._call('pixelpros_update_data', { id, patch: { [key]: input.value } });
+    if (res && res.ok) { this.state.edit = null; this._toast('Modifié ✓'); await this.refresh(); }
+    else this._toast('Échec : ' + (res?.error || res?.message || '?'), true);
+  },
+
+  async _toggleBool(id, key) {
+    const data = (this.state.detail && this.state.detail.intake.data) || {};
+    const on = data[key] === 'on';
+    const patch = {};
+    patch[key] = on ? null : 'on';
+    const res = await this._call('pixelpros_update_data', { id, patch });
+    if (res && res.ok) { this._toast(on ? 'Désactivé' : 'Activé'); await this.refresh(); }
+    else this._toast('Échec : ' + (res?.error || res?.message || '?'), true);
+  },
+
+  _syncListBuffer(panel, ncols) {
+    if (!this.state.editRows) return;
+    const rows = [];
+    panel.querySelectorAll('.pp-list-edit-row').forEach(rowEl => {
+      const cells = new Array(ncols).fill('');
+      rowEl.querySelectorAll('[data-pp-list-cell]').forEach(cell => {
+        const ci = parseInt(cell.dataset.ci, 10);
+        if (!isNaN(ci)) cells[ci] = cell.value;
+      });
+      rows.push(cells);
+    });
+    this.state.editRows = rows;
+  },
+
+  async _saveList(id) {
+    const panel = document.getElementById('pp-detail');
+    const sec = this.SECTIONS[this.state.edit.sectionIdx];
+    const cols = sec.list.cols;
+    this._syncListBuffer(panel, cols.length);
+    let rows = (this.state.editRows || []).filter(r => r.some(c => (c || '').trim() !== ''));
+    const patch = {};
+    cols.forEach((c, ci) => { patch[c.key] = rows.map(r => r[ci] || ''); });
+    const res = await this._call('pixelpros_update_data', { id, patch });
+    if (res && res.ok) { this.state.edit = null; this.state.editRows = null; this._toast('Liste enregistrée ✓'); await this.refresh(); }
+    else this._toast('Échec : ' + (res?.error || res?.message || '?'), true);
+  },
+
+  async _saveSocials(id) {
+    const panel = document.getElementById('pp-detail');
+    const patch = {};
+    this.SOCIALS.forEach(s => {
+      const onEl = panel.querySelector('[data-pp-social-on="' + s.key + '"]');
+      const urlEl = panel.querySelector('[data-pp-social-url="' + s.key + '"]');
+      patch['social-' + s.key + '-on'] = (onEl && onEl.checked) ? 'on' : null;
+      patch['social-' + s.key + '-url'] = urlEl ? urlEl.value.trim() : '';
+    });
+    const res = await this._call('pixelpros_update_data', { id, patch });
+    if (res && res.ok) { this.state.edit = null; this._toast('Réseaux enregistrés ✓'); await this.refresh(); }
+    else this._toast('Échec : ' + (res?.error || res?.message || '?'), true);
+  },
+
+  // ----- PHOTOS : upload / suppression / zoom -----
+  async _onPhotoChosen(file) {
+    const ctx = this._photoCtx;
+    if (!ctx || !file) return;
+    if (file.size > 10 * 1024 * 1024) { this._toast('Photo trop lourde (10 Mo maximum)', true); return; }
+    this._toast('Envoi de la photo…');
+    let b64;
+    try { b64 = await this._fileToDataUrl(file); }
+    catch (e) { this._toast('Lecture du fichier impossible', true); return; }
+    const res = await this._call('pixelpros_upload_photo', {
+      id: ctx.id, kind: ctx.kind, filename: file.name, content_base64: b64,
+    });
+    if (!res || !res.ok) { this._toast('Échec : ' + (res?.error || res?.message || '?'), true); return; }
+    if (ctx.replacePath) await this._call('pixelpros_delete_photo', { id: ctx.id, path: ctx.replacePath });
+    this._toast(ctx.replacePath ? 'Photo remplacée ✓' : 'Photo ajoutée ✓');
+    this._photoCtx = null;
+    await this.refresh();
+  },
+
+  _fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(fr.error);
+      fr.readAsDataURL(file);
+    });
+  },
+
+  async _deletePhoto(id, path) {
+    if (!confirm('Supprimer définitivement cette photo ?')) return;
+    const res = await this._call('pixelpros_delete_photo', { id, path });
+    if (res && res.ok) { this._toast('Photo supprimée'); await this.refresh(); }
+    else this._toast('Échec : ' + (res?.error || res?.message || '?'), true);
+  },
+
+  _zoomPhoto(url) {
+    const ov = document.createElement('div');
+    ov.className = 'pp-lightbox';
+    ov.innerHTML = `<img src="${this._escape(url)}" alt="" /><button class="pp-lightbox-close" aria-label="Fermer">×</button>`;
+    ov.onclick = () => ov.remove();
+    document.body.appendChild(ov);
   },
 
   // Mini-dialog pour modifier email/téléphone d'un intake.
