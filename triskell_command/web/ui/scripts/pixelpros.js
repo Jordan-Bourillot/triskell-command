@@ -1161,7 +1161,7 @@ const PixelPros = {
       ? `<div class="pp-pay-status ok">
            <span class="pp-pay-ico">✅</span>
            <div><div class="pp-pay-status-main">Paiement reçu</div>
-           <div class="pp-pay-status-sub">${paidWhen ? 'Le ' + this._escape(paidWhen) : ''}${manual ? ' · encaissé à la main' : ''}</div></div>
+           <div class="pp-pay-status-sub">${paidWhen ? 'Le ' + this._escape(paidWhen) : ''}${manual ? ' · validé manuellement' : ' · payé en ligne par carte'}</div></div>
          </div>`
       : `<div class="pp-pay-status wait">
            <span class="pp-pay-ico">⏳</span>
