@@ -455,6 +455,42 @@ def _git_pull(repo: Path) -> None:
         logger.debug("pixelpros: git pull silencieux: %s", exc)
 
 
+def _resolve_anthropic_key() -> str:
+    """Clé Anthropic à transmettre au builder.
+
+    Même logique multi-source que le reste de Triskell Command : on regarde
+    d'abord la variable d'env ANTHROPIC_API_KEY, puis Supabase
+    (shared_settings.ai_keys.anthropic).
+
+    Indispensable parce que le builder (pixel-studio/builder/claude_adapter.py)
+    ne sait lire QUE la variable d'env ANTHROPIC_API_KEY. Sur Coolify, la clé
+    vit dans Supabase et n'est PAS exposée en variable d'env : sans cette
+    résolution, l'adaptateur Claude lève RuntimeError, le builder retombe sur
+    les données brutes du formulaire et le site client sort VIDE.
+    """
+    key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if key:
+        return key
+    sb = _sb()
+    if sb is None:
+        return ""
+    try:
+        rows = (sb.table("shared_settings").select("value")
+                .eq("key", "ai_keys").limit(1).execute().data)
+        if rows:
+            value = rows[0].get("value") or {}
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except Exception:
+                    value = {}
+            if isinstance(value, dict):
+                return (value.get("anthropic") or "").strip()
+    except Exception as exc:
+        logger.warning("pixelpros._resolve_anthropic_key: %s", exc)
+    return ""
+
+
 def _dispatch_local(pixel_studio: Path, intake_id: str) -> tuple[bool, str]:
     """Lance le builder en subprocess + draine ses logs vers le logger Python
     (qui finit dans les logs Coolify, visibles en debug). Non bloquant."""
@@ -463,6 +499,24 @@ def _dispatch_local(pixel_studio: Path, intake_id: str) -> tuple[bool, str]:
     import threading
 
     builder = pixel_studio / "builder" / "build_site.py"
+
+    # Environnement du subprocess. Le builder hérite de tout l'env du serveur
+    # (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GITHUB_TOKEN, NETLIFY_AUTH_TOKEN…
+    # déjà présents sur Coolify). MAIS la clé Anthropic, elle, n'est pas une
+    # variable d'env sur Coolify (elle est rangée dans Supabase) : on la résout
+    # et on l'injecte explicitement, sinon l'adaptateur Claude échoue et le
+    # site client sort VIDE.
+    child_env = dict(os.environ)
+    if not (child_env.get("ANTHROPIC_API_KEY") or "").strip():
+        anthropic_key = _resolve_anthropic_key()
+        if anthropic_key:
+            child_env["ANTHROPIC_API_KEY"] = anthropic_key
+            logger.info("[builder %s] clé Anthropic injectée (source Supabase)", intake_id[:8])
+        else:
+            logger.warning(
+                "[builder %s] ANTHROPIC_API_KEY introuvable (ni env, ni Supabase) "
+                "— le site risque de sortir vide.", intake_id[:8]
+            )
     try:
         proc = subprocess.Popen(
             [sys.executable, "-u", str(builder), "--draft-id", intake_id],
@@ -471,6 +525,7 @@ def _dispatch_local(pixel_studio: Path, intake_id: str) -> tuple[bool, str]:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            env=child_env,
         )
 
         # Thread qui draine stdout au fur et à mesure → logger Python.
