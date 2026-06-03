@@ -977,7 +977,10 @@ const PixelPros = {
     const color = this._colorFromName(name);
     const col = this.COLUMNS.find(c => c.status === intake.status) ||
                 { label: intake.status, accent: '#94a3b8', icon: '?' };
-    const errMsg = data.error;
+    // L'erreur de fabrication n'est pertinente que pour un échec en cours.
+    // Si le site est reparti (en ligne / en construction / payé), on n'affiche
+    // pas un vieux message d'un essai raté précédent : ce serait une fausse alerte.
+    const errMsg = (intake.status === 'failed') ? data.error : '';
     const actions = this._availableActions(intake);
 
     panel.innerHTML = `
