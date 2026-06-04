@@ -28,7 +28,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import auth as tcauth
@@ -709,6 +709,122 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.exception("affiliate-login-request a échoué")
             return JSONResponse(content=generic_response)
+
+    # ---------------- Formulaire de contact des sites clients ----------------
+    # Endpoint PUBLIC appelé par le navigateur des visiteurs d'un site client
+    # ({slug}.pixel-pros.fr). On résout TOUJOURS l'email du client côté serveur
+    # à partir du slug (jamais une adresse écrite dans la page) → certitude que
+    # le message part vers le bon client. Anti-spam : honeypot + rate-limit IP.
+
+    _contact_rate: dict[str, list[float]] = {}
+
+    def _contact_rate_ok(ip: str, max_per_hour: int = 12) -> bool:
+        import time
+        now = time.time()
+        bucket = _contact_rate.setdefault(ip, [])
+        cutoff = now - 3600
+        bucket[:] = [t for t in bucket if t > cutoff]
+        if len(bucket) >= max_per_hour:
+            return False
+        bucket.append(now)
+        if len(_contact_rate) > 5000:
+            _contact_rate.clear()
+        return True
+
+    def _slug_from_origin(request: Request) -> str:
+        import re
+        src = request.headers.get("origin") or request.headers.get("referer") or ""
+        m = re.search(r"https?://([a-z0-9-]+)\.pixel-pros\.fr", src, re.I)
+        if m:
+            s = m.group(1).lower()
+            if s not in ("www", "api", "app"):
+                return s
+        return ""
+
+    @app.post("/api/pixelpros/contact")
+    async def pixelpros_contact(request: Request):
+        """Reçoit un message du formulaire de contact d'un site client et le
+        relaie par mail au client (destinataire résolu via le slug)."""
+        ip = (request.client.host if request.client else "?") or "?"
+        try:
+            form = await request.form()
+        except Exception:
+            form = {}
+
+        def _f(key: str) -> str:
+            v = form.get(key) if form else None
+            return str(v).strip() if v is not None else ""
+
+        slug = _f("slug")
+        name = _f("name")
+        email = _f("email")
+        message = _f("message")
+        honey = _f("website")  # champ piège anti-bot (invisible dans la page)
+
+        accept = (request.headers.get("accept") or "").lower()
+        wants_json = "application/json" in accept
+
+        def _esc(s: str) -> str:
+            return (str(s or "").replace("&", "&amp;").replace("<", "&lt;")
+                    .replace(">", "&gt;"))
+
+        def _reply(ok: bool, msg: str, status: int = 200):
+            code = 200 if ok else status
+            if wants_json:
+                return JSONResponse(status_code=code, content={"ok": ok, "message": msg})
+            if ok:
+                html = (
+                    "<!doctype html><html lang=\"fr\"><meta charset=\"utf-8\">"
+                    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+                    "<title>Message envoyé</title>"
+                    "<div style=\"font-family:system-ui,-apple-system,sans-serif;max-width:520px;"
+                    "margin:14vh auto;text-align:center;padding:0 22px;color:#0b0d1a;\">"
+                    "<div style=\"width:66px;height:66px;border-radius:50%;background:#22c55e;"
+                    "color:#fff;font-size:36px;line-height:66px;margin:0 auto 20px;\">✓</div>"
+                    "<h1 style=\"font-size:23px;margin:0 0 10px;\">Message envoyé&nbsp;!</h1>"
+                    "<p style=\"opacity:.72;font-size:16px;line-height:1.5;\">Merci, on a bien reçu "
+                    "ton message. On te répond très vite.</p>"
+                    "<p style=\"margin-top:26px;\"><a href=\"javascript:history.back()\" "
+                    "style=\"color:#2563eb;font-weight:700;text-decoration:none;\">← Retour au site</a></p>"
+                    "</div>"
+                )
+                return HTMLResponse(content=html, status_code=200)
+            return HTMLResponse(
+                content="<!doctype html><meta charset=\"utf-8\"><div style=\"font-family:"
+                        "system-ui,sans-serif;max-width:520px;margin:14vh auto;text-align:center;"
+                        "padding:0 22px;\"><p>" + _esc(msg) + "</p>"
+                        "<p><a href=\"javascript:history.back()\">← Retour</a></p></div>",
+                status_code=code,
+            )
+
+        # Bot : honeypot rempli → on fait semblant d'accepter, sans rien envoyer.
+        if honey:
+            return _reply(True, "Merci !")
+        if not _contact_rate_ok(ip):
+            return _reply(False, "Trop de messages d'affilée. Réessaie dans un moment.", status=429)
+        if not name or not email or "@" not in email or "." not in email.split("@")[-1] or not message:
+            return _reply(False, "Merci d'indiquer ton prénom, un email valide et un message.", status=400)
+        if len(name) > 200 or len(email) > 320 or len(message) > 5000:
+            return _reply(False, "Un des champs est trop long.", status=400)
+
+        if not slug:
+            slug = _slug_from_origin(request)
+
+        try:
+            from ..integrations.pixelpros import repo as r, mailer as m
+            intake = r.get_intake_by_slug(slug) if slug else None
+            ok, info = m.send_contact_message(
+                intake, slug=slug, visitor_name=name,
+                visitor_email=email, visitor_message=message,
+            )
+            if not ok:
+                logger.warning("pixelpros.contact: envoi KO (slug=%s) : %s", slug, info)
+                return _reply(False, "L'envoi n'a pas marché, réessaie dans un instant.", status=502)
+            logger.info("pixelpros.contact: message relayé (slug=%s) : %s", slug, info)
+            return _reply(True, "Message envoyé")
+        except Exception:
+            logger.exception("pixelpros.contact a échoué")
+            return _reply(False, "L'envoi n'a pas marché, réessaie dans un instant.", status=500)
 
     # ---------------- Static files (UI) ----------------
 

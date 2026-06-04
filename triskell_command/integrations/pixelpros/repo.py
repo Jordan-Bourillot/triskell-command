@@ -152,6 +152,27 @@ def get_intake(intake_id: str) -> Optional[dict]:
         return None
 
 
+def get_intake_by_slug(slug: str) -> Optional[dict]:
+    """Retrouve un draft à partir de son slug (= sous-domaine du site).
+
+    Sert au formulaire de contact des sites clients : on connaît le slug
+    (présent dans l'URL/le sous-domaine), on remonte au draft pour récupérer
+    l'email du client. Le slug est UNIQUE en base → 0 ou 1 résultat.
+    """
+    if not slug:
+        return None
+    sb = _sb()
+    if sb is None:
+        return None
+    try:
+        rows = (sb.table(TABLE).select("*")
+                .eq("slug", slug).limit(1).execute().data)
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("pixelpros.get_intake_by_slug: %s", exc)
+        return None
+
+
 def count_by_status() -> dict[str, int]:
     """Renvoie le nombre de drafts pour chaque status connu."""
     keys = ["draft", "paid", "building", "live", "failed"]

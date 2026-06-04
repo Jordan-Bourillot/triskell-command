@@ -411,11 +411,14 @@ def _load_smtp_config() -> Optional[dict]:
 
 
 def _send_via_smtp(cfg: dict, *, to: str, subject: str, body: str,
-                   body_html: str = "", source: str = "") -> bool:
+                   body_html: str = "", source: str = "", reply_to: str = "") -> bool:
     """Wrapper autour de triskell_core.prospect.outreach.smtp_sender.send_email.
 
     En cas de succès, logge l'envoi dans `email_history` pour que le mail
     apparaisse dans la vue « Mails envoyés ».
+
+    `reply_to` : adresse de réponse (ex : le visiteur d'un formulaire de
+    contact, pour que le client réponde directement en répondant au mail).
     """
     try:
         from triskell_core.prospect.outreach.smtp_sender import send_email
@@ -423,7 +426,8 @@ def _send_via_smtp(cfg: dict, *, to: str, subject: str, body: str,
         logger.error("pixelpros.mailer: smtp_sender introuvable : %s", exc)
         return False
     try:
-        message_id = send_email(cfg, to=to, subject=subject, body=body, body_html=body_html)
+        message_id = send_email(cfg, to=to, subject=subject, body=body,
+                                body_html=body_html, reply_to=reply_to)
     except Exception as exc:
         logger.warning("pixelpros.mailer envoi KO : %s", exc)
         return False
@@ -518,6 +522,117 @@ def send_live_mail(intake: dict) -> tuple[bool, str]:
     ok = _send_via_smtp(cfg, to=to, subject=subject, body=body, body_html=body_html,
                         source="pixelpros_live_mail")
     return (True, f"Envoyé à {to}") if ok else (False, "Envoi SMTP a échoué (voir logs)")
+
+
+# ---------------------------------------------------------------------------
+# Formulaire de contact d'un site client → mail au client
+# ---------------------------------------------------------------------------
+def _ops_inbox(cfg: dict) -> str:
+    """Adresse de secours : si l'email du client est introuvable, le message
+    ne doit JAMAIS être perdu. On retombe sur l'expéditeur configuré (une
+    vraie boîte qu'on relève), sinon contact@pixel-pros.fr."""
+    box = ""
+    if isinstance(cfg, dict):
+        box = (cfg.get("from_email") or cfg.get("smtp_user") or "").strip()
+    return box or "contact@pixel-pros.fr"
+
+
+def _contact_html(name: str, visitor_email: str, message: str,
+                  business: str, fallback_slug: str = "") -> str:
+    n = _html(name)
+    em = _html(visitor_email)
+    msg_html = _html(message).replace("\n", "<br>")
+    biz = (" " + _html(business)) if business else ""
+    warn = ""
+    if fallback_slug:
+        warn = (
+            "<p style=\"margin:18px 0 0; padding:12px 14px; background:#fef2f2; "
+            "border-left:4px solid #ef4444; border-radius:6px; font-size:13px; color:#7f1d1d;\">"
+            "⚠ Destinataire client introuvable pour « " + _html(fallback_slug) +
+            " » — message routé vers l'adresse de secours.</p>"
+        )
+    return (
+        "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"></head>"
+        "<body style=\"margin:0; padding:0; background:#f4f5f7; font-family:-apple-system,"
+        "BlinkMacSystemFont,'Segoe UI',sans-serif; color:#0b0d1a;\">"
+        "<div style=\"max-width:560px; margin:0 auto; padding:28px 20px;\">"
+        "<div style=\"background:#ffffff; border-radius:14px; padding:26px 24px; "
+        "box-shadow:0 2px 8px rgba(0,0,0,.06);\">"
+        "<p style=\"margin:0 0 4px; font-size:13px; letter-spacing:.06em; "
+        "text-transform:uppercase; color:#6b7280; font-weight:700;\">📬 Nouveau message</p>"
+        "<h1 style=\"margin:0 0 18px; font-size:20px;\">Un visiteur t'écrit depuis ton site" + biz + "</h1>"
+        "<table style=\"width:100%; font-size:14.5px; border-collapse:collapse; margin-bottom:18px;\">"
+        "<tr><td style=\"padding:6px 0; color:#6b7280; width:80px;\">De</td>"
+        "<td style=\"padding:6px 0; font-weight:700;\">" + n + "</td></tr>"
+        "<tr><td style=\"padding:6px 0; color:#6b7280;\">Email</td>"
+        "<td style=\"padding:6px 0;\"><a href=\"mailto:" + em + "\" style=\"color:#2563eb;\">" + em + "</a></td></tr>"
+        "</table>"
+        "<div style=\"padding:16px 18px; background:#f9fafb; border:1px solid #e5e7eb; "
+        "border-radius:10px; font-size:15px; line-height:1.6; white-space:normal;\">" + msg_html + "</div>"
+        "<p style=\"margin:18px 0 0; font-size:13.5px; color:#6b7280;\">"
+        "💬 Pour répondre, réponds simplement à ce mail — ta réponse partira vers " + em + ".</p>"
+        + warn +
+        "</div>"
+        "<p style=\"text-align:center; margin:16px 0 0; font-size:11.5px; color:#9ca3af;\">"
+        "Reçu via le formulaire de contact de ton site · Pixel Pros</p>"
+        "</div></body></html>"
+    )
+
+
+def send_contact_message(intake: Optional[dict], *, slug: str,
+                         visitor_name: str, visitor_email: str,
+                         visitor_message: str) -> tuple[bool, str]:
+    """Envoie au client le message reçu via le formulaire de contact de son site.
+
+    Le destinataire est l'email du client tel qu'enregistré dans son draft
+    (résolu en amont par le slug du site). Si on ne le trouve pas, on route
+    vers une adresse de secours pour ne JAMAIS perdre un message.
+    Reply-To = email du visiteur (le client répond en répondant au mail).
+    """
+    cfg = _load_smtp_config()
+    if cfg is None:
+        return False, "Config SMTP introuvable (shared_settings.smtp_pixel_pros ou smtp_config)"
+
+    business = ""
+    if isinstance(intake, dict):
+        data = intake.get("data") or {}
+        if isinstance(data, dict):
+            business = (data.get("business_name") or data.get("business-name") or "")
+        if not business:
+            business = intake.get("business_name") or ""
+
+    to = _resolve_email(intake) if isinstance(intake, dict) else None
+    used_fallback = False
+    if not to:
+        to = _ops_inbox(cfg)
+        used_fallback = True
+    if not to:
+        return False, "Aucun destinataire (ni client ni secours)"
+
+    name = (visitor_name or "Un visiteur").strip()
+    subject = f"📬 Nouveau message via ton site{(' ' + business) if business else ''}"
+    text_lines = [
+        f"Tu as reçu un nouveau message depuis le formulaire de contact de ton site{(' ' + business) if business else ''}.",
+        "",
+        f"De : {name}",
+        f"Email : {visitor_email}",
+        "",
+        "Message :",
+        visitor_message,
+        "",
+        "— Pour répondre, réponds simplement à ce mail : ta réponse partira vers le visiteur.",
+    ]
+    if used_fallback:
+        text_lines += ["", f"(⚠ Destinataire client introuvable pour « {slug} » — message routé vers l'adresse de secours.)"]
+    body = "\n".join(text_lines)
+    body_html = _contact_html(name, visitor_email, visitor_message, business,
+                              fallback_slug=slug if used_fallback else "")
+
+    ok = _send_via_smtp(cfg, to=to, subject=subject, body=body, body_html=body_html,
+                        source="pixelpros_contact_form", reply_to=visitor_email)
+    if not ok:
+        return False, "Envoi SMTP a échoué (voir logs)"
+    return True, f"Envoyé à {to}" + (" (secours)" if used_fallback else "")
 
 
 # ---------------------------------------------------------------------------
