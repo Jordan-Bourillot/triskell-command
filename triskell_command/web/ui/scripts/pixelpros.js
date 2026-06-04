@@ -380,14 +380,22 @@ const PixelPros = {
       .pp-stat-ico { font-size:20px; margin-bottom:6px; }
       .pp-stat-val { font-size:26px; font-weight:900; color:#f8fafc; line-height:1.1; }
       .pp-stat-lbl { font-size:11.5px; color:#94a3b8; margin-top:5px; font-weight:600; }
+      .pp-stats-sub { font-size:12.5px; color:#94a3b8; margin:3px 0 0; }
       .pp-stat-top { background:var(--surface,#0f172a); border:1px solid var(--border,#1e293b); border-radius:12px; padding:14px 16px; }
-      .pp-stat-top-title { font-size:13px; font-weight:800; color:#e2e8f0; margin-bottom:8px; }
+      .pp-stat-top-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+      .pp-stat-top-title { font-size:13px; font-weight:800; color:#e2e8f0; }
+      .pp-stat-top-coltitle { font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:.04em; }
       .pp-stat-top-list { list-style:none; margin:0; padding:0; }
-      .pp-stat-top-list li { display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid rgba(148,163,184,.10); font-size:13px; }
-      .pp-stat-top-list li:last-child { border-bottom:none; }
-      .pp-stat-top-page { color:#cbd5e1; word-break:break-all; }
-      .pp-stat-top-n { color:#facc15; font-weight:800; padding-left:10px; }
-      .pp-stat-top-empty { color:#64748b; }
+      .pp-stat-top-row { display:grid; grid-template-columns: minmax(140px,1.4fr) 2fr auto; align-items:center; gap:14px; padding:9px 0; border-bottom:1px solid rgba(148,163,184,.10); }
+      .pp-stat-top-row:last-child { border-bottom:none; }
+      .pp-stat-top-info { display:flex; flex-direction:column; min-width:0; }
+      .pp-stat-top-name { color:#f1f5f9; font-weight:700; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .pp-stat-top-path { color:#64748b; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .pp-stat-top-barwrap { background:rgba(148,163,184,.12); border-radius:999px; height:8px; overflow:hidden; }
+      .pp-stat-top-bar { height:100%; border-radius:999px; background:linear-gradient(90deg,#facc15,#f59e0b); }
+      .pp-stat-top-views { color:#facc15; font-weight:800; font-size:13px; white-space:nowrap; min-width:62px; text-align:right; }
+      .pp-stat-top-empty { color:#64748b; padding:8px 0; }
+      @media (max-width:640px){ .pp-stat-top-row { grid-template-columns: 1fr auto; } .pp-stat-top-barwrap { display:none; } }
       @media (max-width: 1100px) { .pp-kanban { grid-template-columns: repeat(2, 1fr); } }
       @media (max-width: 640px)  { .pp-kanban { grid-template-columns: 1fr; } }
 
@@ -861,31 +869,58 @@ const PixelPros = {
     let res = {};
     try { res = await App.api.pixelpros_analytics({ period }); } catch (e) {}
     const s = (res && res.stats) || {};
+    const cap = (t) => t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+    const fileOf = (path) => String(path || '').split('?')[0].split('/').pop().replace(/\.html$/i, '');
+    const cleanPath = (path) => '/' + (String(path || '').split('?')[0].split('/').pop() || '');
+    const prettyPage = (path) => {
+      const f = fileOf(path);
+      if (!f || f === 'index') return 'Accueil';
+      const map = { 'configurer':'Formulaire de configuration', 'merci':'Remerciement (apres paiement)', 'affiliation':'Programme affiliation', 'demo':'Demo generale', 'cgv':'CGV', 'mentions-legales':'Mentions legales', 'confidentialite':'Confidentialite', '404':'Page introuvable (404)' };
+      if (map[f]) return map[f];
+      if (f.indexOf('demo-') === 0) return 'Demo — ' + cap(f.slice(5).replace(/-/g, ' '));
+      return 'Page ' + cap(f.replace(/-/g, ' '));
+    };
     const fmtTime = (sec) => { sec = sec || 0; const m = Math.floor(sec / 60), r = sec % 60; return m ? (m + ' min ' + r + 's') : (r + 's'); };
+
     const cards = [
-      { ico: '👤', val: s.visiteurs_uniques ?? 0, lbl: 'Visiteurs uniques' },
-      { ico: '⏱️', val: fmtTime(s.temps_moyen_session_s), lbl: 'Temps moyen / visite' },
-      { ico: '📜', val: (s.scroll_moyen ?? 0) + ' %', lbl: 'Page parcourue (moy.)' },
-      { ico: '📄', val: s.pages_vues ?? 0, lbl: 'Pages vues' },
-      { ico: '📝', val: s.formulaires_commences ?? 0, lbl: 'Formulaires commencés' },
+      { ico: '👤', val: s.visiteurs_uniques ?? 0, lbl: 'Visiteurs uniques', hint: 'personnes differentes venues sur le site' },
+      { ico: '⏱️', val: fmtTime(s.temps_moyen_session_s), lbl: 'Temps moyen par visite', hint: 'temps passe sur le site en moyenne' },
+      { ico: '📜', val: (s.scroll_moyen ?? 0) + ' %', lbl: 'Page lue en moyenne', hint: 'jusqu ou les gens descendent dans la page' },
+      { ico: '📄', val: s.pages_vues ?? 0, lbl: 'Pages vues (total)', hint: 'nombre total de pages affichees' },
+      { ico: '📝', val: s.formulaires_commences ?? 0, lbl: 'Formulaires commences', hint: 'visiteurs qui ont commence a remplir' },
     ];
-    const top = (s.top_pages || []).map(p =>
-      `<li><span class="pp-stat-top-page">${this._escape(p.page)}</span><span class="pp-stat-top-n">${p.vues}</span></li>`
-    ).join('') || '<li class="pp-stat-top-empty">Pas encore de données — reviens dans quelques heures.</li>';
+
+    const tops = s.top_pages || [];
+    const maxV = Math.max.apply(null, tops.map(p => p.vues).concat([1]));
+    const topHtml = tops.length ? tops.map(p => {
+      const pct = Math.round(p.vues / maxV * 100);
+      return `<li class="pp-stat-top-row">
+        <div class="pp-stat-top-info">
+          <span class="pp-stat-top-name">${this._escape(prettyPage(p.page))}</span>
+          <span class="pp-stat-top-path">${this._escape(cleanPath(p.page))}</span>
+        </div>
+        <div class="pp-stat-top-barwrap"><div class="pp-stat-top-bar" style="width:${pct}%"></div></div>
+        <span class="pp-stat-top-views">${p.vues} vue${p.vues > 1 ? 's' : ''}</span>
+      </li>`;
+    }).join('') : '<li class="pp-stat-top-empty">Pas encore de donnees — les pages apparaitront ici des les premieres visites.</li>';
+
     const periods = [['7d', '7 jours'], ['30d', '30 jours'], ['all', 'Tout']];
     el.innerHTML = `
       <div class="pp-stats-head">
-        <h3 class="pp-stats-title">📊 Fréquentation du site</h3>
+        <div>
+          <h3 class="pp-stats-title">📊 Fréquentation de pixel-pros.fr</h3>
+          <p class="pp-stats-sub">Comment les visiteurs se comportent sur ton site.</p>
+        </div>
         <div class="pp-stats-periods">
           ${periods.map(([k, lab]) => `<button class="pp-stat-period ${period === k ? 'is-active' : ''}" data-period="${k}">${lab}</button>`).join('')}
         </div>
       </div>
       <div class="pp-stats-grid">
-        ${cards.map(c => `<div class="pp-stat-card"><div class="pp-stat-ico">${c.ico}</div><div class="pp-stat-val">${c.val}</div><div class="pp-stat-lbl">${c.lbl}</div></div>`).join('')}
+        ${cards.map(c => `<div class="pp-stat-card" title="${c.hint}"><div class="pp-stat-ico">${c.ico}</div><div class="pp-stat-val">${c.val}</div><div class="pp-stat-lbl">${c.lbl}</div></div>`).join('')}
       </div>
       <div class="pp-stat-top">
-        <div class="pp-stat-top-title">🔥 Pages les plus regardées</div>
-        <ul class="pp-stat-top-list">${top}</ul>
+        <div class="pp-stat-top-head"><span class="pp-stat-top-title">🔥 Pages les plus regardées</span><span class="pp-stat-top-coltitle">Nombre de vues</span></div>
+        <ul class="pp-stat-top-list">${topHtml}</ul>
       </div>
     `;
     el.querySelectorAll('.pp-stat-period').forEach(b => { b.onclick = () => this._renderStats(b.dataset.period); });
