@@ -587,7 +587,7 @@ const Thomas = {
   /** Rendu de la citation affichée en haut d'une bulle qui est une réponse. */
   _renderQuotedParent(parentId) {
     const parent = this.cachedById[parentId];
-    let authorName, excerpt, accent;
+    let authorName, excerpt, accent, thumbHtml = '';
     if (parent) {
       const fromMe = this._isFromMe(parent);
       accent = fromMe ? this.myColor : this.otherColor;
@@ -596,7 +596,14 @@ const Thomas = {
       );
       // Si le message d'origine a été supprimé entre-temps, on ne
       // restitue pas son contenu — on indique juste qu'il est parti.
-      excerpt = parent.deleted_at ? 'Message supprimé' : this._messageExcerpt(parent);
+      if (parent.deleted_at) {
+        excerpt = 'Message supprimé';
+      } else {
+        excerpt = this._messageExcerpt(parent);
+        // Aperçu image (façon WhatsApp) : si le message cité est une photo,
+        // on montre une vignette à droite, pas seulement le texte "Photo".
+        thumbHtml = this._quoteThumb(parent);
+      }
     } else {
       // Message parent hors de la fenêtre chargée (>100 messages d'écart).
       accent = 'rgba(255,255,255,0.4)';
@@ -604,11 +611,25 @@ const Thomas = {
       excerpt = 'Message original';
     }
     return `
-      <div class="thomas-quote" data-quote-target="${this._escape(parentId)}"
+      <div class="thomas-quote ${thumbHtml ? 'has-thumb' : ''}" data-quote-target="${this._escape(parentId)}"
            style="border-left-color:${this._escape(accent)};">
-        <div class="thomas-quote-author">${this._escape(authorName)}</div>
-        <div class="thomas-quote-body">${this._escape(excerpt)}</div>
+        <div class="thomas-quote-text">
+          <div class="thomas-quote-author">${this._escape(authorName)}</div>
+          <div class="thomas-quote-body">${this._escape(excerpt)}</div>
+        </div>
+        ${thumbHtml}
       </div>`;
+  },
+
+  /** Vignette de l'image d'un message cité (façon WhatsApp). Renvoie une
+   *  chaîne vide si le message cité n'est pas une photo. On charge l'image
+   *  d'origine et le CSS la réduit en petit carré. */
+  _quoteThumb(msg) {
+    if (!msg || !msg.attachment_url) return '';
+    const type = String(msg.attachment_type || '').toLowerCase();
+    if (!type.startsWith('image/')) return '';
+    const url = this._escape(msg.attachment_url);
+    return `<img class="thomas-quote-thumb" src="${url}" alt="" aria-hidden="true"/>`;
   },
 
   /** Confirme puis supprime (soft) un message à moi. */
@@ -698,6 +719,7 @@ const Thomas = {
           <div class="text-[11px] font-semibold text-text">Réponse à ${this._escape(author)}</div>
           <div class="text-xs text-text-muted truncate">${this._escape(this._messageExcerpt(m, 120))}</div>
         </div>
+        ${this._quoteThumb(m)}
         <button id="thomas-reply-cancel" type="button"
                 class="w-7 h-7 rounded-full text-text-muted hover:text-danger hover:bg-bg
                        transition-colors flex items-center justify-center text-lg leading-none">×</button>

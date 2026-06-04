@@ -926,6 +926,24 @@ html, body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Variante avec aperçu image : texte à gauche, vignette à droite (WhatsApp) */
+.thomas-quote.has-thumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.thomas-quote-text {
+  min-width: 0;
+  flex: 1;
+}
+.thomas-quote-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: block;
+}
 
 /* Flash visuel quand on clique une citation pour retrouver l'original */
 @keyframes thomas-msg-flash {
