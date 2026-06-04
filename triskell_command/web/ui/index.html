@@ -493,6 +493,27 @@
           </div>
         </div>
         <div class="flex items-center gap-1">
+          <!-- Appel vocal en direct -->
+          <button id="thomas-call-audio" type="button"
+                  class="w-8 h-8 rounded-lg flex items-center justify-center
+                         text-text-muted hover:text-text hover:bg-bg
+                         transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Appel vocal">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>
+            </svg>
+          </button>
+          <!-- Appel vidéo (visio) en direct -->
+          <button id="thomas-call-video" type="button"
+                  class="w-8 h-8 rounded-lg flex items-center justify-center
+                         text-text-muted hover:text-text hover:bg-bg
+                         transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Appel vidéo">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M23 7l-7 5 7 5V7z"/>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+            </svg>
+          </button>
           <!-- Sélecteur de couleur perso : ouvre une mini-palette pour
                choisir la couleur des bulles que J'envoie. -->
           <button id="thomas-color-btn" type="button"
@@ -658,6 +679,70 @@
                    flex items-center justify-center transition-colors">×</button>
   </div>
 
+  <!-- ===================== Fenêtre d'appel (vocal / visio) ===================== -->
+  <div id="call-overlay"
+       class="tri-call-overlay fixed inset-0 z-[90] hidden flex-col items-center justify-between"
+       style="height: 100dvh;">
+    <!-- Vidéo de l'autre personne (visio) : remplit le fond. -->
+    <video id="call-remote-video" class="tri-call-remote" autoplay playsinline></video>
+
+    <!-- Haut : avatar (appel vocal) + nom + statut/durée -->
+    <div class="tri-call-head">
+      <div id="call-avatar" class="tri-call-avatar">?</div>
+      <div id="call-peer-name" class="tri-call-name">…</div>
+      <div id="call-status" class="tri-call-status">Appel…</div>
+      <div id="call-sub" class="tri-call-sub"></div>
+    </div>
+
+    <!-- Ma propre image (visio), en petit dans un coin. -->
+    <video id="call-local-video" class="tri-call-local" autoplay playsinline muted></video>
+
+    <!-- Bas : contrôles de l'appel -->
+    <div class="tri-call-controls">
+      <button id="call-mute-btn" type="button" class="tri-call-ctrl" title="Couper le micro">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+      <button id="call-cam-btn" type="button" class="tri-call-ctrl" title="Couper la caméra">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 7l-7 5 7 5V7z"/>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        </svg>
+      </button>
+      <button id="call-hangup-btn" type="button" class="tri-call-ctrl tri-call-hangup" title="Raccrocher">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+          <path d="M21 15.46l-5.27-.61-2.52 2.52a15.05 15.05 0 0 1-6.59-6.59l2.53-2.53L8.04 3H3.03C2.45 13.18 10.82 21.55 21 20.97v-5.51z" transform="rotate(135 12 12)"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===================== Appel entrant ===================== -->
+  <div id="call-incoming"
+       class="tri-call-incoming fixed inset-0 z-[95] hidden flex-col items-center justify-center">
+    <div class="tri-call-incoming-card">
+      <div id="call-incoming-avatar" class="tri-call-avatar tri-call-avatar-ring">?</div>
+      <div id="call-incoming-name" class="tri-call-name">…</div>
+      <div id="call-incoming-mode" class="tri-call-status">Appel vocal</div>
+      <div class="tri-call-incoming-actions">
+        <button id="call-decline-btn" type="button" class="tri-call-ctrl tri-call-hangup" title="Refuser">
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <path d="M21 15.46l-5.27-.61-2.52 2.52a15.05 15.05 0 0 1-6.59-6.59l2.53-2.53L8.04 3H3.03C2.45 13.18 10.82 21.55 21 20.97v-5.51z" transform="rotate(135 12 12)"/>
+          </svg>
+        </button>
+        <button id="call-accept-btn" type="button" class="tri-call-ctrl tri-call-accept" title="Accepter">
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <path d="M21 15.46l-5.27-.61-2.52 2.52a15.05 15.05 0 0 1-6.59-6.59l2.53-2.53L8.04 3H3.03C2.45 13.18 10.82 21.55 21 20.97v-5.51z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Bouton flottant Allô Claude supprimé — accessible via l'item sidebar. -->
 
   <!-- ===================== Bus de templates de vues ===================== -->
@@ -721,6 +806,7 @@
   <script src="scripts/user_badge.js"></script>
   <script src="scripts/claude.js"></script>
   <script src="scripts/thomas.js"></script>
+  <script src="scripts/call.js"></script>
   <script src="scripts/push.js"></script>
 </body>
 </html>

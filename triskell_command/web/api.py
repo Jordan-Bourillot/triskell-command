@@ -7417,6 +7417,96 @@ class Api:
             return {"ok": False, "error": str(exc), "typing": False}
 
     # ==================================================================
+    # Appels audio / vidéo (WebRTC) dans le chat
+    # ==================================================================
+    # On ne fait transiter ici que la « poignée de main » (offre / réponse
+    # WebRTC) + le « raccroché ». Le son et l'image circulent ensuite en
+    # direct de navigateur à navigateur. Détails : integrations/calls.py.
+
+    def call_signal_send(self, payload: dict) -> dict:
+        """Dépose un signal d'appel pour l'autre user.
+        Payload : { call_id, kind, payload?, mode? }."""
+        try:
+            from ..integrations.calls import send_signal
+            data = payload or {}
+            ok = send_signal(
+                call_id=data.get("call_id", ""),
+                kind=data.get("kind", ""),
+                payload=data.get("payload"),
+                mode=data.get("mode"),
+            )
+            return {"ok": bool(ok)}
+        except Exception as exc:
+            logger.warning("call_signal_send: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def call_signal_poll(self, payload: dict | None = None) -> dict:
+        """Relève les signaux d'appel qui me sont destinés (lecture unique)."""
+        try:
+            from ..integrations.calls import poll_signals
+            return {"ok": True, "signals": poll_signals()}
+        except Exception as exc:
+            logger.debug("call_signal_poll: %s", exc)
+            return {"ok": False, "error": str(exc), "signals": []}
+
+    def call_clear(self, payload: dict) -> dict:
+        """Purge les signaux d'une session d'appel (après raccroché)."""
+        try:
+            from ..integrations.calls import clear_call
+            return {"ok": bool(clear_call((payload or {}).get("call_id", "")))}
+        except Exception as exc:
+            logger.debug("call_clear: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def call_config(self) -> dict:
+        """Config nécessaire à l'appel côté navigateur : qui on peut
+        appeler + serveurs de mise en relation.
+
+        STUN Google (gratuit) suffit pour la plupart des connexions. Pour
+        ajouter un relais TURN (utile si la connexion directe échoue sur
+        certains réseaux restrictifs), définir côté serveur (Coolify) :
+            TURN_URL        ex: turn:turn.mondomaine.fr:3478
+            TURN_USERNAME   identifiant TURN
+            TURN_CREDENTIAL mot de passe TURN
+        """
+        try:
+            import os
+            from ..integrations.calls import other_user_id
+            ice = [
+                {"urls": [
+                    "stun:stun.l.google.com:19302",
+                    "stun:stun1.l.google.com:19302",
+                ]},
+            ]
+            turn_url = (os.environ.get("TURN_URL") or "").strip()
+            if turn_url:
+                turn: dict = {"urls": [turn_url]}
+                user = (os.environ.get("TURN_USERNAME") or "").strip()
+                cred = (os.environ.get("TURN_CREDENTIAL") or "").strip()
+                if user:
+                    turn["username"] = user
+                if cred:
+                    turn["credential"] = cred
+                ice.append(turn)
+            other = other_user_id()
+            display = None
+            if other:
+                try:
+                    from .auth import get_display_name
+                    display = get_display_name(other)
+                except Exception:
+                    display = other.capitalize()
+            return {
+                "ok": True,
+                "ice_servers": ice,
+                "peer_id": other,
+                "peer_name": display,
+            }
+        except Exception as exc:
+            logger.debug("call_config: %s", exc)
+            return {"ok": False, "error": str(exc), "ice_servers": []}
+
+    # ==================================================================
     # Le Convoi — Importer une liste (PDF/Word/Excel/Image/Texte)
     # ==================================================================
     # Le front pilote 5 étapes :

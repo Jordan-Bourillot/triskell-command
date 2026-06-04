@@ -4871,3 +4871,95 @@ body[data-view-color="green"]    { --page-glow:  74 222 128; }
 body[data-view-color="emerald"]  { --page-glow:  52 211 153; }
 body[data-view-color="slate"]    { --page-glow: 148 163 184; }
 
+
+/* ============================================================= */
+/* Appel vocal / visio en direct (WebRTC)                        */
+/* La fenêtre d'appel est volontairement en ambiance sombre dans */
+/* les 3 thèmes — c'est la convention universelle d'un appel.    */
+/* ============================================================= */
+.tri-call-overlay {
+  background: radial-gradient(120% 120% at 50% 0%, #1f2937 0%, #0b1220 62%, #060a12 100%);
+  color: #fff;
+  padding: max(34px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom));
+  overflow: hidden;
+}
+.tri-call-remote {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  background: #060a12;
+  opacity: 0;                    /* invisible en vocal MAIS l'élément reste
+                                    actif → le son de l'autre passe quand même */
+  transition: opacity .2s;
+  z-index: 0;
+}
+.tri-call-overlay.tri-call-video-mode .tri-call-remote { opacity: 1; }
+.tri-call-overlay:not(.tri-call-video-mode) .tri-call-head { margin-top: 10vh; }
+
+.tri-call-head {
+  position: relative; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  text-align: center;
+}
+.tri-call-overlay.tri-call-video-mode .tri-call-head,
+.tri-call-overlay.tri-call-video-mode .tri-call-controls {
+  text-shadow: 0 1px 6px rgba(0,0,0,.65);
+}
+.tri-call-avatar {
+  width: 104px; height: 104px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 42px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  margin-bottom: 10px;
+}
+.tri-call-avatar-ring { animation: tri-call-pulse 1.6s ease-out infinite; }
+@keyframes tri-call-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(16,185,129,.55); }
+  70%  { box-shadow: 0 0 0 22px rgba(16,185,129,0); }
+  100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+}
+.tri-call-name   { font-size: 22px; font-weight: 700; }
+.tri-call-status { font-size: 15px; opacity: .85; font-variant-numeric: tabular-nums; }
+.tri-call-sub    { font-size: 13px; opacity: .6; min-height: 1em; }
+
+.tri-call-local {
+  position: absolute; z-index: 3;
+  right: 16px; top: 16px;
+  width: 116px; height: 164px;
+  object-fit: cover; border-radius: 14px;
+  border: 2px solid rgba(255,255,255,.25);
+  background: #111827;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  display: none;                 /* affichée par le code en visio */
+  transform: scaleX(-1);         /* effet miroir, comme une webcam */
+}
+
+.tri-call-controls {
+  position: relative; z-index: 2;
+  display: flex; align-items: center; justify-content: center; gap: 22px;
+}
+.tri-call-ctrl {
+  width: 60px; height: 60px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.14);
+  color: #fff; border: none; cursor: pointer;
+  transition: background .15s, transform .1s;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.tri-call-ctrl:hover  { background: rgba(255,255,255,.24); }
+.tri-call-ctrl:active { transform: scale(.94); }
+.tri-call-ctrl svg { width: 26px; height: 26px; }
+.tri-call-ctrl.tri-call-off { background: #fff; color: #111827; }
+.tri-call-hangup { background: #ef4444; }
+.tri-call-hangup:hover { background: #dc2626; }
+.tri-call-accept { background: #22c55e; }
+.tri-call-accept:hover { background: #16a34a; }
+
+.tri-call-incoming { background: rgba(6,10,18,.92); }
+.tri-call-incoming-card {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  color: #fff; text-align: center; padding: 32px 28px;
+}
+.tri-call-incoming-actions { margin-top: 26px; display: flex; gap: 48px; }
+
