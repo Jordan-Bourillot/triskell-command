@@ -44,6 +44,7 @@ const PixelPros = {
   // Colonnes Kanban : 4 statuts principaux dans l'ordre du flow.
   // Les échecs ont leur propre section en bas.
   COLUMNS: [
+    { status: 'recall',   label: 'On vous rappelle',    icon: '☎️', accent: '#06b6d4', short: 'À rappeler' },
     { status: 'draft',    label: 'Formulaire reçu',     icon: '📝', accent: '#94a3b8', short: 'Formulaires' },
     { status: 'paid',     label: 'Payé · à construire', icon: '💳', accent: '#facc15', short: 'Payés' },
     { status: 'building', label: 'En construction',     icon: '🛠',  accent: '#818cf8', short: 'En cours' },
@@ -1069,6 +1070,8 @@ const PixelPros = {
     const data = it.data || {};
     const name = data.business_name || data['business-name'] || '(sans nom)';
     const email = data.email || it.contact_email || '—';
+    const isRecall = it.status === 'recall' || data.recall === true;
+    const metaLine = isRecall ? ('☎ ' + (data.phone || 'numéro non fourni')) : email;
     const initial = name.trim().charAt(0).toUpperCase() || '?';
     const color = this._colorFromName(name);
     const option = it.selected_option || data.selected_option || it.option || '';
@@ -1081,9 +1084,9 @@ const PixelPros = {
         <div class="pp-avatar" style="background:${color};">${this._escape(initial)}</div>
         <div class="pp-card-body">
           <div class="pp-card-name">${this._escape(name)}</div>
-          <div class="pp-card-meta">${this._escape(email)}</div>
+          <div class="pp-card-meta">${this._escape(metaLine)}</div>
           <div class="pp-card-badges">
-            ${formule ? `<span class="pp-formule-badge" style="background:${formule.color}20; color:${formule.color};">${this._escape(formule.label)}</span>` : ''}
+            ${isRecall ? `<span class="pp-formule-badge" style="background:#06b6d420; color:#06b6d4;">☎ Rappel</span>` : (formule ? `<span class="pp-formule-badge" style="background:${formule.color}20; color:${formule.color};">${this._escape(formule.label)}</span>` : '')}
             <span class="pp-card-time">${this._timeRelative(it.updated_at || it.created_at)}</span>
             ${isUrgent ? `<span class="pp-urgent-badge">URGENT</span>` : ''}
           </div>
