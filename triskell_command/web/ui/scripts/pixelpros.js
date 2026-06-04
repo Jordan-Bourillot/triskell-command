@@ -1068,7 +1068,7 @@ const PixelPros = {
 
   _renderCard(it, accent) {
     const data = it.data || {};
-    const name = data.business_name || data['business-name'] || '(sans nom)';
+    const name = data.business_name || data['business-name'] || it.business_name || '(sans nom)';
     const email = data.email || it.contact_email || '—';
     const isRecall = it.status === 'recall' || data.recall === true;
     const metaLine = isRecall ? ('☎ ' + (data.phone || 'numéro non fourni')) : email;
@@ -1810,7 +1810,7 @@ const PixelPros = {
     switch (action) {
       case 'simulate_full_flow': {
         const data = intake.data || {};
-        const name = data.business_name || data['business-name'] || '(sans nom)';
+        const name = data.business_name || data['business-name'] || intake.business_name || '(sans nom)';
         const email = data.email || '—';
         const ok = confirm(
           `Tout déclencher comme un vrai paiement Stripe ?\n\n` +
@@ -1831,7 +1831,7 @@ const PixelPros = {
       }
       case 'mark_paid_manual': {
         const data = intake.data || {};
-        const name = data.business_name || data['business-name'] || '(sans nom)';
+        const name = data.business_name || data['business-name'] || intake.business_name || '(sans nom)';
         const ok = confirm(
           `Marquer ce formulaire comme payé manuellement ?\n\n` +
           `  ${name}\n\n` +
@@ -1845,7 +1845,7 @@ const PixelPros = {
       }
       case 'force_build': {
         const data = intake.data || {};
-        const name = data.business_name || data['business-name'] || '(sans nom)';
+        const name = data.business_name || data['business-name'] || intake.business_name || '(sans nom)';
         const ok = confirm(
           `Construire le site MAINTENANT (sans attendre le paiement) ?\n\n` +
           `  ${name}\n\n` +
@@ -1885,7 +1885,7 @@ const PixelPros = {
         break;
       case 'delete': {
         const data = intake.data || {};
-        const name = data.business_name || data['business-name'] || '(sans nom)';
+        const name = data.business_name || data['business-name'] || intake.business_name || '(sans nom)';
         const status = intake.status || '?';
         const warn = status === 'live'
           ? `⚠ Ce formulaire est en statut "en ligne" (site déployé).\nLe supprimer perd l'historique mais NE FERME PAS le site en ligne (à faire séparément).\n\n`
