@@ -3826,6 +3826,18 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def pixelpros_analytics(self, payload: dict) -> dict:
+        """Stats de fréquentation du site vitrine sur une période (7d/30d/all)."""
+        period = ((payload or {}).get("period") or "30d")
+        from datetime import datetime, timezone, timedelta
+        days = {"7d": 7, "30d": 30, "all": 3650}.get(period, 30)
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        try:
+            from ..integrations.pixelpros import repo as r
+            return {"ok": True, "period": period, "stats": r.analytics_summary(since)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def pixelpros_dispatch_build(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
         if not iid: return {"ok": False, "error": "id manquant"}

@@ -598,6 +598,25 @@ def _git_pull(repo: Path) -> None:
         logger.debug("pixelpros: git pull silencieux: %s", exc)
 
 
+def analytics_summary(since_iso: str) -> dict:
+    """Agrège les stats de fréquentation depuis une date donnée.
+
+    Appelle la fonction Supabase pp_analytics_summary (cf
+    pixel-studio/supabase/pp_analytics.sql) qui renvoie un dict avec :
+    visiteurs_uniques, pages_vues, scroll_moyen, temps_moyen_session_s,
+    formulaires_commences, top_pages[].
+    """
+    sb = _sb()
+    if sb is None:
+        return {}
+    try:
+        res = sb.rpc("pp_analytics_summary", {"p_since": since_iso}).execute()
+        return res.data or {}
+    except Exception as exc:
+        logger.warning("pixelpros.analytics_summary: %s", exc)
+        return {}
+
+
 def _resolve_anthropic_key() -> str:
     """Clé Anthropic à transmettre au builder.
 

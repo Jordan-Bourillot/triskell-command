@@ -184,6 +184,9 @@ const PixelPros = {
           </div>
         </div>
 
+        <!-- Encart Statistiques de fréquentation du site vitrine -->
+        <div id="pp-stats" class="mb-7"></div>
+
         <!-- Funnel synthétique -->
         <div id="pp-funnel" class="mb-7"></div>
 
@@ -207,6 +210,7 @@ const PixelPros = {
       this._renderFailures();
     };
     this._ensureDetailEls();
+    this._renderStats();
 
     await this.refresh();
   },
@@ -363,6 +367,27 @@ const PixelPros = {
 
       /* === KANBAN === */
       .pp-kanban { display:grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap:14px; }
+      .pp-stats-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:14px; }
+      .pp-stats-title { font-size:16px; font-weight:800; color:#e2e8f0; margin:0; }
+      .pp-stats-periods { display:flex; gap:6px; }
+      .pp-stat-period { padding:6px 12px; border-radius:999px; border:1px solid var(--border,#1e293b); background:transparent; color:#94a3b8; font-size:12.5px; font-weight:700; cursor:pointer; transition:all .15s; }
+      .pp-stat-period:hover { color:#e2e8f0; }
+      .pp-stat-period.is-active { background:#facc15; color:#0b0d1a; border-color:#facc15; }
+      .pp-stats-grid { display:grid; grid-template-columns: repeat(5, 1fr); gap:12px; margin-bottom:16px; }
+      @media (max-width:1100px){ .pp-stats-grid { grid-template-columns: repeat(3, 1fr); } }
+      @media (max-width:640px){ .pp-stats-grid { grid-template-columns: repeat(2, 1fr); } }
+      .pp-stat-card { background:var(--surface,#0f172a); border:1px solid var(--border,#1e293b); border-radius:12px; padding:16px 14px; text-align:center; }
+      .pp-stat-ico { font-size:20px; margin-bottom:6px; }
+      .pp-stat-val { font-size:26px; font-weight:900; color:#f8fafc; line-height:1.1; }
+      .pp-stat-lbl { font-size:11.5px; color:#94a3b8; margin-top:5px; font-weight:600; }
+      .pp-stat-top { background:var(--surface,#0f172a); border:1px solid var(--border,#1e293b); border-radius:12px; padding:14px 16px; }
+      .pp-stat-top-title { font-size:13px; font-weight:800; color:#e2e8f0; margin-bottom:8px; }
+      .pp-stat-top-list { list-style:none; margin:0; padding:0; }
+      .pp-stat-top-list li { display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid rgba(148,163,184,.10); font-size:13px; }
+      .pp-stat-top-list li:last-child { border-bottom:none; }
+      .pp-stat-top-page { color:#cbd5e1; word-break:break-all; }
+      .pp-stat-top-n { color:#facc15; font-weight:800; padding-left:10px; }
+      .pp-stat-top-empty { color:#64748b; }
       @media (max-width: 1100px) { .pp-kanban { grid-template-columns: repeat(2, 1fr); } }
       @media (max-width: 640px)  { .pp-kanban { grid-template-columns: 1fr; } }
 
@@ -828,6 +853,44 @@ const PixelPros = {
   },
 
   // ----- ÉCHECS -----
+  async _renderStats(period) {
+    period = period || this.state.statsPeriod || '30d';
+    this.state.statsPeriod = period;
+    const el = document.getElementById('pp-stats');
+    if (!el) return;
+    let res = {};
+    try { res = await App.api.pixelpros_analytics({ period }); } catch (e) {}
+    const s = (res && res.stats) || {};
+    const fmtTime = (sec) => { sec = sec || 0; const m = Math.floor(sec / 60), r = sec % 60; return m ? (m + ' min ' + r + 's') : (r + 's'); };
+    const cards = [
+      { ico: '👤', val: s.visiteurs_uniques ?? 0, lbl: 'Visiteurs uniques' },
+      { ico: '⏱️', val: fmtTime(s.temps_moyen_session_s), lbl: 'Temps moyen / visite' },
+      { ico: '📜', val: (s.scroll_moyen ?? 0) + ' %', lbl: 'Page parcourue (moy.)' },
+      { ico: '📄', val: s.pages_vues ?? 0, lbl: 'Pages vues' },
+      { ico: '📝', val: s.formulaires_commences ?? 0, lbl: 'Formulaires commencés' },
+    ];
+    const top = (s.top_pages || []).map(p =>
+      `<li><span class="pp-stat-top-page">${this._escape(p.page)}</span><span class="pp-stat-top-n">${p.vues}</span></li>`
+    ).join('') || '<li class="pp-stat-top-empty">Pas encore de données — reviens dans quelques heures.</li>';
+    const periods = [['7d', '7 jours'], ['30d', '30 jours'], ['all', 'Tout']];
+    el.innerHTML = `
+      <div class="pp-stats-head">
+        <h3 class="pp-stats-title">📊 Fréquentation du site</h3>
+        <div class="pp-stats-periods">
+          ${periods.map(([k, lab]) => `<button class="pp-stat-period ${period === k ? 'is-active' : ''}" data-period="${k}">${lab}</button>`).join('')}
+        </div>
+      </div>
+      <div class="pp-stats-grid">
+        ${cards.map(c => `<div class="pp-stat-card"><div class="pp-stat-ico">${c.ico}</div><div class="pp-stat-val">${c.val}</div><div class="pp-stat-lbl">${c.lbl}</div></div>`).join('')}
+      </div>
+      <div class="pp-stat-top">
+        <div class="pp-stat-top-title">🔥 Pages les plus regardées</div>
+        <ul class="pp-stat-top-list">${top}</ul>
+      </div>
+    `;
+    el.querySelectorAll('.pp-stat-period').forEach(b => { b.onclick = () => this._renderStats(b.dataset.period); });
+  },
+
   _renderFailures() {
     const el = document.getElementById('pp-failures');
     if (!el) return;
