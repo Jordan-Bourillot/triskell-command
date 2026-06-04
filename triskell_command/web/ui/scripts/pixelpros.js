@@ -34,6 +34,8 @@ const PixelPros = {
     counts: null,
     loading: false,
     search: '',
+    // Onglet actif : 'pipeline' (tunnel clients) ou 'stats' (fréquentation).
+    tab: 'pipeline',
     // Mode auto/manuel pour les mails du pipeline (true = auto, défaut).
     // Sync depuis le backend au refresh.
     mailAuto: { paid: true, live: true },
@@ -170,6 +172,7 @@ const PixelPros = {
 
   async render(container) {
     this._root = container;
+    this._statsLoaded = false;   // les stats se chargent à la 1re ouverture de l'onglet
     container.innerHTML = `
       <section class="animate-slide-up">
         <div class="mb-6 flex items-end justify-between flex-wrap gap-3">
@@ -184,17 +187,26 @@ const PixelPros = {
           </div>
         </div>
 
-        <!-- Encart Statistiques de fréquentation du site vitrine -->
-        <div id="pp-stats" class="mb-7"></div>
+        <!-- ONGLETS : Pipeline (tunnel clients) / Statistiques (fréquentation) -->
+        <div class="pp-tabs" role="tablist">
+          <button class="pp-tab" data-pp-tab="pipeline" role="tab">🚚 Pipeline</button>
+          <button class="pp-tab" data-pp-tab="stats" role="tab">📊 Statistiques</button>
+        </div>
 
-        <!-- Funnel synthétique -->
-        <div id="pp-funnel" class="mb-7"></div>
+        <!-- VUE PIPELINE : le tunnel des sites clients + les échecs -->
+        <div id="pp-view-pipeline" class="pp-view">
+          <!-- Funnel synthétique -->
+          <div id="pp-funnel" class="mb-7"></div>
+          <!-- Kanban -->
+          <div id="pp-kanban" class="pp-kanban"></div>
+          <!-- Section Échecs (apparaît seulement s'il y a des failed) -->
+          <div id="pp-failures" class="mt-7"></div>
+        </div>
 
-        <!-- Kanban -->
-        <div id="pp-kanban" class="pp-kanban"></div>
-
-        <!-- Section Échecs (apparaît seulement s'il y a des failed) -->
-        <div id="pp-failures" class="mt-7"></div>
+        <!-- VUE STATISTIQUES : fréquentation du site vitrine -->
+        <div id="pp-view-stats" class="pp-view" hidden>
+          <div id="pp-stats"></div>
+        </div>
 
         <!-- Panneau de détail : créé dans <body> par _ensureDetailEls() pour
              que son plein écran se cale sur la fenêtre entière, et non sur
@@ -203,14 +215,25 @@ const PixelPros = {
     `;
     this._injectStyles();
 
-    document.getElementById('pp-refresh').onclick = () => this.refresh();
+    document.getElementById('pp-refresh').onclick = () => {
+      // Le bouton rafraîchit la vue active : le pipeline, ou les stats.
+      if (this.state.tab === 'stats') this._renderStats(this.state.statsPeriod);
+      else this.refresh();
+    };
     document.getElementById('pp-search').oninput = (e) => {
       this.state.search = e.target.value.toLowerCase().trim();
       this._renderKanban();
       this._renderFailures();
     };
     this._ensureDetailEls();
-    this._renderStats();
+
+    // Onglets Pipeline / Statistiques — la préférence est retenue d'une fois sur l'autre.
+    this._root.querySelectorAll('[data-pp-tab]').forEach(b => {
+      b.onclick = () => this._setTab(b.dataset.ppTab);
+    });
+    let savedTab = 'pipeline';
+    try { savedTab = localStorage.getItem('pp_tab') || 'pipeline'; } catch (e) {}
+    this._setTab(savedTab);
 
     await this.refresh();
   },
@@ -220,6 +243,13 @@ const PixelPros = {
     const s = document.createElement('style');
     s.id = 'pp-styles';
     s.textContent = `
+      /* === ONGLETS Pipeline / Statistiques === */
+      .pp-tabs { display:flex; gap:4px; margin-bottom:22px; border-bottom:1px solid var(--border,#1e293b); }
+      .pp-tab { appearance:none; -webkit-appearance:none; background:transparent; border:none; border-bottom:2px solid transparent; color:#94a3b8; font-size:14px; font-weight:800; padding:11px 18px; cursor:pointer; transition:color .15s, border-color .15s, background .15s; margin-bottom:-1px; border-radius:8px 8px 0 0; }
+      .pp-tab:hover { color:#e2e8f0; background:rgba(148,163,184,.06); }
+      .pp-tab.is-active { color:#facc15; border-bottom-color:#facc15; }
+      .pp-view { animation: pp-fadein .2s ease; }
+
       /* === FUNNEL synthétique === */
       .pp-funnel { display:flex; align-items:stretch; gap:0; flex-wrap:wrap; background:var(--surface, #0f172a); border:1px solid var(--border, #1e293b); border-radius:14px; padding:14px; }
       .pp-funnel-step { flex:1; min-width:120px; padding:10px 14px; display:flex; flex-direction:column; align-items:center; gap:4px; position:relative; }
@@ -580,6 +610,34 @@ const PixelPros = {
       @keyframes pp-toastin { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
     `;
     document.head.appendChild(s);
+  },
+
+  // Bascule entre la vue Pipeline (tunnel clients) et la vue Statistiques.
+  // La préférence est mémorisée pour la prochaine visite.
+  _setTab(tab) {
+    tab = (tab === 'stats') ? 'stats' : 'pipeline';
+    this.state.tab = tab;
+    try { localStorage.setItem('pp_tab', tab); } catch (e) {}
+
+    if (this._root) {
+      this._root.querySelectorAll('[data-pp-tab]').forEach(b => {
+        b.classList.toggle('is-active', b.dataset.ppTab === tab);
+      });
+    }
+    const vp = document.getElementById('pp-view-pipeline');
+    const vs = document.getElementById('pp-view-stats');
+    if (vp) vp.hidden = (tab !== 'pipeline');
+    if (vs) vs.hidden = (tab !== 'stats');
+
+    // La recherche ne concerne que le pipeline : on la masque côté stats.
+    const search = document.getElementById('pp-search');
+    if (search) search.style.display = (tab === 'pipeline') ? '' : 'none';
+
+    // Les stats ne se chargent qu'à la première ouverture de l'onglet.
+    if (tab === 'stats' && !this._statsLoaded) {
+      this._statsLoaded = true;
+      this._renderStats();
+    }
   },
 
   async refresh() {
