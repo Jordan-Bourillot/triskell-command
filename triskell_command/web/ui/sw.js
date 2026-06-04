@@ -93,6 +93,7 @@ function humanGroup(tag) {
     'replies':       'réponses prospects',
     'sales':         'paiements',
     'clients':       'projets clients',
+    'call':          'appels',
     'system':        'système',
     'triskell-command': 'activité',
   })[tag] || tag;

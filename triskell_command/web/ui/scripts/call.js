@@ -76,6 +76,14 @@ const TriCall = {
     document.addEventListener('click', unlock, { once: true });
     document.addEventListener('keydown', unlock, { once: true });
 
+    // Quand on revient sur la page (typiquement après avoir cliqué la
+    // notification « X t'appelle »), on vérifie aussitôt s'il y a un appel
+    // en attente — sans attendre le prochain tour de veille.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') this._poll();
+    });
+    window.addEventListener('focus', () => this._poll());
+
     // Charge la config (avec qui on parle + serveurs de mise en relation)
     // puis lance la veille des appels entrants.
     this._loadConfig().finally(() => this._startPoll());

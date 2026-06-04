@@ -104,10 +104,50 @@ def send_signal(
         row["mode"] = mode
     try:
         c.raw.table("call_signals").insert(row).execute()
-        return True
     except Exception as exc:
         logger.warning("send_signal: %s", exc)
         return False
+    # Une offre = un appel qui démarre. On réveille le destinataire par une
+    # notification push, pour que ça sonne même s'il n'a pas le site ouvert.
+    if kind == "offer":
+        _notify_incoming_call(me, other, mode)
+    return True
+
+
+def _notify_incoming_call(caller_id: str, callee_id: str, mode: Optional[str]) -> None:
+    """Réveille le destinataire d'un appel par une notification push, même
+    site fermé. Envoyé en tâche de fond pour ne pas ralentir la mise en
+    relation. Sans effet (silencieux) si l'autre n'a jamais activé les
+    notifications — aucune erreur n'est levée dans ce cas.
+    """
+    try:
+        from ..web.auth import get_display_name
+        caller_name = get_display_name(caller_id) or (caller_id or "").capitalize()
+    except Exception:
+        caller_name = (caller_id or "Quelqu’un").capitalize()
+    title = f"📞 {caller_name} t’appelle"
+    body = "Appel vidéo" if mode == "video" else "Appel vocal"
+
+    def _go():
+        try:
+            from ..web.push import send_push
+            send_push(
+                title, body,
+                user_id=callee_id,
+                priority="urgent",      # vibration forte + reste affichée
+                tag="call",
+                tag_group="call",
+                url="/",
+                extra_data={"type": "call", "mode": mode or "audio"},
+            )
+        except Exception as exc:
+            logger.debug("_notify_incoming_call send: %s", exc)
+
+    try:
+        import threading
+        threading.Thread(target=_go, name="call-push", daemon=True).start()
+    except Exception as exc:
+        logger.debug("_notify_incoming_call thread: %s", exc)
 
 
 def poll_signals() -> list[dict[str, Any]]:
