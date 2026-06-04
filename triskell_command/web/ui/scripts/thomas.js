@@ -32,6 +32,16 @@ const Thomas = {
   pendingAttachment: null,    // {url, name, type, size} entre upload et envoi
   pendingReplyTo: null,       // message auquel on est en train de répondre
   pendingEdit: null,          // message que l'on est en train de modifier
+  // Enregistrement d'un message vocal (API MediaRecorder du navigateur)
+  mediaRecorder: null,
+  recordChunks: [],
+  recordStream: null,
+  recordTimerHandle: null,
+  recordStartMs: 0,
+  recordCancelled: false,
+  recordMime: '',
+  _recordExt: 'webm',
+  isRecording: false,
 
   init() {
     const fab = document.getElementById('thomas-fab');
@@ -115,6 +125,15 @@ const Thomas = {
     const emojiBtn = document.getElementById('thomas-emoji-btn');
     if (emojiBtn) emojiBtn.addEventListener('click', () => this._openEmojiPicker(emojiBtn));
 
+    // Micro : démarre l'enregistrement d'un message vocal. La barre
+    // d'enregistrement (annuler / envoyer) prend la place du composer.
+    const micBtn = document.getElementById('thomas-mic-btn');
+    if (micBtn) micBtn.addEventListener('click', () => this._startRecording());
+    const recCancelBtn = document.getElementById('thomas-rec-cancel');
+    if (recCancelBtn) recCancelBtn.addEventListener('click', () => this._cancelRecording());
+    const recSendBtn = document.getElementById('thomas-rec-send');
+    if (recSendBtn) recSendBtn.addEventListener('click', () => this._stopRecordingAndSend());
+
     // Lightbox : clic sur fond ou bouton × ferme
     const lightbox = document.getElementById('thomas-lightbox');
     const lightboxClose = document.getElementById('thomas-lightbox-close');
@@ -143,6 +162,11 @@ const Thomas = {
         const lb = document.getElementById('thomas-lightbox');
         if (lb && !lb.classList.contains('hidden')) {
           this._closeLightbox();
+          return;
+        }
+        // Enregistrement vocal en cours : Échap l'annule (sans fermer le chat).
+        if (this.isRecording) {
+          this._cancelRecording();
           return;
         }
         // Modification ou aperçu "répondre à" en cours : on annule
@@ -302,6 +326,8 @@ const Thomas = {
   // soit directement par popstate quand l'utilisateur tape "retour".
   _teardown() {
     if (!this.open) return;
+    // Si on ferme le chat en plein enregistrement, on coupe le micro.
+    if (this.isRecording) this._cancelRecording();
     const dlg = document.getElementById('thomas-dialog');
     dlg.classList.add('hidden');
     dlg.classList.remove('flex');
@@ -614,7 +640,9 @@ const Thomas = {
     let txt = (msg.body || '').trim();
     if (!txt && msg.attachment_url) {
       const t = String(msg.attachment_type || '').toLowerCase();
-      txt = t.startsWith('image/') ? '📎 Photo' : '📎 Fichier';
+      txt = t.startsWith('image/') ? '📎 Photo'
+          : t.startsWith('audio/') ? '🎤 Message vocal'
+          : '📎 Fichier';
     }
     if (txt.length > max) txt = txt.slice(0, max - 1) + '…';
     return txt;
@@ -1070,6 +1098,24 @@ const Thomas = {
                     hover:opacity-90 transition-opacity"
              style="max-height:240px;"/>`;
     }
+    // Message vocal : petit lecteur audio intégré dans la bulle.
+    if (type.startsWith('audio/')) {
+      return `
+        <div class="thomas-voice">
+          <div class="thomas-voice-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+            Message vocal
+          </div>
+          <audio controls preload="metadata" src="${url}" class="thomas-voice-audio">
+            Lecture impossible sur ce navigateur.
+          </audio>
+        </div>`;
+    }
     return `
       <a href="${url}" target="_blank" rel="noopener"
          class="flex items-center gap-2 px-2 py-2 rounded-lg
@@ -1218,10 +1264,21 @@ const Thomas = {
     const previewEl = document.getElementById('thomas-attach-preview');
     if (!previewEl || !this.pendingAttachment) return;
     const a = this.pendingAttachment;
-    const isImg = String(a.type || '').toLowerCase().startsWith('image/');
+    const lowerType = String(a.type || '').toLowerCase();
+    const isImg = lowerType.startsWith('image/');
+    const isAudio = lowerType.startsWith('audio/');
     const thumb = isImg
       ? `<img src="${this._escape(a.url)}" alt=""
              class="w-12 h-12 object-cover rounded shrink-0"/>`
+      : isAudio
+      ? `<div class="w-12 h-12 rounded bg-bg flex items-center justify-center shrink-0">
+           <svg class="w-5 h-5 text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+             <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+             <line x1="12" y1="19" x2="12" y2="23"/>
+             <line x1="8" y1="23" x2="16" y2="23"/>
+           </svg>
+         </div>`
       : `<div class="w-12 h-12 rounded bg-bg flex items-center justify-center shrink-0">
            <svg class="w-5 h-5 text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
              <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
@@ -1248,6 +1305,160 @@ const Thomas = {
     if (previewEl) {
       previewEl.classList.add('hidden');
       previewEl.innerHTML = '';
+    }
+  },
+
+  // ───────────────────────── Messages vocaux ─────────────────────────
+  /** Choisit un format audio supporté par le navigateur, avec l'extension
+   *  de fichier qui va avec. Opus/WebM partout, sauf Safari/iOS → mp4. */
+  _pickAudioMime() {
+    const candidates = [
+      { mime: 'audio/webm;codecs=opus', ext: 'webm' },
+      { mime: 'audio/webm',             ext: 'webm' },
+      { mime: 'audio/ogg;codecs=opus',  ext: 'ogg'  },
+      { mime: 'audio/mp4',              ext: 'm4a'  },
+    ];
+    const MR = window.MediaRecorder;
+    for (const c of candidates) {
+      if (MR && typeof MR.isTypeSupported === 'function' && MR.isTypeSupported(c.mime)) {
+        return c;
+      }
+    }
+    return { mime: '', ext: 'webm' };
+  },
+
+  /** Démarre l'enregistrement : demande le micro, lance MediaRecorder et
+   *  bascule l'interface sur la barre d'enregistrement. */
+  async _startRecording() {
+    if (this.isRecording) return;
+    // Garde-fou : micro indisponible (vieux navigateur, ou page non sécurisée).
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+      window.alert("Ton navigateur ne permet pas d'enregistrer un message vocal.");
+      return;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      window.alert("Impossible d'accéder au micro. Autorise le micro dans ton navigateur pour envoyer un message vocal.");
+      return;
+    }
+    const picked = this._pickAudioMime();
+    this.recordMime = picked.mime;
+    this._recordExt = picked.ext;
+    this.recordStream = stream;
+    this.recordChunks = [];
+    this.recordCancelled = false;
+    let rec;
+    try {
+      rec = picked.mime
+        ? new MediaRecorder(stream, { mimeType: picked.mime })
+        : new MediaRecorder(stream);
+    } catch (e) {
+      rec = new MediaRecorder(stream);  // fallback : format par défaut du navigateur
+    }
+    this.mediaRecorder = rec;
+    rec.addEventListener('dataavailable', (e) => {
+      if (e.data && e.data.size > 0) this.recordChunks.push(e.data);
+    });
+    rec.addEventListener('stop', () => this._onRecordStop());
+    rec.start();
+    this.isRecording = true;
+    this._showRecordingUI();
+  },
+
+  _showRecordingUI() {
+    const composer = document.getElementById('thomas-composer');
+    const bar = document.getElementById('thomas-recording-bar');
+    if (composer) composer.classList.add('hidden');
+    if (bar) {
+      bar.classList.remove('hidden');
+      bar.classList.add('flex');
+    }
+    this.recordStartMs = Date.now();
+    this._updateRecordTimer();
+    if (this.recordTimerHandle) clearInterval(this.recordTimerHandle);
+    this.recordTimerHandle = setInterval(() => this._updateRecordTimer(), 250);
+  },
+
+  _hideRecordingUI() {
+    const composer = document.getElementById('thomas-composer');
+    const bar = document.getElementById('thomas-recording-bar');
+    if (bar) {
+      bar.classList.add('hidden');
+      bar.classList.remove('flex');
+    }
+    if (composer) composer.classList.remove('hidden');
+    if (this.recordTimerHandle) {
+      clearInterval(this.recordTimerHandle);
+      this.recordTimerHandle = null;
+    }
+  },
+
+  _updateRecordTimer() {
+    const el = document.getElementById('thomas-rec-timer');
+    if (!el) return;
+    const secs = Math.max(0, Math.floor((Date.now() - this.recordStartMs) / 1000));
+    const mm = Math.floor(secs / 60);
+    const ss = String(secs % 60).padStart(2, '0');
+    el.textContent = `${mm}:${ss}`;
+  },
+
+  /** Coupe le flux micro : libère le matériel et fait disparaître l'icône
+   *  "enregistrement" de l'onglet du navigateur. */
+  _releaseStream() {
+    if (this.recordStream) {
+      try { this.recordStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+      this.recordStream = null;
+    }
+  },
+
+  /** Annule : on jette l'enregistrement, rien n'est envoyé. */
+  _cancelRecording() {
+    if (!this.isRecording) return;
+    this.recordCancelled = true;
+    this.isRecording = false;
+    try {
+      if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') this.mediaRecorder.stop();
+    } catch (e) {}
+    this._releaseStream();
+    this._hideRecordingUI();
+  },
+
+  /** Stoppe l'enregistrement et déclenche l'envoi (via l'event "stop"). */
+  _stopRecordingAndSend() {
+    if (!this.isRecording) return;
+    this.recordCancelled = false;
+    this.isRecording = false;
+    try {
+      if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') this.mediaRecorder.stop();
+    } catch (e) {
+      this._releaseStream();
+      this._hideRecordingUI();
+    }
+    // La suite (assemblage + upload + envoi) se fait dans _onRecordStop.
+  },
+
+  /** Appelé quand MediaRecorder a fini : assemble le son, l'upload comme
+   *  une pièce jointe, puis envoie le message. */
+  async _onRecordStop() {
+    this._releaseStream();
+    this._hideRecordingUI();
+    const cancelled = this.recordCancelled;
+    const chunks = this.recordChunks || [];
+    this.recordChunks = [];
+    if (cancelled || !chunks.length) return;
+    const type = this.recordMime ? this.recordMime.split(';')[0] : 'audio/webm';
+    const blob = new Blob(chunks, { type });
+    if (!blob.size) return;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const file = new File([blob], `message_vocal_${stamp}.${this._recordExt || 'webm'}`, {
+      type, lastModified: Date.now(),
+    });
+    // Réutilise le flux des pièces jointes : upload → pendingAttachment → envoi.
+    await this._uploadAttachment(file);
+    if (this.pendingAttachment) {
+      await this.send();
     }
   },
 

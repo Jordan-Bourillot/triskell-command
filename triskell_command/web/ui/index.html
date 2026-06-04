@@ -539,7 +539,8 @@
            class="hidden px-3 pt-2 border-t border-border bg-surface"></div>
 
       <!-- Composer -->
-      <div class="p-3 border-t border-border bg-surface flex items-center gap-1">
+      <div id="thomas-composer"
+           class="p-3 border-t border-border bg-surface flex items-center gap-1">
         <!-- Trombone : ouvre le picker de fichier -->
         <button id="thomas-attach-btn" type="button"
                 class="w-8 h-9 shrink-0 rounded-lg flex items-center justify-center
@@ -572,6 +573,20 @@
           😊
         </button>
 
+        <!-- Bouton micro : enregistre un message vocal -->
+        <button id="thomas-mic-btn" type="button"
+                class="w-8 h-9 shrink-0 rounded-lg flex items-center justify-center
+                       text-text-muted hover:text-text hover:bg-bg
+                       transition-colors"
+                title="Enregistrer un message vocal">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </button>
+
         <input id="thomas-input" type="text"
                placeholder="Écris un message à Thomas…"
                autocomplete="off"
@@ -589,6 +604,40 @@
                        text-white
                        hover:shadow-soft transition-all
                        disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 2L11 13"/>
+            <path d="M22 2l-7 20-4-9-9-4 20-7z"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Barre d'enregistrement vocal : cachée par défaut, elle remplace
+           le composer pendant qu'on enregistre un message vocal. -->
+      <div id="thomas-recording-bar"
+           class="hidden p-3 border-t border-border bg-surface items-center gap-3">
+        <!-- Annuler : jette l'enregistrement -->
+        <button id="thomas-rec-cancel" type="button"
+                class="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center
+                       text-text-muted hover:text-danger hover:bg-bg transition-colors"
+                title="Annuler l'enregistrement">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            <path d="M10 11v6M14 11v6"/>
+          </svg>
+        </button>
+        <!-- Indicateur "en train d'enregistrer" + minuteur -->
+        <div class="flex-1 min-w-0 flex items-center gap-2">
+          <span class="thomas-rec-dot"></span>
+          <span class="text-sm text-text">Enregistrement…</span>
+          <span id="thomas-rec-timer" class="text-sm text-text-muted tabular-nums ml-auto">0:00</span>
+        </div>
+        <!-- Envoyer le message vocal (stoppe et envoie) -->
+        <button id="thomas-rec-send" type="button"
+                class="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center
+                       bg-gradient-to-br from-accent to-accent-hover text-white
+                       hover:shadow-soft transition-all"
+                title="Envoyer le message vocal">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 2L11 13"/>
             <path d="M22 2l-7 20-4-9-9-4 20-7z"/>
