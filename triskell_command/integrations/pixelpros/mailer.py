@@ -579,6 +579,76 @@ def _contact_html(name: str, visitor_email: str, message: str,
     )
 
 
+def _studio_contact_html(name: str, email: str, phone: str,
+                         message: str, page_source: str) -> str:
+    n = _html(name or "visiteur")
+    em = _html(email)
+    msg_html = _html(message).replace("\n", "<br>")
+    rows = (
+        "<tr><td style=\"padding:6px 0; color:#6b7280; width:90px;\">De</td>"
+        "<td style=\"padding:6px 0; font-weight:700;\">" + n + "</td></tr>"
+        "<tr><td style=\"padding:6px 0; color:#6b7280;\">Email</td>"
+        "<td style=\"padding:6px 0;\"><a href=\"mailto:" + em + "\" style=\"color:#2563eb;\">" + em + "</a></td></tr>"
+    )
+    if phone:
+        rows += ("<tr><td style=\"padding:6px 0; color:#6b7280;\">Téléphone</td>"
+                 "<td style=\"padding:6px 0;\">" + _html(phone) + "</td></tr>")
+    if page_source:
+        rows += ("<tr><td style=\"padding:6px 0; color:#6b7280;\">Page</td>"
+                 "<td style=\"padding:6px 0; color:#6b7280;\">" + _html(page_source) + "</td></tr>")
+    return (
+        "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"></head>"
+        "<body style=\"margin:0; padding:0; background:#f4f5f7; font-family:-apple-system,"
+        "BlinkMacSystemFont,'Segoe UI',sans-serif; color:#0b0d1a;\">"
+        "<div style=\"max-width:560px; margin:0 auto; padding:28px 20px;\">"
+        "<div style=\"background:#ffffff; border-radius:14px; padding:26px 24px; "
+        "box-shadow:0 2px 8px rgba(0,0,0,.06);\">"
+        "<p style=\"margin:0 0 4px; font-size:13px; letter-spacing:.06em; "
+        "text-transform:uppercase; color:#6b7280; font-weight:700;\">📬 Formulaire de contact</p>"
+        "<h1 style=\"margin:0 0 18px; font-size:20px;\">Nouveau message depuis pixel-pros.fr</h1>"
+        "<table style=\"width:100%; font-size:14.5px; border-collapse:collapse; margin-bottom:18px;\">"
+        + rows +
+        "</table>"
+        "<div style=\"padding:16px 18px; background:#f9fafb; border:1px solid #e5e7eb; "
+        "border-radius:10px; font-size:15px; line-height:1.6;\">" + msg_html + "</div>"
+        "<p style=\"margin:18px 0 0; font-size:13.5px; color:#6b7280;\">"
+        "💬 Pour répondre, réponds simplement à ce mail — ta réponse partira vers " + em + ".</p>"
+        "</div>"
+        "<p style=\"text-align:center; margin:16px 0 0; font-size:11.5px; color:#9ca3af;\">"
+        "Reçu via le formulaire de contact de pixel-pros.fr</p>"
+        "</div></body></html>"
+    )
+
+
+def send_studio_contact(*, name: str, email: str, phone: str = "",
+                        message: str = "", page_source: str = "") -> tuple[bool, str]:
+    """Relaie un message reçu via le formulaire de contact de pixel-pros.fr
+    (le site vitrine lui-même, pas un site client) à l'équipe Pixel Pros.
+
+    Destinataire : variable d'env PIXELPROS_CONTACT_TO, sinon l'adresse de
+    secours (l'expéditeur configuré, ou contact@pixel-pros.fr).
+    Reply-To = email du visiteur, pour répondre en répondant au mail.
+    """
+    cfg = _load_smtp_config()
+    if cfg is None:
+        return False, "Config SMTP introuvable (shared_settings.smtp_pixel_pros ou smtp_config)"
+    import os
+    to = (os.environ.get("PIXELPROS_CONTACT_TO") or "").strip() or _ops_inbox(cfg)
+    subject = f"📬 Nouveau message pixel-pros.fr — {name or 'visiteur'}"
+    phone_line = f"\nTéléphone : {phone}" if phone else ""
+    page_line = f"\nPage : {page_source}" if page_source else ""
+    body = (
+        "Nouveau message depuis le formulaire de contact de pixel-pros.fr\n\n"
+        f"De : {name}\nEmail : {email}{phone_line}{page_line}\n\n"
+        f"Message :\n{message}\n"
+    )
+    body_html = _studio_contact_html(name, email, phone, message, page_source)
+    ok = _send_via_smtp(cfg, to=to, subject=subject, body=body,
+                        body_html=body_html, source="pixelpros_studio_contact",
+                        reply_to=email)
+    return (True, f"Envoyé à {to}") if ok else (False, "Envoi SMTP a échoué (voir logs)")
+
+
 def send_contact_message(intake: Optional[dict], *, slug: str,
                          visitor_name: str, visitor_email: str,
                          visitor_message: str) -> tuple[bool, str]:

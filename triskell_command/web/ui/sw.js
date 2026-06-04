@@ -94,6 +94,7 @@ function humanGroup(tag) {
     'sales':         'paiements',
     'clients':       'projets clients',
     'call':          'appels',
+    'contact':       'messages',
     'system':        'système',
     'triskell-command': 'activité',
   })[tag] || tag;

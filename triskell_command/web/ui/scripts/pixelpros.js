@@ -44,6 +44,7 @@ const PixelPros = {
   // Colonnes Kanban : 4 statuts principaux dans l'ordre du flow.
   // Les échecs ont leur propre section en bas.
   COLUMNS: [
+    { status: 'contact',  label: 'Messages reçus',      icon: '✉️', accent: '#f59e0b', short: 'Messages' },
     { status: 'recall',   label: 'On vous rappelle',    icon: '☎️', accent: '#06b6d4', short: 'À rappeler' },
     { status: 'draft',    label: 'Formulaire reçu',     icon: '📝', accent: '#94a3b8', short: 'Formulaires' },
     { status: 'paid',     label: 'Payé · à construire', icon: '💳', accent: '#facc15', short: 'Payés' },
@@ -1190,6 +1191,12 @@ const PixelPros = {
       </div>
 
       ${errMsg ? `<div class="pp-detail-section"><div class="pp-error-box">⚠ ${this._escape(errMsg)}</div></div>` : ''}
+
+      ${data.message ? `
+        <div class="pp-detail-section">
+          <div class="pp-detail-section-title">Message</div>
+          <div class="pp-msg-box">${this._escape(data.message)}</div>
+        </div>` : ''}
 
       ${this._paymentBlock(intake)}
 

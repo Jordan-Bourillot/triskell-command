@@ -75,6 +75,7 @@ PUBLIC_API_PATHS = {
     "/api/pixelpros/on_built",  # Builder Python → mail "site en ligne"
     "/api/pixelpros/affiliate-login-request",  # Demande de magic link affilié (public, rate-limité)
     "/api/pixelpros/contact",  # Formulaire de contact des sites clients (public, rate-limité)
+    "/api/pixelpros/contact_studio",  # Formulaire de contact de pixel-pros.fr (public, rate-limité)
 }
 
 # Utilisateurs reconnus (étendre ici si on ajoute du monde)

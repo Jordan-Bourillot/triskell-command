@@ -826,6 +826,73 @@ def create_app() -> FastAPI:
             logger.exception("pixelpros.contact a échoué")
             return _reply(False, "L'envoi n'a pas marché, réessaie dans un instant.", status=500)
 
+    @app.post("/api/pixelpros/contact_studio")
+    async def pixelpros_contact_studio(request: Request):
+        """Message reçu via le formulaire de contact de pixel-pros.fr LUI-MÊME
+        (le site vitrine, pas un site client). On prévient l'équipe Pixel Pros
+        par mail + notification push. Le message est, en parallèle, déjà
+        enregistré dans le Pipeline côté Supabase (RPC pp_create_contact
+        appelée depuis le site) — donc même si ce relais échoue, rien n'est
+        perdu."""
+        ip = (request.client.host if request.client else "?") or "?"
+        payload: dict = {}
+        try:
+            payload = await request.json()
+        except Exception:
+            try:
+                form = await request.form()
+                payload = {k: form.get(k) for k in form} if form else {}
+            except Exception:
+                payload = {}
+
+        def _g(key: str) -> str:
+            v = payload.get(key) if isinstance(payload, dict) else None
+            return str(v).strip() if v is not None else ""
+
+        name = _g("name")
+        email = _g("email")
+        phone = _g("phone")
+        message = _g("message")
+        page_source = _g("page_source")
+        honey = _g("website")  # honeypot anti-bot
+
+        if honey:
+            return JSONResponse(content={"ok": True})  # bot : on fait semblant
+        if not _contact_rate_ok(ip):
+            return JSONResponse(status_code=429, content={"ok": False, "error": "rate_limited"})
+        if not name or not email or "@" not in email or not message:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "invalid"})
+        if len(name) > 200 or len(email) > 320 or len(message) > 5000 or len(phone) > 60:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "too_long"})
+
+        sent_mail = False
+        try:
+            from ..integrations.pixelpros import mailer as m
+            ok, info = m.send_studio_contact(
+                name=name, email=email, phone=phone,
+                message=message, page_source=page_source,
+            )
+            sent_mail = bool(ok)
+            if not ok:
+                logger.warning("pixelpros.contact_studio mail KO : %s", info)
+        except Exception:
+            logger.exception("pixelpros.contact_studio mail a échoué")
+
+        # Notification push (best-effort) — Jordan pilote Pixel Pros.
+        try:
+            from .push import send_push
+            preview = (message[:90] + "…") if len(message) > 90 else message
+            send_push(
+                f"📬 Message de {name}", preview,
+                user_id="jordan", priority="normal",
+                tag="contact", tag_group="contact", url="/",
+                extra_data={"type": "pp_contact"},
+            )
+        except Exception as exc:
+            logger.debug("pixelpros.contact_studio push KO : %s", exc)
+
+        return JSONResponse(content={"ok": True, "mailed": sent_mail})
+
     # ---------------- Static files (UI) ----------------
 
     if UI_DIR.exists():
