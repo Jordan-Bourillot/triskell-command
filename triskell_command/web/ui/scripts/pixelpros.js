@@ -396,6 +396,16 @@ const PixelPros = {
       .pp-stat-top-views { color:#facc15; font-weight:800; font-size:13px; white-space:nowrap; min-width:62px; text-align:right; }
       .pp-stat-top-empty { color:#64748b; padding:8px 0; }
       @media (max-width:640px){ .pp-stat-top-row { grid-template-columns: 1fr auto; } .pp-stat-top-barwrap { display:none; } }
+      .pp-stats-2col { display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-top:14px; }
+      @media (max-width:900px){ .pp-stats-2col { grid-template-columns: 1fr; } }
+      .pp-stat-device-bar { display:flex; height:14px; border-radius:999px; overflow:hidden; margin:8px 0 14px; background:rgba(148,163,184,.12); }
+      .pp-stat-device-mob { background:#38bdf8; }
+      .pp-stat-device-ord { background:#a78bfa; }
+      .pp-stat-device-legend { display:flex; flex-direction:column; gap:7px; font-size:13px; color:#cbd5e1; }
+      .pp-stat-device-legend > span { display:flex; align-items:center; gap:8px; }
+      .pp-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+      .pp-dot-mob { background:#38bdf8; }
+      .pp-dot-ord { background:#a78bfa; }
       @media (max-width: 1100px) { .pp-kanban { grid-template-columns: repeat(2, 1fr); } }
       @media (max-width: 640px)  { .pp-kanban { grid-template-columns: 1fr; } }
 
@@ -904,6 +914,17 @@ const PixelPros = {
       </li>`;
     }).join('') : '<li class="pp-stat-top-empty">Pas encore de donnees — les pages apparaitront ici des les premieres visites.</li>';
 
+    const srcs = s.sources || [];
+    const maxS = Math.max.apply(null, srcs.map(x => x.visiteurs).concat([1]));
+    const srcHtml = srcs.length ? srcs.map(x => {
+      const pct = Math.round(x.visiteurs / maxS * 100);
+      return `<li class="pp-stat-top-row"><div class="pp-stat-top-info"><span class="pp-stat-top-name">${this._escape(x.source)}</span></div><div class="pp-stat-top-barwrap"><div class="pp-stat-top-bar" style="width:${pct}%"></div></div><span class="pp-stat-top-views">${x.visiteurs}</span></li>`;
+    }).join('') : '<li class="pp-stat-top-empty">Pas encore de données.</li>';
+    const app = s.appareils || {};
+    const mob = app.mobile || 0, ord = app.ordinateur || 0, totApp = mob + ord;
+    const mobPct = totApp ? Math.round(mob / totApp * 100) : 0;
+    const ordPct = totApp ? 100 - mobPct : 0;
+
     const periods = [['7d', '7 jours'], ['30d', '30 jours'], ['all', 'Tout']];
     el.innerHTML = `
       <div class="pp-stats-head">
@@ -921,6 +942,17 @@ const PixelPros = {
       <div class="pp-stat-top">
         <div class="pp-stat-top-head"><span class="pp-stat-top-title">🔥 Pages les plus regardées</span><span class="pp-stat-top-coltitle">Nombre de vues</span></div>
         <ul class="pp-stat-top-list">${topHtml}</ul>
+      </div>
+      <div class="pp-stats-2col">
+        <div class="pp-stat-top">
+          <div class="pp-stat-top-head"><span class="pp-stat-top-title">🔗 D'où viennent les visiteurs</span><span class="pp-stat-top-coltitle">Visiteurs</span></div>
+          <ul class="pp-stat-top-list">${srcHtml}</ul>
+        </div>
+        <div class="pp-stat-top">
+          <div class="pp-stat-top-head"><span class="pp-stat-top-title">📱 Mobile / Ordinateur</span></div>
+          ${totApp ? `<div class="pp-stat-device-bar"><div class="pp-stat-device-mob" style="width:${mobPct}%"></div><div class="pp-stat-device-ord" style="width:${ordPct}%"></div></div>
+          <div class="pp-stat-device-legend"><span><span class="pp-dot pp-dot-mob"></span>Mobile · ${mob} (${mobPct} %)</span><span><span class="pp-dot pp-dot-ord"></span>Ordinateur · ${ord} (${ordPct} %)</span></div>` : '<div class="pp-stat-top-empty">Pas encore de données.</div>'}
+        </div>
       </div>
     `;
     el.querySelectorAll('.pp-stat-period').forEach(b => { b.onclick = () => this._renderStats(b.dataset.period); });
