@@ -44,6 +44,10 @@ const TriCall = {
   audioCtx: null,
   savedTitle: null,
 
+  // Empêche l'écran de s'éteindre pendant un appel (sinon le téléphone se
+  // met en veille et coupe la communication).
+  wakeLock: null,
+
   CALL_TIMEOUT_MS: 35000,  // sans réponse au-delà → on abandonne
 
   init() {
@@ -80,7 +84,12 @@ const TriCall = {
     // notification « X t'appelle »), on vérifie aussitôt s'il y a un appel
     // en attente — sans attendre le prochain tour de veille.
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') this._poll();
+      if (document.visibilityState === 'visible') {
+        this._poll();
+        // Le navigateur lâche le « garde l'écran allumé » dès que l'onglet
+        // passe en arrière-plan : on le reprend au retour si on est en appel.
+        if (this.state !== 'idle') this._acquireWakeLock();
+      }
     });
     window.addEventListener('focus', () => this._poll());
 
@@ -166,6 +175,7 @@ const TriCall = {
     this.callId = this._newId();
     this.state = 'outgoing';
     this._startPoll();
+    this._acquireWakeLock();
 
     let stream;
     try {
@@ -231,6 +241,7 @@ const TriCall = {
     }
     this.state = 'incoming';
     this._startPoll();
+    this._acquireWakeLock();
     this._showIncoming();
     this._ring();
     // L'appelant abandonne après ~35 s ; on ferme la sonnerie un peu après
@@ -481,6 +492,7 @@ const TriCall = {
     this._stopRing();
     this._stopRingback();
     this._stopTitleBlink();
+    this._releaseWakeLock();
     if (this.durationHandle) { clearInterval(this.durationHandle); this.durationHandle = null; }
     if (this.callTimeoutHandle) { clearTimeout(this.callTimeoutHandle); this.callTimeoutHandle = null; }
     if (this.pc) { try { this.pc.close(); } catch (e) {} this.pc = null; }
@@ -649,6 +661,27 @@ const TriCall = {
   _stopTitleBlink() {
     if (this.titleBlinkHandle) { clearInterval(this.titleBlinkHandle); this.titleBlinkHandle = null; }
     if (this.savedTitle != null) { document.title = this.savedTitle; this.savedTitle = null; }
+  },
+
+  // ------------------------------------------------------------------
+  // Garde l'écran allumé tant qu'un appel est en cours, pour que le
+  // téléphone ne se mette pas en veille (ce qui couperait le micro et donc
+  // l'appel). Le navigateur relâche ce verrou dès que l'onglet passe en
+  // arrière-plan ; on le reprend au retour (voir visibilitychange).
+  // ------------------------------------------------------------------
+  async _acquireWakeLock() {
+    try {
+      if (!('wakeLock' in navigator) || this.wakeLock) return;
+      this.wakeLock = await navigator.wakeLock.request('screen');
+      this.wakeLock.addEventListener('release', () => { this.wakeLock = null; });
+    } catch (e) { /* non supporté ou refusé : sans gravité */ }
+  },
+
+  _releaseWakeLock() {
+    try {
+      if (this.wakeLock) this.wakeLock.release();
+    } catch (e) {}
+    this.wakeLock = null;
   },
 
   // ------------------------------------------------------------------
