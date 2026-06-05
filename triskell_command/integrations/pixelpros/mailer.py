@@ -19,6 +19,7 @@ Templates éditables :
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -128,14 +129,19 @@ DEFAULT_LIVE = {
         "Tu reçois un nouveau mail dès que ton adresse définitive est active.\n\n"
         "Quelque chose à modifier (texte, photo, couleur, n'importe quoi) ? Tu réponds à ce mail\n"
         "et on s'en occupe — les modifs sont incluses dans ton abonnement.\n\n"
+        "<!--CARNET-->"
         "🎁 Petit cadeau de bienvenue : Carnet\n"
         "On t'offre Carnet, notre outil pour faire tes devis et tes factures en deux clics depuis ton téléphone.\n"
         "Aucune installation, aucun compte à créer, c'est dans ton navigateur :\n\n"
         "  https://carnet-pro-fr.netlify.app\n\n"
+        "<!--/CARNET-->"
         "Quelques petits conseils pour démarrer :\n"
         "  • Partage le lien à tes proches et tes clients\n"
         "  • Ajoute-le sur Google Business, Instagram, ta signature mail\n"
-        "  • Si tu n'as pas pris le pack TOUT-EN-UN et que tu veux ton propre nom de domaine, on peut l'ajouter à tout moment\n\n"
+        "<!--NOPACK-->"
+        "  • Si tu n'as pas pris le pack TOUT-EN-UN et que tu veux ton propre nom de domaine, on peut l'ajouter à tout moment\n"
+        "<!--/NOPACK-->"
+        "\n"
         "À très vite,\n"
         "L'équipe Pixel Pros\n"
         "https://pixel-pros.fr"
@@ -183,6 +189,7 @@ DEFAULT_LIVE = {
         "      <p style=\"margin:0; font-size:13.5px; color:#1f5a3c; font-weight:700;\">📧 Tu reçois un nouveau mail dès que ton adresse définitive est active.</p>\n"
         "    </div>\n"
         "\n"
+        "<!--CARNET-->"
         "    <!-- Encart cadeau Carnet -->\n"
         "    <div style=\"background:#fff8ed; border:3px solid #0b0d1a; border-radius:12px; box-shadow:4px 4px 0 #0b0d1a; padding:22px 22px; margin:32px 0 8px; position:relative;\">\n"
         "      <div style=\"display:inline-block; background:#ec4899; color:#fff; font-family:'Press Start 2P', monospace; font-size:9px; padding:5px 10px; border:2px solid #0b0d1a; border-radius:5px; box-shadow:2px 2px 0 #0b0d1a; letter-spacing:0.04em; margin-bottom:14px;\">🎁 TON CADEAU</div>\n"
@@ -192,6 +199,7 @@ DEFAULT_LIVE = {
         "        <a href=\"https://carnet-pro-fr.netlify.app\" style=\"display:inline-block; background:#22c55e; color:#ffffff; font-weight:900; padding:13px 26px; border:3px solid #0b0d1a; border-radius:10px; box-shadow:4px 4px 0 #0b0d1a; text-decoration:none; font-size:14.5px; letter-spacing:0.02em;\">📓 OUVRIR MON CARNET</a>\n"
         "      </p>\n"
         "    </div>\n"
+        "<!--/CARNET-->"
         "\n"
         "    <!-- Conseils -->\n"
         "    <p style=\"margin:28px 0 12px; font-weight:800; font-size:13px; letter-spacing:0.08em; text-transform:uppercase; color:#51546b;\">▶ Quelques conseils pour démarrer</p>\n"
@@ -204,10 +212,12 @@ DEFAULT_LIVE = {
         "        <span style=\"font-size:18px; line-height:1; flex-shrink:0;\">📍</span>\n"
         "        <span style=\"font-size:14.5px; line-height:1.5;\">Ajoute-le sur Google Business, Instagram, ta signature mail</span>\n"
         "      </div>\n"
+        "<!--NOPACK-->"
         "      <div style=\"display:flex; align-items:flex-start; gap:12px; padding:12px 14px; background:#fff8ed; border:2px solid #0b0d1a; border-radius:10px;\">\n"
         "        <span style=\"font-size:18px; line-height:1; flex-shrink:0;\">🌐</span>\n"
         "        <span style=\"font-size:14.5px; line-height:1.5;\">Pas pris le pack TOUT-EN-UN ? On peut ajouter ton propre nom de domaine quand tu veux.</span>\n"
         "      </div>\n"
+        "<!--/NOPACK-->"
         "    </div>\n"
         "\n"
         "    <!-- Modifs -->\n"
@@ -346,11 +356,40 @@ def reset_template(kind: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _apply_pack_blocks(s: str, is_combo: bool) -> str:
+    """Affiche ou masque les blocs conditionnels du mail selon l'offre prise.
+
+    - ``<!--CARNET-->…<!--/CARNET-->`` : visible UNIQUEMENT pour le Pack
+      TOUT-EN-UN (le cadeau Carnet est réservé au pack).
+    - ``<!--NOPACK-->…<!--/NOPACK-->`` : visible UNIQUEMENT hors pack (ex. la
+      note « ajoute ton domaine » n'a pas de sens pour un client qui a déjà le
+      pack).
+
+    Bloc gardé → on retire seulement ses balises ; bloc masqué → on retire les
+    balises ET leur contenu.
+    """
+    def _resolve(text: str, tag: str, keep: bool) -> str:
+        if keep:
+            return text.replace(f"<!--{tag}-->", "").replace(f"<!--/{tag}-->", "")
+        return re.sub(rf"<!--{tag}-->.*?<!--/{tag}-->", "", text, flags=re.DOTALL)
+
+    out = _resolve(s or "", "CARNET", keep=is_combo)
+    out = _resolve(out, "NOPACK", keep=not is_combo)
+    return out
+
+
 def _render_placeholders(template: dict, intake: dict) -> tuple[str, str, str]:
     """Substitue les placeholders dans le template avec les données du draft."""
     data = intake.get("data") or {}
     if not isinstance(data, dict):
         data = {}
+
+    # Offre prise par le client : le cadeau Carnet est réservé au Pack TOUT-EN-UN.
+    selected_option = str(
+        intake.get("selected_option") or data.get("selected_option") or ""
+    ).strip().lower()
+    is_combo = selected_option == "combo"
+
     firstname = _firstname_from(data)
     business = data.get("business_name") or data.get("business-name") or ""
     site_url = intake.get("site_url") or ""
@@ -379,8 +418,8 @@ def _render_placeholders(template: dict, intake: dict) -> tuple[str, str, str]:
     html_ctx["site_url"] = _html(site_url)
 
     subject = _safe_format(template.get("subject", ""), ctx)
-    body_text = _safe_format(template.get("body_text", ""), ctx)
-    body_html = _safe_format(template.get("body_html", ""), html_ctx)
+    body_text = _safe_format(_apply_pack_blocks(template.get("body_text", ""), is_combo), ctx)
+    body_html = _safe_format(_apply_pack_blocks(template.get("body_html", ""), is_combo), html_ctx)
     return subject, body_text, body_html
 
 
