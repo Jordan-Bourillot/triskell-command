@@ -259,7 +259,9 @@ const PixelPros = {
       .pp-tab { appearance:none; -webkit-appearance:none; background:transparent; border:none; border-bottom:2px solid transparent; color:#94a3b8; font-size:14px; font-weight:800; padding:11px 18px; cursor:pointer; transition:color .15s, border-color .15s, background .15s; margin-bottom:-1px; border-radius:8px 8px 0 0; }
       .pp-tab:hover { color:#e2e8f0; background:rgba(148,163,184,.06); }
       .pp-tab.is-active { color:#facc15; border-bottom-color:#facc15; }
+      .pp-tab-badge { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; margin-left:7px; border-radius:999px; background:#f59e0b; color:#0b0d1a; font-size:11px; font-weight:900; line-height:1; vertical-align:middle; }
       .pp-view { animation: pp-fadein .2s ease; }
+      .pp-comm-intro { color:#94a3b8; font-size:13.5px; line-height:1.5; margin:0 0 18px; }
 
       /* === FUNNEL synthétique === */
       .pp-funnel { display:flex; align-items:stretch; gap:0; flex-wrap:wrap; background:var(--surface, #0f172a); border:1px solid var(--border, #1e293b); border-radius:14px; padding:14px; }
@@ -449,6 +451,10 @@ const PixelPros = {
       .pp-dot-ord { background:#a78bfa; }
       @media (max-width: 1100px) { .pp-kanban { grid-template-columns: repeat(2, 1fr); } }
       @media (max-width: 640px)  { .pp-kanban { grid-template-columns: 1fr; } }
+
+      /* Communication : 2 colonnes (messages + rappels), pleine largeur sur petit écran. */
+      .pp-kanban-comm { grid-template-columns: repeat(2, minmax(240px, 420px)); }
+      @media (max-width: 640px) { .pp-kanban-comm { grid-template-columns: 1fr; } }
 
       .pp-col { background:var(--surface, #0f172a); border:1px solid var(--border, #1e293b); border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:10px; min-height:200px; }
       .pp-col-head { display:flex; align-items:center; justify-content:space-between; padding-bottom:10px; border-bottom:2px solid var(--col-accent, #94a3b8); }
@@ -923,17 +929,29 @@ const PixelPros = {
   },
 
   // ----- KANBAN -----
+  // Deux tableaux distincts, alimentés par les mêmes données :
+  //  - Pipeline (#pp-kanban)      : colonnes du tunnel des sites.
+  //  - Communication (#pp-comm-kanban) : messages reçus + demandes de rappel.
   _renderKanban() {
-    const el = document.getElementById('pp-kanban');
+    const pipelineCols = this.COLUMNS.filter(c => c.group !== 'comm');
+    const commCols     = this.COLUMNS.filter(c => c.group === 'comm');
+    this._renderColumns('pp-kanban', pipelineCols, 'Aucune commande ici.');
+    this._renderColumns('pp-comm-kanban', commCols, 'Personne pour le moment.');
+    this._updateCommBadge();
+  },
+
+  // Rend un jeu de colonnes Kanban dans le conteneur demandé.
+  _renderColumns(containerId, columns, emptyLabel) {
+    const el = document.getElementById(containerId);
     if (!el) return;
     const groups = {};
-    for (const col of this.COLUMNS) groups[col.status] = [];
+    for (const col of columns) groups[col.status] = [];
     const filtered = this._filteredIntakes();
     for (const it of filtered) {
       if (groups[it.status]) groups[it.status].push(it);
     }
 
-    el.innerHTML = this.COLUMNS.map(col => {
+    el.innerHTML = columns.map(col => {
       const items = groups[col.status];
       return `
         <div class="pp-col" style="--col-accent:${col.accent};">
@@ -943,7 +961,7 @@ const PixelPros = {
           </div>
           <div class="pp-col-body">
             ${items.length === 0
-              ? `<div class="pp-col-empty">${this.state.loading ? 'Chargement…' : 'Aucune commande ici.'}</div>`
+              ? `<div class="pp-col-empty">${this.state.loading ? 'Chargement…' : this._escape(emptyLabel)}</div>`
               : items.map(it => this._renderCard(it, col.accent)).join('')}
           </div>
         </div>
@@ -951,6 +969,17 @@ const PixelPros = {
     }).join('');
 
     this._bindCardActions(el);
+  },
+
+  // Pastille de compteur sur l'onglet Communication : nombre de messages /
+  // rappels en attente, pour les repérer même quand on est sur un autre onglet.
+  _updateCommBadge() {
+    const badge = document.getElementById('pp-comm-badge');
+    if (!badge) return;
+    const n = (this.state.intakes || [])
+      .filter(it => it.status === 'contact' || it.status === 'recall').length;
+    if (n > 0) { badge.textContent = n; badge.hidden = false; }
+    else { badge.hidden = true; }
   },
 
   // ----- ÉCHECS -----
@@ -2001,6 +2030,10 @@ const PixelPros = {
           this._toast('Le composeur de mail n’est pas encore prêt, réessaie dans un instant.', true);
           return;
         }
+        // La fiche du contact est posée très haut (z-index 1000) alors que la
+        // fenêtre de rédaction est plus basse : sans ça, elle s'ouvrirait
+        // derrière la fiche. On ferme donc la fiche avant d'ouvrir le mail.
+        this._closeDetail();
         Mails._openComposer({
           prefilledTo: mail,
           prefilledSubject: 'Votre message – Pixel Pros',
