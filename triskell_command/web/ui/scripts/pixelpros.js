@@ -42,7 +42,7 @@ const PixelPros = {
   },
 
   // Colonnes Kanban, réparties en 2 groupes d'onglets :
-  //  - group 'comm'     → onglet Communication (messages reçus + demandes de rappel)
+  //  - group 'comm'     → onglet Contact (messages reçus + demandes de rappel)
   //  - group 'pipeline' → onglet Pipeline (le tunnel des sites : formulaire → en ligne)
   // Les échecs ont leur propre section en bas de l'onglet Pipeline.
   COLUMNS: [
@@ -191,10 +191,10 @@ const PixelPros = {
           </div>
         </div>
 
-        <!-- ONGLETS : Pipeline (tunnel clients) / Communication (messages & rappels) / Statistiques -->
+        <!-- ONGLETS : Pipeline (tunnel clients) / Contact (messages & rappels) / Statistiques -->
         <div class="pp-tabs" role="tablist">
           <button class="pp-tab" data-pp-tab="pipeline" role="tab">🚚 Pipeline</button>
-          <button class="pp-tab" data-pp-tab="comm" role="tab">💬 Communication<span class="pp-tab-badge" id="pp-comm-badge" hidden></span></button>
+          <button class="pp-tab" data-pp-tab="comm" role="tab">💬 Contact<span class="pp-tab-badge" id="pp-comm-badge" hidden></span></button>
           <button class="pp-tab" data-pp-tab="stats" role="tab">📊 Statistiques</button>
         </div>
 
@@ -208,7 +208,7 @@ const PixelPros = {
           <div id="pp-failures" class="mt-7"></div>
         </div>
 
-        <!-- VUE COMMUNICATION : les gens qui ont écrit ou demandé à être rappelés -->
+        <!-- VUE CONTACT : les gens qui ont écrit ou demandé à être rappelés -->
         <div id="pp-view-comm" class="pp-view" hidden>
           <p class="pp-comm-intro">Les personnes qui t'ont écrit ou demandé à être rappelées. Clique sur une carte pour lire le message et agir.</p>
           <div id="pp-comm-kanban" class="pp-kanban pp-kanban-comm"></div>
@@ -452,7 +452,7 @@ const PixelPros = {
       @media (max-width: 1100px) { .pp-kanban { grid-template-columns: repeat(2, 1fr); } }
       @media (max-width: 640px)  { .pp-kanban { grid-template-columns: 1fr; } }
 
-      /* Communication : 2 colonnes (messages + rappels), pleine largeur sur petit écran. */
+      /* Contact : 2 colonnes (messages + rappels), pleine largeur sur petit écran. */
       .pp-kanban-comm { grid-template-columns: repeat(2, minmax(240px, 420px)); }
       @media (max-width: 640px) { .pp-kanban-comm { grid-template-columns: 1fr; } }
 
@@ -931,7 +931,7 @@ const PixelPros = {
   // ----- KANBAN -----
   // Deux tableaux distincts, alimentés par les mêmes données :
   //  - Pipeline (#pp-kanban)      : colonnes du tunnel des sites.
-  //  - Communication (#pp-comm-kanban) : messages reçus + demandes de rappel.
+  //  - Contact (#pp-comm-kanban) : messages reçus + demandes de rappel.
   _renderKanban() {
     const pipelineCols = this.COLUMNS.filter(c => c.group !== 'comm');
     const commCols     = this.COLUMNS.filter(c => c.group === 'comm');
@@ -971,7 +971,7 @@ const PixelPros = {
     this._bindCardActions(el);
   },
 
-  // Pastille de compteur sur l'onglet Communication : nombre de messages /
+  // Pastille de compteur sur l'onglet Contact : nombre de messages /
   // rappels en attente, pour les repérer même quand on est sur un autre onglet.
   _updateCommBadge() {
     const badge = document.getElementById('pp-comm-badge');
