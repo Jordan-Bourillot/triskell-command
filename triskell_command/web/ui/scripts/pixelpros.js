@@ -610,6 +610,18 @@ const PixelPros = {
       .pp-toast.ok { background:#facc15; color:#0f172a; }
       .pp-toast.err { background:#ef4444; color:#fff; }
       @keyframes pp-toastin { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+
+      /* === FICHE MESSAGE / RAPPEL (épurée) === */
+      .pp-msg-box { background:rgba(148,163,184,.07); border:1px solid var(--border,#1e293b); border-left:3px solid #f59e0b; border-radius:8px; padding:12px 14px; font-size:14px; line-height:1.6; color:#e2e8f0; white-space:pre-wrap; word-break:break-word; }
+      .pp-msg-box.pp-msg-empty { color:#64748b; font-style:italic; border-left-color:#475569; }
+      .pp-recall-box { display:flex; align-items:center; gap:14px; background:rgba(6,182,212,.08); border:1px solid rgba(6,182,212,.3); border-radius:12px; padding:14px 16px; }
+      .pp-recall-ico { font-size:28px; line-height:1; }
+      .pp-recall-lbl { font-size:12px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:.04em; margin-bottom:3px; }
+      .pp-recall-num { font-size:24px; font-weight:800; color:#22d3ee; text-decoration:none; letter-spacing:.02em; }
+      .pp-recall-num:hover { text-decoration:underline; }
+      .pp-recall-num-empty { color:#64748b; font-size:16px; font-style:italic; font-weight:600; }
+      /* Les actions sous forme de lien (<a>) doivent ressembler aux boutons */
+      a.pp-action-btn { display:inline-flex; align-items:center; gap:6px; text-decoration:none; }
     `;
     document.head.appendChild(s);
   },
@@ -1175,7 +1187,14 @@ const PixelPros = {
     const errMsg = (intake.status === 'failed') ? data.error : '';
     const actions = this._availableActions(intake);
 
-    panel.innerHTML = `
+    // Un simple message de contact ou une demande de rappel n'a rien d'une
+    // commande de site : pas de paiement, pas de formulaire à rallonge, pas de
+    // photos. On lui dédie une fiche épurée (qui · son message · actions).
+    const isRecall = intake.status === 'recall' || data.recall === true;
+    const isSimpleMessage = intake.status === 'contact' || isRecall;
+
+    // En-tête (avatar + identité + pastille de statut), commun aux 2 fiches.
+    const headHtml = `
       <button class="pp-detail-close" data-pp-close>×</button>
 
       <div class="pp-detail-head">
@@ -1188,7 +1207,62 @@ const PixelPros = {
           </div>
           <span class="pp-detail-pill" style="background:${col.accent}25; color:${col.accent};">${col.icon} ${this._escape(col.label)}</span>
         </div>
-      </div>
+      </div>`;
+
+    // Chronologie + données techniques brutes, communes aux 2 fiches.
+    const timelineHtml = `
+      <div class="pp-detail-section">
+        <div class="pp-detail-section-title">Chronologie</div>
+        <div class="pp-timeline">
+          ${(timeline || []).map(ev => `
+            <div class="pp-timeline-event ${ev.kind === 'current' ? 'current' : ''}">
+              <div class="ts">${this._fmtDate(ev.ts)}</div>
+              <div class="lbl">${this._escape(ev.label)}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+
+    const rawHtml = `
+      <div class="pp-detail-section">
+        <details>
+          <summary class="pp-data-toggle">Voir les données techniques brutes (${Object.keys(data).length} champs)</summary>
+          ${intake.stripe_session_id ? `<div style="font-size:12px; color:#94a3b8; margin:8px 0;">Référence Stripe : <code style="color:#cbd5e1;">${this._escape(intake.stripe_session_id)}</code></div>` : ''}
+          <pre class="pp-data-pre">${this._escape(JSON.stringify(data, null, 2))}</pre>
+        </details>
+      </div>`;
+
+    // --- Fiche épurée : message de contact / demande de rappel ---
+    if (isSimpleMessage) {
+      const messageHtml = data.message
+        ? `<div class="pp-detail-section">
+             <div class="pp-detail-section-title">${isRecall ? 'Son message (facultatif)' : 'Message'}</div>
+             <div class="pp-msg-box">${this._escape(data.message)}</div>
+           </div>`
+        : (isRecall
+            ? ''
+            : `<div class="pp-detail-section">
+                 <div class="pp-msg-box pp-msg-empty">(Pas de message — juste ses coordonnées.)</div>
+               </div>`);
+
+      panel.innerHTML = `
+        ${headHtml}
+        ${isRecall ? this._recallBlock(phone) : ''}
+        ${messageHtml}
+        <div class="pp-detail-section">
+          <div class="pp-detail-section-title">Actions</div>
+          <div class="pp-actions">${this._simpleActions(intake, email, phone).join('')}</div>
+        </div>
+        ${timelineHtml}
+        ${rawHtml}
+      `;
+      this._bindDetail(panel, intake);
+      return;
+    }
+
+    // --- Fiche complète : commande de site ---
+    panel.innerHTML = `
+      ${headHtml}
 
       ${errMsg ? `<div class="pp-detail-section"><div class="pp-error-box">⚠ ${this._escape(errMsg)}</div></div>` : ''}
 
@@ -1215,30 +1289,48 @@ const PixelPros = {
 
       ${this._photosBlock(intake)}
 
-      <div class="pp-detail-section">
-        <div class="pp-detail-section-title">Chronologie</div>
-        <div class="pp-timeline">
-          ${(timeline || []).map(ev => `
-            <div class="pp-timeline-event ${ev.kind === 'current' ? 'current' : ''}">
-              <div class="ts">${this._fmtDate(ev.ts)}</div>
-              <div class="lbl">${this._escape(ev.label)}</div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
+      ${timelineHtml}
 
-      <div class="pp-detail-section">
-        <details>
-          <summary class="pp-data-toggle">Voir les données techniques brutes (${Object.keys(data).length} champs)</summary>
-          ${intake.stripe_session_id ? `<div style="font-size:12px; color:#94a3b8; margin:8px 0;">Référence Stripe : <code style="color:#cbd5e1;">${this._escape(intake.stripe_session_id)}</code></div>` : ''}
-          <pre class="pp-data-pre">${this._escape(JSON.stringify(data, null, 2))}</pre>
-        </details>
-      </div>
+      ${rawHtml}
 
       <input type="file" id="pp-photo-file" accept="image/*" hidden />
     `;
 
     this._bindDetail(panel, intake);
+  },
+
+  // Encadré « à rappeler » : le numéro bien en évidence, cliquable.
+  _recallBlock(phone) {
+    const tel = phone ? String(phone).replace(/[^\d+]/g, '') : '';
+    const shown = phone ? this._escape(phone) : 'numéro non fourni';
+    const num = tel
+      ? `<a class="pp-recall-num" href="tel:${this._escape(tel)}">${shown}</a>`
+      : `<span class="pp-recall-num pp-recall-num-empty">${shown}</span>`;
+    return `
+      <div class="pp-detail-section">
+        <div class="pp-recall-box">
+          <span class="pp-recall-ico">☎️</span>
+          <div>
+            <div class="pp-recall-lbl">Souhaite être rappelé·e au</div>
+            ${num}
+          </div>
+        </div>
+      </div>`;
+  },
+
+  // Actions d'un simple message / rappel : répondre par mail, appeler, supprimer.
+  _simpleActions(intake, email, phone) {
+    const out = [];
+    const mail = (email && email !== '—') ? String(email).trim() : '';
+    const tel = phone ? String(phone).replace(/[^\d+]/g, '') : '';
+    if (mail) {
+      out.push(`<a class="pp-action-btn primary" href="mailto:${this._escape(mail)}">✉️ Répondre par mail</a>`);
+    }
+    if (tel) {
+      out.push(`<a class="pp-action-btn secondary" href="tel:${this._escape(tel)}">☎️ Appeler</a>`);
+    }
+    out.push(`<button data-pp-action="delete" class="pp-action-btn danger">🗑 Supprimer définitivement</button>`);
+    return out;
   },
 
   // ----- BINDINGS du panneau de détail -----
