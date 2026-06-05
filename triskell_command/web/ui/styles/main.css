@@ -650,6 +650,27 @@ html, body {
 }
 .thomas-bubble-wrap-mine { align-items: flex-end; }
 .thomas-bubble-wrap-theirs { align-items: flex-start; }
+/* Ligne du bas de bulle : heure + coches d'état alignées à droite. */
+.thomas-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+/* Coches d'état (envoyé / distribué / lu) façon WhatsApp. Posées sur la
+   bulle colorée (couleur perso de l'expéditeur) → indépendantes du thème :
+   clair par défaut, bleu vif quand le message est lu. */
+.thomas-ticks {
+  display: inline-flex;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.75);
+}
+.thomas-ticks svg {
+  width: 16px;
+  height: 10px;
+  display: block;
+}
+.thomas-ticks.is-read { color: #8fe3ff; }
 /* Pastilles de réactions (chips) sous la bulle. */
 .thomas-reactions {
   display: flex;

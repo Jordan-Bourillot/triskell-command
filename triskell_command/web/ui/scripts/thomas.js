@@ -260,16 +260,25 @@ const Thomas = {
       await this.refreshMessages();
       await this.refreshPeerTyping();
     } else {
-      await this.pollUnread();
+      const unread = await this.pollUnread();
+      // App ouverte mais chat fermé : si j'ai reçu des messages, je préviens
+      // l'expéditeur qu'ils sont arrivés sur mon poste → statut « distribué ».
+      // (Un message non distribué est forcément non lu, donc inutile d'appeler
+      // si je n'ai aucun non-lu.)
+      if (unread > 0) {
+        try { await App.api.messages_mark_delivered(); } catch (e) {}
+      }
     }
   },
 
   async pollUnread() {
-    if (typeof App === 'undefined' || !App.api) return;
+    if (typeof App === 'undefined' || !App.api) return 0;
     try {
       const res = await App.api.messages_count_unread();
-      this.updateBadge(res && res.ok ? (res.count || 0) : 0);
-    } catch (e) {}
+      const n = res && res.ok ? (res.count || 0) : 0;
+      this.updateBadge(n);
+      return n;
+    } catch (e) { return 0; }
   },
 
   updateBadge(n) {
@@ -355,9 +364,21 @@ const Thomas = {
       const sigA = this._messagesSignature(this.cachedMessages);
       const sigB = this._messagesSignature(msgs);
       const alreadyRendered = el && el.innerHTML.trim().length > 0;
-      if (sigA === sigB && alreadyRendered) return;
-      this.cachedMessages = msgs;
-      this.renderMessages(msgs);
+      if (sigA !== sigB || !alreadyRendered) {
+        this.cachedMessages = msgs;
+        this.renderMessages(msgs);
+      }
+      // Chat ouvert : tout message reçu encore non lu passe « lu »
+      // immédiatement — sinon, en laissant le chat ouvert, l'expéditeur
+      // verrait « distribué » alors qu'on a le message sous les yeux.
+      if (this.open && this.myUserId) {
+        const hasUnreadIncoming = msgs.some(
+          m => m && m.recipient_id === this.myUserId && !m.read_at);
+        if (hasUnreadIncoming) {
+          try { await App.api.messages_mark_read(); } catch (e) {}
+          this.updateBadge(0);
+        }
+      }
     } catch (e) { /* silencieux */ }
   },
 
@@ -368,7 +389,7 @@ const Thomas = {
     if (!arr || !arr.length) return '0';
     const parts = [String(arr.length)];
     for (const m of arr) {
-      parts.push(`${m.id}:${(m.reactions || []).length}:${m.edited_at || ''}:${m.deleted_at || ''}`);
+      parts.push(`${m.id}:${(m.reactions || []).length}:${m.edited_at || ''}:${m.deleted_at || ''}:${m.read_at || ''}:${m.delivered_at || ''}`);
     }
     return parts.join('|');
   },
@@ -493,6 +514,11 @@ const Thomas = {
         ? 'thomas-bubble-wrap thomas-bubble-wrap-mine'
         : 'thomas-bubble-wrap thomas-bubble-wrap-theirs';
 
+      // Coches d'état (façon WhatsApp), uniquement sous MES bulles humaines
+      // non supprimées : envoyé / distribué / lu.
+      const statusTicks = (isFromMe && !isFromClaude && !isDeleted)
+        ? this._renderStatusTicks(m) : '';
+
       const bubble = `
         <div class="${wrapClass}">
           ${claudeLabelHtml}
@@ -502,7 +528,9 @@ const Thomas = {
             ${quoteHtml}
             ${attachHtml}
             ${bodyHtml}
-            <div class="text-[10px] opacity-70 mt-1 text-right">${time}${editedTag}</div>
+            <div class="thomas-meta mt-1">
+              <span class="text-[10px] opacity-70">${time}${editedTag}</span>${statusTicks}
+            </div>
           </div>
           ${actionsHtml}
           ${reactionsHtml}
@@ -1172,6 +1200,30 @@ const Thomas = {
       const mm = String(d.getMinutes()).padStart(2, '0');
       return `${hh}:${mm}`;
     } catch (e) { return ''; }
+  },
+
+  /** Coches d'état sous mes propres bulles, façon WhatsApp :
+   *   - envoyé    : 1 coche claire (le message est parti)
+   *   - distribué : 2 coches claires (arrivé sur le poste de l'autre)
+   *   - lu        : 2 coches bleues (l'autre a ouvert le chat)
+   *  `delivered_at` n'existe que si la migration 44 est appliquée ; sans
+   *  elle, un message lu reste cohérent (2 coches bleues) et un non-lu
+   *  affiche 1 coche — dégradation propre vers « envoyé / lu ». */
+  _renderStatusTicks(m) {
+    const read = !!m.read_at;
+    const delivered = read || !!m.delivered_at;
+    const stroke = 'stroke="currentColor" stroke-width="1.7" fill="none" ' +
+                   'stroke-linecap="round" stroke-linejoin="round"';
+    const svg = delivered
+      ? `<svg viewBox="0 0 20 12" aria-hidden="true">
+           <path d="M1 6.5 l3.5 3.5 L11 2" ${stroke}/>
+           <path d="M7 6.5 l3.5 3.5 L17 2" ${stroke}/>
+         </svg>`
+      : `<svg viewBox="0 0 20 12" aria-hidden="true">
+           <path d="M4 6.5 l3.5 3.5 L14 2" ${stroke}/>
+         </svg>`;
+    const label = read ? 'Lu' : (delivered ? 'Distribué' : 'Envoyé');
+    return `<span class="thomas-ticks${read ? ' is-read' : ''}" title="${label}">${svg}</span>`;
   },
 
   _escape(s) {

@@ -90,9 +90,41 @@ def other_user() -> Optional[dict[str, Any]]:
     }
 
 
-_MSG_COLUMNS = ("id, sender_id, recipient_id, body, created_at, read_at, "
-                "attachment_url, attachment_name, attachment_type, attachment_size, "
-                "reply_to_id, edited_at, deleted_at")
+# Colonnes de base toujours présentes. `delivered_at` (statut « distribué »)
+# est ajouté dynamiquement SI la colonne existe — c'est la migration
+# 44_chat_delivered.sql qui la crée. Tant qu'elle n'est pas appliquée, on ne
+# la sélectionne pas (sinon Supabase renverrait une erreur et le chat
+# resterait vide) : on dégrade alors proprement vers « envoyé / lu ».
+_MSG_COLUMNS_BASE = ("id, sender_id, recipient_id, body, created_at, read_at, "
+                     "attachment_url, attachment_name, attachment_type, attachment_size, "
+                     "reply_to_id, edited_at, deleted_at")
+
+# Cache de disponibilité de la colonne delivered_at :
+#   True       → confirmée présente, on ne re-teste plus.
+#   None/False → pas (encore) confirmée → on re-teste au prochain appel, ce
+#                qui permet à la fonctionnalité de s'activer dès que la
+#                migration est appliquée, sans redémarrer le serveur.
+_delivered_col_ok: Optional[bool] = None
+
+
+def _delivered_supported(c) -> bool:
+    """True si la colonne messages.delivered_at existe (migration 44)."""
+    global _delivered_col_ok
+    if _delivered_col_ok is True:
+        return True
+    try:
+        c.raw.table("messages").select("delivered_at").limit(1).execute()
+        _delivered_col_ok = True
+    except Exception:
+        _delivered_col_ok = False
+    return bool(_delivered_col_ok)
+
+
+def _msg_columns(c) -> str:
+    """Colonnes à sélectionner, avec delivered_at si la colonne existe."""
+    if _delivered_supported(c):
+        return _MSG_COLUMNS_BASE + ", delivered_at"
+    return _MSG_COLUMNS_BASE
 
 
 def list_messages(limit: int = 100) -> list[dict[str, Any]]:
@@ -108,14 +140,15 @@ def list_messages(limit: int = 100) -> list[dict[str, Any]]:
     if c is None or not me or not other:
         return []
     try:
+        cols = _msg_columns(c)
         # supabase-py n'a pas d'OR sur 2 paires (sender,recipient) — on fait
         # 2 requêtes (sens aller + retour) et on merge côté client.
         sent = (c.raw.table("messages")
-                .select(_MSG_COLUMNS)
+                .select(cols)
                 .eq("sender_id", me).eq("recipient_id", other)
                 .order("created_at", desc=True).limit(limit).execute())
         recv = (c.raw.table("messages")
-                .select(_MSG_COLUMNS)
+                .select(cols)
                 .eq("sender_id", other).eq("recipient_id", me)
                 .order("created_at", desc=True).limit(limit).execute())
         # 3e requête : messages postés par Claude (mode vocal Allo Claude).
@@ -123,7 +156,7 @@ def list_messages(limit: int = 100) -> list[dict[str, Any]]:
         # initial — le chat fonctionne comme un fil partagé où Claude
         # est un participant visible des deux côtés.
         claude_q = (c.raw.table("messages")
-                    .select(_MSG_COLUMNS)
+                    .select(cols)
                     .eq("sender_id", CLAUDE_USER_ID)
                     .in_("recipient_id", list(_HUMAN_USERS))
                     .order("created_at", desc=True).limit(limit).execute())
@@ -337,6 +370,30 @@ def mark_all_read() -> int:
         return len(res.data or [])
     except Exception as exc:
         logger.debug("mark_all_read: %s", exc)
+        return 0
+
+
+def mark_all_delivered() -> int:
+    """Marque comme « distribués » tous les messages reçus pas encore
+    distribués (poste qui reçoit → signale à l'expéditeur que le message
+    est bien arrivé chez lui, même chat fermé). Renvoie le nombre de lignes
+    mises à jour. No-op (0) si la colonne delivered_at n'existe pas encore
+    (migration 44 non appliquée)."""
+    me = _me()
+    c = _supabase()
+    if c is None or not me:
+        return 0
+    if not _delivered_supported(c):
+        return 0
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        res = (c.raw.table("messages")
+               .update({"delivered_at": now_iso})
+               .eq("recipient_id", me).is_("delivered_at", "null").execute())
+        return len(res.data or [])
+    except Exception as exc:
+        logger.debug("mark_all_delivered: %s", exc)
         return 0
 
 

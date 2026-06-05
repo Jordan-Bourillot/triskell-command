@@ -7379,6 +7379,16 @@ class Api:
             logger.debug("messages_mark_read: %s", exc)
             return {"ok": False, "error": str(exc), "count": 0}
 
+    def messages_mark_delivered(self) -> dict:
+        """Marque comme « distribués » les messages reçus pas encore
+        distribués (statut intermédiaire entre envoyé et lu)."""
+        try:
+            from ..integrations.messages import mark_all_delivered
+            return {"ok": True, "count": mark_all_delivered()}
+        except Exception as exc:
+            logger.debug("messages_mark_delivered: %s", exc)
+            return {"ok": False, "error": str(exc), "count": 0}
+
     def messages_count_unread(self) -> dict:
         """Nombre de messages reçus non lus."""
         try:
