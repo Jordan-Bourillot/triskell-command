@@ -41,15 +41,17 @@ const PixelPros = {
     mailAuto: { paid: true, live: true },
   },
 
-  // Colonnes Kanban : 4 statuts principaux dans l'ordre du flow.
-  // Les échecs ont leur propre section en bas.
+  // Colonnes Kanban, réparties en 2 groupes d'onglets :
+  //  - group 'comm'     → onglet Communication (messages reçus + demandes de rappel)
+  //  - group 'pipeline' → onglet Pipeline (le tunnel des sites : formulaire → en ligne)
+  // Les échecs ont leur propre section en bas de l'onglet Pipeline.
   COLUMNS: [
-    { status: 'contact',  label: 'Messages reçus',      icon: '✉️', accent: '#f59e0b', short: 'Messages' },
-    { status: 'recall',   label: 'On vous rappelle',    icon: '☎️', accent: '#06b6d4', short: 'À rappeler' },
-    { status: 'draft',    label: 'Formulaire reçu',     icon: '📝', accent: '#94a3b8', short: 'Formulaires' },
-    { status: 'paid',     label: 'Payé · à construire', icon: '💳', accent: '#facc15', short: 'Payés' },
-    { status: 'building', label: 'En construction',     icon: '🛠',  accent: '#818cf8', short: 'En cours' },
-    { status: 'live',     label: 'En ligne',            icon: '✅', accent: '#22c55e', short: 'En ligne' },
+    { status: 'contact',  label: 'Messages reçus',      icon: '✉️', accent: '#f59e0b', short: 'Messages',    group: 'comm' },
+    { status: 'recall',   label: 'On vous rappelle',    icon: '☎️', accent: '#06b6d4', short: 'À rappeler',  group: 'comm' },
+    { status: 'draft',    label: 'Formulaire reçu',     icon: '📝', accent: '#94a3b8', short: 'Formulaires', group: 'pipeline' },
+    { status: 'paid',     label: 'Payé · à construire', icon: '💳', accent: '#facc15', short: 'Payés',       group: 'pipeline' },
+    { status: 'building', label: 'En construction',     icon: '🛠',  accent: '#818cf8', short: 'En cours',    group: 'pipeline' },
+    { status: 'live',     label: 'En ligne',            icon: '✅', accent: '#22c55e', short: 'En ligne',     group: 'pipeline' },
   ],
 
   FORMULES: {
@@ -189,9 +191,10 @@ const PixelPros = {
           </div>
         </div>
 
-        <!-- ONGLETS : Pipeline (tunnel clients) / Statistiques (fréquentation) -->
+        <!-- ONGLETS : Pipeline (tunnel clients) / Communication (messages & rappels) / Statistiques -->
         <div class="pp-tabs" role="tablist">
           <button class="pp-tab" data-pp-tab="pipeline" role="tab">🚚 Pipeline</button>
+          <button class="pp-tab" data-pp-tab="comm" role="tab">💬 Communication<span class="pp-tab-badge" id="pp-comm-badge" hidden></span></button>
           <button class="pp-tab" data-pp-tab="stats" role="tab">📊 Statistiques</button>
         </div>
 
@@ -203,6 +206,12 @@ const PixelPros = {
           <div id="pp-kanban" class="pp-kanban"></div>
           <!-- Section Échecs (apparaît seulement s'il y a des failed) -->
           <div id="pp-failures" class="mt-7"></div>
+        </div>
+
+        <!-- VUE COMMUNICATION : les gens qui ont écrit ou demandé à être rappelés -->
+        <div id="pp-view-comm" class="pp-view" hidden>
+          <p class="pp-comm-intro">Les personnes qui t'ont écrit ou demandé à être rappelées. Clique sur une carte pour lire le message et agir.</p>
+          <div id="pp-comm-kanban" class="pp-kanban pp-kanban-comm"></div>
         </div>
 
         <!-- VUE STATISTIQUES : fréquentation du site vitrine -->
@@ -629,7 +638,7 @@ const PixelPros = {
   // Bascule entre la vue Pipeline (tunnel clients) et la vue Statistiques.
   // La préférence est mémorisée pour la prochaine visite.
   _setTab(tab) {
-    tab = (tab === 'stats') ? 'stats' : 'pipeline';
+    if (!['pipeline', 'comm', 'stats'].includes(tab)) tab = 'pipeline';
     this.state.tab = tab;
     try { localStorage.setItem('pp_tab', tab); } catch (e) {}
 
@@ -639,13 +648,15 @@ const PixelPros = {
       });
     }
     const vp = document.getElementById('pp-view-pipeline');
+    const vc = document.getElementById('pp-view-comm');
     const vs = document.getElementById('pp-view-stats');
     if (vp) vp.hidden = (tab !== 'pipeline');
+    if (vc) vc.hidden = (tab !== 'comm');
     if (vs) vs.hidden = (tab !== 'stats');
 
-    // La recherche ne concerne que le pipeline : on la masque côté stats.
+    // La recherche filtre les cartes (pipeline + communication) : inutile côté stats.
     const search = document.getElementById('pp-search');
-    if (search) search.style.display = (tab === 'pipeline') ? '' : 'none';
+    if (search) search.style.display = (tab === 'stats') ? 'none' : '';
 
     // Les stats ne se chargent qu'à la première ouverture de l'onglet.
     if (tab === 'stats' && !this._statsLoaded) {
@@ -1324,7 +1335,7 @@ const PixelPros = {
     const mail = (email && email !== '—') ? String(email).trim() : '';
     const tel = phone ? String(phone).replace(/[^\d+]/g, '') : '';
     if (mail) {
-      out.push(`<a class="pp-action-btn primary" href="mailto:${this._escape(mail)}">✉️ Répondre par mail</a>`);
+      out.push(`<button data-pp-action="reply_mail" class="pp-action-btn primary">✉️ Répondre par mail</button>`);
     }
     if (tel) {
       out.push(`<a class="pp-action-btn secondary" href="tel:${this._escape(tel)}">☎️ Appeler</a>`);
@@ -1982,6 +1993,21 @@ const PixelPros = {
         res = await this._call('pixelpros_resend_live_mail', { id });
         this._toast(res?.ok ? `Mail "site en ligne" envoyé : ${res.message || ''}` : `Échec : ${res?.error || res?.message || '?'}`, !res?.ok);
         break;
+      case 'reply_mail': {
+        const data = intake.data || {};
+        const mail = (data.email || intake.email || '').trim();
+        if (!mail) { this._toast('Pas d’adresse mail pour ce contact.', true); return; }
+        if (typeof Mails === 'undefined' || !Mails._openComposer) {
+          this._toast('Le composeur de mail n’est pas encore prêt, réessaie dans un instant.', true);
+          return;
+        }
+        Mails._openComposer({
+          prefilledTo: mail,
+          prefilledSubject: 'Votre message – Pixel Pros',
+          title: 'Répondre',
+        });
+        return;
+      }
       case 'delete': {
         const data = intake.data || {};
         const name = data.business_name || data['business-name'] || intake.business_name || '(sans nom)';
