@@ -170,6 +170,16 @@ def collect_snapshot(app_state) -> dict:
                 snap["client_projects"] = groups
             except Exception:
                 pass
+            # PROSPECTS (refonte 2026-06) : c'est le capital commercial —
+            # il n'était PAS sauvegardé (uniquement chez Supabase). Dump
+            # complet hebdo pour pouvoir tout reconstruire en cas de pépin.
+            try:
+                rows = (client.raw.table("prospects").select("*")
+                        .limit(20000).execute().data or [])
+                snap["prospects"] = rows
+                snap["prospects_count"] = len(rows)
+            except Exception as exc:
+                logger.debug("backup prospects: %s", exc)
     except Exception as exc:
         logger.debug("backup supabase: %s", exc)
 

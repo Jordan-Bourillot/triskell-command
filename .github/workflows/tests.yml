@@ -1,0 +1,36 @@
+# Tests automatiques à chaque push — volontairement SANS installer les
+# dépendances lourdes (playwright, supabase…) : compilation Python complète
+# + validation syntaxe de tous les scripts du site. Rapide (< 1 min) et
+# suffisant pour attraper les fautes de frappe avant un déploiement.
+# Si ce workflow est rouge, NE PAS lancer deploy-prod.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compilation de tout le paquet (web + integrations + desktop)
+        run: python -m compileall -q triskell_command
+
+  javascript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntaxe de tous les scripts du site
+        run: |
+          set -e
+          for f in triskell_command/web/ui/scripts/*.js; do
+            node --check "$f"
+          done

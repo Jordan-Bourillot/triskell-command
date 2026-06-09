@@ -1,0 +1,195 @@
+# -*- coding: utf-8 -*-
+"""Smoke test de la refonte profonde (2026-06-10, 2e passe).
+
+Vérifie SANS réseau et SANS démarrer les workers :
+  1. Chien de garde : diagnostic des robots (panne / muet / volontairement
+     éteint / en retrait derrière le serveur).
+  2. Présence serveur : arbitrage desktop/serveur (battement de cœur).
+  3. Docteur DNS : analyse SPF/DKIM/DMARC/MX (verdicts purs).
+  4. Performance par modèle : agrégation envois × réponses.
+  5. Export Excel commun : fichier généré, lignes comptées, surlignage.
+  6. Clés API : plus AUCUNE clé en dur dans le code.
+  7. Nouveaux endpoints exposés (mail_dns_check, funnel_by_template).
+
+Usage :  python scripts/smoke_refonte_v2.py
+"""
+from __future__ import annotations
+
+import sys
+import tempfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(HERE))
+CORE = HERE.parent / "triskell-core"
+if CORE.exists():
+    sys.path.insert(0, str(CORE))
+
+PASS, FAIL = [], []
+
+
+def check(label: str, cond: bool, detail: str = "") -> None:
+    (PASS if cond else FAIL).append(label)
+    print(f"  {'OK  ' if cond else 'FAIL'}- {label} {detail if not cond else ''}")
+
+
+print("1) Chien de garde…")
+from triskell_command.integrations.worker_watchdog import diagnose_workers  # noqa: E402
+
+_now = datetime.now(timezone.utc)
+_old = (_now - timedelta(hours=5)).isoformat(timespec="seconds")
+_recent = (_now - timedelta(minutes=10)).isoformat(timespec="seconds")
+workers = [
+    {"name": "ok_one", "label": "Robot sain", "running": True,
+     "health": "healthy", "last_run_at": _recent, "last_run_result": {}},
+    {"name": "warn_one", "label": "Robot en panne", "running": True,
+     "health": "warning", "last_run_at": _recent,
+     "last_run_result": {"error": "JWT expired"}},
+    {"name": "mute_one", "label": "Robot muet", "running": True,
+     "health": "healthy", "last_run_at": _old, "last_run_result": {}},
+    {"name": "stopped_one", "label": "Robot arrêté", "running": False,
+     "health": "healthy", "last_run_at": _recent, "last_run_result": {}},
+    {"name": "autopilot_runner", "label": "Auto-pilote", "running": False,
+     "health": "healthy", "last_run_at": "",
+     "last_run_result": {"skipped_reason": "disabled"}},
+    {"name": "desktop_defer", "label": "Robot en retrait", "running": True,
+     "health": "healthy", "last_run_at": _old,
+     "last_run_result": {"skipped_reason": "server_active"}},
+]
+problems = diagnose_workers(workers)
+names = {p["name"] for p in problems}
+check("panne détectée (warning)", "warn_one" in names)
+check("robot muet détecté (5h sans passage)", "mute_one" in names)
+check("robot arrêté détecté", "stopped_one" in names)
+check("robot sain non alerté", "ok_one" not in names)
+check("auto-pilote désactivé = pas une panne", "autopilot_runner" not in names)
+check("robot en retrait (serveur actif) = pas une panne",
+      "desktop_defer" not in names)
+
+print("2) Présence serveur…")
+import os  # noqa: E402
+from triskell_command.integrations import server_presence as sp  # noqa: E402
+
+
+class _FakeClient:
+    def __init__(self, hb): self._hb = hb
+    def get_shared_setting(self, key, default=None): return self._hb
+    def set_shared_setting(self, key, value): self._hb = value
+
+
+os.environ.pop("TRISKELL_IS_SERVER", None)
+fresh_hb = {"at": _now.isoformat(timespec="seconds"), "host": "srv"}
+stale_hb = {"at": (_now - timedelta(hours=1)).isoformat(timespec="seconds"),
+            "host": "srv"}
+check("desktop s'efface si serveur vivant",
+      sp.should_defer_to_server(_FakeClient(fresh_hb)) is True)
+check("desktop reprend si serveur mort (>15 min)",
+      sp.should_defer_to_server(_FakeClient(stale_hb)) is False)
+check("sans accès base → comportement historique",
+      sp.should_defer_to_server(None) is False)
+sp.mark_server_process()
+check("le serveur lui-même ne s'efface jamais",
+      sp.should_defer_to_server(_FakeClient(fresh_hb)) is False)
+os.environ.pop("TRISKELL_IS_SERVER", None)
+
+print("3) Docteur DNS…")
+from triskell_command.integrations.mail_dns_doctor import analyze_records  # noqa: E402
+
+good = analyze_records(
+    "triskell-studio.fr",
+    spf_txts=["v=spf1 include:_spf-eu.ionos.com ~all"],
+    dmarc_txts=["v=DMARC1; p=quarantine; rua=mailto:contact@triskell-studio.fr"],
+    dkim_found_selector="s1-ionos",
+    has_mx=True,
+)
+check("domaine bien configuré → 4/4", good["score"] == "4/4" and good["all_good"])
+bad = analyze_records("nu.fr", spf_txts=[], dmarc_txts=[],
+                      dkim_found_selector=None, has_mx=False)
+check("domaine nu → 0/4 avec conseils",
+      bad["score"] == "0/4" and all(c["advice"] or c["ok"] is False
+                                     for c in bad["checks"]))
+weak = analyze_records("x.fr", spf_txts=["v=spf1 ?all"],
+                       dmarc_txts=["v=DMARC1; p=none"],
+                       dkim_found_selector="s1", has_mx=True)
+spf_check = next(c for c in weak["checks"] if c["id"] == "spf")
+dmarc_check = next(c for c in weak["checks"] if c["id"] == "dmarc")
+check("SPF laxiste signalé", "?all" in spf_check["advice"])
+check("DMARC p=none signalé", "p=none" in dmarc_check["advice"]
+      or "quarantine" in dmarc_check["advice"])
+
+print("4) Performance par modèle…")
+from triskell_command.integrations.funnel_metrics import (  # noqa: E402
+    aggregate_template_performance,
+)
+
+sent = [
+    {"prospect_id": "p1", "ts": "2026-06-01T10:00:00", "template_key": "pixel_pros_v1"},
+    {"prospect_id": "p2", "ts": "2026-06-01T11:00:00", "template_key": "pixel_pros_v1"},
+    {"prospect_id": "p3", "ts": "2026-06-02T10:00:00", "template_key": "carnet_v2"},
+    {"prospect_id": "p1", "ts": "2026-06-05T10:00:00", "template_key": "relance_j5",
+     "extra": {}},
+]
+replies = [
+    # p1 répond APRÈS la relance → créditée à relance_j5
+    {"prospect_id": "p1", "ts": "2026-06-06T09:00:00",
+     "extra": {"classification": {"category": "interested"}}},
+    # p3 répond après carnet_v2
+    {"prospect_id": "p3", "ts": "2026-06-03T09:00:00",
+     "extra": {"classification": {"category": "no"}}},
+]
+rows = aggregate_template_performance(sent, replies)
+by_tpl = {r["template"]: r for r in rows}
+check("envois comptés par modèle",
+      by_tpl["pixel_pros_v1"]["sent"] == 2 and by_tpl["carnet_v2"]["sent"] == 1)
+check("réponse créditée au DERNIER modèle envoyé",
+      by_tpl["relance_j5"]["replies"] == 1
+      and by_tpl["pixel_pros_v1"]["replies"] == 0)
+check("intéressé compté", by_tpl["relance_j5"]["interested"] == 1)
+check("taux calculé", by_tpl["carnet_v2"]["reply_rate"] == 100.0)
+
+print("5) Export Excel commun…")
+from triskell_command.integrations.hunt_exports import write_xlsx  # noqa: E402
+
+with tempfile.TemporaryDirectory() as td:
+    out = Path(td) / "test.xlsx"
+    n = write_xlsx(out, sheet_title="Test",
+                   headers=["A", "B"], rows=[[1, "x"], [2, "y"], [3, "z"]],
+                   widths=[10, 20], highlight=[False, True, False])
+    check("fichier Excel généré", out.exists() and out.stat().st_size > 0)
+    check("lignes comptées", n == 3)
+    from openpyxl import load_workbook
+    wb = load_workbook(out)
+    ws = wb.active
+    check("entête + données présentes",
+          ws["A1"].value == "A" and ws["A4"].value == 3)
+    check("ligne 2 surlignée (ambre)",
+          ws["A3"].fill.fgColor.rgb in ("00FEF3C7", "FFFEF3C7"))
+
+print("6) Plus de clés en dur…")
+import re  # noqa: E402
+
+leaks = []
+for f in [HERE / "triskell_command/web/api.py",
+          HERE / "triskell_command/integrations/chasseur_createurs.py",
+          HERE / "triskell_command/integrations/prospecteur_google.py"]:
+    src = f.read_text(encoding="utf-8")
+    if re.search(r'"AIzaSy[A-Za-z0-9_\-]{20,}"|"sk-[a-f0-9]{28,}"', src):
+        leaks.append(f.name)
+check("aucune clé API en dur dans le code", not leaks, f"(fuites : {leaks})")
+
+print("7) Nouveaux endpoints…")
+from triskell_command.web.api import Api  # noqa: E402
+
+api = Api()
+for ep in ("mail_dns_check", "funnel_by_template",
+           "chasseur_createurs_push_to_prospects",
+           "prospecteur_google_push_to_prospects"):
+    check(f"endpoint {ep} exposé", callable(getattr(api, ep, None)))
+r = api.mail_dns_check({"domain": ""})
+check("mail_dns_check sans domaine → message clair",
+      r.get("ok") is False and "domaine" in (r.get("error") or "").lower())
+
+print()
+print(f"{len(PASS)} OK / {len(FAIL)} échec(s)")
+sys.exit(1 if FAIL else 0)

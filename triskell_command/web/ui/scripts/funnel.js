@@ -107,9 +107,57 @@ const Funnel = {
       return;
     }
     slot.innerHTML = this._renderStages(data) +
+                     `<div id="f-templates"></div>` +
                      this._renderBars('Types de réponses reçues', data.by_category, 'accent') +
                      this._renderBars('Où en sont tes prospects', data.by_status, 'accent-glow') +
                      this._renderBars('Produits les plus mis en avant', data.by_product, 'text-secondary');
+    this._loadTemplatePerf();
+  },
+
+  // ---- Performance par modèle de mail (chargée à part : requête lourde) ----
+  async _loadTemplatePerf() {
+    const slot = document.getElementById('f-templates');
+    if (!slot || !App.api || typeof App.api.funnel_by_template !== 'function') return;
+    let r = null;
+    try {
+      r = await App.api.funnel_by_template({ period: this.period === 'all' ? 'all' : '90d' });
+    } catch (e) { r = null; }
+    if (!r || !r.ok || !(r.rows || []).length) {
+      slot.innerHTML = '';
+      return;
+    }
+    const rows = r.rows.slice(0, 12);
+    slot.innerHTML = `
+      <div class="mb-10">
+        <div class="section-label">Quel modèle de mail fait répondre ? (90 derniers jours)</div>
+        <div class="card p-0 overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-bg">
+              <tr class="text-left text-[11px] uppercase tracking-wide text-text-muted">
+                <th class="px-4 py-2.5">Modèle</th>
+                <th class="px-4 py-2.5 text-right">Envoyés</th>
+                <th class="px-4 py-2.5 text-right">Réponses</th>
+                <th class="px-4 py-2.5 text-right">Intéressés</th>
+                <th class="px-4 py-2.5 text-right">Taux de réponse</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(t => `
+                <tr class="border-t border-border">
+                  <td class="px-4 py-2.5 font-medium truncate max-w-[280px]" title="${this._esc(t.template)}">${this._esc(t.template)}</td>
+                  <td class="px-4 py-2.5 text-right tabular-nums">${t.sent}</td>
+                  <td class="px-4 py-2.5 text-right tabular-nums">${t.replies}</td>
+                  <td class="px-4 py-2.5 text-right tabular-nums ${t.interested > 0 ? 'text-success font-semibold' : ''}">${t.interested}</td>
+                  <td class="px-4 py-2.5 text-right tabular-nums font-bold ${t.reply_rate >= 5 ? 'text-success' : ''}">${t.reply_rate}%</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+          <div class="px-4 py-2.5 text-[11px] text-text-muted border-t border-border">
+            Une réponse est créditée au dernier modèle envoyé à ce prospect.
+            Moins de 20 envois par modèle = chiffres à prendre avec des pincettes.
+          </div>
+        </div>
+      </div>`;
   },
 
   _renderStages(data) {

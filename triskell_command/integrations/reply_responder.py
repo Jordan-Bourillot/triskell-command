@@ -419,6 +419,15 @@ def _do_one_cycle(app_state) -> dict:
         _LAST_RUN_AT = datetime.now().isoformat(timespec="seconds")
         return counters
 
+    # Anti-double-traitement : on s'efface si le serveur bat encore
+    # (deux envoyeurs de réponses en parallèle = double mail au prospect).
+    from .server_presence import should_defer_to_server
+    if should_defer_to_server(client):
+        counters["skipped_reason"] = "server_active"
+        _LAST_RUN_RESULT = counters
+        _LAST_RUN_AT = datetime.now().isoformat(timespec="seconds")
+        return counters
+
     config = load_config(client)
     if not config.get("worker_enabled", True):
         _LAST_RUN_RESULT = counters

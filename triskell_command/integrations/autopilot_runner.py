@@ -406,6 +406,22 @@ def _do_one_tick(app_state) -> None:
         _LAST_RUN_RESULT["skipped_reason"] = "disabled"
         return
 
+    # Anti-double-traitement : si CE process n'est pas le serveur (app
+    # desktop) et que le serveur bat encore, le run nocturne lui revient.
+    try:
+        from triskell_core.db import get_client, SupabaseNotConfigured
+        from .server_presence import should_defer_to_server
+        try:
+            _presence_client = get_client()
+        except SupabaseNotConfigured:
+            _presence_client = None
+        if should_defer_to_server(_presence_client):
+            _LAST_RUN_RESULT.clear()
+            _LAST_RUN_RESULT["skipped_reason"] = "server_active"
+            return
+    except Exception as exc:
+        logger.debug("presence check: %s", exc)
+
     now = _now_paris()
     today_iso = now.date().isoformat()
     state = _read_state()

@@ -45,11 +45,9 @@ CHASSEUR_C_DIR = Path.home() / ".triskell-command" / "chasseur_createurs"
 HUNTS_DIR = CHASSEUR_C_DIR / "hunts"
 EXPORTS_DIR = CHASSEUR_C_DIR / "exports"
 
-# Clé YouTube par défaut (peut être surchargée via la variable d'env
-# YOUTUBE_API_KEY ou dans le payload de la chasse). C'est la clé qui était
-# déjà utilisée dans le programme desktop ; elle a un quota de 10 000 unités
-# par jour, ce qui permet ~80 chasses moyennes.
-DEFAULT_YOUTUBE_API_KEY = "AIzaSyCu8xcAyxf091ureRYpaqzMtIKda6TAg10"
+# SÉCURITÉ : plus de clé YouTube en dur dans le code (l'ancienne a fuité
+# dans l'historique git → à révoquer côté Google). La clé vient du payload
+# de la chasse, de la variable d'env YOUTUBE_API_KEY, ou des Réglages.
 
 EMAIL_REGEX = r"[\w\.\-+]+@[\w\.\-]+\.\w+"
 
@@ -167,6 +165,13 @@ class CreatorHunt:
             json.dumps(asdict(self), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        # Copie de secours cloud quand la chasse atteint un état final
+        if self.status in ("done", "error"):
+            try:
+                from .hunt_cloud_backup import mirror_hunt
+                mirror_hunt("chasseur_createurs", asdict(self))
+            except Exception:
+                pass
 
     @classmethod
     def load(cls, hunt_id: str) -> "CreatorHunt | None":
@@ -222,12 +227,25 @@ def _clean_emails(emails: set[str]) -> list[str]:
 
 
 def _get_youtube_api_key(payload_key: str | None = None) -> str:
+    """Résout la clé YouTube : payload > env > Réglages. Vide si aucune."""
     if payload_key and payload_key.strip():
         return payload_key.strip()
     env_key = (os.environ.get("YOUTUBE_API_KEY") or "").strip()
     if env_key:
         return env_key
-    return DEFAULT_YOUTUBE_API_KEY
+    # Réglages de l'app (settings.json → ai.api_keys.youtube_data)
+    try:
+        import json as _json
+        p = Path.home() / ".triskell-command" / "settings.json"
+        if p.exists():
+            d = _json.loads(p.read_text(encoding="utf-8"))
+            key = (((d.get("ai") or {}).get("api_keys") or {})
+                   .get("youtube_data") or "").strip()
+            if key:
+                return key
+    except Exception:
+        pass
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -694,6 +712,12 @@ def start_hunt(platform: str, niche: str, min_subs: int, max_subs: int,
         raise ValueError(f"Plateforme inconnue : {platform}")
     if not niche or not niche.strip():
         raise ValueError("La niche / mot-clé est requise.")
+    if platform == "youtube" and not _get_youtube_api_key(youtube_api_key):
+        raise ValueError(
+            "Clé YouTube manquante. Ajoute-la dans Réglages → IA & clés "
+            "(champ youtube_data), ou en variable d'environnement "
+            "YOUTUBE_API_KEY sur le serveur."
+        )
     if min_subs < 0:
         min_subs = 0
     if max_subs <= min_subs:
@@ -782,59 +806,32 @@ def export_csv(hunt_id: str) -> dict:
 
 def export_xlsx(hunt_id: str) -> dict:
     """Exporte les créateurs d'une chasse en fichier Excel (.xlsx)."""
-    try:
-        from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment
-    except ImportError as exc:
-        return {"ok": False,
-                "error": "openpyxl manquant — `pip install openpyxl`"}
     h = CreatorHunt.load(hunt_id)
     if not h:
         return {"ok": False, "error": "chasse introuvable"}
     ensure_dirs()
     out = EXPORTS_DIR / f"createurs_{h.id}.xlsx"
     rows = h.creators or []
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Créateurs"
-    headers = ["Plateforme", "Nom", "Abonnés", "Email principal",
-               "Emails secondaires", "URL", "Pays", "Vidéos",
-               "Date création", "Liens externes"]
-    ws.append(headers)
-
-    # Mise en forme de l'entête (gras blanc sur fond orange Triskell)
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill("solid", fgColor="EA580C")
-    for cell in ws[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="left", vertical="center")
-
-    for c in rows:
-        ws.append([
-            c.get("platform", ""),
-            c.get("name", ""),
-            c.get("subscribers", 0),
-            c.get("email", ""),
-            "; ".join(c.get("emails_extra", []) or []),
-            c.get("url", ""),
-            c.get("country", ""),
-            c.get("video_count", 0),
-            c.get("created_at", ""),
-            "; ".join(c.get("external_links", []) or []),
-        ])
-
-    # Largeurs de colonnes ajustées au contenu attendu
-    widths = [12, 32, 12, 30, 30, 40, 10, 10, 18, 40]
-    for i, w in enumerate(widths, start=1):
-        ws.column_dimensions[chr(64 + i)].width = w
-
-    # Fige la première ligne pour qu'elle reste visible au scroll
-    ws.freeze_panes = "A2"
-
-    wb.save(out)
-    return {"ok": True, "path": str(out), "rows": len(rows)}
+    try:
+        from .hunt_exports import write_xlsx
+        n = write_xlsx(
+            out, sheet_title="Créateurs",
+            headers=["Plateforme", "Nom", "Abonnés", "Email principal",
+                     "Emails secondaires", "URL", "Pays", "Vidéos",
+                     "Date création", "Liens externes"],
+            rows=([c.get("platform", ""), c.get("name", ""),
+                   c.get("subscribers", 0), c.get("email", ""),
+                   "; ".join(c.get("emails_extra", []) or []),
+                   c.get("url", ""), c.get("country", ""),
+                   c.get("video_count", 0), c.get("created_at", ""),
+                   "; ".join(c.get("external_links", []) or [])]
+                  for c in rows),
+            widths=[12, 32, 12, 30, 30, 40, 10, 10, 18, 40],
+        )
+    except ImportError:
+        return {"ok": False,
+                "error": "openpyxl manquant — `pip install openpyxl`"}
+    return {"ok": True, "path": str(out), "rows": n}
 
 
 def delete_hunt(hunt_id: str) -> dict:

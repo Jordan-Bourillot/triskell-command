@@ -171,6 +171,16 @@ def _do_one_poll(app_state) -> dict:
         _LAST_RUN_AT = datetime.now().isoformat(timespec="seconds")
         return counters
 
+    # Anti-double-traitement : deux lecteurs IMAP en parallèle (serveur +
+    # desktop) se disputent le curseur last_uid → on s'efface si le serveur
+    # bat encore. Relais automatique si le serveur meurt (>15 min).
+    from .server_presence import should_defer_to_server
+    if should_defer_to_server(client):
+        counters["skipped_reason"] = "server_active"
+        _LAST_RUN_RESULT = counters
+        _LAST_RUN_AT = datetime.now().isoformat(timespec="seconds")
+        return counters
+
     accounts = _list_imap_accounts_to_scan(app_state, client)
     if not accounts:
         counters["error"] = "no_imap_account_configured"

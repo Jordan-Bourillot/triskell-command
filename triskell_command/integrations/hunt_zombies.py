@@ -77,4 +77,12 @@ def reconcile_hunt_file(path: Path, *, is_running: bool) -> dict | None:
         logger.info("Chasse zombie requalifiée : %s", path.name)
     except Exception as exc:
         logger.debug("reconcile_hunt_file write %s : %s", path.name, exc)
+    # Copie de secours cloud (l'outil = nom du dossier parent des chasses :
+    # ~/.triskell-command/<outil>/hunts/<id>.json)
+    try:
+        from .hunt_cloud_backup import mirror_hunt
+        tool = path.parent.parent.name
+        mirror_hunt(tool, data)
+    except Exception:
+        pass
     return data

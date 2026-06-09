@@ -27,17 +27,10 @@ from ..state import AppState
 logger = logging.getLogger(__name__)
 
 
-# Clé DeepSeek par défaut, injectée au boot si l'utilisateur n'en a pas
-# enregistré une. DeepSeek a une API compatible OpenAI, modèle deepseek-chat
-# très bon marché ; utile en complément des autres providers IA.
-DEFAULT_DEEPSEEK_KEY = "sk-1899aa9f51be40c1a6e658cf9d39231d"
-
-# Clés Google des outils bêta : YouTube Data API (Chasseur Créateur) et
-# Google Places API (Prospecteur Google). Injectées au boot si pas encore
-# enregistrées, pour que les outils marchent "out of the box". Jordan peut
-# les remplacer par les siennes via Réglages → Services Google.
-DEFAULT_YOUTUBE_DATA_KEY  = "AIzaSyCu8xcAyxf091ureRYpaqzMtIKda6TAg10"
-DEFAULT_GOOGLE_PLACES_KEY = "AIzaSyAhOg-mJY2TTOnl4mUKi_FCRt2b__jHd2I"
+# SÉCURITÉ : les clés API ne vivent plus JAMAIS en dur dans le code.
+# Elles se règlent via Réglages (stockées dans settings.json / Supabase)
+# ou par variables d'environnement. Les anciennes clés par défaut qui
+# traînaient ici ont fuité dans l'historique git : à révoquer.
 
 
 class _AutopilotStopped(Exception):
@@ -422,6 +415,34 @@ class Api:
         try:
             from ..integrations import replies_poller
             return replies_poller.poll_now(self._app_state)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_dns_check(self, payload: dict | None = None) -> dict:
+        """Vérifie les 3 tampons de délivrabilité (SPF / DKIM / DMARC) +
+        la réception (MX) du domaine d'envoi.
+
+        payload = {domain?} — sans domaine fourni, prend celui de
+        l'adresse expéditrice principale (config SMTP).
+        """
+        domain = ((payload or {}).get("domain") or "").strip()
+        if not domain:
+            try:
+                from ..integrations import shared_secrets
+                client = self._supabase()
+                cfg = shared_secrets.get_smtp_config(client=client) or {}
+                from_email = (cfg.get("from_email") or "").strip()
+                if "@" in from_email:
+                    domain = from_email.split("@", 1)[1]
+            except Exception as exc:
+                logger.debug("mail_dns_check resolve domain: %s", exc)
+        if not domain:
+            return {"ok": False,
+                    "error": "Aucun domaine : configure d'abord l'adresse "
+                             "expéditrice (Réglages → Mails)."}
+        try:
+            from ..integrations import mail_dns_doctor
+            return mail_dns_doctor.check_domain(domain)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -842,12 +863,19 @@ class Api:
 
         sb = client.raw
 
-        # 1) lit le draft + prospect lié
+        # 1) lit le draft + prospect lié. La colonne body_html n'existe que
+        # si la migration 45 est passée → lecture tolérante (retry sans).
         try:
-            res = (sb.table("prospect_drafts")
-                    .select("id, subject, body, prospect_id, "
-                            "prospects:prospect_id(id, name, emails)")
-                    .eq("id", draft_id).limit(1).execute())
+            try:
+                res = (sb.table("prospect_drafts")
+                        .select("id, subject, body, body_html, prospect_id, "
+                                "prospects:prospect_id(id, name, emails)")
+                        .eq("id", draft_id).limit(1).execute())
+            except Exception:
+                res = (sb.table("prospect_drafts")
+                        .select("id, subject, body, prospect_id, "
+                                "prospects:prospect_id(id, name, emails)")
+                        .eq("id", draft_id).limit(1).execute())
         except Exception as exc:
             return {"ok": False, "error": f"lecture draft KO : {exc}"}
 
@@ -857,6 +885,9 @@ class Api:
         d = data[0]
         subject = d.get("subject") or ""
         final_body = body if body is not None else (d.get("body") or "")
+        # La version HTML n'est utilisable que si le texte n'a pas été
+        # retouché à la main (sinon les deux versions divergeraient).
+        body_html = (d.get("body_html") or "") if body is None else ""
         prospect = d.get("prospects") or {}
         to = ((prospect.get("emails") or [""])[0] or "").strip()
         if not to:
@@ -880,10 +911,17 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": f"update KO : {exc}"}
 
-        # 4) envoi SMTP
+        # 4) envoi SMTP (mail de prospection → en-tête de désinscription)
         try:
-            msg_id = send_email(smtp_cfg, to=to,
-                                 subject=subject, body=final_body)
+            from triskell_core.prospect.outreach.smtp_sender import (
+                prospection_headers,
+            )
+            msg_id = send_email(
+                smtp_cfg, to=to, subject=subject, body=final_body,
+                body_html=body_html,
+                custom_headers=prospection_headers(
+                    smtp_cfg.get("from_email", "")),
+            )
         except Exception as exc:
             # Envoi KO → on remet en pending pour ne pas perdre le brouillon
             try:
@@ -1289,6 +1327,19 @@ class Api:
             return funnel_metrics.compute_funnel(
                 period=p.get("period") or "30d",
                 segment=p.get("segment") or "all",
+            )
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def funnel_by_template(self, payload: dict | None = None) -> dict:
+        """Performance par modèle de mail : envois, réponses, intéressés
+        et taux de réponse pour chaque modèle. La boucle de retour qui
+        dit ENFIN quel texte marche. payload = {period?} (défaut 90d)."""
+        p = payload or {}
+        try:
+            from ..integrations import funnel_metrics
+            return funnel_metrics.compute_template_performance(
+                period=p.get("period") or "90d",
             )
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -7089,30 +7140,12 @@ class Api:
         except Exception as exc:
             logger.debug("migration secrets: %s", exc)
 
-        # Injection des clés par défaut si l'utilisateur n'en a pas encore
-        # enregistré une — DeepSeek + YouTube Data + Google Places (les
-        # clés non-partagées via shared_secrets). Permet à l'app de marcher
-        # "out of the box" tout en laissant la possibilité de remplacer les
-        # clés via Réglages.
-        default_extras = [
-            ("deepseek",      DEFAULT_DEEPSEEK_KEY),
-            ("youtube_data",  DEFAULT_YOUTUBE_DATA_KEY),
-            ("google_places", DEFAULT_GOOGLE_PLACES_KEY),
-        ]
-        for slot, default_val in default_extras:
-            if not default_val:
-                continue
-            try:
-                existing = (self._app_state.get(
-                    "ai", "api_keys", slot, default="") or "").strip()
-                if not existing:
-                    self._app_state.set(
-                        "ai", "api_keys", slot, value=default_val,
-                    )
-                    self._app_state.save()
-                    logger.info("Clé '%s' par défaut injectée.", slot)
-            except Exception as exc:
-                logger.debug("injection %s: %s", slot, exc)
+        # SÉCURITÉ (refonte 2026-06) : plus AUCUNE clé API par défaut écrite
+        # en dur dans le code. Les clés DeepSeek / YouTube / Google Places
+        # se règlent via Réglages ou par variables d'environnement
+        # (DEEPSEEK_API_KEY, YOUTUBE_API_KEY, GOOGLE_PLACES_API_KEY).
+        # Les anciennes clés en dur ont fuité dans l'historique git → elles
+        # doivent être RÉVOQUÉES côté Google/DeepSeek et remplacées.
 
         # Démarrage des workers (best-effort, no-op si dépendances absentes)
         worker_status = {}

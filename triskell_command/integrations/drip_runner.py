@@ -169,6 +169,16 @@ def _do_one_cycle(app_state) -> dict:
         _set_run(counters)
         return counters
 
+    # Anti-double-traitement : si CE process n'est PAS le serveur (ex: app
+    # desktop ouverte sur le PC) et que le serveur bat encore, on lui laisse
+    # le travail. Si le serveur meurt (>15 min sans battement), ce process
+    # reprend automatiquement le relais au cycle suivant.
+    from .server_presence import should_defer_to_server
+    if should_defer_to_server(client):
+        counters["skipped_reason"] = "server_active"
+        _set_run(counters)
+        return counters
+
     config = load_config(client)
     if not config.get("enabled", True):
         _set_run(counters)
@@ -361,7 +371,9 @@ def _create_drip_draft(client, app_state, sent_row: dict,
         if not smtp_cfg:
             return out  # draft créé mais pas envoyé : skip
         try:
-            from triskell_core.prospect.outreach.smtp_sender import send_email
+            from triskell_core.prospect.outreach.smtp_sender import (
+                prospection_headers, send_email,
+            )
             in_reply_to = (sent_row.get("message_id") or "").strip()
             headers = {}
             if in_reply_to:
@@ -370,6 +382,9 @@ def _create_drip_draft(client, app_state, sent_row: dict,
                     else f"<{in_reply_to}>"
                 )
                 headers["References"] = headers["In-Reply-To"]
+            # Relance de prospection → en-tête de désinscription obligatoire
+            headers = prospection_headers(
+                smtp_cfg.get("from_email", ""), extra=headers)
             msg_id = send_email(
                 smtp_cfg, to=to, subject=subject, body=body,
                 custom_headers=headers,

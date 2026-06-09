@@ -112,6 +112,14 @@ class Hunt:
             json.dumps(asdict(self), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        # Copie de secours cloud quand la chasse atteint un état final
+        # (best-effort : ne casse jamais la fin de chasse).
+        if self.status in ("done", "error"):
+            try:
+                from .hunt_cloud_backup import mirror_hunt
+                mirror_hunt("chasseur", asdict(self))
+            except Exception:
+                pass
 
     @classmethod
     def load(cls, hunt_id: str) -> "Hunt | None":

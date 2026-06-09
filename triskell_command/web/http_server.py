@@ -49,10 +49,20 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
 
-    # CORS — permissif en dev. À restreindre quand on déploie public.
+    # CORS — configurable via TRISKELL_CORS_ORIGINS (origines séparées par
+    # des virgules). Défaut "*" car les sites clients Pixel Pros (dizaines
+    # de domaines, dont des domaines custom) postent leurs formulaires de
+    # contact sur les endpoints publics — impossible de lister les origines
+    # à l'avance. Le risque est contenu : le cookie de session est
+    # SameSite=Lax + HttpOnly, donc un site tiers ne peut PAS faire d'appel
+    # authentifié avec le cookie de Jordan (anti-CSRF), et toutes les
+    # routes /api/* non publiques exigent ce cookie.
+    _cors_raw = (os.environ.get("TRISKELL_CORS_ORIGINS") or "*").strip()
+    _cors_origins = ([o.strip() for o in _cors_raw.split(",") if o.strip()]
+                     or ["*"])
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=_cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -84,6 +94,27 @@ def create_app() -> FastAPI:
                 tcauth.reset_current_local_user(token)
         return await call_next(request)
 
+    # Marqueur de présence : CE process est LE serveur. Les robots qui
+    # tournent ailleurs (app desktop ouverte sur le PC de Jordan) verront
+    # son battement de cœur et s'effaceront — fin du double traitement.
+    try:
+        from ..integrations import server_presence
+        server_presence.mark_server_process()
+    except Exception as exc:
+        logger.debug("server_presence indisponible : %s", exc)
+
+    # Rôle du process : "all" (défaut, comportement historique = web +
+    # robots), "web" (sert uniquement le site/API, aucun robot) ou
+    # "workers" (robots sans vocation à servir le front). Prépare la
+    # séparation serveur web / robots en 2 déploiements SANS rien casser :
+    # tant que la variable n'est pas posée, rien ne change.
+    role = (os.environ.get("TRISKELL_ROLE") or "all").strip().lower()
+    if role not in ("all", "web", "workers"):
+        role = "all"
+    run_workers = role in ("all", "workers")
+    logger.info("Rôle du process : %s (robots de fond : %s)",
+                role, "oui" if run_workers else "non")
+
     # Singleton Api (workers backend démarrent au premier accès)
     api_instance = Api()
 
@@ -107,19 +138,29 @@ def create_app() -> FastAPI:
     # Empêche l'expiration de l'access_token (durée typique : 1h).
     _start_supabase_refresh_thread()
 
-    # Thread des rappels Brain : check toutes les 5 min si des notes ont
-    # un remind_at échu et envoie une push notification.
-    _start_brain_reminders_thread()
+    if run_workers:
+        # Thread des rappels Brain : check toutes les 5 min si des notes ont
+        # un remind_at échu et envoie une push notification.
+        _start_brain_reminders_thread()
 
-    # Démarre les workers backend (pollers IMAP, autopilot, drip, etc.)
-    # SANS attendre que le front se connecte. Comme ça, le serveur fait son
-    # boulot même si personne n'a la page ouverte.
-    try:
-        boot_result = api_instance.boot()
-        if boot_result.get("ok"):
-            logger.info("Workers backend démarrés au boot du serveur HTTP.")
-    except Exception as exc:
-        logger.warning("boot() au démarrage HTTP a échoué : %s", exc)
+        # Battement de cœur serveur (toutes les 5 min dans shared_settings) :
+        # signale aux robots du desktop que le serveur travaille.
+        _start_server_heartbeat_thread()
+
+        # Chien de garde : alerte push si un robot est en panne / muet.
+        # (La panne silencieuse de juin 2026 — 6 robots morts pendant des
+        # semaines — ne doit JAMAIS se reproduire.)
+        _start_watchdog_thread(api_instance)
+
+        # Démarre les workers backend (pollers IMAP, autopilot, drip, etc.)
+        # SANS attendre que le front se connecte. Comme ça, le serveur fait
+        # son boulot même si personne n'a la page ouverte.
+        try:
+            boot_result = api_instance.boot()
+            if boot_result.get("ok"):
+                logger.info("Workers backend démarrés au boot du serveur HTTP.")
+        except Exception as exc:
+            logger.warning("boot() au démarrage HTTP a échoué : %s", exc)
 
     # Reprise auto des envois Convoi qui ont ete tues par le redemarrage
     # precedent (ex: redeploiement Coolify pendant un convoi en cours).
@@ -141,9 +182,10 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.warning("resume_convoy_sends au boot a echoue : %s", exc)
 
-    threading.Thread(
-        target=_resume_convoy_later, name="convoy-resume-boot", daemon=True,
-    ).start()
+    if run_workers:
+        threading.Thread(
+            target=_resume_convoy_later, name="convoy-resume-boot", daemon=True,
+        ).start()
 
     # Auto-génération des routes depuis les méthodes publiques
     method_count = 0
@@ -184,12 +226,18 @@ def create_app() -> FastAPI:
             "user_id": user_id,
             "display_name": tcauth.get_display_name(user_id),
         })
+        # Cookie "secure" (jamais transmis en HTTP clair) dès que la requête
+        # arrive en HTTPS — c'est le cas en prod derrière le proxy Coolify
+        # (en-tête x-forwarded-proto). En local (http://localhost) il reste
+        # non-secure pour que le login marche en dev.
+        _fwd_proto = (request.headers.get("x-forwarded-proto") or "").lower()
+        _is_https = request.url.scheme == "https" or _fwd_proto == "https"
         response.set_cookie(
             key=tcauth.COOKIE_NAME,
             value=cookie_value,
             max_age=tcauth.COOKIE_MAX_AGE,
             httponly=True,
-            secure=False,  # Sera passé à True en prod via env (cf. Phase 3.3)
+            secure=_is_https,
             samesite="lax",
             path="/",
         )
@@ -968,6 +1016,52 @@ def _start_supabase_refresh_thread(interval_sec: int = 1800) -> None:
     t = threading.Thread(target=loop, name="supabase-refresh", daemon=True)
     t.start()
     logger.info("Thread auto-refresh Supabase démarré (toutes les %d s).", interval_sec)
+
+
+def _start_server_heartbeat_thread() -> None:
+    """Battement de cœur serveur : toutes les 5 min dans shared_settings.
+
+    Les robots qui tournent hors du serveur (app desktop) le consultent
+    pour s'effacer pendant que le serveur est vivant.
+    """
+    def loop():
+        from ..integrations import server_presence
+        while True:
+            try:
+                from triskell_core.db import get_client, SupabaseNotConfigured
+                try:
+                    c = get_client()
+                except SupabaseNotConfigured:
+                    c = None
+                if c is not None and c.is_authenticated:
+                    server_presence.beat(c)
+            except Exception as exc:
+                logger.debug("heartbeat thread : %s", exc)
+            time.sleep(server_presence.HEARTBEAT_INTERVAL_SEC)
+
+    t = threading.Thread(target=loop, name="server-heartbeat", daemon=True)
+    t.start()
+    logger.info("Battement de cœur serveur démarré (toutes les 5 min).")
+
+
+def _start_watchdog_thread(api_instance) -> None:
+    """Chien de garde : vérifie l'état des robots toutes les 30 min et
+    pousse une notification si l'un d'eux est en panne ou muet."""
+    def loop():
+        from ..integrations import worker_watchdog as wd
+        time.sleep(wd.BOOT_DELAY_SEC)  # laisse les robots faire un passage
+        while True:
+            try:
+                res = wd.check_and_alert(api_instance)
+                if res.get("alerted") or res.get("recovered"):
+                    logger.info("Watchdog : %s", res)
+            except Exception as exc:
+                logger.warning("watchdog thread : %s", exc)
+            time.sleep(wd.CHECK_INTERVAL_SEC)
+
+    t = threading.Thread(target=loop, name="worker-watchdog", daemon=True)
+    t.start()
+    logger.info("Chien de garde des robots démarré (passage toutes les 30 min).")
 
 
 def _start_brain_reminders_thread(interval_sec: int = 300) -> None:

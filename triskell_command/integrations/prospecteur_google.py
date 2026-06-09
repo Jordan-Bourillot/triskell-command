@@ -41,9 +41,9 @@ PROSP_DIR = Path.home() / ".triskell-command" / "prospecteur_google"
 HUNTS_DIR = PROSP_DIR / "hunts"
 EXPORTS_DIR = PROSP_DIR / "exports"
 
-# Clé API Google Places par défaut (issue du programme desktop d'origine).
-# Surchargeable via la variable d'env GOOGLE_PLACES_API_KEY ou dans le payload.
-DEFAULT_GOOGLE_PLACES_KEY = "AIzaSyAhOg-mJY2TTOnl4mUKi_FCRt2b__jHd2I"
+# SÉCURITÉ : plus de clé Google Places en dur dans le code (l'ancienne a
+# fuité dans l'historique git → à révoquer côté Google). La clé vient du
+# payload, de la variable d'env GOOGLE_PLACES_API_KEY, ou des Réglages.
 
 PLACES_URL = "https://places.googleapis.com/v1/places:searchText"
 PLACES_FIELDS = (
@@ -100,12 +100,24 @@ def ensure_dirs() -> None:
 
 
 def _get_api_key(payload_key: str | None = None) -> str:
+    """Résout la clé Google Places : payload > env > Réglages. Vide si aucune."""
     if payload_key and payload_key.strip():
         return payload_key.strip()
     env_key = (os.environ.get("GOOGLE_PLACES_API_KEY") or "").strip()
     if env_key:
         return env_key
-    return DEFAULT_GOOGLE_PLACES_KEY
+    try:
+        import json as _json
+        p = Path.home() / ".triskell-command" / "settings.json"
+        if p.exists():
+            d = _json.loads(p.read_text(encoding="utf-8"))
+            key = (((d.get("ai") or {}).get("api_keys") or {})
+                   .get("google_places") or "").strip()
+            if key:
+                return key
+    except Exception:
+        pass
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +162,13 @@ class ProspectHunt:
             json.dumps(asdict(self), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        # Copie de secours cloud quand la chasse atteint un état final
+        if self.status in ("done", "error"):
+            try:
+                from .hunt_cloud_backup import mirror_hunt
+                mirror_hunt("prospecteur_google", asdict(self))
+            except Exception:
+                pass
 
     @classmethod
     def load(cls, hunt_id: str) -> "ProspectHunt | None":
@@ -273,6 +292,12 @@ def start_hunt(metier: str, zone: str, num_results: int = 60,
         raise ValueError("Indique un métier ou un type d'entreprise.")
     if not zone or not zone.strip():
         raise ValueError("Indique une zone géographique.")
+    if not _get_api_key(api_key):
+        raise ValueError(
+            "Clé Google Places manquante. Ajoute-la dans Réglages → IA & "
+            "clés (champ google_places), ou en variable d'environnement "
+            "GOOGLE_PLACES_API_KEY sur le serveur."
+        )
     if num_results <= 0:
         num_results = 60
     if num_results > 200:
@@ -492,62 +517,33 @@ def export_csv(hunt_id: str) -> dict:
 
 def export_xlsx(hunt_id: str) -> dict:
     """Exporte les entreprises d'une recherche en fichier Excel (.xlsx)."""
-    try:
-        from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment
-    except ImportError:
-        return {"ok": False,
-                "error": "openpyxl manquant — `pip install openpyxl`"}
     h = ProspectHunt.load(hunt_id)
     if not h:
         return {"ok": False, "error": "chasse introuvable"}
     ensure_dirs()
     out = EXPORTS_DIR / f"prospects_google_{h.id}.xlsx"
     rows = h.prospects or []
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Entreprises"
-    headers = ["Nom", "Adresse", "Téléphone", "Site web",
-               "Email principal", "Emails secondaires",
-               "A un site ?", "Statut"]
-    ws.append(headers)
-
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill("solid", fgColor="EA580C")
-    for cell in ws[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="left", vertical="center")
-
-    # Couleur de fond pour mettre en évidence les boîtes SANS site
-    no_site_fill = PatternFill("solid", fgColor="FEF3C7")  # ambre clair
-
-    for p in rows:
-        has_site = bool(p.get("has_website"))
-        ws.append([
-            p.get("name", ""),
-            p.get("address", ""),
-            p.get("phone", ""),
-            p.get("website", ""),
-            p.get("email", ""),
-            "; ".join(p.get("emails_extra", []) or []),
-            "oui" if has_site else "NON",
-            p.get("status", ""),
-        ])
-        # Si pas de site, fond ambre clair pour toute la ligne
-        if not has_site:
-            for cell in ws[ws.max_row]:
-                cell.fill = no_site_fill
-
-    widths = [28, 38, 18, 32, 28, 28, 12, 18]
-    for i, w in enumerate(widths, start=1):
-        ws.column_dimensions[chr(64 + i)].width = w
-
-    ws.freeze_panes = "A2"
-
-    wb.save(out)
-    return {"ok": True, "path": str(out), "rows": len(rows)}
+    try:
+        from .hunt_exports import write_xlsx
+        n = write_xlsx(
+            out, sheet_title="Entreprises",
+            headers=["Nom", "Adresse", "Téléphone", "Site web",
+                     "Email principal", "Emails secondaires",
+                     "A un site ?", "Statut"],
+            rows=([p.get("name", ""), p.get("address", ""),
+                   p.get("phone", ""), p.get("website", ""),
+                   p.get("email", ""),
+                   "; ".join(p.get("emails_extra", []) or []),
+                   "oui" if p.get("has_website") else "NON",
+                   p.get("status", "")] for p in rows),
+            widths=[28, 38, 18, 32, 28, 28, 12, 18],
+            # Met en évidence (fond ambre) les boîtes SANS site
+            highlight=[not p.get("has_website") for p in rows],
+        )
+    except ImportError:
+        return {"ok": False,
+                "error": "openpyxl manquant — `pip install openpyxl`"}
+    return {"ok": True, "path": str(out), "rows": n}
 
 
 def delete_hunt(hunt_id: str) -> dict:

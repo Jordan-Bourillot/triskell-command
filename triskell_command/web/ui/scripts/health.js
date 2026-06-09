@@ -81,7 +81,67 @@ const Health = {
       this._renderSummary(data.summary || {}) +
       this._renderMailSafety(mailHealth || {}) +
       this._renderDeliverability(data['delivrabilité'] || {}) +
+      this._renderDnsCard() +
       this._renderWorkers(data.workers || []);
+    this._bindDnsCard();
+  },
+
+  // ---- Tampons DNS (SPF / DKIM / DMARC / MX) ----
+  // Vérification à la demande (pas à chaque refresh : c'est du DNS externe).
+  _dnsResult: null,
+
+  _renderDnsCard() {
+    const r = this._dnsResult;
+    let body;
+    if (!r) {
+      body = `
+        <p class="text-xs text-text-muted mb-3">
+          Les trois « tampons » qui prouvent aux boîtes mail (Gmail, Yahoo…)
+          que tes envois sont légitimes. Sans eux, direction spam.
+        </p>
+        <button id="h-dns-check" class="btn btn-secondary text-xs">Vérifier mon domaine d'envoi</button>`;
+    } else if (!r.ok) {
+      body = `
+        <div class="text-sm text-danger mb-3">${this._esc(r.error || 'Vérification impossible')}</div>
+        <button id="h-dns-check" class="btn btn-secondary text-xs">Réessayer</button>`;
+    } else {
+      body = `
+        <div class="text-xs text-text-muted mb-3">Domaine vérifié :
+          <span class="font-semibold text-text">${this._esc(r.domain)}</span>
+          — score ${this._esc(r.score)}</div>
+        <div class="space-y-2 mb-3">
+          ${(r.checks || []).map(c => `
+            <div class="flex items-start gap-2 text-sm">
+              <span>${c.ok ? '✅' : '❌'}</span>
+              <div>
+                <span class="font-semibold">${this._esc(c.label)}</span>
+                <span class="text-text-muted"> — ${this._esc(c.detail)}</span>
+                ${c.advice ? `<div class="text-xs text-warning mt-0.5">→ ${this._esc(c.advice)}</div>` : ''}
+              </div>
+            </div>`).join('')}
+        </div>
+        <button id="h-dns-check" class="btn btn-secondary text-xs">Re-vérifier</button>`;
+    }
+    return `
+      <div class="mb-8">
+        <div class="section-label">Tampons d'authentification (DNS)</div>
+        <div class="card p-4">${body}</div>
+      </div>`;
+  },
+
+  _bindDnsCard() {
+    const btn = document.getElementById('h-dns-check');
+    if (!btn) return;
+    btn.onclick = async () => {
+      btn.disabled = true;
+      btn.textContent = 'Vérification…';
+      try {
+        this._dnsResult = await App.api.mail_dns_check({});
+      } catch (e) {
+        this._dnsResult = { ok: false, error: String(e) };
+      }
+      await this.refresh();
+    };
   },
 
   _renderMailSafety(mh) {

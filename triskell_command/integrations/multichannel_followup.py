@@ -249,6 +249,16 @@ def _do_one_cycle(app_state) -> dict:
         _set_run(counters)
         return counters
 
+    # Anti-double-traitement : si CE process n'est PAS le serveur (ex: app
+    # desktop ouverte sur le PC) et que le serveur bat encore, on lui laisse
+    # le travail. Si le serveur meurt (>15 min sans battement), ce process
+    # reprend automatiquement le relais au cycle suivant.
+    from .server_presence import should_defer_to_server
+    if should_defer_to_server(client):
+        counters["skipped_reason"] = "server_active"
+        _set_run(counters)
+        return counters
+
     config = load_config(client)
     if not config.get("enabled", True):
         _set_run(counters)

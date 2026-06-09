@@ -175,6 +175,16 @@ def _do_one_cycle(app_state) -> dict:
         _set_run(counters)
         return counters
 
+    # Anti-double-traitement : si CE process n'est PAS le serveur (ex: app
+    # desktop ouverte sur le PC) et que le serveur bat encore, on lui laisse
+    # le travail. Si le serveur meurt (>15 min sans battement), ce process
+    # reprend automatiquement le relais au cycle suivant.
+    from .server_presence import should_defer_to_server
+    if should_defer_to_server(client):
+        counters["skipped_reason"] = "server_active"
+        _set_run(counters)
+        return counters
+
     config = load_config(client)
     if not config.get("enabled", True):
         _set_run(counters)
@@ -442,9 +452,16 @@ def _create_post_sale_draft(client, app_state, proj: dict,
         if not smtp_cfg:
             return out
         try:
-            from triskell_core.prospect.outreach.smtp_sender import send_email
-            msg_id = send_email(smtp_cfg, to=client_email,
-                                 subject=subject, body=body)
+            from triskell_core.prospect.outreach.smtp_sender import (
+                prospection_headers, send_email,
+            )
+            # Mail commercial (cross-sell / NPS) à un client → désinscription
+            # proposée aussi : un client a le droit de couper le marketing.
+            msg_id = send_email(
+                smtp_cfg, to=client_email, subject=subject, body=body,
+                custom_headers=prospection_headers(
+                    smtp_cfg.get("from_email", "")),
+            )
             now_iso = datetime.now().isoformat(timespec="seconds")
             # Marque la stage envoyée sur le projet (colonnes legacy
             # uniquement pour les stages historiques). Les nouvelles stages

@@ -693,12 +693,17 @@ def send_draft(
         except Exception:
             pass
     try:
+        from triskell_core.prospect.outreach.smtp_sender import (
+            prospection_headers,
+        )
         msg_id = send_email(
             smtp_cfg,
             to=to,
             subject=draft.subject or "(sans objet)",
             body=draft.body or "",
             body_html=draft.body_html or "",
+            custom_headers=prospection_headers(
+                smtp_cfg.get("from_email", "")),
         )
         draft.status = "sent"
         draft.sent_at = _now_iso()

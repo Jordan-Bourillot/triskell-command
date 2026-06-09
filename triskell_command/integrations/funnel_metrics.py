@@ -188,3 +188,121 @@ def compute_funnel(period: str = "30d", segment: str = "all") -> dict[str, Any]:
             100.0 * status_counter.get("unsubscribed", 0) / sent_count, 2)
     out["ok"] = True
     return out
+
+
+# ---------------------------------------------------------------------------
+# Performance par modèle de mail — quel modèle fait répondre ?
+# ---------------------------------------------------------------------------
+def _template_label(row: dict) -> str:
+    """Étiquette lisible du « modèle » d'un envoi (colonne ou extra)."""
+    extra = row.get("extra") or {}
+    if isinstance(extra, str):
+        try:
+            extra = json.loads(extra)
+        except Exception:
+            extra = {}
+    label = (row.get("template_key") or extra.get("template_key")
+             or extra.get("offer_name") or "")
+    label = str(label).strip()
+    if not label:
+        if extra.get("drip_stage"):
+            return f"relance {extra['drip_stage']}"
+        if extra.get("auto_drip"):
+            return "relance auto"
+        if extra.get("convoy_campaign_id"):
+            return "Convoi (libre)"
+        return "(génération libre)"
+    return label
+
+
+def aggregate_template_performance(sent_rows: list[dict],
+                                    reply_rows: list[dict]) -> list[dict]:
+    """Agrégation PURE : envois + réponses → stats par modèle.
+
+    Une réponse est créditée au modèle du DERNIER envoi fait à ce prospect
+    AVANT la réponse. Renvoie une liste triée par volume d'envois :
+    [{template, sent, replies, interested, reply_rate}].
+    """
+    # Index des envois par prospect, triés par date
+    sends_by_pid: dict[str, list[tuple[str, str]]] = {}
+    counts: dict[str, dict] = {}
+    for r in sent_rows:
+        pid = r.get("prospect_id") or ""
+        ts = r.get("ts") or ""
+        label = _template_label(r)
+        c = counts.setdefault(label, {"sent": 0, "replies": 0,
+                                       "interested": 0})
+        c["sent"] += 1
+        if pid:
+            sends_by_pid.setdefault(pid, []).append((ts, label))
+    for pid in sends_by_pid:
+        sends_by_pid[pid].sort()
+
+    for r in reply_rows:
+        pid = r.get("prospect_id") or ""
+        ts = r.get("ts") or ""
+        sends = sends_by_pid.get(pid) or []
+        label = None
+        for s_ts, s_label in sends:
+            if not ts or s_ts <= ts:
+                label = s_label
+            else:
+                break
+        if label is None:
+            continue  # réponse sans envoi connu dans la fenêtre
+        extra = r.get("extra") or {}
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except Exception:
+                extra = {}
+        cat = ((extra.get("classification") or {}).get("category") or "")
+        c = counts.setdefault(label, {"sent": 0, "replies": 0,
+                                       "interested": 0})
+        c["replies"] += 1
+        if cat == "interested":
+            c["interested"] += 1
+
+    rows = []
+    for label, c in counts.items():
+        rate = round(100.0 * c["replies"] / c["sent"], 1) if c["sent"] else 0.0
+        rows.append({"template": label, "sent": c["sent"],
+                     "replies": c["replies"],
+                     "interested": c["interested"],
+                     "reply_rate": rate})
+    rows.sort(key=lambda x: (-x["sent"], x["template"]))
+    return rows
+
+
+def compute_template_performance(period: str = "90d") -> dict[str, Any]:
+    """Quel modèle de mail fait répondre ? (envois vs réponses, par modèle).
+
+    C'est la boucle de retour qui manquait : les données dormaient dans
+    email_history sans jamais être croisées. Période par défaut : 90 jours
+    (la prospection met du temps à répondre).
+    """
+    out: dict[str, Any] = {"ok": False, "period": period, "rows": [],
+                           "error": ""}
+    client = _get_client()
+    if client is None:
+        out["error"] = "supabase_unavailable"
+        return out
+    period = period if period in PERIODS else "90d"
+    since = _period_start(period)
+    sb = client.raw
+    try:
+        sent_res = (sb.table("email_history")
+                    .select("prospect_id,ts,template_key,extra")
+                    .eq("kind", "email_sent")
+                    .gte("ts", since).limit(20000).execute())
+        reply_res = (sb.table("email_history")
+                     .select("prospect_id,ts,extra")
+                     .eq("kind", "reply_received")
+                     .gte("ts", since).limit(20000).execute())
+    except Exception as exc:
+        out["error"] = f"email_history: {exc}"
+        return out
+    out["rows"] = aggregate_template_performance(
+        sent_res.data or [], reply_res.data or [])
+    out["ok"] = True
+    return out
