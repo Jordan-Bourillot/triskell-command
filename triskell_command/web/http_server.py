@@ -932,11 +932,20 @@ def _try_refresh_supabase() -> bool:
             c = get_client()
         except SupabaseNotConfigured:
             return False
+        if getattr(c, "service_mode", False):
+            # Mode service_role : l'accès base n'expire jamais, rien à faire.
+            return True
         if not c.is_authenticated:
             return False
         ok = c.refresh_session()
         if ok:
             logger.info("Session Supabase rafraîchie (token renouvelé).")
+        else:
+            logger.warning(
+                "Refresh Supabase ÉCHOUÉ — le token va expirer. "
+                "Ajoute SUPABASE_SERVICE_ROLE_KEY à l'environnement du serveur "
+                "pour un accès permanent sans session."
+            )
         return ok
     except Exception as exc:
         logger.debug("_try_refresh_supabase: %s", exc)

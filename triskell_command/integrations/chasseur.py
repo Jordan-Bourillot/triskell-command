@@ -119,7 +119,10 @@ class Hunt:
         if not p.exists():
             return None
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            from .hunt_zombies import reconcile_hunt_file
+            data = reconcile_hunt_file(p, is_running=is_running(hunt_id))
+            if not data:
+                return None
             return cls(**data)
         except Exception as exc:
             logger.warning("hunt.load failed %s: %s", hunt_id, exc)
@@ -664,6 +667,12 @@ def _extract_emails_from_html(html: str) -> list[str]:
                   "@", text, flags=re.IGNORECASE)
     text = re.sub(r"\s+(?:\[|\(|\{)\s*(?:dot|point|\.)\s*(?:\]|\)|\})\s+",
                   ".", text, flags=re.IGNORECASE)
+    # Filtre central anti-fausses-adresses de triskell_core (même protection
+    # qu'Obélisk / Chasseur Créateur / Prospecteur Google).
+    try:
+        from triskell_core.prospect.enrichers.email_filter import clean_email
+    except ImportError:
+        clean_email = None
     found = []
     for m in EMAIL_RE.finditer(text):
         e = m.group(0).lower().rstrip(".,;:)")
@@ -673,6 +682,10 @@ def _extract_emails_from_html(html: str) -> list[str]:
         if any(e.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif",
                                             ".webp", ".svg", ".css", ".js")):
             continue
+        if clean_email is not None:
+            e = clean_email(e) or ""
+            if not e:
+                continue
         if e not in found:
             found.append(e)
     return found
@@ -861,12 +874,20 @@ def is_running(hunt_id: str) -> bool:
 
 
 def list_hunts(limit: int = 20) -> list[dict]:
-    """Liste les chasses connues localement, plus récentes en premier."""
+    """Liste les chasses connues localement, plus récentes en premier.
+
+    Au passage, requalifie les chasses zombies (statut "en cours" sans
+    thread vivant — typiquement après un redémarrage du serveur).
+    """
     ensure_dirs()
+    from .hunt_zombies import reconcile_hunt_file
     items: list[dict] = []
     for p in HUNTS_DIR.glob("*.json"):
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            running = is_running(p.stem)
+            data = reconcile_hunt_file(p, is_running=running)
+            if not data:
+                continue
             items.append({
                 "id": data.get("id"),
                 "label": data.get("label"),
@@ -875,7 +896,8 @@ def list_hunts(limit: int = 20) -> list[dict]:
                 "progress": data.get("progress"),
                 "stats": data.get("stats") or {},
                 "filters": data.get("filters") or {},
-                "running": is_running(data.get("id") or ""),
+                "running": running,
+                "prospects_count": len(data.get("prospects") or []),
             })
         except Exception:
             continue

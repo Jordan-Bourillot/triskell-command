@@ -240,6 +240,17 @@ def is_valid_email(email: str, include_personal: bool = False) -> bool:
     if not EMAIL_STRICT_RE.match(email):
         return False
 
+    # Barrière centrale anti-fausses-adresses de triskell_core (domaines
+    # plateforme/factices, local-parts suspects type "only"/"online", www.).
+    # Utilisée en simple rejet : on ne prend pas sa version normalisée pour
+    # ne pas changer la valeur stockée par Argus.
+    try:
+        from triskell_core.prospect.enrichers.email_filter import clean_email
+        if clean_email(email) is None:
+            return False
+    except ImportError:
+        pass
+
     # Faux positifs type "icon@2x.png".
     if any(email.endswith(suf) for suf in FAKE_EMAIL_SUFFIXES):
         return False

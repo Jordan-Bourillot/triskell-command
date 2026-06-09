@@ -517,7 +517,13 @@ const ChasseurCreateurs = {
           <div class="flex items-center gap-2">
             ${this._statusBadge(h.status, isRunning)}
             ${isDone && creators.length > 0 ? `
-              <button id="cc-export-xlsx" class="btn btn-primary" title="Télécharger en Excel (.xlsx)">
+              ${withMail > 0 ? `
+              <button id="cc-push" class="btn btn-primary"
+                      title="Ajouter les créateurs avec mail à la base Tous les prospects (même base qu'Obélisk et l'Auto-pilote)">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                Ajouter à mes prospects
+              </button>` : ''}
+              <button id="cc-export-xlsx" class="btn btn-secondary" title="Télécharger en Excel (.xlsx)">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
                 Excel
               </button>
@@ -619,8 +625,44 @@ const ChasseurCreateurs = {
     if (exportBtn) exportBtn.onclick = () => this._exportCsv();
     const exportXlsxBtn = document.getElementById('cc-export-xlsx');
     if (exportXlsxBtn) exportXlsxBtn.onclick = () => this._exportXlsx();
+    const pushBtn = document.getElementById('cc-push');
+    if (pushBtn) pushBtn.onclick = () => this._pushToProspects();
     const delBtn = document.getElementById('cc-delete');
     if (delBtn) delBtn.onclick = () => this._deleteHunt();
+  },
+
+  async _pushToProspects() {
+    if (!this.state.currentId) return;
+    const h = this.state.currentHunt;
+    const withMail = (h?.stats?.avec_mail) || 0;
+    if (!withMail) {
+      this._toast('Aucun créateur avec mail à ajouter.', 'danger');
+      return;
+    }
+    const ok = confirm(
+      `Ajouter ${withMail} créateur${withMail > 1 ? 's' : ''} à la base ` +
+      `de prospects ?\n\n` +
+      `Ils apparaîtront dans "Tous les prospects" (même base qu'Obélisk). ` +
+      `Les doublons sont fusionnés automatiquement, et l'Auto-pilote ` +
+      `pourra leur écrire.`
+    );
+    if (!ok) return;
+    const btn = document.getElementById('cc-push');
+    if (btn) { btn.disabled = true; btn.textContent = 'Ajout…'; }
+    const r = await this._api('push_to_prospects', {hunt_id: this.state.currentId});
+    if (btn) btn.disabled = false;
+    if (!r || !r.ok) {
+      this._toast((r && r.error) || 'Ajout impossible', 'danger');
+      this._renderDetail();
+      return;
+    }
+    this._toast(
+      `${r.pushed} créateur${r.pushed > 1 ? 's' : ''} ajouté${r.pushed > 1 ? 's' : ''} ` +
+      `à la base — ${r.created} nouveau${r.created > 1 ? 'x' : ''}, ` +
+      `${r.merged} fusionné${r.merged > 1 ? 's' : ''}.`,
+      'success'
+    );
+    this._renderDetail();
   },
 
   _statCell(label, value, tone) {

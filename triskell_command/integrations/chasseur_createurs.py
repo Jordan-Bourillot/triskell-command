@@ -174,7 +174,10 @@ class CreatorHunt:
         if not p.exists():
             return None
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            from .hunt_zombies import reconcile_hunt_file
+            data = reconcile_hunt_file(p, is_running=is_running(hunt_id))
+            if not data:
+                return None
             return cls(**data)
         except Exception as exc:
             logger.warning("creator hunt.load failed %s: %s", hunt_id, exc)
@@ -185,12 +188,31 @@ class CreatorHunt:
 # Helpers
 # ---------------------------------------------------------------------------
 def _clean_emails(emails: set[str]) -> list[str]:
-    """Vire les mails techniques / faux positifs."""
-    out = []
+    """Vire les mails techniques / faux positifs.
+
+    Toutes les extractions du module (YouTube, Instagram, Facebook)
+    convergent ici. On applique DEUX couches :
+      1. le filtre central de triskell_core (`email_filter.clean_email`) —
+         la source de vérité anti-fausses-adresses (fragments d'URL,
+         domaines plateforme/factices, local-parts suspects, préfixe www.) ;
+         c'est le même filtre qui protège Obélisk depuis le 2026-05-22.
+      2. la blacklist locale historique, en complément.
+    Si triskell_core est absent (dev sans le paquet), seule la couche 2
+    s'applique — comme avant.
+    """
+    try:
+        from triskell_core.prospect.enrichers.email_filter import clean_email
+    except ImportError:
+        clean_email = None  # fallback : blacklist locale seule
+    out: list[str] = []
     for e in emails:
-        e = e.strip().lower()
+        e = (e or "").strip().lower()
         if not e:
             continue
+        if clean_email is not None:
+            e = clean_email(e) or ""
+            if not e:
+                continue
         if any(p in e for p in EMAIL_BLACKLIST_PATTERNS):
             continue
         if e in out:
@@ -616,12 +638,20 @@ def is_running(hunt_id: str) -> bool:
 
 
 def list_hunts(limit: int = 20) -> list[dict]:
-    """Liste les chasses connues localement, plus récentes en premier."""
+    """Liste les chasses connues localement, plus récentes en premier.
+
+    Requalifie au passage les chasses zombies (interrompues par un
+    redémarrage du serveur).
+    """
     ensure_dirs()
+    from .hunt_zombies import reconcile_hunt_file
     items: list[dict] = []
     for p in HUNTS_DIR.glob("*.json"):
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            running = is_running(p.stem)
+            data = reconcile_hunt_file(p, is_running=running)
+            if not data:
+                continue
             items.append({
                 "id": data.get("id"),
                 "label": data.get("label"),
@@ -630,7 +660,8 @@ def list_hunts(limit: int = 20) -> list[dict]:
                 "progress": data.get("progress"),
                 "stats": data.get("stats") or {},
                 "filters": data.get("filters") or {},
-                "running": is_running(data.get("id") or ""),
+                "running": running,
+                "creators_count": len(data.get("creators") or []),
             })
         except Exception:
             continue
@@ -815,3 +846,104 @@ def delete_hunt(hunt_id: str) -> dict:
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
     return {"ok": True}
+
+
+def push_to_prospects(hunt_id: str) -> dict:
+    """Pousse les créateurs d'une chasse vers la base partagée (table
+    `prospects`) — la même base qu'Obélisk, l'Auto-Pilote et la vue
+    "Tous les prospects". Upsert dédoublonné par email / URL.
+
+    Seuls les créateurs AVEC email sont poussés : sans mail, ni
+    l'Auto-Pilote ni les campagnes ne peuvent rien en faire.
+
+    Renvoie {ok, backend, pushed, created, merged, total}.
+    """
+    h = CreatorHunt.load(hunt_id)
+    if not h:
+        return {"ok": False, "error": "chasse introuvable"}
+    if not h.creators:
+        return {"ok": False, "error": "aucun créateur à pousser"}
+
+    try:
+        from triskell_core.prospect.core.crm import get_crm
+        from triskell_core.prospect.core.prospect import (
+            Prospect as CoreProspect, Source,
+        )
+    except ImportError as exc:
+        return {"ok": False, "error":
+                f"triskell_core absent — impossible de pousser ({exc})"}
+
+    try:
+        crm = get_crm()
+    except Exception as exc:
+        return {"ok": False, "error": f"connexion CRM impossible : {exc}"}
+    backend = "remote" if crm.__class__.__name__ == "RemoteCRM" else "local"
+
+    niche = (h.filters or {}).get("niche") or ""
+
+    context_by_platform = {
+        "youtube": "profil YouTube (description / page À propos)",
+        "instagram": "bio Instagram",
+        "facebook": "page Facebook",
+    }
+
+    core_prospects: list[CoreProspect] = []
+    for c in h.creators:
+        email = (c.get("email") or "").strip()
+        if not email:
+            continue
+        platform = (c.get("platform") or "").strip() or "youtube"
+        all_emails = [email] + [e for e in (c.get("emails_extra") or []) if e]
+        emails_meta = [{
+            "email": e,
+            "source": platform,
+            "source_id": (c.get("handle") or "").strip(),
+            "url": (c.get("url") or "").strip(),
+            "context": context_by_platform.get(platform, "profil créateur"),
+            "found_at": "",
+        } for e in all_emails]
+        try:
+            subs = int(c.get("subscribers") or 0)
+        except (TypeError, ValueError):
+            subs = 0
+        cp = CoreProspect(
+            name=(c.get("name") or "").strip(),
+            handle=(c.get("handle") or "").strip(),
+            emails=all_emails,
+            emails_meta=emails_meta,
+            country=(c.get("country") or "").strip(),
+            industry=niche,
+            description=(c.get("description") or "").strip()[:500],
+            language="fr",
+            subscribers=subs or None,
+            platform_url=(c.get("url") or "").strip(),
+            other_urls=[u for u in (c.get("external_links") or []) if u][:5],
+            tags=["chasseur_createurs", platform],
+            sources=[Source(
+                name=platform,
+                source_id=(c.get("handle") or "").strip(),
+                url=(c.get("url") or "").strip(),
+            )],
+            status="new",
+        )
+        core_prospects.append(cp)
+
+    if not core_prospects:
+        return {"ok": False, "error":
+                "aucun créateur avec mail à pousser (mail requis)"}
+
+    try:
+        result = crm.upsert_many(core_prospects)
+        if hasattr(crm, "save"):
+            try: crm.save()
+            except Exception: pass
+        return {
+            "ok": True,
+            "backend":  backend,
+            "created":  int(result.get("created") or 0),
+            "merged":   int(result.get("merged") or 0),
+            "total":    int(result.get("total") or 0),
+            "pushed":   len(core_prospects),
+        }
+    except Exception as exc:
+        return {"ok": False, "error": f"upsert échoué : {exc}"}

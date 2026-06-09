@@ -296,6 +296,15 @@ const Obelisk = {
             <button id="ob-refresh" class="ob-icon-btn" title="Rafraîchir" aria-label="Rafraîchir">↻</button>
           </div>
         </header>
+        <div class="ob-flow-strip">
+          <span class="ob-flow-step"><b>1 · Trouver</b> — Obélisk, Chasseur, Créateur, Google, Argus</span>
+          <span class="ob-flow-arrow">→</span>
+          <span class="ob-flow-step"><b>2 · Ici</b> — tout atterrit dans cette base, sans doublon</span>
+          <span class="ob-flow-arrow">→</span>
+          <span class="ob-flow-step"><b>3 · Écrire & envoyer</b> — Auto-pilote (ou Le Convoi pour une liste)</span>
+          <span class="ob-flow-arrow">→</span>
+          <span class="ob-flow-step"><b>4 · Réponses</b> — triées toutes seules</span>
+        </div>
         <div id="ob-content"></div>
       </section>
     `;
@@ -327,6 +336,18 @@ const Obelisk = {
       .ob-header-actions {
         display: flex; align-items: center; gap: 14px;
       }
+      /* Bandeau "parcours" : rappelle en une ligne comment les outils
+         s'enchaînent. Discret, ne vole pas la vedette à la liste. */
+      .ob-flow-strip {
+        display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px;
+        padding: 8px 12px; margin-bottom: 14px;
+        border: 1px dashed hsl(var(--border));
+        border-radius: 10px;
+        font-size: 11.5px; color: hsl(var(--text-muted));
+        background: hsl(var(--bg) / .55);
+      }
+      .ob-flow-strip b { color: hsl(var(--text-secondary)); font-weight: 600; }
+      .ob-flow-arrow { color: hsl(var(--accent)); font-weight: 700; }
       .ob-stats-inline {
         display: flex; align-items: center; gap: 18px;
       }

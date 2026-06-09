@@ -157,7 +157,10 @@ class ProspectHunt:
         if not p.exists():
             return None
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            from .hunt_zombies import reconcile_hunt_file
+            data = reconcile_hunt_file(p, is_running=is_running(hunt_id))
+            if not data:
+                return None
             return cls(**data)
         except Exception as exc:
             logger.warning("prospect hunt.load failed %s: %s", hunt_id, exc)
@@ -184,12 +187,22 @@ def _scrape_site_for_emails(url: str) -> set[str]:
         f"{base}/about",
         f"{base}/mentions-legales",
     ]
+    # Filtre central anti-fausses-adresses de triskell_core (même protection
+    # qu'Obélisk et le Chasseur Créateur). Fallback : blacklist locale seule.
+    try:
+        from triskell_core.prospect.enrichers.email_filter import clean_email
+    except ImportError:
+        clean_email = None
     for page in pages:
         try:
             r = requests.get(page, headers=UA_WEB, timeout=8)
             if r.status_code == 200:
                 for em in re.findall(EMAIL_REGEX, r.text):
                     em_low = em.lower()
+                    if clean_email is not None:
+                        em_low = clean_email(em_low) or ""
+                        if not em_low:
+                            continue
                     if not any(b in em_low for b in EMAIL_BLACKLIST):
                         emails.add(em_low)
         except Exception:
@@ -210,11 +223,16 @@ def is_running(hunt_id: str) -> bool:
 
 
 def list_hunts(limit: int = 20) -> list[dict]:
+    """Liste les chasses, en requalifiant les zombies (serveur redémarré)."""
     ensure_dirs()
+    from .hunt_zombies import reconcile_hunt_file
     items: list[dict] = []
     for p in HUNTS_DIR.glob("*.json"):
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            running = is_running(p.stem)
+            data = reconcile_hunt_file(p, is_running=running)
+            if not data:
+                continue
             items.append({
                 "id": data.get("id"),
                 "label": data.get("label"),
@@ -223,7 +241,8 @@ def list_hunts(limit: int = 20) -> list[dict]:
                 "progress": data.get("progress"),
                 "stats": data.get("stats") or {},
                 "filters": data.get("filters") or {},
-                "running": is_running(data.get("id") or ""),
+                "running": running,
+                "prospects_count": len(data.get("prospects") or []),
             })
         except Exception:
             continue
@@ -540,3 +559,97 @@ def delete_hunt(hunt_id: str) -> dict:
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
     return {"ok": True}
+
+
+def push_to_prospects(hunt_id: str) -> dict:
+    """Pousse les prospects d'une chasse Google vers la base partagée
+    (table `prospects`), là où l'Auto-Pilote et la vue "Tous les prospects"
+    travaillent. Même mécanique que Le Chasseur (upsert dédoublonné).
+
+    Seuls les prospects AVEC email sont poussés : sans mail, ni
+    l'Auto-Pilote ni les campagnes ne peuvent rien en faire.
+
+    Renvoie {ok, backend, pushed, created, merged, total}.
+    """
+    h = ProspectHunt.load(hunt_id)
+    if not h:
+        return {"ok": False, "error": "chasse introuvable"}
+    if not h.prospects:
+        return {"ok": False, "error": "aucun prospect à pousser"}
+
+    try:
+        from triskell_core.prospect.core.crm import get_crm
+        from triskell_core.prospect.core.prospect import (
+            Prospect as CoreProspect, Source,
+        )
+    except ImportError as exc:
+        return {"ok": False, "error":
+                f"triskell_core absent — impossible de pousser ({exc})"}
+
+    try:
+        crm = get_crm()
+    except Exception as exc:
+        return {"ok": False, "error": f"connexion CRM impossible : {exc}"}
+    backend = "remote" if crm.__class__.__name__ == "RemoteCRM" else "local"
+
+    metier = (h.filters or {}).get("metier") or ""
+    zone = (h.filters or {}).get("zone") or ""
+
+    core_prospects: list[CoreProspect] = []
+    for p in h.prospects:
+        email = (p.get("email") or "").strip()
+        if not email:
+            continue
+        all_emails = [email] + [e for e in (p.get("emails_extra") or []) if e]
+        emails_meta = [{
+            "email": e,
+            "source": "maps",
+            "source_id": "",
+            "url": (p.get("website") or "").strip(),
+            "context": "site web trouvé via fiche Google Maps",
+            "found_at": "",
+        } for e in all_emails]
+        tags = ["prospecteur_google"]
+        if not p.get("has_website"):
+            tags.append("sans_site")
+        cp = CoreProspect(
+            name=(p.get("name") or "").strip(),
+            emails=all_emails,
+            emails_meta=emails_meta,
+            phones=[p.get("phone")] if p.get("phone") else [],
+            website=(p.get("website") or "").strip(),
+            address=(p.get("address") or "").strip(),
+            country="FR",
+            industry=metier,
+            language="fr",
+            tags=tags,
+            notes=f"Trouvé via Prospecteur Google ({metier or 'tous métiers'}"
+                  f" — {zone or 'France'})",
+            sources=[Source(
+                name="maps",
+                source_id="",
+                url=(p.get("website") or "").strip(),
+            )],
+            status="new",
+        )
+        core_prospects.append(cp)
+
+    if not core_prospects:
+        return {"ok": False, "error":
+                "aucun prospect avec mail à pousser (mail requis)"}
+
+    try:
+        result = crm.upsert_many(core_prospects)
+        if hasattr(crm, "save"):
+            try: crm.save()
+            except Exception: pass
+        return {
+            "ok": True,
+            "backend":  backend,
+            "created":  int(result.get("created") or 0),
+            "merged":   int(result.get("merged") or 0),
+            "total":    int(result.get("total") or 0),
+            "pushed":   len(core_prospects),
+        }
+    except Exception as exc:
+        return {"ok": False, "error": f"upsert échoué : {exc}"}

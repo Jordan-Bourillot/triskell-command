@@ -8812,6 +8812,23 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def chasseur_createurs_push_to_prospects(self, payload: dict) -> dict:
+        """Pousse les créateurs d'une chasse (ceux avec email) vers la base
+        partagée `prospects` — même destination qu'Obélisk. Ils deviennent
+        visibles dans "Tous les prospects" et exploitables par l'Auto-Pilote.
+
+        payload = {hunt_id}
+        Renvoie {ok, backend, pushed, created, merged, total}.
+        """
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import chasseur_createurs
+            return chasseur_createurs.push_to_prospects(hid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ------------------------------------------------------------------
     # Prospecteur Google — recherche entreprises locales via Google Places
     # ------------------------------------------------------------------
@@ -8946,6 +8963,23 @@ class Api:
                 "rows": res.get("rows", 0),
                 "path": res["path"],
             }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def prospecteur_google_push_to_prospects(self, payload: dict) -> dict:
+        """Pousse les prospects d'une chasse Google (ceux avec email) vers
+        la base partagée `prospects`. Ils deviennent visibles dans "Tous les
+        prospects" et exploitables par l'Auto-Pilote.
+
+        payload = {hunt_id}
+        Renvoie {ok, backend, pushed, created, merged, total}.
+        """
+        hid = ((payload or {}).get("hunt_id") or "").strip()
+        if not hid:
+            return {"ok": False, "error": "hunt_id requis"}
+        try:
+            from ..integrations import prospecteur_google
+            return prospecteur_google.push_to_prospects(hid)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
