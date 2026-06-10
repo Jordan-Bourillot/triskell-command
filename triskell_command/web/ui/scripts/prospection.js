@@ -214,6 +214,9 @@ const Prospection = {
       return this._toast((r && r.error) || 'Lancement impossible', 'danger');
     }
     this._toast('Mission lancée — la chaîne avance toute seule.', 'success');
+    if (typeof Guide !== 'undefined' && Guide.say) {
+      Guide.say('✓ Mission lancée — je te dis quand la chasse se termine.');
+    }
     await this._refresh();
   },
 

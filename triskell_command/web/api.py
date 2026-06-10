@@ -8571,6 +8571,132 @@ class Api:
     # Le Chasseur — découverte de PME et extraction de mails publics
     # ------------------------------------------------------------------
     # ------------------------------------------------------------------
+    # Guide — l'instantané qui nourrit le compagnon d'assistance
+    # ------------------------------------------------------------------
+    _GUIDE_CACHE = {"at": 0.0, "data": None}
+    _GUIDE_CACHE_TTL = 10  # secondes — absorbe le polling des navigateurs
+
+    def guide_snapshot(self, payload: dict | None = None) -> dict:
+        """Instantané LÉGER de l'état global, pour le Guide (barre
+        d'assistance). Une poignée de compteurs — pas de gros objets.
+
+        Renvoie :
+          {ok, prospects_total, prospects_new, drafts_pending,
+           replies_unhandled, missions: [..3 max actives/récentes..],
+           autopilot_enabled, autopilot_send_mode,
+           workers: {healthy, warning, error}}
+        """
+        import time as _time
+        cache = Api._GUIDE_CACHE
+        if cache["data"] is not None and (_time.time() - cache["at"]) < Api._GUIDE_CACHE_TTL:
+            return cache["data"]
+
+        out: dict = {
+            "ok": True,
+            "prospects_total": None, "prospects_new": None,
+            "drafts_pending": None, "replies_unhandled": None,
+            "missions": [], "autopilot_enabled": False,
+            "autopilot_send_mode": "manual",
+            "workers": {"healthy": 0, "warning": 0, "error": 0},
+        }
+
+        client = self._supabase()
+        if client is not None:
+            sb = client.raw
+
+            def _count(table, **eq):
+                try:
+                    q = sb.table(table).select("id", count="exact")
+                    for k, v in eq.items():
+                        q = q.eq(k, v)
+                    return q.limit(1).execute().count or 0
+                except Exception:
+                    return None
+
+            out["prospects_total"] = _count("prospects")
+            out["prospects_new"] = _count("prospects", status="new")
+            d1 = _count("prospect_drafts", status="pending")
+            d2 = _count("convoy_drafts", status="pending")
+            if d1 is not None or d2 is not None:
+                out["drafts_pending"] = (d1 or 0) + (d2 or 0)
+            # Réponses non traitées : le flag est dans extra (JSON) → on
+            # compte côté Python sur les 200 dernières (même logique que
+            # la vue Réponses).
+            try:
+                import json as _json
+                rows = (sb.table("email_history").select("extra")
+                        .eq("kind", "reply_received")
+                        .order("ts", desc=True).limit(200)
+                        .execute().data or [])
+                n = 0
+                for r in rows:
+                    extra = r.get("extra") or {}
+                    if isinstance(extra, str):
+                        try:
+                            extra = _json.loads(extra)
+                        except Exception:
+                            extra = {}
+                    if not extra.get("handled"):
+                        n += 1
+                out["replies_unhandled"] = n
+            except Exception:
+                pass
+            # Missions : les actives d'abord, sinon la plus récente
+            try:
+                from ..integrations import missions as _mi
+                lst = sorted(_mi.load_missions(client),
+                             key=lambda m: m.get("created_at") or "",
+                             reverse=True)
+                active = [m for m in lst if m.get("status")
+                          in ("hunting", "handing")]
+                out["missions"] = [
+                    {"id": m.get("id"), "label": m.get("label"),
+                     "status": m.get("status"),
+                     "progress": m.get("progress", 0),
+                     "counts": m.get("counts") or {},
+                     "autopilot": m.get("autopilot") or {}}
+                    for m in (active or lst[:1])[:3]
+                ]
+            except Exception:
+                pass
+
+        try:
+            from triskell_core.prospect.pipeline import PipelineConfig
+            cfg = PipelineConfig.load()
+            out["autopilot_enabled"] = bool(cfg.enabled)
+            modes = (self.autopilot_get_stage_modes() or {}).get("modes") or {}
+            out["autopilot_send_mode"] = modes.get("send", "manual")
+        except Exception:
+            pass
+
+        # Santé des robots — uniquement les statuts en mémoire (aucune requête)
+        try:
+            for mod_name in ("replies_poller", "reply_responder", "drip_runner",
+                             "post_sale_runner", "lead_to_client",
+                             "multichannel_followup", "dormant_recycler",
+                             "stripe_poller", "mission_runner",
+                             "autopilot_runner"):
+                try:
+                    mod = __import__(
+                        f"triskell_command.integrations.{mod_name}",
+                        fromlist=["get_status"])
+                    st = mod.get_status() if hasattr(mod, "get_status") else {}
+                    running = bool(st.get("running"))
+                    res = st.get("last_run_result") or {}
+                    has_err = bool(res.get("error") or res.get("errors", 0))
+                    key = ("healthy" if running and not has_err
+                           else "warning" if running else "error")
+                    out["workers"][key] += 1
+                except Exception:
+                    out["workers"]["error"] += 1
+        except Exception:
+            pass
+
+        cache["data"] = out
+        cache["at"] = _time.time()
+        return out
+
+    # ------------------------------------------------------------------
     # Missions de prospection — UNE commande pour TOUTE la chaîne
     # (cherche → verse dans la base → transmet à l'Auto-pilote)
     # ------------------------------------------------------------------
