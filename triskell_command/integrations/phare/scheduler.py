@@ -387,6 +387,14 @@ def _tick(app_state) -> dict:
         actions_done.append({"mission": "client_reports_send", **r})
         _mark_ran("client_reports_send:")
 
+    # Battement de cœur : prouve que le tick a tourné même sans mission
+    # lancée (sinon une panne GitHub Actions est invisible depuis le serveur).
+    try:
+        from . import heartbeat
+        heartbeat.beat(len(actions_done))
+    except Exception:
+        pass
+
     return {"actions_done": actions_done,
             "sites_count": len(sites),
             "weekday": weekday, "hour": hour}

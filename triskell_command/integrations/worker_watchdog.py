@@ -102,7 +102,13 @@ def diagnose_workers(workers: list[dict],
             })
             continue
         age_h = _hours_since(w.get("last_run_at") or "")
-        if running and age_h is not None and age_h > stale_after_hours:
+        # Seuil de silence par robot : les robots « distants » (ex. Phare sur
+        # GitHub Actions, cron élastique) tolèrent plus que les 3 h par défaut.
+        try:
+            w_stale = float(w.get("stale_after_hours") or stale_after_hours)
+        except (TypeError, ValueError):
+            w_stale = stale_after_hours
+        if running and age_h is not None and age_h > w_stale:
             problems.append({
                 "name": name, "label": label,
                 "problem": f"muet depuis {age_h:.0f} h",

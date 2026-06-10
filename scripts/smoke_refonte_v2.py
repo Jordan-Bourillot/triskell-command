@@ -67,6 +67,58 @@ check("auto-pilote désactivé = pas une panne", "autopilot_runner" not in names
 check("robot en retrait (serveur actif) = pas une panne",
       "desktop_defer" not in names)
 
+# Seuil de silence PAR robot (les robots distants tolèrent plus que 3 h)
+_h10 = (_now - timedelta(hours=10)).isoformat(timespec="seconds")
+slow_workers = [
+    {"name": "remote_ok", "label": "Distant 5h", "running": True,
+     "health": "healthy", "last_run_at": _old, "last_run_result": {},
+     "stale_after_hours": 9},
+    {"name": "remote_mute", "label": "Distant 10h", "running": True,
+     "health": "healthy", "last_run_at": _h10, "last_run_result": {},
+     "stale_after_hours": 9},
+]
+slow_names = {p["name"] for p in diagnose_workers(slow_workers)}
+check("seuil par robot : 5h de silence tolérées (stale_after_hours=9)",
+      "remote_ok" not in slow_names)
+check("seuil par robot : 10h de silence = muet (stale_after_hours=9)",
+      "remote_mute" in slow_names)
+
+print("1bis) Battement de cœur du Phare…")
+from triskell_command.integrations.phare import heartbeat as ph_hb  # noqa: E402
+
+_tick_fresh = (_now - timedelta(hours=2)).isoformat(timespec="seconds")
+_tick_old = (_now - timedelta(hours=12)).isoformat(timespec="seconds")
+w = ph_hb.evaluate({"enabled": True, "last_tick_at": _tick_fresh}, now=_now)
+check("tick frais (2h) → robot Phare sain",
+      w is not None and w["health"] == "healthy" and w["running"])
+w = ph_hb.evaluate({"enabled": True, "last_tick_at": _tick_old}, now=_now)
+check("tick vieux (12h) → robot Phare en panne",
+      w is not None and w["health"] == "error" and not w["running"])
+check("…avec une erreur qui pointe vers GitHub Actions",
+      w is not None and "github" in (w["last_run_result"].get("error") or "").lower())
+w = ph_hb.evaluate({"enabled": False, "last_tick_at": _tick_old}, now=_now)
+check("Phare désactivé → visible mais jamais alerté",
+      w is not None and (w["last_run_result"].get("skipped_reason") == "disabled"))
+_today = _now.date().isoformat()
+w = ph_hb.evaluate({"enabled": True,
+                    "scheduler_log": {"algo_watch:": _today}}, now=_now)
+check("pas de battement mais mission globale aujourd'hui → sain (fallback)",
+      w is not None and w["health"] == "healthy")
+_j3 = (_now - timedelta(days=3)).date().isoformat()
+w = ph_hb.evaluate({"enabled": True,
+                    "scheduler_log": {"algo_watch:": _j3}}, now=_now)
+check("dernière mission globale il y a 3 jours → panne (fallback)",
+      w is not None and w["health"] == "error")
+check("config vide → pas de robot virtuel (pas de fausse alerte)",
+      ph_hb.evaluate({}, now=_now) is None)
+# Le pseudo-robot doit passer le diagnostic du chien de garde sans bruit
+w_ok = ph_hb.evaluate({"enabled": True, "last_tick_at": _old}, now=_now)
+check("Phare : 5h sans tick GitHub = toléré par le chien de garde",
+      w_ok is not None and not diagnose_workers([w_ok]))
+w_ko = ph_hb.evaluate({"enabled": True, "last_tick_at": _tick_old}, now=_now)
+check("Phare : 12h sans tick = alerte du chien de garde",
+      w_ko is not None and len(diagnose_workers([w_ko])) == 1)
+
 print("2) Présence serveur…")
 import os  # noqa: E402
 from triskell_command.integrations import server_presence as sp  # noqa: E402
@@ -186,9 +238,12 @@ for ep in ("mail_dns_check", "funnel_by_template",
            "chasseur_createurs_push_to_prospects",
            "prospecteur_google_push_to_prospects"):
     check(f"endpoint {ep} exposé", callable(getattr(api, ep, None)))
+# Sans domaine : l'endpoint retombe sur le domaine d'envoi configuré
+# (machine avec SMTP → vraie vérif), sinon il refuse avec un message clair.
 r = api.mail_dns_check({"domain": ""})
-check("mail_dns_check sans domaine → message clair",
-      r.get("ok") is False and "domaine" in (r.get("error") or "").lower())
+check("mail_dns_check sans domaine → réponse propre (fallback ou refus clair)",
+      (r.get("ok") is True and r.get("checks"))
+      or (r.get("ok") is False and "domaine" in (r.get("error") or "").lower()))
 
 print()
 print(f"{len(PASS)} OK / {len(FAIL)} échec(s)")

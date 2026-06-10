@@ -5823,6 +5823,18 @@ class Api:
                 })
                 out["summary"]["error"] += 1
 
+        # 1bis) Le Phare tourne sur GitHub Actions, pas ici : on l'expose en
+        # robot virtuel via son battement de cœur en base, sinon une panne
+        # de ses ticks est invisible (vécu : 3 échecs muets les 09-10/06).
+        try:
+            from ..integrations.phare import heartbeat as phare_heartbeat
+            pw = phare_heartbeat.virtual_worker()
+            if pw is not None:
+                out["workers"].append(pw)
+                out["summary"][pw.get("health") or "healthy"] += 1
+        except Exception as exc:
+            logger.debug("system_health phare virtual worker: %s", exc)
+
         # 2) Métriques de délivrabilité (envois + réponses sur 24h et 7j)
         client = self._supabase()
         deliv = {
@@ -11161,6 +11173,18 @@ class Api:
         cycle auto est dû. Idempotent."""
         if getattr(self, "_geo_autopilot_thread", None) is not None:
             return
+        # Le flag 'running' est persisté : un redémarrage en plein cycle le
+        # laissait coincé à True et l'auto-pilote ne repartait plus jamais
+        # (ni en auto, ni via « lancer maintenant »). On libère au boot.
+        try:
+            root = self._geo_root()
+            ap = root.get("autopilot")
+            if isinstance(ap, dict) and ap.get("running"):
+                ap["running"] = False
+                self._geo_save()
+                logger.info("geo_autopilot: verrou 'running' libéré après redémarrage")
+        except Exception as exc:
+            logger.debug("geo_autopilot unlock: %s", exc)
         import time as _time
 
         def loop():
