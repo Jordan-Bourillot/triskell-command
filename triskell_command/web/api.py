@@ -2153,6 +2153,34 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def phare_automerge_get(self) -> dict:
+        """Lit l'état de la publication automatique des modifs vérifiées.
+        Endpoint dédié (et non un settings_set générique) pour ne JAMAIS
+        exposer le reste de phare_config — il contient des tokens."""
+        try:
+            from ..integrations.phare import repo as phare_repo
+            cfg = phare_repo.get_config() or {}
+            return {"ok": True,
+                    "enabled": bool(cfg.get("auto_merge_enabled", False))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def phare_automerge_set(self, payload: dict) -> dict:
+        """Active/coupe la publication automatique (phare_config.auto_merge_enabled).
+        N'écrit QUE cette clé."""
+        enabled = bool((payload or {}).get("enabled"))
+        try:
+            from ..integrations.phare import repo as phare_repo
+            phare_repo.update_config({"auto_merge_enabled": enabled})
+            cfg = phare_repo.get_config() or {}
+            real = bool(cfg.get("auto_merge_enabled", False))
+            if real != enabled:
+                return {"ok": False, "error":
+                        "Le réglage n'a pas pu être enregistré (base injoignable ?)."}
+            return {"ok": True, "enabled": real}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ------------------------------------------------------------------
     # Lagriffe — éditeur de templates de mail (4 mails du pipeline)
     # ------------------------------------------------------------------

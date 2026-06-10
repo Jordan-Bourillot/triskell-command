@@ -144,10 +144,82 @@ def test_scheduler_pro_missions_dispatched() -> None:
     from triskell_command.integrations.phare import scheduler
     for mission in ("outreach_drafts", "outreach_followups", "ab_record",
                      "brand_scan", "local_seo", "cro_check",
-                     "algo_watch", "bulletin_pdf"):
+                     "algo_watch", "bulletin_pdf", "auto_merge"):
         r = scheduler.run_now(mission, "00000000-0000-0000-0000-000000000000")
         assert "mission inconnue" not in (r.get("error") or ""), \
             f"{mission} non dispatché : {r}"
+
+
+def test_auto_merge_guardrails() -> None:
+    """L'auto-merge respecte ses garde-fous : opt-in, fenêtre de veto,
+    plafond, recommandations textuelles jamais touchées, hold conservé."""
+    from datetime import datetime, timedelta
+    from triskell_command.integrations.phare import orchestrator as orch
+    from triskell_command.integrations.phare import repo as ph_repo
+
+    # 1. Désactivé (défaut) → sort en skipped sans rien toucher
+    saved_cfg = ph_repo.get_config
+    try:
+        ph_repo.get_config = lambda: {}
+        r = orch.auto_merge_verified()
+        assert r.get("skipped") == "auto_merge_disabled", r
+    finally:
+        ph_repo.get_config = saved_cfg
+
+    # 2. Activé : merge la PR vieille+vérifiée, veto sur la fraîche,
+    #    ignore la reco sans PR, garde la PR « hold » en preview
+    now = datetime.now()
+    old_ts = (now - timedelta(hours=3)).isoformat(timespec="seconds")
+    fresh_ts = (now - timedelta(minutes=5)).isoformat(timespec="seconds")
+    fake_actions = [
+        {"id": "a_fresh", "github_pr_url": "https://github.com/x/y/pull/1",
+         "created_at": fresh_ts, "title": "PR fraîche", "site_id": "s1"},
+        {"id": "a_ok", "github_pr_url": "https://github.com/x/y/pull/2",
+         "created_at": old_ts, "title": "PR vérifiée", "site_id": "s1"},
+        {"id": "a_reco", "github_pr_url": "",
+         "created_at": old_ts, "title": "Reco texte", "site_id": "s1"},
+        {"id": "a_hold", "github_pr_url": "https://github.com/x/y/pull/3",
+         "created_at": old_ts, "title": "PR douteuse", "site_id": "s1"},
+    ]
+    merged_calls: list[tuple] = []
+    notified: list[str] = []
+
+    saved = (ph_repo.get_config, ph_repo.list_actions, ph_repo.get_site,
+             orch.merge_action)
+    try:
+        ph_repo.get_config = lambda: {"auto_merge_enabled": True}
+        ph_repo.list_actions = lambda **kw: list(fake_actions)
+        ph_repo.get_site = lambda sid: {"name": "Site test", "domain": "t.fr"}
+
+        def fake_merge(action_id, *, force=False, auto=False):
+            merged_calls.append((action_id, force, auto))
+            assert force is False, "l'auto-merge ne doit JAMAIS forcer"
+            assert auto is True, "l'auto-merge doit se tracer auto=True"
+            if action_id == "a_hold":
+                return {"ok": False, "decision": "hold", "checks": {}}
+            return {"ok": True}
+        orch.merge_action = fake_merge
+
+        from triskell_command.integrations.phare import notifications as notifs
+        saved_notify = getattr(notifs, "notify_auto_merged", None)
+        notifs.notify_auto_merged = (
+            lambda *, site, action: notified.append(action["id"]) or {})
+        try:
+            r = orch.auto_merge_verified(max_merges=3, min_age_minutes=45)
+        finally:
+            if saved_notify is not None:
+                notifs.notify_auto_merged = saved_notify
+    finally:
+        (ph_repo.get_config, ph_repo.list_actions, ph_repo.get_site,
+         orch.merge_action) = saved
+
+    tried = {c[0] for c in merged_calls}
+    assert "a_fresh" not in tried, "fenêtre de veto ignorée"
+    assert "a_reco" not in tried, "recommandation textuelle touchée"
+    assert "a_ok" in tried and "a_hold" in tried
+    assert [m["action_id"] for m in r["merged"]] == ["a_ok"], r
+    assert [h["action_id"] for h in r["held"]] == ["a_hold"], r
+    assert notified == ["a_ok"], "notification du merge auto manquante"
 
 
 def test_algo_watch_rss_parser() -> None:
@@ -396,7 +468,8 @@ def main() -> int:
     _run("A/B test — Mann-Whitney U", test_ab_mann_whitney)
     _run("Programmatic — interpolate / slugify / quality_score", test_programmatic_helpers)
     _run("Bulletin — fallback HTML sans reportlab", test_bulletin_html_fallback)
-    _run("Scheduler — 8 missions pro dispatchées", test_scheduler_pro_missions_dispatched)
+    _run("Scheduler — 9 missions pro dispatchées", test_scheduler_pro_missions_dispatched)
+    _run("Auto-merge — garde-fous (opt-in, veto, plafond, hold)", test_auto_merge_guardrails)
     _run("Algo watch — RSS parser tolérant", test_algo_watch_rss_parser)
     _run("Outreach — templates contiennent les placeholders", test_outreach_template_rendering)
     _run("Voice — texte propre détecté propre", test_voice_clean)

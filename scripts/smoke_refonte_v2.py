@@ -236,7 +236,8 @@ from triskell_command.web.api import Api  # noqa: E402
 api = Api()
 for ep in ("mail_dns_check", "funnel_by_template",
            "chasseur_createurs_push_to_prospects",
-           "prospecteur_google_push_to_prospects"):
+           "prospecteur_google_push_to_prospects",
+           "phare_automerge_get", "phare_automerge_set"):
     check(f"endpoint {ep} exposé", callable(getattr(api, ep, None)))
 # Sans domaine : l'endpoint retombe sur le domaine d'envoi configuré
 # (machine avec SMTP → vraie vérif), sinon il refuse avec un message clair.

@@ -640,10 +640,12 @@ const Phare = {
             <p class="phare-subtitle">Chacun a sa spécialité. Ensemble, ils gardent tes sites au sommet, 24/7.</p>
           </div>
         </header>
+        <div id="ph-automerge-panel"></div>
         <div id="ph-coulisses-grid"><div class="phare-loading">Chargement…</div></div>
       </section>
     `;
     container.querySelector('[data-act="back"]').onclick = () => this._go(this.selectedSite ? 'site' : 'home');
+    this._renderAutomergePanel();
     let agents = this._defaultAgents();
     if (App.api) {
       try {
@@ -690,6 +692,68 @@ const Phare = {
         finally { b.disabled = false; b.textContent = lbl; }
       };
     });
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  //  PANNEAU PUBLICATION AUTO — interrupteur auto-merge (vue Coulisses)
+  // ════════════════════════════════════════════════════════════════════
+  async _renderAutomergePanel() {
+    const host = document.getElementById('ph-automerge-panel');
+    if (!host || !App.api || typeof App.api.phare_automerge_get !== 'function') return;
+    let enabled = false;
+    try {
+      const res = await App.api.phare_automerge_get();
+      if (!res || !res.ok) return;          // base injoignable → pas de panneau
+      enabled = !!res.enabled;
+    } catch (e) { return; }
+
+    const paint = (on, busy) => {
+      host.innerHTML = `
+        <div class="phare-automerge ${on ? 'is-on' : ''}">
+          <div class="phare-automerge-text">
+            <div class="phare-automerge-title">
+              ${on ? '🟢' : '⚪'} Publication automatique des modifs vérifiées
+            </div>
+            <p class="phare-automerge-desc">
+              ${on
+                ? 'Chaque jour à 15h, les améliorations qui passent toutes les vérifications (vitesse, rendu, aucun lien cassé) sont mises en ligne toutes seules. Tu es prévenu à chaque publication, et la surveillance continue 14 jours après.'
+                : 'Aujourd’hui, chaque amélioration attend ton OK. Active pour que celles qui passent toutes les vérifications (vitesse, rendu, aucun lien cassé) partent toutes seules — tu gardes la matinée pour mettre ton veto, et tu es prévenu à chaque publication.'}
+            </p>
+          </div>
+          <button class="btn ${on ? 'btn-secondary' : 'btn-primary'}" data-act="toggle" ${busy ? 'disabled' : ''}>
+            ${busy ? '…' : (on ? 'Couper' : 'Activer')}
+          </button>
+        </div>`;
+      host.querySelector('[data-act="toggle"]').onclick = async () => {
+        const next = !on;
+        if (next && !window.confirm(
+          'Activer la publication automatique ?\n\n' +
+          'Les améliorations préparées par les robots seront mises en ligne ' +
+          'toutes seules UNIQUEMENT si toutes les vérifications passent ' +
+          '(vitesse, rendu visuel, aucun lien cassé). Maximum 3 par jour.\n\n' +
+          'Tu seras prévenu à chaque publication, et si le trafic d’un site ' +
+          'décroche dans les 14 jours, tu seras alerté pour retour arrière.')) {
+          return;
+        }
+        paint(on, true);
+        try {
+          const r = await App.api.phare_automerge_set({ enabled: next });
+          if (r && r.ok) {
+            paint(!!r.enabled, false);
+            this._toast(r.enabled
+              ? '🟢 Publication automatique activée (passage chaque jour à 15h)'
+              : 'Publication automatique coupée — tout repasse par ton OK');
+          } else {
+            paint(on, false);
+            this._toast('Erreur : ' + ((r && r.error) || 'réglage non enregistré'), 'error');
+          }
+        } catch (e) {
+          paint(on, false);
+          this._toast('Erreur : ' + e, 'error');
+        }
+      };
+    };
+    paint(enabled, false);
   },
 
   // ════════════════════════════════════════════════════════════════════

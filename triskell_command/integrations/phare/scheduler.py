@@ -300,6 +300,15 @@ def _tick(app_state) -> dict:
         actions_done.append({"mission": "rollback_check", **r})
         _mark_ran("rollback_check:")
 
+    # Auto-merge des PRs vérifiées : tous les jours à partir de 15h (global).
+    # Après les optims du matin (10-11h) → ~4-5 h de fenêtre de veto pour
+    # Jordan, qui reçoit une push à chaque ouverture de PR. Opt-in via
+    # phare_config.auto_merge_enabled (la mission sort en skipped sinon).
+    if hour >= 15 and not _global_ran_today("auto_merge:"):
+        r = run_now("auto_merge", None, app_state=app_state)
+        actions_done.append({"mission": "auto_merge", **r})
+        _mark_ran("auto_merge:")
+
     # Sitemap + IndexNow : lundi à partir de 14h, top 3 sites
     if weekday == 0 and hour >= 14:
         for s in sites[:3]:
@@ -552,6 +561,8 @@ def run_now(mission: str, site_id: Optional[str] = None,
     if mission == "rollback_check":
         from . import rollback_watch
         return rollback_watch.check_due_watches()
+    if mission == "auto_merge":
+        return orchestrator.auto_merge_verified()
     # ---- Missions pro (v0.6) ----
     if mission == "outreach_drafts":
         from . import outreach

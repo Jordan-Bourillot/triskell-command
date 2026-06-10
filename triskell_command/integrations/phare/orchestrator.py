@@ -497,7 +497,8 @@ def ecosystem_overview() -> dict:
 # ---------------------------------------------------------------------------
 # Validation manuelle d'une PR en attente (depuis l'UI)
 # ---------------------------------------------------------------------------
-def merge_action(action_id: str, *, force: bool = False) -> dict:
+def merge_action(action_id: str, *, force: bool = False,
+                 auto: bool = False) -> dict:
     """Valide une action.
 
     Deux cas :
@@ -506,6 +507,9 @@ def merge_action(action_id: str, *, force: bool = False) -> dict:
     - Action sans PR (recommandation textuelle, bulletin, cluster sémantique…) :
       marque simplement comme 'merged' pour la sortir de la liste « à regarder ».
       C'est l'utilisateur qui actionne le conseil hors du Phare.
+
+    `auto=True` quand l'appel vient de l'auto-merge du scheduler (trace
+    auto_merged en base pour distinguer des validations humaines).
     """
     sb = repo._sb()
     if sb is None:
@@ -518,7 +522,7 @@ def merge_action(action_id: str, *, force: bool = False) -> dict:
     if not pr_url:
         # Validation simple : pas de modif technique, on note juste « accepté »
         repo.update_action(action_id, {
-            "status": "merged", "auto_merged": False,
+            "status": "merged", "auto_merged": auto,
             "merged_at": datetime.now().isoformat(),
         })
         return {"ok": True, "kind": "note_only"}
@@ -534,9 +538,70 @@ def merge_action(action_id: str, *, force: bool = False) -> dict:
     ok = git_pipeline.merge_pr(site["repo_github"], pr_number,
                                 commit_title=action.get("title", ""))
     if ok:
-        repo.update_action(action_id, {"status": "merged", "auto_merged": False,
+        repo.update_action(action_id, {"status": "merged", "auto_merged": auto,
                                         "merged_at": datetime.now().isoformat()})
     return {"ok": ok}
+
+
+def auto_merge_verified(*, max_merges: int = 3,
+                        min_age_minutes: int = 45) -> dict:
+    """Publie tout seul les PRs en attente qui passent TOUTES les vérifs.
+
+    C'est la brique qui transforme le Phare de « propose et attend » en
+    « agit » : les patches vérifiés (Lighthouse, diff visuel, 4xx/5xx via
+    verify_pr) sont mergés sans intervention, le reste reste dans le bac
+    de validation humaine.
+
+    Garde-fous :
+      - opt-in : phare_config.auto_merge_enabled (défaut False) ;
+      - fenêtre de veto : on ne touche pas une PR plus jeune que
+        min_age_minutes (Jordan est notifié à l'ouverture → il peut
+        rejeter avant le passage) ;
+      - max_merges par passage : limite le rayon d'impact d'un cycle ;
+      - jamais de force : verdict « hold » → la PR reste en preview ;
+      - traçabilité : auto_merged=True en base + notification push ;
+      - filet aval : rollback_watch surveille le trafic 14 j post-merge.
+    """
+    cfg = repo.get_config()
+    if not cfg.get("auto_merge_enabled", False):
+        return {"ok": True, "skipped": "auto_merge_disabled"}
+
+    pending = repo.list_actions(status="preview", limit=50)
+    merged: list[dict] = []
+    held: list[dict] = []
+    now = datetime.now()
+    for action in pending:
+        if len(merged) >= max_merges:
+            break
+        if not (action.get("github_pr_url") or ""):
+            # Recommandation textuelle : décision humaine, pas d'auto-merge.
+            continue
+        # Fenêtre de veto
+        try:
+            created = datetime.fromisoformat(
+                str(action.get("created_at") or "").replace("Z", "+00:00"))
+            age_min = (now - created.replace(tzinfo=None)).total_seconds() / 60.0
+            if age_min < min_age_minutes:
+                continue
+        except Exception:
+            pass
+        r = merge_action(action["id"], force=False, auto=True)
+        entry = {"action_id": action["id"], "title": action.get("title", ""),
+                 "site_id": action.get("site_id", "")}
+        if r.get("ok"):
+            merged.append(entry)
+            try:
+                from . import notifications
+                site = repo.get_site(action.get("site_id", "")) or {}
+                notifications.notify_auto_merged(site=site, action=action)
+            except Exception as exc:
+                logger.debug("notify_auto_merged: %s", exc)
+        else:
+            entry["decision"] = r.get("decision") or r.get("error") or "hold"
+            held.append(entry)
+
+    return {"ok": True, "merged": merged, "held": held,
+            "pending_seen": len(pending)}
 
 
 def reject_action(action_id: str, reason: str = "") -> dict:

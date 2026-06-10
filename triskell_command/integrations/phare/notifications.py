@@ -210,6 +210,40 @@ def notify_bulletin(*, site: dict, bulletin: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Cas 2 — Modification en attente de validation
 # ---------------------------------------------------------------------------
+def notify_auto_merged(*, site: dict, action: dict) -> dict:
+    """Appelée quand l'auto-merge a publié une modification VÉRIFIÉE tout seul.
+    Jordan est informé (transparence totale) mais n'a rien à faire."""
+    site_name = site.get("name") or site.get("domain") or "ton site"
+    action_title = action.get("title") or "modification SEO"
+
+    title = f"✅ Publié tout seul — {site_name}"
+    body_short = (f"{action_title[:120]} — vérifs passées "
+                  "(vitesse, rendu, liens), mis en ligne.")
+
+    body_mail = (
+        f"Le Phare a publié une modification tout seul\n"
+        f"{'=' * 50}\n\n"
+        f"Site    : {site_name}\n"
+        f"Détail  : {action_title}\n\n"
+        "Toutes les vérifications sont passées (Lighthouse, rendu visuel,\n"
+        "aucun lien cassé). La surveillance post-publication reste active\n"
+        "14 jours : si le trafic décroche, tu seras alerté pour retour\n"
+        "arrière.\n\n"
+        "---\n"
+        "Historique complet :\n"
+        "https://command.triskell-studio.fr/#phare → Ce qui a été fait\n"
+    )
+
+    return _notify(
+        title=title,
+        body_short=body_short,
+        body_mail=body_mail,
+        url_path="https://command.triskell-studio.fr/#phare",
+        tag_group="phare-automerge",
+        priority="low",
+    )
+
+
 def notify_pending_action(*, site: dict, action: dict) -> dict:
     """Appelée quand une modification est soumise et attend validation manuelle."""
     site_name = site.get("name") or site.get("domain") or "ton site"

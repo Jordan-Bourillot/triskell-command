@@ -3712,6 +3712,34 @@ html, body {
 }
 .phare-coulisses-mini p { margin-bottom: 8px; }
 
+/* ─── VUE COULISSES — publication automatique (auto-merge) ─── */
+.phare-automerge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  background: hsl(var(--card));
+}
+.phare-automerge.is-on {
+  border-color: hsl(150 60% 40% / 0.45);
+  background: hsl(150 60% 40% / 0.06);
+}
+.phare-automerge-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.phare-automerge-desc {
+  font-size: 13px;
+  color: hsl(var(--text-muted));
+  max-width: 640px;
+}
+.phare-automerge .btn { flex-shrink: 0; }
+
 /* ─── VUE COULISSES — grille agents ─── */
 .phare-agents-grid {
   display: grid;
