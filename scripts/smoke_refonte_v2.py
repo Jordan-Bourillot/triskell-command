@@ -119,6 +119,86 @@ w_ko = ph_hb.evaluate({"enabled": True, "last_tick_at": _tick_old}, now=_now)
 check("Phare : 12h sans tick = alerte du chien de garde",
       w_ko is not None and len(diagnose_workers([w_ko])) == 1)
 
+print("1ter) Construction auto Pixel Pros (simulation à blanc)…")
+from triskell_command.integrations.pixelpros import auto_builder as ab  # noqa: E402
+from triskell_command.integrations.pixelpros import repo as pp_repo  # noqa: E402
+
+
+class _FakeSb:
+    """Faux client base : réglages en mémoire, aucune requête réseau."""
+    def __init__(self, settings): self._s = dict(settings)
+    is_authenticated = True
+    def get_shared_setting(self, key, default=None): return self._s.get(key, default)
+    def set_shared_setting(self, key, value): self._s[key] = value
+
+
+_paid_old = (_now - timedelta(hours=2)).isoformat(timespec="seconds")
+_paid_fresh = (_now - timedelta(seconds=60)).isoformat(timespec="seconds")
+fake_intakes = [
+    {"id": "i_fresh", "status": "paid", "stripe_paid_at": _paid_fresh,
+     "business_name": "Boulangerie Toute Fraîche"},
+    {"id": "i_old", "status": "paid", "stripe_paid_at": _paid_old,
+     "business_name": "Garage Dupont"},
+    {"id": "i_tried", "status": "paid", "stripe_paid_at": _paid_old,
+     "business_name": "Déjà Tenté SARL"},
+    {"id": "i_broken", "status": "paid", "stripe_paid_at": _paid_old,
+     "business_name": "Échec Co"},
+]
+dispatched, failed_marks, notifs = [], [], []
+_fake_sb = _FakeSb({
+    ab.SETTING_ENABLED: True,
+    ab.SETTING_STATE: {"i_tried": _paid_old},
+})
+_saved_ab = (ab._get_client, pp_repo.list_intakes, pp_repo.dispatch_build,
+             pp_repo.mark_failed, ab._notify)
+try:
+    ab._get_client = lambda: _fake_sb
+    pp_repo.list_intakes = lambda **kw: list(fake_intakes)
+
+    def _fake_dispatch(iid):
+        dispatched.append(iid)
+        if iid == "i_broken":
+            return False, "builder introuvable (test)"
+        return True, "lancé"
+    pp_repo.dispatch_build = _fake_dispatch
+    pp_repo.mark_failed = (
+        lambda iid, **kw: failed_marks.append(iid) or True)
+    ab._notify = lambda title, body, priority="normal": notifs.append(
+        (title, priority))
+
+    # OFF → skipped proprement, rien touché
+    _fake_sb._s[ab.SETTING_ENABLED] = False
+    r_off = ab.tick(now=_now)
+    check("auto-build OFF → skipped 'disabled', zéro lancement",
+          r_off.get("skipped_reason") == "disabled" and not dispatched)
+
+    # ON → la vieille part, la fraîche patiente, la déjà-tentée est ignorée
+    _fake_sb._s[ab.SETTING_ENABLED] = True
+    r_on = ab.tick(now=_now)
+    check("payé il y a 2h → construction lancée", "i_old" in r_on["launched"])
+    check("payé il y a 1 min → délai de grâce respecté",
+          "i_fresh" not in dispatched and r_on["waiting_grace"] >= 1)
+    check("déjà tenté → JAMAIS relancé tout seul",
+          "i_tried" not in dispatched and r_on["already_tried"] >= 1)
+    check("échec de lancement → commande marquée 'failed'",
+          failed_marks == ["i_broken"])
+    check("échec → alerte haute priorité envoyée",
+          any(p == "high" for (_t, p) in notifs))
+    check("lancement → notification d'information envoyée",
+          any(p == "low" for (_t, p) in notifs))
+    check("tentatives persistées (i_old et i_broken marqués)",
+          "i_old" in _fake_sb._s[ab.SETTING_STATE]
+          and "i_broken" in _fake_sb._s[ab.SETTING_STATE])
+
+    # Re-tick : plus rien à faire (anti-boucle)
+    dispatched.clear()
+    r_again = ab.tick(now=_now)
+    check("re-passage → aucune relance (anti-boucle)",
+          not dispatched and not r_again["launched"])
+finally:
+    (ab._get_client, pp_repo.list_intakes, pp_repo.dispatch_build,
+     pp_repo.mark_failed, ab._notify) = _saved_ab
+
 print("2) Présence serveur…")
 import os  # noqa: E402
 from triskell_command.integrations import server_presence as sp  # noqa: E402

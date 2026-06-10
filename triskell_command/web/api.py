@@ -2153,6 +2153,26 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def pixelpros_auto_build_get(self) -> dict:
+        """Lit l'interrupteur de construction automatique des sites payés."""
+        try:
+            from ..integrations.pixelpros import auto_builder
+            return {"ok": True, "enabled": auto_builder.is_enabled()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def pixelpros_auto_build_set(self, payload: dict) -> dict:
+        """Active/coupe la construction automatique des sites payés."""
+        enabled = bool((payload or {}).get("enabled"))
+        try:
+            from ..integrations.pixelpros import auto_builder
+            ok, msg = auto_builder.set_enabled(enabled)
+            if not ok:
+                return {"ok": False, "error": msg}
+            return {"ok": True, "enabled": auto_builder.is_enabled()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def phare_automerge_get(self) -> dict:
         """Lit l'état de la publication automatique des modifs vérifiées.
         Endpoint dédié (et non un settings_set générique) pour ne JAMAIS
@@ -5818,6 +5838,7 @@ class Api:
             ("claude_proactive",      "Veille proactive Claude"),
             ("mission_runner",        "Chef de gare des prospections"),
             ("autopilot_runner",      "Prospection nocturne (3h Paris)"),
+            ("pixelpros.auto_builder", "Construction auto des sites payés"),
         ]
         for mod_name, label in worker_modules:
             try:
@@ -7217,6 +7238,7 @@ class Api:
             ("backup_runner",          "start_worker", "backup_runner"),
             ("mission_runner",         "start_worker", "mission_runner"),
             ("autopilot_runner",       "start_worker", "autopilot_nightly"),
+            ("pixelpros.auto_builder", "start_worker", "pixelpros_auto_builder"),
         ]:
             try:
                 mod = __import__(

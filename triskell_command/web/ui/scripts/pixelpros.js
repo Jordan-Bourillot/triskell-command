@@ -200,6 +200,8 @@ const PixelPros = {
 
         <!-- VUE PIPELINE : le tunnel des sites clients + les échecs -->
         <div id="pp-view-pipeline" class="pp-view">
+          <!-- Construction automatique des sites payés (interrupteur) -->
+          <div id="pp-autobuild"></div>
           <!-- Funnel synthétique -->
           <div id="pp-funnel" class="mb-7"></div>
           <!-- Kanban -->
@@ -246,7 +248,68 @@ const PixelPros = {
     try { savedTab = localStorage.getItem('pp_tab') || 'pipeline'; } catch (e) {}
     this._setTab(savedTab);
 
+    this._renderAutoBuildPanel();
     await this.refresh();
+  },
+
+  // Interrupteur « construction automatique » : quand il est sur AUTO, le
+  // serveur lance le builder tout seul dès qu'un paiement arrive (scan
+  // toutes les 5 min). OFF = comportement historique, Jordan clique.
+  async _renderAutoBuildPanel() {
+    const host = document.getElementById('pp-autobuild');
+    if (!host || !App.api || typeof App.api.pixelpros_auto_build_get !== 'function') return;
+    let enabled = false;
+    try {
+      const res = await App.api.pixelpros_auto_build_get();
+      if (!res || !res.ok) return;
+      enabled = !!res.enabled;
+    } catch (e) { return; }
+
+    const paint = (on, busy) => {
+      host.innerHTML = `
+        <div class="pp-autobuild ${on ? 'is-on' : ''}">
+          <div>
+            <div class="pp-autobuild-title">${on ? '🟢' : '⚪'} Construction automatique après paiement</div>
+            <div class="pp-autobuild-desc">
+              ${on
+                ? 'Dès qu’un client paie, son site part en construction tout seul (vérification toutes les 5 min). Tu es prévenu au lancement et à la mise en ligne.'
+                : 'Aujourd’hui, un site payé attend ton clic « Lancer la construction ». Active pour qu’il parte tout seul dès le paiement — tu restes prévenu à chaque étape.'}
+            </div>
+          </div>
+          <button class="btn ${on ? 'btn-secondary' : 'btn-primary'}" data-act="pp-ab-toggle" ${busy ? 'disabled' : ''}>
+            ${busy ? '…' : (on ? 'Couper' : 'Activer')}
+          </button>
+        </div>`;
+      host.querySelector('[data-act="pp-ab-toggle"]').onclick = async () => {
+        const next = !on;
+        if (next && !window.confirm(
+          'Activer la construction automatique ?\n\n' +
+          'Dès qu’un paiement arrive, le site du client sera construit et mis ' +
+          'en ligne sans action de ta part (2 constructions max en parallèle, ' +
+          'une seule tentative automatique par commande).\n\n' +
+          'Tu seras prévenu au lancement, à la mise en ligne, et si quelque ' +
+          'chose échoue.')) {
+          return;
+        }
+        paint(on, true);
+        try {
+          const r = await App.api.pixelpros_auto_build_set({ enabled: next });
+          if (r && r.ok) {
+            paint(!!r.enabled, false);
+            this._toast(r.enabled
+              ? '🟢 Construction automatique activée'
+              : 'Construction automatique coupée — tout repasse par ton clic');
+          } else {
+            paint(on, false);
+            this._toast('Erreur : ' + ((r && r.error) || 'réglage non enregistré'), true);
+          }
+        } catch (e) {
+          paint(on, false);
+          this._toast('Erreur : ' + e, true);
+        }
+      };
+    };
+    paint(enabled, false);
   },
 
   _injectStyles() {
@@ -254,6 +317,13 @@ const PixelPros = {
     const s = document.createElement('style');
     s.id = 'pp-styles';
     s.textContent = `
+      /* === CONSTRUCTION AUTOMATIQUE (interrupteur) === */
+      .pp-autobuild { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:14px 18px; margin-bottom:18px; border:1px solid var(--border,#1e293b); border-radius:12px; background:var(--card,#0f172a); }
+      .pp-autobuild.is-on { border-color:rgba(34,197,94,.45); background:rgba(34,197,94,.06); }
+      .pp-autobuild-title { font-weight:700; font-size:14px; margin-bottom:3px; color:#e2e8f0; }
+      .pp-autobuild-desc { font-size:13px; color:#94a3b8; max-width:640px; }
+      .pp-autobuild .btn { flex-shrink:0; }
+
       /* === ONGLETS Pipeline / Statistiques === */
       .pp-tabs { display:flex; gap:4px; margin-bottom:22px; border-bottom:1px solid var(--border,#1e293b); }
       .pp-tab { appearance:none; -webkit-appearance:none; background:transparent; border:none; border-bottom:2px solid transparent; color:#94a3b8; font-size:14px; font-weight:800; padding:11px 18px; cursor:pointer; transition:color .15s, border-color .15s, background .15s; margin-bottom:-1px; border-radius:8px 8px 0 0; }
