@@ -521,13 +521,9 @@ def update_config(patch: dict) -> bool:
         return False
     cur = get_config()
     cur.update(patch)
-    try:
-        sb.table("shared_settings").upsert({
-            "key": "phare_config",
-            "value": cur,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }, on_conflict="key").execute()
-        return True
-    except Exception as exc:
-        logger.warning("phare.update_config: %s", exc)
-        return False
+    # PK composite (workspace_id, key) depuis la migration 20 : l'ancien
+    # upsert on_conflict="key" plantait en 42P10 et la config ne
+    # s'écrivait PLUS (scheduler_log figé → missions globales re-exécutées
+    # à chaque tick). L'idiome robuste vit dans shared_settings_db.
+    from ..shared_settings_db import upsert_setting
+    return upsert_setting(sb, "phare_config", cur)

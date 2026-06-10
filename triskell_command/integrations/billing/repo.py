@@ -312,13 +312,6 @@ def update_config(patch: dict) -> bool:
         merged_issuer.update(patch["issuer"])
         patch = {**patch, "issuer": merged_issuer}
     cur.update(patch)
-    try:
-        sb.table("shared_settings").upsert({
-            "key": "billing_config",
-            "value": cur,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }, on_conflict="key").execute()
-        return True
-    except Exception as exc:
-        logger.warning("billing.update_config: %s", exc)
-        return False
+    # Même PK composite que phare_config : upsert on_conflict="key" → 42P10.
+    from ..shared_settings_db import upsert_setting
+    return upsert_setting(sb, "billing_config", cur)

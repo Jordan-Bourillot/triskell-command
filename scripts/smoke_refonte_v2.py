@@ -199,6 +199,53 @@ finally:
     (ab._get_client, pp_repo.list_intakes, pp_repo.dispatch_build,
      pp_repo.mark_failed, ab._notify) = _saved_ab
 
+print("1quater) Écriture shared_settings (PK composite)…")
+from triskell_command.integrations.shared_settings_db import upsert_setting  # noqa: E402
+
+
+class _SSR:
+    def __init__(self, data): self.data = data
+
+
+class _SSTable:
+    def __init__(self, owner, name): self.o, self.n = owner, name; self._op = None
+    def update(self, patch): self._op = "update"; return self
+    def insert(self, row):
+        self._op = "insert"; self.o.inserted.append((self.n, row)); return self
+    def select(self, *a, **k): self._op = "select"; return self
+    def eq(self, *a): return self
+    def order(self, *a, **k): return self
+    def limit(self, *a): return self
+    def execute(self):
+        if self.n == "shared_settings" and self._op == "update":
+            return _SSR(list(self.o.update_hits))
+        if self.n == "workspaces":
+            return _SSR([{"id": "ws-test-1"}])
+        return _SSR([])
+
+
+class _SSDb:
+    def __init__(self, update_hits):
+        self.update_hits = update_hits; self.inserted = []
+    def table(self, name): return _SSTable(self, name)
+    def rpc(self, name):
+        class _Rpc:
+            def execute(self_inner): return _SSR(None)
+        return _Rpc()
+
+
+_db_hit = _SSDb(update_hits=[{"key": "phare_config"}])
+check("ligne existante → UPDATE suffit (aucun ON CONFLICT)",
+      upsert_setting(_db_hit, "phare_config", {"a": 1}) is True
+      and not _db_hit.inserted)
+_db_miss = _SSDb(update_hits=[])
+ok_ins = upsert_setting(_db_miss, "phare_config", {"a": 1})
+check("ligne absente → INSERT avec workspace résolu",
+      ok_ins is True and len(_db_miss.inserted) == 1
+      and _db_miss.inserted[0][1].get("workspace_id") == "ws-test-1")
+check("client None → False sans exception",
+      upsert_setting(None, "phare_config", {}) is False)
+
 print("2) Présence serveur…")
 import os  # noqa: E402
 from triskell_command.integrations import server_presence as sp  # noqa: E402
