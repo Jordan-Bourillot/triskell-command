@@ -190,6 +190,39 @@ def test_schema_organization() -> None:
     assert out["type_detected"] == "Organization"
 
 
+def test_schema_no_invented_contact() -> None:
+    """RÈGLE : aucune coordonnée inventée dans le markup publié.
+    Sans org_phone/org_locality configurés, is_local retombe sur
+    Organization (pas de LocalBusiness avec un faux numéro), et aucun
+    logo n'est émis si l'URL n'est pas connue."""
+    from triskell_command.integrations.phare import schema_architect as sa
+    out = sa.generate_schemas(
+        {"path": "/", "title": "Pack Élec", "meta_description": "", "h1": ""},
+        {"name": "Pack Élec", "domain": "pack-elec.triskell-studio.fr"},
+        extras={"is_local": True},
+    )
+    org = out["schemas"][0]
+    assert org["@type"] == "Organization", f"attendu Organization, eu {org['@type']}"
+    assert "telephone" not in org, "téléphone inventé publié !"
+    assert "logo" not in org, "logo deviné publié !"
+    # Avec logo_url explicite sur le site → le logo sort
+    out2 = sa.generate_schemas(
+        {"path": "/", "title": "X", "meta_description": "", "h1": ""},
+        {"name": "X", "domain": "x.fr", "logo_url": "https://x.fr/logo.png"},
+    )
+    assert out2["schemas"][0].get("logo") == "https://x.fr/logo.png"
+
+
+def test_schema_wired_into_onpage_optim() -> None:
+    """Le schema-architecte doit rester branché au flux d'optimisation
+    on-page (il a passé 5 semaines orphelin sans que personne le voie)."""
+    import inspect
+    from triskell_command.integrations.phare import orchestrator
+    src = inspect.getsource(orchestrator.run_onpage_optim)
+    assert "schema_architect" in src, "schema_architect débranché de run_onpage_optim"
+    assert "patches_for_page" in src
+
+
 def test_ctr_curve() -> None:
     from triskell_command.integrations.phare.ctr_hacker import expected_ctr
     assert 0.30 <= expected_ctr(1.0) <= 0.34
@@ -353,6 +386,8 @@ def main() -> int:
     _run("Imports modules avancés v0.5", test_imports_advanced)
     _run("Schema-architecte — page produit", test_schema_product)
     _run("Schema-architecte — page d'accueil = Organization", test_schema_organization)
+    _run("Schema-architecte — zéro coordonnée inventée", test_schema_no_invented_contact)
+    _run("Schema-architecte — branché dans l'optim on-page", test_schema_wired_into_onpage_optim)
     _run("CTR-Hacker — courbe CTR par position", test_ctr_curve)
     _run("Image SEO — détection issues HTML offline", test_image_audit_offline)
     _run("Sitemap.xml — génération valide", test_sitemap_xml)

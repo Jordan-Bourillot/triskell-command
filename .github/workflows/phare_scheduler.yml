@@ -20,6 +20,11 @@ jobs:
   tick:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Les fenêtres horaires du scheduler (audit lundi 6-22h, bulletin 8h…)
+      # sont pensées en heure française ; sans ça le runner est en UTC et
+      # tout est décalé de 1-2h selon la saison.
+      TZ: Europe/Paris
 
     steps:
       - name: Checkout Triskell Command

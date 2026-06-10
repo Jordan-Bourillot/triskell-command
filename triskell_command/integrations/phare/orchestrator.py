@@ -175,6 +175,20 @@ def run_onpage_optim(site_id: str, page_path: str = "/",
         out = {}
 
     abstract_patches = out.get("patches") or []
+
+    # Schema-architecte : si la page n'a AUCUNE donnée structurée au crawl,
+    # on ajoute le bloc JSON-LD déterministe (pas de LLM, fiable). Passe par
+    # le même circuit PR + vérifications que les autres patches — et rend la
+    # mission utile même quand l'agent LLM n'a rien proposé.
+    if not (page.get("schema_types") or []):
+        try:
+            from . import schema_architect
+            jsonld_patches = schema_architect.patches_for_page(page, site)
+            if jsonld_patches:
+                abstract_patches = abstract_patches + jsonld_patches
+        except Exception as exc:
+            logger.debug("schema_architect: %s", exc)
+
     if not abstract_patches:
         return {"ok": False, "error": "aucun patch proposé", "agent_output": out}
 

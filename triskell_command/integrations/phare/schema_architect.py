@@ -18,12 +18,26 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# Voix Triskell — phone/email
-TRISKELL_PHONE = "+33 2 96 00 00 00"   # à confirmer avec Jordan
+# Coordonnées publiées dans le JSON-LD. RÈGLE : on n'invente RIEN — le
+# téléphone et l'adresse ne sortent que s'ils sont posés dans
+# phare_config (org_phone, org_locality, org_region). Un faux numéro
+# publié sur un site ferait plus de mal que pas de numéro du tout.
 TRISKELL_EMAIL = "contact@triskell-studio.fr"
-TRISKELL_REGION = "Bretagne"
-TRISKELL_LOCALITY = "Saint-Brieuc"
 TRISKELL_COUNTRY = "FR"
+
+
+def _org_contact_config() -> dict:
+    """Lit les coordonnées officielles depuis phare_config (best-effort)."""
+    try:
+        from . import repo
+        cfg = repo.get_config() or {}
+        return {
+            "phone": (cfg.get("org_phone") or "").strip(),
+            "locality": (cfg.get("org_locality") or "").strip(),
+            "region": (cfg.get("org_region") or "").strip(),
+        }
+    except Exception:
+        return {"phone": "", "locality": "", "region": ""}
 
 
 # ---------------------------------------------------------------------------
@@ -56,16 +70,12 @@ def detect_type(page: dict, site: dict) -> str:
 def build_organization(site: dict) -> dict:
     domain = site.get("domain", "")
     name = site.get("name") or domain.split(".")[0].title()
-    return {
+    org = {
         "@context": "https://schema.org",
         "@type": "Organization",
         "name": name,
         "url": f"https://{domain}/",
-        "logo": f"https://{domain}/assets/logo.svg",
-        "sameAs": [
-            "https://triskell-studio.fr/",
-            "https://github.com/Jordan-Bourillot",
-        ],
+        "sameAs": ["https://triskell-studio.fr/"],
         "contactPoint": [{
             "@type": "ContactPoint",
             "contactType": "customer support",
@@ -74,18 +84,28 @@ def build_organization(site: dict) -> dict:
             "availableLanguage": ["French"],
         }],
     }
+    # Logo seulement s'il est connu — un lien 404 dans le markup fait sale.
+    logo = (site.get("logo_url") or "").strip()
+    if logo:
+        org["logo"] = logo
+    return org
 
 
 def build_local_business(site: dict) -> dict:
+    """LocalBusiness UNIQUEMENT si les coordonnées réelles sont configurées
+    (phare_config.org_phone / org_locality) — sinon Organization simple."""
+    contact = _org_contact_config()
     org = build_organization(site)
+    if not (contact["phone"] and contact["locality"]):
+        return org
     org["@type"] = "LocalBusiness"
     org["address"] = {
         "@type": "PostalAddress",
-        "addressLocality": TRISKELL_LOCALITY,
-        "addressRegion": TRISKELL_REGION,
+        "addressLocality": contact["locality"],
+        "addressRegion": contact["region"] or contact["locality"],
         "addressCountry": TRISKELL_COUNTRY,
     }
-    org["telephone"] = TRISKELL_PHONE
+    org["telephone"] = contact["phone"]
     return org
 
 
@@ -162,7 +182,7 @@ def build_faq(page: dict, site: dict, raw_text: str = "") -> dict:
     Heuristique : ligne se finissant par ?, suivie d'au moins un paragraphe."""
     text = raw_text or ""
     pairs = []
-    for m in _QA_RE.finditer(text)[:20] if hasattr(_QA_RE.finditer(text), "__getitem__") else list(_QA_RE.finditer(text))[:20]:
+    for m in list(_QA_RE.finditer(text))[:20]:
         q = m.group(1).strip()
         a = m.group(2).strip()[:600]
         if 5 <= len(q) <= 200 and len(a) >= 20:

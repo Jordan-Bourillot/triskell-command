@@ -219,6 +219,42 @@ registre des 8 agents, structure de l'overview, scheduler, vue UI,
 routing, sidebar, présence des fichiers SQL. Idéal pour valider après
 une modif de code avant de pousser.
 
+## Fiabilité du scheduler (depuis le 10/06/2026)
+
+- **Battement de cœur** : chaque tick écrit `phare_config.last_tick_at`
+  (`heartbeat.py`). Le serveur web expose le Phare en « robot virtuel »
+  dans Système → Santé, et le chien de garde envoie une alerte push à
+  Jordan après 9 h de silence (le cron GitHub Actions saute des heures,
+  d'où le seuil généreux). Plus jamais de panne muette.
+- **Fuseau horaire** : le workflow GitHub pose `TZ=Europe/Paris` — les
+  fenêtres horaires du cron logique sont bien des heures françaises.
+- **Accès base en CI** : `repo._sb()` passe par `client.raw` (init forcée
+  du SDK). Ne JAMAIS revenir au pattern `getattr(c, "_client")` — il
+  retourne None en mode service_role à froid (panne du 09-10/06/2026,
+  verrouillé par `scripts/smoke_sb_service_mode.py`).
+
+## Schema-architecte (branché le 10/06/2026)
+
+`schema_architect.py` est appelé par `run_onpage_optim` : si la page n'a
+aucune donnée structurée au crawl, le bloc JSON-LD déterministe
+(Organization/Product/Article/FAQ + breadcrumb) est ajouté aux patches et
+suit le circuit PR → vérifs → merge. Règle absolue : **aucune coordonnée
+inventée** — téléphone/adresse ne sortent que si `phare_config.org_phone`
+/ `org_locality` sont renseignés, le logo que si `phare_sites.logo_url`
+existe.
+
+## Chantiers à décider avec Jordan (pas des oublis)
+
+- **programmatic.py** (pages en masse) : moteur complet et testé, mais
+  il manque tout le 2e étage — UI de création de templates + circuit de
+  publication des pages générées (`phare_programmatic_pages` → fichiers
+  → PR). Gros coûts LLM et vraie décision SEO : à lancer ensemble le
+  jour où un site a besoin de pages localisées en volume.
+- **geo_surveillant.py vs module GEO du site web** : les deux mesurent
+  « les IA citent-elles mes sites ? » sur deux stockages différents
+  (tables phare_* vs réglages serveur). Redondance assumée pour
+  l'instant ; fusion = choisir quel écran survit.
+
 ## Roadmap
 
 Voir `Triskell Studio/LE_PHARE_ROADMAP.md` à la racine du dossier Triskell
