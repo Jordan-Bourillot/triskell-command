@@ -90,6 +90,15 @@ const Argus = {
     this._root = container;
     container.innerHTML = `
       <section class="animate-slide-up">
+        <div class="mb-6 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-relaxed">
+          <strong>⏸️ Argus est en pause.</strong>
+          Ses sources (Pages Jaunes, Europages, recherche web) bloquent le
+          serveur : aux derniers essais, il n'a quasiment rien ramené. Il a
+          donc été retiré du menu le temps de le fiabiliser — le
+          <strong>Prospecteur Google</strong> et <strong>Le Chasseur</strong>
+          font le même travail en mieux. Cet écran reste ouvert pour tes
+          essais ponctuels.
+        </div>
         <header class="mb-6 sm:mb-8">
           <div class="hero-kicker mb-2" style="color: hsl(var(--accent));">ARGUS</div>
           <h1 class="hero-title hero-title--md mb-2 sm:mb-3">

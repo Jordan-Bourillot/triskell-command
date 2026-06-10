@@ -382,6 +382,49 @@ def _fetch_places(region_code: str, metier: str, zone: str, num_results: int,
     return places[:num_results]
 
 
+# Champs minimaux pour une recherche « site d'UNE entreprise » : on ne
+# demande QUE l'URL du site (+ le nom pour vérifier qu'on est sur la bonne
+# boîte) → requête la moins chère possible côté facturation Places.
+_SITE_LOOKUP_FIELDS = "places.displayName,places.websiteUri"
+
+
+def lookup_site_for_company(name: str, city: str, api_key: str = "",
+                            region_code: str = "FR") -> str:
+    """Trouve le site web d'UNE entreprise via Google Places (UNE requête).
+
+    Sert de filet pour Le Chasseur quand les moteurs gratuits (devinage de
+    domaine, Mojeek, DuckDuckGo) ne trouvent rien — ce qui est le cas sur
+    le serveur où ces moteurs sont bloqués.
+
+    Renvoie l'URL du site (str) ou "" si rien / pas de clé / erreur.
+    Best-effort : ne lève jamais.
+    """
+    key = (api_key or "").strip() or _get_api_key()
+    q = " ".join(p for p in [(name or "").strip(), (city or "").strip()] if p)
+    if not key or not q:
+        return ""
+    try:
+        r = requests.post(
+            PLACES_URL,
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": key,
+                "X-Goog-FieldMask": _SITE_LOOKUP_FIELDS,
+            },
+            json={"textQuery": q, "pageSize": 1, "languageCode": "fr",
+                  "regionCode": region_code or "FR"},
+            timeout=12,
+        )
+        if r.status_code != 200:
+            return ""
+        places = (r.json() or {}).get("places") or []
+        if not places:
+            return ""
+        return (places[0].get("websiteUri") or "").strip()
+    except Exception:
+        return ""
+
+
 def _run_hunt(hunt: ProspectHunt, metier: str, zone: str, num_results: int,
               only_no_site: bool, api_key: str, pays: str = "FR",
               progress_cb: Callable[[ProspectHunt], None] | None = None) -> None:

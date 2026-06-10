@@ -1,7 +1,17 @@
 <!doctype html>
-<html lang="fr" data-theme="light">
+<html lang="fr" data-theme="mid">
 <head>
   <meta charset="utf-8" />
+  <script>
+    // Applique tout de suite le thème mémorisé — évite le flash de mauvaise
+    // couleur au chargement, avant la réponse du serveur.
+    try {
+      var tcTheme = localStorage.getItem('tc-theme');
+      if (tcTheme === 'light' || tcTheme === 'mid' || tcTheme === 'dark') {
+        document.documentElement.setAttribute('data-theme', tcTheme);
+      }
+    } catch (e) {}
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Triskell Command</title>
 
@@ -26,7 +36,10 @@
   <script>
     // Configuration Tailwind avec nos tokens (HSL via vars CSS)
     tailwind.config = {
-      darkMode: ['class', '[data-theme="dark"]'],
+      // Les variantes dark: s'appliquent aux DEUX thèmes sombres (mid + dark).
+      // Avant le 10/06/2026, le thème "mid" (sombre, par défaut) ne les
+      // recevait pas → bannières claires criardes au milieu de l'UI sombre.
+      darkMode: ['class', ':is([data-theme="dark"],[data-theme="mid"])'],
       theme: {
         extend: {
           fontFamily: {
@@ -45,9 +58,16 @@
             accent:    'hsl(var(--accent) / <alpha-value>)',
             'accent-hover': 'hsl(var(--accent-hover) / <alpha-value>)',
             'accent-glow':  'hsl(var(--accent-glow) / <alpha-value>)',
+            'accent-strong': 'hsl(var(--accent-strong) / <alpha-value>)',
+            'accent-text':   'hsl(var(--accent-text) / <alpha-value>)',
             success:   'hsl(var(--success) / <alpha-value>)',
+            'success-text': 'hsl(var(--success-text) / <alpha-value>)',
             warning:   'hsl(var(--warning) / <alpha-value>)',
+            'warning-text': 'hsl(var(--warning-text) / <alpha-value>)',
             danger:    'hsl(var(--danger) / <alpha-value>)',
+            'danger-text':  'hsl(var(--danger-text) / <alpha-value>)',
+            info:      'hsl(var(--info) / <alpha-value>)',
+            'info-text':    'hsl(var(--info-text) / <alpha-value>)',
             gold:      'hsl(var(--gold) / <alpha-value>)',
           },
           boxShadow: {
@@ -249,7 +269,7 @@
 
         <!-- ===== 1. PROSPECTION : dans l'ordre du pipeline ===== -->
         <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-fuchsia-400 mb-2">PROSPECTION</div>
+          <div class="px-3 text-[11px] font-bold tracking-widest text-fuchsia-700 dark:text-fuchsia-400 mb-2">PROSPECTION</div>
           <button data-view="prospection" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/><circle cx="5" cy="12" r="2"/></svg>
             <span>Lancer une prospection</span>
@@ -281,7 +301,7 @@
                   aria-expanded="false">
             <svg class="w-3.5 h-3.5 nav-group-chev" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
             <span>Outils de recherche</span>
-            <span class="nav-group-count">5</span>
+            <span class="nav-group-count">4</span>
           </button>
           <div id="nav-group-recherche-items" class="nav-group-items" hidden>
             <button data-view="obelisk" class="nav-item">
@@ -302,17 +322,15 @@
               <span>Prospecteur Google</span>
               <span class="nav-beta" title="Outil en rodage : il fonctionne, mais garde un œil sur ses résultats">bêta</span>
             </button>
-            <button data-view="argus" class="nav-item">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              <span>Argus</span>
-              <span class="nav-beta" title="Outil en rodage : il fonctionne, mais garde un œil sur ses résultats">bêta</span>
-            </button>
+            <!-- Argus retiré du menu le 10/06/2026 : ses sources bloquent le
+                 serveur (≈0 résultat). Vue conservée + routée (accès direct),
+                 avec bandeau « en pause » — cf. scripts/argus.js. -->
           </div>
         </div>
 
         <!-- ===== 2. MAILS ===== -->
         <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-sky-400 mb-2">MAILS</div>
+          <div class="px-3 text-[11px] font-bold tracking-widest text-sky-700 dark:text-sky-400 mb-2">MAILS</div>
           <button data-view="mails" data-compose="1" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
             <span>Rédiger</span>
@@ -337,7 +355,7 @@
 
         <!-- ===== 3. CLIENTS & CHIFFRES ===== -->
         <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-violet-400 mb-2">CLIENTS &amp; CHIFFRES</div>
+          <div class="px-3 text-[11px] font-bold tracking-widest text-violet-700 dark:text-violet-400 mb-2">CLIENTS &amp; CHIFFRES</div>
           <button data-view="clients_master" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <span>Tous les clients</span>
@@ -358,7 +376,7 @@
 
         <!-- ===== 4. SITES & SEO ===== -->
         <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-amber-400 mb-2">SITES &amp; SEO</div>
+          <div class="px-3 text-[11px] font-bold tracking-widest text-amber-700 dark:text-amber-400 mb-2">SITES &amp; SEO</div>
           <button data-view="pixelpros" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9 16.5 14 18 22 12 18 6 22 7.5 14 2 9 9 9 12 2"/></svg>
             <span>Pixel Pros · pipeline</span>
@@ -392,7 +410,7 @@
 
         <!-- ===== 5. ATELIER ===== -->
         <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-lime-400 mb-2">ATELIER</div>
+          <div class="px-3 text-[11px] font-bold tracking-widest text-lime-700 dark:text-lime-400 mb-2">ATELIER</div>
           <button data-view="catalogue" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
             <span>Catalogue</span>
@@ -409,7 +427,7 @@
 
         <!-- ===== 6. SYSTÈME ===== -->
         <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-emerald-400 mb-2">SYSTÈME</div>
+          <div class="px-3 text-[11px] font-bold tracking-widest text-emerald-700 dark:text-emerald-400 mb-2">SYSTÈME</div>
           <button data-view="health" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
             <span>Santé du système</span>
@@ -456,6 +474,7 @@
         <!-- Tuto · Réglages · Signaler un bug · v en une seule ligne discrète -->
         <div class="flex items-center justify-between px-2 pt-1 text-[10px] text-text-muted">
           <div class="flex gap-3">
+            <button id="launcher-trigger" type="button" title="Tous les outils Triskell (Ctrl+O)" class="hover:text-text transition-colors">Outils</button>
             <button data-view="tutorial" class="hover:text-text transition-colors">Tuto</button>
             <button data-view="config"   class="hover:text-text transition-colors">Réglages</button>
             <button id="footer-bug-report" type="button" class="hover:text-accent transition-colors">Signaler un bug</button>

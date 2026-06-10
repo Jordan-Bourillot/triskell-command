@@ -138,7 +138,13 @@ check("sa vue reste routée (lien direct possible)",
 check("bannière de remplacement sur la vue",
       "remplacé par" in
       (ui / "scripts/chasseur_createurs.js").read_text(encoding="utf-8"))
-check("compteur du groupe à jour (5)", 'nav-group-count">5' in html)
+check("Argus retiré du menu",
+      'data-view="argus"' not in html)
+check("sa vue Argus reste routée (lien direct possible)",
+      "case 'argus'" in (ui / "scripts/app.js").read_text(encoding="utf-8"))
+check("bandeau « en pause » sur la vue Argus",
+      "en pause" in (ui / "scripts/argus.js").read_text(encoding="utf-8"))
+check("compteur du groupe à jour (4)", 'nav-group-count">4' in html)
 check("Éclaireur renommé « Compléter les fiches »",
       "<span>Compléter les fiches</span>" in html)
 

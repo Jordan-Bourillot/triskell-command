@@ -558,12 +558,16 @@ def _mojeek_first_results(query: str, limit: int = 5) -> list[str]:
     return out
 
 
-def _discover_site(nom: str, ville: str) -> tuple[str, int, str, str]:
+def _discover_site(nom: str, ville: str,
+                   places_key: str = "") -> tuple[str, int, str, str]:
     """Trouve le meilleur site pour cette boîte.
 
     Renvoie (site_root, score, source, html_home).
-      source ∈ {"guess", "mojeek", "ddg", ""}.
+      source ∈ {"guess", "mojeek", "ddg", "places", ""}.
       score < 40 = pas de match validé (le site_root sera "" dans ce cas).
+
+    places_key : si fourni, Google Places sert de dernier filet quand les
+    moteurs gratuits (souvent bloqués sur le serveur) n'ont rien donné.
     """
     best_url = ""
     best_score = -1
@@ -632,6 +636,30 @@ def _discover_site(nom: str, ville: str) -> tuple[str, int, str, str]:
                     best_url = site_root
                     best_source = "ddg"
                     best_html = html
+
+    # ─── Voie 4 : Google Places (payant, clé requise) — dernier filet ───
+    # Les voies gratuites ci-dessus sont régulièrement bloquées côté serveur.
+    # Avec une clé Places, on demande directement à Google le site de la
+    # boîte. Le résultat repasse par le SCORE de pertinence → un mauvais
+    # match (autre entreprise) est rejeté comme pour les autres voies.
+    if places_key and best_score < 60:
+        try:
+            from . import prospecteur_google
+            purl = prospecteur_google.lookup_site_for_company(
+                nom, ville, api_key=places_key)
+        except Exception:
+            purl = ""
+        if purl:
+            site_root = _normalize_site(purl)
+            if site_root:
+                html = _fetch(site_root)
+                if html and _looks_french(html):
+                    score, _ = _score_site_relevance(html, nom, ville)
+                    if score > best_score:
+                        best_score = score
+                        best_url = site_root
+                        best_source = "places"
+                        best_html = html
 
     if best_score >= 50:
         return _normalize_site(best_url), best_score, best_source, best_html
@@ -1003,15 +1031,28 @@ def _build_label(sector: str, zone: dict, mode: str = "all") -> str:
     return f"{s} — {zlabel}{suffix}"
 
 
+def _strip_accents(text: str) -> str:
+    """Retire les accents : « électricien » → « electricien ». Permet de
+    reconnaître un métier-préset même tapé avec accents (sinon
+    « électricien » ne matchait pas la clé « electricien » et la chasse
+    partait en recherche plein-texte → 6 résultats au lieu de 180)."""
+    import unicodedata
+    return "".join(
+        c for c in unicodedata.normalize("NFD", text or "")
+        if unicodedata.category(c) != "Mn"
+    )
+
+
 def _build_filters(sector: str, zone: dict) -> dict:
     f: dict = {}
-    s = (sector or "").strip().lower()
+    raw = (sector or "").strip()
+    s = _strip_accents(raw.lower())
     if s in SECTOR_PRESETS:
         f.update(SECTOR_PRESETS[s])
-    elif re.match(r"^\d{2}\.\d{2}[A-Z]$", (sector or "").strip()):
-        f["activite_principale"] = sector.strip()
-    elif sector:
-        f["q"] = sector
+    elif re.match(r"^\d{2}\.\d{2}[A-Z]$", raw):
+        f["activite_principale"] = raw
+    elif raw:
+        f["q"] = raw
     z = zone or {}
     if z.get("departement"):
         f["departement"] = str(z["departement"]).strip()
@@ -1096,18 +1137,43 @@ def _run_hunt(hunt: Hunt, target: int, with_email_only: bool,
     # ---- Étape 2 : pour chaque boîte, trouver site + extraire mails ----
     kept: list[Prospect] = []
     seen_emails: set[str] = set()
-    sources_count = {"guess": 0, "mojeek": 0, "ddg": 0}
+    sources_count = {"guess": 0, "mojeek": 0, "ddg": 0, "places": 0}
+
+    # Filet payant Google Places : réutilise la clé du Prospecteur Google.
+    # Sans clé → comportement historique inchangé (aucun coût). Avec clé →
+    # filet plafonné (chaque appel = une requête Places facturée). Le plafond
+    # est réglable sans redéploiement via la variable CHASSEUR_PLACES_CAP.
+    places_key = ""
+    places_cap = 0
+    places_used = 0
+    try:
+        from . import prospecteur_google
+        places_key = prospecteur_google._get_api_key()
+    except Exception:
+        places_key = ""
+    if places_key:
+        import os as _os
+        try:
+            places_cap = int(_os.environ.get("CHASSEUR_PLACES_CAP", "150"))
+        except ValueError:
+            places_cap = 150
+        log(f"Filet Google Places actif — jusqu'à {places_cap} recherches de "
+            f"site payantes pour combler ce que les moteurs gratuits ratent.")
+
     for i, prospect in enumerate(raw):
         if len(kept) >= target:
             break
         try:
-            # 1) Découverte du site : devinage de domaine → Mojeek → DDG
+            # 1) Découverte du site : devinage → Mojeek → DDG → Places (filet)
+            use_key = places_key if (places_key and places_used < places_cap) else ""
             site_root, score, source, html_home = _discover_site(
-                prospect.nom, prospect.ville,
+                prospect.nom, prospect.ville, places_key=use_key,
             )
             prospect.site_web = site_root
             if source:
                 sources_count[source] = sources_count.get(source, 0) + 1
+            if source == "places":
+                places_used += 1
 
             # 2) Crawl des pages contact pour récupérer un mail public.
             #    On garde le html_home (page d'accueil) déjà chargé pour
@@ -1174,7 +1240,8 @@ def _run_hunt(hunt: Hunt, target: int, with_email_only: bool,
             n_with_mail_so_far = sum(1 for x in kept if x.email)
             n_poor = sum(1 for x in kept if x.site_quality == "poor")
             log(f"  [{i+1}/{len(raw)}] sites trouvés (guess={sources_count.get('guess',0)} "
-                f"mojeek={sources_count.get('mojeek',0)} ddg={sources_count.get('ddg',0)}), "
+                f"mojeek={sources_count.get('mojeek',0)} ddg={sources_count.get('ddg',0)} "
+                f"places={sources_count.get('places',0)}), "
                 f"retenus={len(kept)} (dont {n_with_mail_so_far} avec mail, {n_poor} sites pourris)")
         # Throttle gentil — on est poli avec les serveurs cibles
         time.sleep(0.2)
@@ -1195,7 +1262,8 @@ def _run_hunt(hunt: Hunt, target: int, with_email_only: bool,
         f"{hunt.stats['avec_mail']} avec mail. "
         f"Sites trouvés via : devinage={sources_count.get('guess', 0)}, "
         f"mojeek={sources_count.get('mojeek', 0)}, "
-        f"ddg={sources_count.get('ddg', 0)}.")
+        f"ddg={sources_count.get('ddg', 0)}, "
+        f"places={sources_count.get('places', 0)}.")
 
 
 def export_csv(hunt_id: str) -> dict:

@@ -889,6 +889,71 @@ def create_search_job(user_email: str, niche: str, platforms: list[str],
         return {"ok": False, "error": str(exc)}
 
 
+# Une vraie recherche Obélisk dure quelques minutes. Au-delà de ce délai
+# sans s'être terminée, le job est considéré mort (serveur redémarré /
+# planté pendant la recherche) — comme les « chasses zombies » des autres
+# outils, qu'Obélisk ne gérait pas (d'où des recherches affichées « en
+# cours » pendant des jours). Réglable via OBELISK_STALE_JOB_MINUTES.
+def _stale_job_minutes() -> int:
+    try:
+        return max(15, int(os.environ.get("OBELISK_STALE_JOB_MINUTES", "90")))
+    except (TypeError, ValueError):
+        return 90
+
+
+_ZOMBIE_JOB_MSG = ("Recherche interrompue (redémarrage du serveur ou "
+                   "plantage). Relance-la pour repartir.")
+
+
+def _job_is_stale(job: dict) -> bool:
+    status = (job.get("status") or "").strip().lower()
+    if status not in ("pending", "running") or job.get("finished_at"):
+        return False
+    ts = job.get("started_at") or job.get("created_at") or ""
+    if not ts:
+        return False
+    # Sécurité : si le job tourne VRAIMENT dans ce process, on n'y touche pas.
+    try:
+        from .runner import _RUNNING
+        if job.get("id") in _RUNNING:
+            return False
+    except Exception:
+        pass
+    from datetime import datetime, timezone, timedelta
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt) > timedelta(
+            minutes=_stale_job_minutes())
+    except Exception:
+        return False
+
+
+def _requalify_stale_jobs(jobs: list[dict]) -> list[dict]:
+    """Marque « failed » les jobs visiblement morts et persiste la
+    correction. Best-effort : ne lève jamais. Renvoie la liste corrigée."""
+    out: list[dict] = []
+    sb = None
+    for job in (jobs or []):
+        if isinstance(job, dict) and _job_is_stale(job):
+            from datetime import datetime, timezone
+            patch = {"status": "failed", "error": _ZOMBIE_JOB_MSG,
+                     "finished_at": datetime.now(timezone.utc).isoformat()}
+            try:
+                sb = sb if sb is not None else _sb()
+                if sb is not None:
+                    (sb.table("obelisk_search_jobs").update(patch)
+                       .eq("id", job.get("id")).execute())
+                    logger.info("Recherche Obélisk zombie requalifiée : %s",
+                                job.get("id"))
+            except Exception as exc:
+                logger.debug("requalify stale job %s : %s", job.get("id"), exc)
+            job = {**job, **patch}
+        out.append(job)
+    return out
+
+
 def get_search_job(job_id: str) -> dict:
     sb = _sb()
     if sb is None:
@@ -898,7 +963,8 @@ def get_search_job(job_id: str) -> dict:
                   .eq("id", job_id).limit(1).execute().data or [])
         if not rows:
             return {"ok": False, "error": "introuvable"}
-        return {"ok": True, "job": rows[0]}
+        job = _requalify_stale_jobs([rows[0]])[0]
+        return {"ok": True, "job": job}
     except Exception as exc:
         logger.warning("obelisk.get_search_job: %s", exc)
         return {"ok": False, "error": str(exc)}
@@ -910,11 +976,13 @@ def list_recent_jobs(user_email: str = "", limit: int = 10) -> dict:
         return {"ok": True, "jobs": [], "fallback": True}
     try:
         q = (sb.table("obelisk_search_jobs")
-               .select("id, niche, platforms, status, stats, created_at, finished_at")
+               .select("id, niche, platforms, status, stats, created_at, "
+                       "started_at, finished_at")
                .order("created_at", desc=True).limit(limit))
         if user_email:
             q = q.eq("user_email", user_email)
-        return {"ok": True, "jobs": q.execute().data or []}
+        jobs = _requalify_stale_jobs(q.execute().data or [])
+        return {"ok": True, "jobs": jobs}
     except Exception as exc:
         logger.warning("obelisk.list_recent_jobs: %s", exc)
         return {"ok": True, "jobs": [], "error": str(exc)}
