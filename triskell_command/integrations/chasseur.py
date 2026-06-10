@@ -1245,6 +1245,13 @@ def push_to_autopilot(hunt_id: str) -> dict:
     mode = (h.filters or {}).get("mode") or "all"
     sector = (h.filters or {}).get("sector_input") or ""
 
+    # Contrôle qualité AVANT versement : emails invalides/fabriqués, noms
+    # fantômes et doublons internes sont écartés — rien de faux n'entre
+    # dans la base. Le rapport remonte jusqu'à la mission.
+    from .data_quality import filter_for_push
+    clean_prospects, quality = filter_for_push(
+        h.prospects, email_key="email", name_key="nom")
+
     # Traduit la valeur "source_mail" du Chasseur en (source, contexte humain)
     # pour les meta d'email. Référence Triskell : explique à l'IA d'où vient
     # exactement l'adresse pour qu'elle adapte son mail de prospection.
@@ -1277,7 +1284,7 @@ def push_to_autopilot(hunt_id: str) -> dict:
                 "found_at": ""}
 
     core_prospects: list[CoreProspect] = []
-    for p in h.prospects:
+    for p in clean_prospects:
         email = (p.get("email") or "").strip()
         if not email:
             continue   # Auto-Pilote ne peut rien faire sans mail
@@ -1329,6 +1336,7 @@ def push_to_autopilot(hunt_id: str) -> dict:
             "merged":   int(result.get("merged") or 0),
             "total":    int(result.get("total") or 0),
             "pushed":   len(core_prospects),
+            "quality":  quality,
         }
     except Exception as exc:
         return {"ok": False, "error": f"upsert échoué : {exc}"}

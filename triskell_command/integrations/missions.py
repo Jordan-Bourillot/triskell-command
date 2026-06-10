@@ -162,10 +162,22 @@ def start_hunt_for(source: str, params: dict) -> dict:
 
 
 def create_mission(source: str, params: dict, *, created_by: str = "",
-                   client=None) -> dict:
-    """Crée + démarre une mission. Renvoie {ok, mission} ou {ok:False,error}."""
+                   dry_run: bool = False, client=None) -> dict:
+    """Crée + démarre une mission. Renvoie {ok, mission} ou {ok:False,error}.
+
+    dry_run (test à blanc) : la recherche tourne pour de vrai (c'est le
+    but — vérifier la qualité de ce qu'elle ramène), mais RIEN n'est
+    écrit dans la base et l'Auto-pilote n'est pas prévenu. À la place,
+    la mission produit un rapport : combien seraient versés, combien de
+    nouveaux/fusions, quels écarts qualité, avec un échantillon.
+    """
     if source not in SOURCES:
         return {"ok": False, "error": f"cible inconnue : {source}"}
+    if dry_run and source == "createurs":
+        return {"ok": False, "error":
+                "Le test à blanc n'existe pas pour les créateurs : Obélisk "
+                "écrit directement dans la base pendant sa recherche. "
+                "Lance plutôt une vraie mission avec un petit volume (10)."}
     started = start_hunt_for(source, params)
     if not started.get("ok"):
         return started
@@ -175,8 +187,10 @@ def create_mission(source: str, params: dict, *, created_by: str = "",
         "updated_at": _now(),
         "created_by": created_by or "",
         "source": source,
-        "label": started.get("label") or SOURCE_LABELS.get(source, source),
+        "label": (("🧪 " if dry_run else "")
+                  + (started.get("label") or SOURCE_LABELS.get(source, source))),
         "params": params or {},
+        "dry_run": bool(dry_run),
         "hunt_ref": started["hunt_ref"],
         "status": ST_HUNTING,
         "error": "",
@@ -247,8 +261,8 @@ def hunt_state_for(source: str, hunt_ref: str) -> dict:
 def push_for(source: str, hunt_ref: str) -> Optional[dict]:
     """Verse les prospects de la chasse dans la base partagée.
 
-    Renvoie le résultat {ok, pushed, created, merged} — ou None si la
-    source écrit déjà directement dans la base (Obélisk).
+    Renvoie le résultat {ok, pushed, created, merged, quality} — ou None
+    si la source écrit déjà directement dans la base (Obélisk).
     L'upsert est dédoublonné → rejouable sans risque.
     """
     if source == "createurs":
@@ -262,6 +276,72 @@ def push_for(source: str, hunt_ref: str) -> Optional[dict]:
     return {"ok": False, "error": f"cible inconnue : {source}"}
 
 
+def _load_hunt_prospects(source: str, hunt_ref: str) -> tuple[list[dict], str]:
+    """Charge les prospects bruts d'une chasse. Renvoie (liste, clé_nom)."""
+    if source == "pme":
+        from . import chasseur
+        h = chasseur.Hunt.load(hunt_ref)
+        return (h.prospects if h else []), "nom"
+    if source == "local":
+        from . import prospecteur_google
+        h = prospecteur_google.ProspectHunt.load(hunt_ref)
+        return (h.prospects if h else []), "name"
+    return [], "nom"
+
+
+def dry_push_for(source: str, hunt_ref: str, client=None) -> dict:
+    """SIMULATION de versement — n'écrit RIEN, dit ce qui se passerait.
+
+    1. Passe la fournée au contrôle qualité (mêmes règles que le réel).
+    2. Pour chaque fiche valide (100 max), regarde si l'email existe déjà
+       dans la base → « fusion » sinon « nouveau ».
+    3. Renvoie {ok, would_push, would_create, would_merge, quality,
+       sample: [..5 fiches..]}.
+    """
+    prospects, name_key = _load_hunt_prospects(source, hunt_ref)
+    if not prospects:
+        return {"ok": True, "would_push": 0, "would_create": 0,
+                "would_merge": 0, "quality": {"total": 0, "kept": 0,
+                                               "dropped": {}}, "sample": []}
+    from .data_quality import filter_for_push
+    kept, quality = filter_for_push(prospects, email_key="email",
+                                     name_key=name_key)
+    c = client or _client()
+    would_create = would_merge = 0
+    sample: list[dict] = []
+    capped = kept[:100]
+    for p in capped:
+        email = (p.get("email") or "").strip().lower()
+        exists = False
+        if c is not None and email:
+            try:
+                res = (c.raw.table("prospects").select("id", count="exact")
+                       .contains("emails", [email]).limit(1).execute())
+                exists = bool(res.count)
+            except Exception:
+                pass
+        if exists:
+            would_merge += 1
+        else:
+            would_create += 1
+        if len(sample) < 5:
+            sample.append({
+                "nom": (p.get(name_key) or p.get("name") or "")[:60],
+                "email": email[:80],
+                "sort": "fusion avec une fiche existante" if exists
+                        else "nouvelle fiche",
+            })
+    # Au-delà du plafond d'analyse, on compte le reste en « nouveaux »
+    # estimés (annoncé tel quel dans la note).
+    rest = max(0, len(kept) - len(capped))
+    return {"ok": True,
+            "would_push": len(kept),
+            "would_create": would_create + rest,
+            "would_merge": would_merge,
+            "analyzed": len(capped), "estimated_rest": rest,
+            "quality": quality, "sample": sample}
+
+
 # ---------------------------------------------------------------------------
 # Machine à états — PURE (providers injectés) pour être testable
 # ---------------------------------------------------------------------------
@@ -269,6 +349,7 @@ def advance_mission(mission: dict, *,
                     hunt_state: Callable[[str, str], dict],
                     push: Callable[[str, str], Optional[dict]],
                     kick_autopilot: Callable[[], tuple[bool, str]],
+                    dry_push: Callable[[str, str], dict] | None = None,
                     ) -> tuple[dict, bool]:
     """Fait avancer UNE mission d'un cran si possible.
 
@@ -299,6 +380,32 @@ def advance_mission(mission: dict, *,
                               or "la recherche s'est arrêtée en erreur")
                 changed = True
 
+        if m.get("status") == ST_HANDING and m.get("dry_run"):
+            # TEST À BLANC : on simule le versement, on n'écrit RIEN,
+            # et l'Auto-pilote n'est pas prévenu.
+            fn = dry_push or (lambda s, r: {"ok": False,
+                                             "error": "simulation indisponible"})
+            res = fn(m.get("source") or "", m.get("hunt_ref") or "")
+            counts = dict(m.get("counts") or {})
+            if res.get("ok"):
+                counts["pushed"] = 0
+                counts["would_push"] = int(res.get("would_push") or 0)
+                counts["would_create"] = int(res.get("would_create") or 0)
+                counts["would_merge"] = int(res.get("would_merge") or 0)
+                m["quality"] = res.get("quality") or {}
+                m["preview"] = res.get("sample") or []
+                m["autopilot"] = {"kicked": False,
+                                  "note": "simulation — rien n'est entré "
+                                          "dans la base, rien n'a été envoyé"}
+                m["status"] = ST_HANDED
+            else:
+                m["status"] = ST_ERROR
+                m["error"] = (f"simulation impossible : "
+                              f"{res.get('error') or '?'}")
+            m["counts"] = counts
+            m["updated_at"] = _now()
+            return m, True
+
         if m.get("status") == ST_HANDING:
             res = push(m.get("source") or "", m.get("hunt_ref") or "")
             counts = dict(m.get("counts") or {})
@@ -309,6 +416,8 @@ def advance_mission(mission: dict, *,
                 counts["pushed"] = int(res.get("pushed") or 0)
                 counts["created"] = int(res.get("created") or 0)
                 counts["merged"] = int(res.get("merged") or 0)
+                if res.get("quality"):
+                    m["quality"] = res["quality"]
             else:
                 err = (res.get("error") or "").strip()
                 # « aucun prospect avec mail » n'est pas une panne : la
@@ -379,6 +488,7 @@ def tick(client=None) -> dict:
                     hunt_state=hunt_state_for,
                     push=push_for,
                     kick_autopilot=default_kick_autopilot,
+                    dry_push=lambda s, r: dry_push_for(s, r, client=client),
                 )
                 if changed:
                     any_change = True

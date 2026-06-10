@@ -246,8 +246,78 @@
             <span>Cockpit</span>
           </button>
         </div>
+
+        <!-- ===== 1. PROSPECTION : dans l'ordre du pipeline ===== -->
         <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-sky-400 mb-2">BOÎTE MAIL</div>
+          <div class="px-3 text-[10px] font-bold tracking-widest text-fuchsia-400 mb-2">PROSPECTION</div>
+          <button data-view="prospection" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/><circle cx="5" cy="12" r="2"/></svg>
+            <span>Lancer une prospection</span>
+          </button>
+          <button data-view="prospects_crm" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>Tous les prospects</span>
+          </button>
+          <button data-view="drafts" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+            <span>Brouillons à valider</span>
+          </button>
+          <button data-view="replies" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1 0 2 1 2 2v12c0 1-1 2-2 2H4c-1 0-2-1-2-2V6c0-1 1-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg>
+            <span>Réponses</span>
+          </button>
+          <button data-view="autopilot" class="nav-item">
+            <img src="assets/apps/obelisk.png" class="nav-item-logo" alt="" />
+            <span>Auto-pilote</span>
+          </button>
+          <button data-view="convoy" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>Le Convoi (listes)</span>
+          </button>
+
+          <!-- Outils de recherche : repliés par défaut. L'écran « Lancer une
+               prospection » les pilote ; ici = accès direct, usages pointus. -->
+          <button type="button" id="nav-group-recherche" class="nav-group-head"
+                  aria-expanded="false">
+            <svg class="w-3.5 h-3.5 nav-group-chev" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+            <span>Outils de recherche</span>
+            <span class="nav-group-count">6</span>
+          </button>
+          <div id="nav-group-recherche-items" class="nav-group-items" hidden>
+            <button data-view="obelisk" class="nav-item">
+              <img src="assets/apps/obelisk.png" class="nav-item-logo" alt="" />
+              <span>Obélisk</span>
+              <span id="nav-obelisk-badge" class="nav-item-badge" hidden></span>
+            </button>
+            <button data-view="chasseur" class="nav-item">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2l3 6 6 1-4.5 4 1 6L12 16l-5.5 3 1-6L3 9l6-1z"/></svg>
+              <span>Le Chasseur</span>
+            </button>
+            <button data-view="eclaireur" class="nav-item">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 21l-4.35-4.35"/><circle cx="11" cy="11" r="8"/></svg>
+              <span>L'Éclaireur</span>
+            </button>
+            <button data-view="chasseur_createurs" class="nav-item">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="6" r="2"/></svg>
+              <span>Chasseur Créateur</span>
+              <span class="nav-beta" title="Outil en rodage : il fonctionne, mais garde un œil sur ses résultats">bêta</span>
+            </button>
+            <button data-view="prospecteur_google" class="nav-item">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              <span>Prospecteur Google</span>
+              <span class="nav-beta" title="Outil en rodage : il fonctionne, mais garde un œil sur ses résultats">bêta</span>
+            </button>
+            <button data-view="argus" class="nav-item">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span>Argus</span>
+              <span class="nav-beta" title="Outil en rodage : il fonctionne, mais garde un œil sur ses résultats">bêta</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ===== 2. MAILS ===== -->
+        <div>
+          <div class="px-3 text-[10px] font-bold tracking-widest text-sky-400 mb-2">MAILS</div>
           <button data-view="mails" data-compose="1" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
             <span>Rédiger</span>
@@ -260,89 +330,23 @@
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             <span>Messages envoyés</span>
           </button>
-          <button data-view="mails" data-tab="reply" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 00-4-4H4"/></svg>
-            <span>Réponses</span>
+          <button data-view="mail_templates" data-tab="transactionnel" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            <span>Modèles · transactionnel</span>
+          </button>
+          <button data-view="mail_templates" data-tab="prospection" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>Modèles · prospection</span>
           </button>
         </div>
+
+        <!-- ===== 3. CLIENTS & CHIFFRES ===== -->
         <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-indigo-400 mb-2">BOÎTE À IDÉES</div>
-          <button data-view="brain" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9.5 2A2.5 2.5 0 007 4.5v0A2.5 2.5 0 004.5 7v0A2.5 2.5 0 002 9.5v5A2.5 2.5 0 004.5 17v0A2.5 2.5 0 007 19.5v0A2.5 2.5 0 009.5 22h5a2.5 2.5 0 002.5-2.5v0a2.5 2.5 0 002.5-2.5v0A2.5 2.5 0 0022 14.5v-5A2.5 2.5 0 0019.5 7v0A2.5 2.5 0 0017 4.5v0A2.5 2.5 0 0014.5 2z"/><path d="M12 5v14"/></svg>
-            <span>Brain</span>
-          </button>
-        </div>
-        <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-violet-400 mb-2">FICHIER CLIENTS</div>
+          <div class="px-3 text-[10px] font-bold tracking-widest text-violet-400 mb-2">CLIENTS &amp; CHIFFRES</div>
           <button data-view="clients_master" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <span>Tous les clients</span>
           </button>
-        </div>
-        <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-purple-400 mb-2">L'APP TRAVAILLE POUR TOI</div>
-          <button data-view="autopilot" class="nav-item">
-            <img src="assets/apps/obelisk.png" class="nav-item-logo" alt="" />
-            <span>Auto-pilote</span>
-          </button>
-          <button data-view="convoy" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <span>Le Convoi (listes)</span>
-          </button>
-          <button data-view="drafts" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-            <span>Brouillons à valider</span>
-          </button>
-          <button data-view="replies" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1 0 2 1 2 2v12c0 1-1 2-2 2H4c-1 0-2-1-2-2V6c0-1 1-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg>
-            <span>Réponses</span>
-          </button>
-        </div>
-        <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-fuchsia-400 mb-2">PROSPECTION</div>
-          <button data-view="prospection" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/><circle cx="5" cy="12" r="2"/></svg>
-            <span>Lancer une prospection</span>
-          </button>
-          <button data-view="prospects_crm" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            <span>Tous les prospects</span>
-          </button>
-          <button data-view="obelisk" class="nav-item">
-            <img src="assets/apps/obelisk.png" class="nav-item-logo" alt="" />
-            <span>Obélisk</span>
-            <span id="nav-obelisk-badge" class="nav-item-badge" hidden></span>
-          </button>
-          <button data-view="chasseur" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2l3 6 6 1-4.5 4 1 6L12 16l-5.5 3 1-6L3 9l6-1z"/></svg>
-            <span>Le Chasseur</span>
-          </button>
-          <button data-view="chasseur_createurs" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="6" r="2"/></svg>
-            <span>Chasseur Créateur</span>
-          </button>
-          <button data-view="prospecteur_google" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-            <span>Prospecteur Google</span>
-          </button>
-          <button data-view="argus" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            <span>Argus</span>
-          </button>
-          <button data-view="eclaireur" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 21l-4.35-4.35"/><circle cx="11" cy="11" r="8"/></svg>
-            <span>L'Éclaireur</span>
-          </button>
-        </div>
-        <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-pink-400 mb-2">GROWTH PARTNER</div>
-          <button data-view="eliks" class="nav-item">
-            <img src="assets/apps/eliks-studio.svg" class="nav-item-logo" alt="" />
-            <span>Eliks Studio</span>
-          </button>
-        </div>
-        <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-rose-400 mb-2">CHIFFRES</div>
           <button data-view="revenue" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             <span>Revenus</span>
@@ -351,69 +355,64 @@
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
             <span>Conversions</span>
           </button>
-        </div>
-        <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-orange-400 mb-2">AGENCE SEO</div>
-          <button data-view="phare" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2v6M12 22v-3M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M22 12h-3M4.93 19.07l4.24-4.24M14.83 9.17l4.24-4.24"/><circle cx="12" cy="12" r="3"/></svg>
-            <span>Le Phare</span>
+          <button data-view="pixelpros-affiliates" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M3 21v-1a6 6 0 0 1 12 0v1"/><circle cx="17" cy="11" r="3"/><path d="M22 21v-1a4 4 0 0 0-4-4"/></svg>
+            <span>Affiliés Pixel Pros</span>
           </button>
         </div>
+
+        <!-- ===== 4. SITES & SEO ===== -->
         <div>
-          <div id="nav-section-geo" class="px-3 text-[10px] font-bold tracking-widest text-red-400 mb-2">AGENCE GEO</div>
-          <button data-view="geo" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18M3 12h18"/></svg>
-            <span>Le GEO</span>
-          </button>
-        </div>
-        <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-amber-400 mb-2">PIPELINES SITES</div>
-          <button data-view="lagriffe" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-            <span>Lagriffe · pipeline</span>
-            <span id="nav-lagriffe-badge" class="nav-item-badge" hidden></span>
-          </button>
-          <button data-view="rankus" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
-            <span>RankUs · pipeline</span>
-            <span id="nav-rankus-badge" class="nav-item-badge" hidden></span>
+          <div class="px-3 text-[10px] font-bold tracking-widest text-amber-400 mb-2">SITES &amp; SEO</div>
+          <button data-view="pixelpros" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9 16.5 14 18 22 12 18 6 22 7.5 14 2 9 9 9 12 2"/></svg>
+            <span>Pixel Pros · pipeline</span>
+            <span id="nav-pixelpros-badge" class="nav-item-badge" hidden></span>
           </button>
           <button data-view="wow" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M3 6c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M3 18c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/></svg>
             <span>WoW · pipeline</span>
             <span id="nav-wow-badge" class="nav-item-badge" hidden></span>
           </button>
-          <button data-view="pixelpros" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9 16.5 14 18 22 12 18 6 22 7.5 14 2 9 9 9 12 2"/></svg>
-            <span>Pixel Pros · pipeline</span>
-            <span id="nav-pixelpros-badge" class="nav-item-badge" hidden></span>
+          <button data-view="rankus" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+            <span>RankUs · pipeline</span>
+            <span id="nav-rankus-badge" class="nav-item-badge" hidden></span>
+          </button>
+          <button data-view="lagriffe" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span>Lagriffe · pipeline</span>
+            <span id="nav-lagriffe-badge" class="nav-item-badge" hidden></span>
+          </button>
+          <button data-view="phare" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2v6M12 22v-3M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M22 12h-3M4.93 19.07l4.24-4.24M14.83 9.17l4.24-4.24"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>Le Phare (SEO)</span>
+          </button>
+          <button data-view="geo" class="nav-item">
+            <span id="nav-section-geo" class="hidden"></span>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18M3 12h18"/></svg>
+            <span>Le GEO</span>
           </button>
         </div>
+
+        <!-- ===== 5. ATELIER ===== -->
         <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-yellow-400 mb-2">AFFILIATION</div>
-          <button data-view="pixelpros-affiliates" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M3 21v-1a6 6 0 0 1 12 0v1"/><circle cx="17" cy="11" r="3"/><path d="M22 21v-1a4 4 0 0 0-4-4"/></svg>
-            <span>Pixel Pros · affiliés</span>
-          </button>
-        </div>
-        <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-lime-400 mb-2">CATALOGUE</div>
+          <div class="px-3 text-[10px] font-bold tracking-widest text-lime-400 mb-2">ATELIER</div>
           <button data-view="catalogue" class="nav-item">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
             <span>Catalogue</span>
           </button>
-        </div>
-        <div>
-          <div class="px-3 text-[10px] font-bold tracking-widest text-green-400 mb-2">MODÈLES MAILS</div>
-          <button data-view="mail_templates" data-tab="transactionnel" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            <span>Transactionnel</span>
+          <button data-view="brain" class="nav-item">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9.5 2A2.5 2.5 0 007 4.5v0A2.5 2.5 0 004.5 7v0A2.5 2.5 0 002 9.5v5A2.5 2.5 0 004.5 17v0A2.5 2.5 0 007 19.5v0A2.5 2.5 0 009.5 22h5a2.5 2.5 0 002.5-2.5v0a2.5 2.5 0 002.5-2.5v0A2.5 2.5 0 0022 14.5v-5A2.5 2.5 0 0019.5 7v0A2.5 2.5 0 0017 4.5v0A2.5 2.5 0 0014.5 2z"/><path d="M12 5v14"/></svg>
+            <span>Boîte à idées</span>
           </button>
-          <button data-view="mail_templates" data-tab="prospection" class="nav-item">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            <span>Prospection</span>
+          <button data-view="eliks" class="nav-item">
+            <img src="assets/apps/eliks-studio.svg" class="nav-item-logo" alt="" />
+            <span>Eliks Studio</span>
           </button>
         </div>
+
+        <!-- ===== 6. SYSTÈME ===== -->
         <div>
           <div class="px-3 text-[10px] font-bold tracking-widest text-emerald-400 mb-2">SYSTÈME</div>
           <button data-view="health" class="nav-item">
@@ -422,6 +421,34 @@
           </button>
         </div>
       </nav>
+
+      <script>
+        // Groupe repliable « Outils de recherche » : état mémorisé, et
+        // ouverture automatique si l'écran actif est à l'intérieur.
+        (function () {
+          const head = document.getElementById('nav-group-recherche');
+          const items = document.getElementById('nav-group-recherche-items');
+          if (!head || !items) return;
+          const KEY = 'triskell.nav.recherche.open';
+          const setOpen = (open) => {
+            items.hidden = !open;
+            head.setAttribute('aria-expanded', open ? 'true' : 'false');
+            try { localStorage.setItem(KEY, open ? '1' : '0'); } catch (e) {}
+          };
+          let open = false;
+          try { open = localStorage.getItem(KEY) === '1'; } catch (e) {}
+          setOpen(open);
+          head.addEventListener('click', () => setOpen(items.hidden));
+          // Si un outil du groupe devient actif (navigation par le Guide,
+          // le lanceur, le Cockpit…), on déplie pour le montrer.
+          new MutationObserver(() => {
+            if (items.querySelector('.nav-item.active') && items.hidden) {
+              setOpen(true);
+            }
+          }).observe(items, { subtree: true, attributes: true,
+                              attributeFilter: ['class'] });
+        })();
+      </script>
 
       <!-- Footer SYSTÈME (compact) -->
       <div class="px-2 py-2 border-t border-border space-y-1">

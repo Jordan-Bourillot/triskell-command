@@ -591,8 +591,14 @@ def push_to_prospects(hunt_id: str) -> dict:
     metier = (h.filters or {}).get("metier") or ""
     zone = (h.filters or {}).get("zone") or ""
 
+    # Contrôle qualité AVANT versement (emails fabriqués, noms fantômes,
+    # doublons internes) — le rapport remonte jusqu'à la mission.
+    from .data_quality import filter_for_push
+    clean_prospects, quality = filter_for_push(
+        h.prospects, email_key="email", name_key="name")
+
     core_prospects: list[CoreProspect] = []
-    for p in h.prospects:
+    for p in clean_prospects:
         email = (p.get("email") or "").strip()
         if not email:
             continue
@@ -646,6 +652,7 @@ def push_to_prospects(hunt_id: str) -> dict:
             "merged":   int(result.get("merged") or 0),
             "total":    int(result.get("total") or 0),
             "pushed":   len(core_prospects),
+            "quality":  quality,
         }
     except Exception as exc:
         return {"ok": False, "error": f"upsert échoué : {exc}"}

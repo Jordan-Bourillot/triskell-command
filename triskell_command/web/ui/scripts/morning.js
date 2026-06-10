@@ -120,42 +120,28 @@ const Morning = {
           </button>
         </div>
 
-        <!-- Outils bêta — tirés d'outils open source, intégrés à Triskell.
-             Volontairement à part de la quickbar pour bien signaler leur
-             statut "à tester, peut évoluer". -->
-        <div class="cockpit-beta-tools mt-5">
-          <div class="text-[10px] font-bold tracking-widest text-orange-500 mb-2">
-            OUTILS BÊTA
+        <!-- Rampe de lancement prospection : UNE porte d'entrée claire.
+             Les outils de recherche individuels (dont les 3 bêta) vivent
+             dans le menu Prospection → Outils de recherche. -->
+        <div class="cockpit-launch mt-5">
+          <div class="text-[10px] font-bold tracking-widest text-text-muted mb-2">
+            PROSPECTION
           </div>
-          <div class="flex flex-wrap gap-2">
-            <button id="m-chasseur-createurs" class="btn-beta-orange"
-                    title="Aller chercher des créateurs YouTube, Instagram, Facebook">
+          <div class="flex flex-wrap items-center gap-2">
+            <button id="m-prospection" class="btn btn-primary"
+                    title="Une commande = toute la chaîne : recherche → base → rédaction → envoi">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="8" r="4"/>
-                <path d="M4 21v-1a8 8 0 0 1 16 0v1"/>
-                <circle cx="18" cy="6" r="2"/>
-                <circle cx="6" cy="6" r="2"/>
+                <path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>
               </svg>
-              Chasseur Créateur
-              <span class="btn-beta-orange-tag">(bêta · tiré d'open source)</span>
+              Lancer une prospection
             </button>
-            <button id="m-prospecteur-google" class="btn-beta-orange"
-                    title="Trouver des entreprises locales via Google Maps + leurs mails">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                <circle cx="12" cy="10" r="3"/>
-              </svg>
-              Prospecteur Google
-              <span class="btn-beta-orange-tag">(bêta · tiré d'open source)</span>
+            <button id="m-prospects" class="btn btn-secondary"
+                    title="La base centrale : tout ce que les outils trouvent atterrit ici">
+              Tous les prospects
             </button>
-            <button id="m-argus" class="btn-beta-orange"
-                    title="Récupérer des mails d'entreprises françaises par secteur et ville (Pages Jaunes, Europages, sites web)">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                <circle cx="12" cy="12" r="3"/>
-              </svg>
-              Argus
-              <span class="btn-beta-orange-tag">(bêta · tiré d'open source)</span>
+            <button id="m-drafts" class="btn btn-secondary"
+                    title="Les mails écrits par l'app qui attendent ton OK">
+              Brouillons à valider
             </button>
           </div>
         </div>
@@ -174,15 +160,13 @@ const Morning = {
 
     // Bindings boutons quickbar
     document.getElementById('m-refresh').onclick = () => this.render(container);
-    // Boutons "Outils bêta" (sous la quickbar) — outils tirés de programmes
-    // open source, intégrés à Triskell Command.
-    const chasseurCBtn = document.getElementById('m-chasseur-createurs');
-    if (chasseurCBtn) chasseurCBtn.onclick = () => App.show('chasseur_createurs');
-    const prospGoogleBtn = document.getElementById('m-prospecteur-google');
-    if (prospGoogleBtn) prospGoogleBtn.onclick = () => App.show('prospecteur_google');
-    // Argus : récupération de mails B2B intégrée au cockpit (vue dédiée).
-    const argusBtn = document.getElementById('m-argus');
-    if (argusBtn) argusBtn.onclick = () => App.show('argus');
+    // Rampe de lancement prospection
+    const prospectionBtn = document.getElementById('m-prospection');
+    if (prospectionBtn) prospectionBtn.onclick = () => App.show('prospection');
+    const prospectsBtn = document.getElementById('m-prospects');
+    if (prospectsBtn) prospectsBtn.onclick = () => App.show('prospects_crm');
+    const draftsBtn = document.getElementById('m-drafts');
+    if (draftsBtn) draftsBtn.onclick = () => App.show('drafts');
 
     // Ambiance poste de pilotage : grille HUD très fine en fond, halos
     // sobres aux couleurs des voyants d'un cockpit (ambre instrumentation,

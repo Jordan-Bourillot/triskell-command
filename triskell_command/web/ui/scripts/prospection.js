@@ -56,6 +56,11 @@ const Prospection = {
           <div class="text-[10px] font-bold tracking-widest text-text-muted mb-3">2 · PRÉCISE TA CIBLE</div>
           <form id="pr-form" class="space-y-3">
             <div id="pr-fields"></div>
+            <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer pt-1"
+                   title="La recherche tourne pour de vrai, mais RIEN n'est enregistré dans la base et rien n'est envoyé. Tu obtiens un rapport : combien seraient ajoutés, la qualité des données, un échantillon.">
+              <input type="checkbox" id="pr-f-dry" class="accent-current" />
+              🧪 Tester à blanc d'abord — rien ne sera enregistré, juste un rapport
+            </label>
             <div class="flex items-center gap-3 pt-1">
               <button type="submit" id="pr-launch" class="btn btn-primary">
                 🚀 Lancer la prospection
@@ -201,12 +206,13 @@ const Prospection = {
         return this._toast('Coche au moins une plateforme.', 'danger');
       }
     }
+    const dryRun = !!document.getElementById('pr-f-dry')?.checked;
     this.state.launching = true;
     const btn = document.getElementById('pr-launch');
     if (btn) { btn.disabled = true; btn.textContent = 'Lancement…'; }
     let r = null;
     try {
-      r = await App.api.prospection_start({ source: s, params });
+      r = await App.api.prospection_start({ source: s, params, dry_run: dryRun });
     } catch (e) { r = { ok: false, error: String(e) }; }
     this.state.launching = false;
     if (btn) { btn.disabled = false; btn.textContent = '🚀 Lancer la prospection'; }
@@ -270,6 +276,20 @@ const Prospection = {
   },
 
   async _toggleAutopilot(turnOn) {
+    // Garde-fou : rien d'irréversible sans feu vert explicite. Si l'envoi
+    // est réglé sur AUTOMATIQUE, allumer l'Auto-pilote = des mails partiront
+    // tout seuls → on le dit noir sur blanc avant.
+    if (turnOn && (this.state.autopilot || {}).send_mode === 'auto') {
+      const ok = confirm(
+        '⚠ ATTENTION : l’envoi est réglé sur AUTOMATIQUE.\n\n' +
+        'En allumant l’Auto-pilote, des mails partiront tout seuls vers ' +
+        'les prospects de ta base, sans validation manuelle.\n\n' +
+        'Pour garder la main, choisis le mode « brouillons à valider » ' +
+        'dans les réglages de l’Auto-pilote (maillon Envoie → Manuel).\n\n' +
+        'Allumer quand même en envoi automatique ?'
+      );
+      if (!ok) return;
+    }
     try {
       const r = await App.api.autopilot_get_config();
       if (!r || !r.ok) throw new Error((r && r.error) || 'config illisible');
@@ -306,16 +326,37 @@ const Prospection = {
         await this._refresh();
       };
     });
+    // « Relancer en réel » après un test à blanc concluant
+    wrap.querySelectorAll('[data-real-id]').forEach(b => {
+      b.onclick = async () => {
+        const m = (this.state.missions || []).find(x => x.id === b.dataset.realId);
+        if (!m) return;
+        if (!confirm('Relancer la même recherche EN RÉEL ?\n\n' +
+                     'Cette fois, les prospects valides seront enregistrés ' +
+                     'dans ta base et l’Auto-pilote sera prévenu.')) return;
+        b.disabled = true;
+        const r = await App.api.prospection_start({
+          source: m.source, params: m.params || {}, dry_run: false,
+        });
+        b.disabled = false;
+        if (!r || !r.ok) {
+          return this._toast((r && r.error) || 'Relance impossible', 'danger');
+        }
+        this._toast('C’est parti en réel — même recherche, base alimentée cette fois.', 'success');
+        await this._refresh();
+      };
+    });
   },
 
   _missionCard(m) {
     const counts = m.counts || {};
     const status = m.status || '';
+    const dry = !!m.dry_run;
     const active = status === 'hunting' || status === 'handing';
     const badge = {
       hunting: ['En chasse…', 'text-accent'],
-      handing: ['Versement…', 'text-accent'],
-      handed: ['Chaîne lancée ✓', 'text-success'],
+      handing: [dry ? 'Simulation…' : 'Versement…', 'text-accent'],
+      handed: [dry ? 'Test à blanc terminé 🧪' : 'Chaîne lancée ✓', 'text-success'],
       error: ['En erreur', 'text-danger'],
       cancelled: ['Abandonnée', 'text-text-muted'],
     }[status] || [status, 'text-text-muted'];
@@ -342,11 +383,12 @@ const Prospection = {
     const pushState = status === 'handed' ? 'done'
       : status === 'handing' ? 'active'
       : status === 'error' && counts.found ? 'error' : 'pending';
-    const pushDetail = status === 'handed'
-      ? (m.source === 'createurs'
+    const pushDetail = status !== 'handed' ? ''
+      : dry
+        ? `${counts.would_push || 0} SERAIENT versés (${counts.would_create || 0} nouveaux, ${counts.would_merge || 0} fusions) — rien d'enregistré`
+      : (m.source === 'createurs'
           ? 'directement dans la base'
-          : `${counts.pushed || 0} versés (${counts.created || 0} nouveaux, ${counts.merged || 0} fusionnés)`)
-      : '';
+          : `${counts.pushed || 0} versés (${counts.created || 0} nouveaux, ${counts.merged || 0} fusionnés)`);
 
     const ap = m.autopilot || {};
     const apState = status !== 'handed' ? 'pending' : (ap.kicked ? 'done' : 'pending');
@@ -367,13 +409,59 @@ const Prospection = {
         ${m.error ? `<div class="text-xs text-danger mb-2">⚠ ${this._esc(m.error)}</div>` : ''}
         <div class="pr-chain">
           ${step('1 · Cherche', huntState, huntDetail)}
-          ${step('2 · Verse dans la base', pushState, pushDetail)}
-          ${step('3 · Rédige & envoie', apState, apDetail)}
+          ${step(dry ? '2 · Versement (simulé)' : '2 · Verse dans la base', pushState, pushDetail)}
+          ${step(dry ? '3 · Envoi (désactivé)' : '3 · Rédige & envoie', apState, apDetail)}
           ${step('4 · Réponses',
-                 status === 'handed' ? 'done' : 'pending',
-                 status === 'handed' ? 'triées automatiquement (onglet Réponses)' : '')}
+                 status === 'handed' && !dry ? 'done' : 'pending',
+                 status === 'handed' && !dry ? 'triées automatiquement (onglet Réponses)' : '')}
         </div>
+        ${this._qualityLine(m)}
+        ${this._previewBlock(m)}
+        ${dry && status === 'handed' ? `
+          <div class="mt-3">
+            <button class="btn btn-primary text-xs" data-real-id="${this._esc(m.id)}"
+                    title="Relance exactement la même recherche, pour de vrai cette fois">
+              ✅ Les chiffres me vont — relancer en réel
+            </button>
+          </div>` : ''}
       </article>`;
+  },
+
+  // Rapport qualité (réel ET test à blanc) : ce qui a été écarté et pourquoi.
+  _qualityLine(m) {
+    const q = m.quality;
+    if (!q || !q.total) return '';
+    const d = q.dropped || {};
+    const labels = { no_email: 'sans email', bad_email: 'email invalide',
+                     placeholder_name: 'nom fantôme',
+                     duplicate_in_batch: 'doublon interne' };
+    const parts = Object.entries(d).filter(([, n]) => n > 0)
+      .map(([k, n]) => `${n} ${labels[k] || k}`);
+    return `
+      <div class="mt-2 text-[11px] text-text-muted">
+        🛡️ Contrôle qualité : <b class="text-text-secondary">${q.kept}/${q.total} fiches gardées</b>
+        ${parts.length ? ' — écartées : ' + this._esc(parts.join(', ')) : ' — rien à écarter'}
+      </div>`;
+  },
+
+  // Échantillon du test à blanc : on voit de VRAIES fiches avant de décider.
+  _previewBlock(m) {
+    const rows = m.preview || [];
+    if (!rows.length) return '';
+    return `
+      <details class="mt-2 text-xs">
+        <summary class="cursor-pointer text-text-muted hover:text-text-secondary">
+          Voir l'échantillon (${rows.length} fiche${rows.length > 1 ? 's' : ''})
+        </summary>
+        <div class="mt-1.5 space-y-1">
+          ${rows.map(r => `
+            <div class="flex items-center gap-2 text-text-secondary">
+              <span class="font-medium truncate max-w-[200px]">${this._esc(r.nom || '(sans nom)')}</span>
+              <span class="text-text-muted truncate">${this._esc(r.email)}</span>
+              <span class="ml-auto text-[10px] ${r.sort === 'nouvelle fiche' ? 'text-success' : 'text-text-muted'}">${this._esc(r.sort)}</span>
+            </div>`).join('')}
+        </div>
+      </details>`;
   },
 
   _startPolling() {

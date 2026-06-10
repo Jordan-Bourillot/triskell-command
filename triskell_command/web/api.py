@@ -8718,6 +8718,7 @@ class Api:
         p = payload or {}
         source = (p.get("source") or "").strip().lower()
         params = p.get("params") or {}
+        dry_run = bool(p.get("dry_run"))
         try:
             from .auth import get_current_local_user
             who = get_current_local_user() or ""
@@ -8726,6 +8727,7 @@ class Api:
         try:
             from ..integrations import missions
             return missions.create_mission(source, params, created_by=who,
+                                            dry_run=dry_run,
                                             client=self._supabase())
         except Exception as exc:
             logger.exception("prospection_start")

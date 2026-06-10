@@ -73,6 +73,21 @@ def create_app() -> FastAPI:
     # tant qu'aucun cookie de session valide n'est présent.
 
     @app.middleware("http")
+    async def cache_control_middleware(request: Request, call_next):
+        """Anti-interface-fantôme : les navigateurs gardaient les vieux
+        scripts en cache après un déploiement → « je ne vois aucun
+        changement ». On force la revalidation des fichiers de l'UI à
+        chaque chargement (réponse 304 ultra-légère si rien n'a bougé,
+        version fraîche sinon). Les assets lourds (images) restent cachés.
+        """
+        response = await call_next(request)
+        p = request.url.path
+        if (p.startswith("/scripts/") or p.startswith("/styles/")
+                or p in ("/", "/index.html", "/login.html")):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+    @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
         path = request.url.path
         if path.startswith("/api/") and path not in tcauth.PUBLIC_API_PATHS:

@@ -5015,3 +5015,35 @@ body[data-view-color="slate"]    { --page-glow: 148 163 184; }
   font-size: 14px;
 }
 
+
+/* === Groupe repliable de la sidebar (Outils de recherche) === */
+.nav-group-head {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 7px 12px; margin-top: 6px;
+  border: 0; background: transparent; cursor: pointer;
+  border-radius: 10px;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  color: hsl(var(--text-muted));
+  transition: background 140ms, color 140ms;
+}
+.nav-group-head:hover { background: hsl(var(--border) / .4); color: hsl(var(--text-secondary)); }
+.nav-group-chev { transition: transform 160ms ease; flex-shrink: 0; }
+.nav-group-head[aria-expanded="true"] .nav-group-chev { transform: rotate(90deg); }
+.nav-group-count {
+  margin-left: auto; font-size: 10px; font-weight: 700;
+  background: hsl(var(--border) / .6); color: hsl(var(--text-muted));
+  border-radius: 999px; padding: 1px 7px;
+}
+.nav-group-items { padding-left: 10px; }
+.nav-group-items .nav-item { font-size: 12.5px; }
+
+/* === Pastille "bêta" sur les outils en rodage === */
+.nav-beta {
+  margin-left: auto; flex-shrink: 0;
+  font-size: 9px; font-weight: 800; letter-spacing: .06em;
+  text-transform: uppercase;
+  color: hsl(35 92% 40%);
+  background: hsl(35 92% 50% / .14);
+  border: 1px solid hsl(35 92% 50% / .35);
+  border-radius: 999px; padding: 1px 6px;
+}
