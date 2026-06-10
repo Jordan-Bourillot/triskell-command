@@ -110,6 +110,14 @@ def start_hunt_for(source: str, params: dict) -> dict:
     try:
         if source == "pme":
             from . import chasseur
+            # Garde-fou : sans métier NI zone, la chasse ratisserait toute
+            # la France — refus clair plutôt qu'une mission monstre.
+            if not ((params.get("metier") or "").strip()
+                    or (params.get("departement") or "").strip()
+                    or (params.get("code_postal") or "").strip()):
+                return {"ok": False, "error":
+                        "Précise au moins un métier OU un département "
+                        "(sinon je chasserais toute la France)."}
             target = int(params.get("volume") or 100)
             hunt = chasseur.start_hunt(
                 sector=(params.get("metier") or "").strip(),

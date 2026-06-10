@@ -90,6 +90,12 @@ const ChasseurCreateurs = {
     this._root = container;
     container.innerHTML = `
       <section class="animate-slide-up">
+        <div class="card p-3.5 mb-5 border-l-4 border-l-warning text-sm text-text-secondary">
+          ℹ️ Cet outil a été remplacé par <b>Obélisk</b> pour l'usage courant
+          (mêmes créateurs, directement dans ta base, plus de plateformes).
+          Il reste fonctionnel ici pour les exports Excel ponctuels.
+          <button class="btn btn-secondary text-xs ml-2" onclick="App.show('obelisk')">Ouvrir Obélisk</button>
+        </div>
         <header class="mb-6 sm:mb-8">
           <div class="hero-kicker mb-2" style="color: hsl(var(--accent));">CHASSEUR CRÉATEUR</div>
           <h1 class="hero-title hero-title--md mb-2 sm:mb-3">

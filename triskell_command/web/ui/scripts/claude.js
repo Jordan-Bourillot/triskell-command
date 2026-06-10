@@ -471,6 +471,12 @@ const Claude = {
     let speakable = '';
     if (reply && reply.ok && reply.text) {
       speakable = reply.text;
+      // L'assistant a pu AGIR (lancer une prospection, ouvrir un écran…) :
+      // si le serveur renvoie une navigation, on l'exécute en arrière-plan
+      // pendant qu'il parle — effet « il l'a fait pour moi ».
+      if (reply.navigate && typeof App !== 'undefined' && App.show) {
+        try { App.show(reply.navigate); } catch (e) { /* jamais bloquant */ }
+      }
       // On nourrit l'historique pour les tours suivants
       this._convoHistory = this._convoHistory || [];
       this._convoHistory.push({ role: 'user',      content: question });

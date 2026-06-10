@@ -576,7 +576,23 @@ def chat_with_claude(app_state, *, question: str,
         logger.debug("convo gather_voice_context: %s", exc)
         context_block = "ÉTAT DE L'APP EN DIRECT : (indisponible)"
 
+    # Missions de prospection récentes : pour que l'assistant sache
+    # toujours où en est la chaîne (« où en est ma chasse ? »).
+    try:
+        from . import missions as _mi
+        _lst = sorted(_mi.load_missions(),
+                      key=lambda m: m.get("created_at") or "",
+                      reverse=True)[:6]
+        if _lst:
+            context_block += (
+                "\n\nMISSIONS DE PROSPECTION (récentes → anciennes) :\n"
+                + json.dumps(_lst, ensure_ascii=False, default=str)
+            )
+    except Exception as exc:
+        logger.debug("convo missions context: %s", exc)
+
     full_prompt = (CONVO_SYSTEM_PROMPT + "\n\n---\n\n"
+                   + ASSISTANT_ACTIONS_PROMPT + "\n\n---\n\n"
                    + context_block + "\n\n---\n\n"
                    + "\n\n".join(convo_parts))
 
@@ -596,6 +612,17 @@ def chat_with_claude(app_state, *, question: str,
         )
         raw = (text or "").strip()
         spoken, sent_to_thomas = _extract_chat_to_thomas(raw)
+        # L'assistant peut AGIR : il termine sa réponse par un tag
+        # [ACTION:{...}] → on l'exécute ici, et on colle le résultat
+        # (en français) à la fin du texte parlé.
+        spoken, action = _extract_action(spoken)
+        if action is not None:
+            result = execute_assistant_action(action)
+            if result.get("summary"):
+                spoken = (spoken + " " + result["summary"]).strip()
+            if result.get("navigate"):
+                out["navigate"] = result["navigate"]
+            out["action_done"] = bool(result.get("ok"))
         out["text"] = spoken
         if sent_to_thomas:
             out["sent_to_thomas"] = True
@@ -606,6 +633,145 @@ def chat_with_claude(app_state, *, question: str,
         out["error"] = f"ai_exception: {exc}"
 
     return out
+
+
+# ═══════════════════════════════════════════════════════════════
+# L'assistant AGIT — protocole d'action du mode conversation
+# ═══════════════════════════════════════════════════════════════
+ASSISTANT_ACTIONS_PROMPT = """TU PEUX AGIR SUR L'APP (pas seulement répondre).
+
+Quand Jordan te demande de FAIRE quelque chose, tu termines ta réponse par
+UNE seule ligne de commande, invisible pour lui :
+[ACTION:{"do":"...", ...}]
+
+Actions disponibles :
+1. Lancer une prospection complète (recherche → base → Auto-pilote) :
+   [ACTION:{"do":"start_prospection","source":"pme","params":{"metier":"plombier","departement":"71","volume":30},"dry_run":false}]
+   - source "pme" (PME françaises) → params {metier, departement?, code_postal?, volume}
+   - source "local" (commerces Google Maps) → params {metier, zone, volume}
+   - source "createurs" (YouTube/Twitch) → params {niche, plateformes:["youtube"], volume}
+   - "dry_run":true = TEST À BLANC (rien n'est enregistré, juste un rapport).
+2. Allumer / éteindre l'Auto-pilote :
+   [ACTION:{"do":"toggle_autopilot","enabled":true}]
+3. Abandonner une mission : [ACTION:{"do":"cancel_mission","id":"abc123"}]
+4. Ouvrir un écran pour Jordan :
+   [ACTION:{"do":"navigate","view":"prospection"}]
+   (vues : prospection, prospects_crm, drafts, replies, autopilot, convoy,
+    health, funnel, revenue, mails, catalogue, obelisk)
+
+RÈGLES DE PRUDENCE (non négociables) :
+- Une action RÉELLE qui écrit ou lance des machines (start_prospection sans
+  dry_run, toggle_autopilot) : tu l'exécutes UNIQUEMENT si Jordan l'a
+  demandée clairement. S'il est vague (« on devrait prospecter »), tu
+  proposes d'abord — et tu peux suggérer le test à blanc.
+- En cas de doute sur les paramètres (quel métier ? quelle zone ?), tu
+  POSES LA QUESTION au lieu d'inventer.
+- JAMAIS plus d'une action par tour. Le tag en DERNIÈRE ligne, JSON valide.
+- Après le tag, rien. Le système exécute et colle la confirmation à ta voix.
+- Tu n'annonces jamais le tag ni son contenu technique : tu parles
+  naturellement (« C'est parti, je lance ça » + le tag)."""
+
+
+def _extract_action(raw: str):
+    """Détache le tag [ACTION:{...}] (dernier de la réponse) du texte parlé.
+
+    Renvoie (texte_sans_tag, action_dict | None). JSON cassé → ignoré
+    proprement (le texte reste intact, sans le tag).
+    """
+    matches = list(_ACTION_RE.finditer(raw or ""))
+    if not matches:
+        return raw, None
+    m = matches[-1]
+    cleaned = (raw[:m.start()] + raw[m.end():]).strip()
+    try:
+        action = json.loads(m.group(1))
+        if not isinstance(action, dict):
+            return cleaned, None
+        return cleaned, action
+    except Exception:
+        return cleaned, None
+
+
+_ALLOWED_NAV_VIEWS = {
+    "prospection", "prospects_crm", "drafts", "replies", "autopilot",
+    "convoy", "health", "funnel", "revenue", "mails", "catalogue",
+    "obelisk", "morning",
+}
+
+
+def execute_assistant_action(action: dict) -> dict:
+    """Exécute une action de l'assistant — liste blanche stricte.
+
+    Renvoie {ok, summary (français, parlé), navigate?}. Ne lève jamais.
+    """
+    do = (action or {}).get("do") or ""
+    try:
+        from ..web.api import get_api_instance
+        api = get_api_instance()
+
+        if do == "navigate":
+            view = (action.get("view") or "").strip()
+            if view in _ALLOWED_NAV_VIEWS:
+                return {"ok": True, "summary": "", "navigate": view}
+            return {"ok": False, "summary": "(écran inconnu)"}
+
+        if api is None:
+            return {"ok": False,
+                    "summary": "Le serveur démarre encore — redemande dans "
+                               "une minute."}
+
+        if do == "start_prospection":
+            r = api.prospection_start({
+                "source": action.get("source") or "",
+                "params": action.get("params") or {},
+                "dry_run": bool(action.get("dry_run")),
+            })
+            if r.get("ok"):
+                label = ((r.get("mission") or {}).get("label") or "")
+                mode = ("Test à blanc lancé" if action.get("dry_run")
+                        else "Mission lancée")
+                return {"ok": True,
+                        "summary": f"{mode} : {label}. Je suivrai "
+                                   f"l'avancée — tu verras tout sur l'écran "
+                                   f"Prospection.",
+                        "navigate": "prospection"}
+            return {"ok": False,
+                    "summary": f"Impossible de lancer : {r.get('error')}"}
+
+        if do == "toggle_autopilot":
+            enabled = bool(action.get("enabled"))
+            from triskell_core.prospect.pipeline import PipelineConfig
+            cfg = PipelineConfig.load()
+            if enabled:
+                modes = (api.autopilot_get_stage_modes() or {}).get("modes") or {}
+                if modes.get("send") == "auto":
+                    # Garde-fou : l'envoi AUTO ne s'allume pas à la voix.
+                    return {"ok": False,
+                            "summary": "L'envoi est réglé sur AUTOMATIQUE — "
+                                       "par sécurité je ne l'allume pas d'ici. "
+                                       "Va sur l'écran Prospection, le bouton "
+                                       "te demandera confirmation.",
+                            "navigate": "prospection"}
+            cfg.enabled = enabled
+            cfg.save()
+            return {"ok": True,
+                    "summary": ("Auto-pilote allumé — il préparera des "
+                                "brouillons à valider." if enabled
+                                else "Auto-pilote éteint.")}
+
+        if do == "cancel_mission":
+            r = api.prospection_mission_cancel({"id": action.get("id") or ""})
+            return {"ok": bool(r.get("ok")),
+                    "summary": ("Mission abandonnée." if r.get("ok")
+                                else f"Échec : {r.get('error')}")}
+
+        return {"ok": False, "summary": "(action inconnue, rien fait)"}
+    except Exception as exc:
+        logger.warning("assistant action %s: %s", do, exc)
+        return {"ok": False, "summary": f"L'action a échoué : {exc}"}
+
+
+_ACTION_RE = re.compile(r"\[ACTION:\s*(\{.*?\})\s*\]", re.DOTALL)
 
 
 # Marqueur que Claude insère dans sa réponse vocale quand Jordan lui

@@ -278,12 +278,13 @@ const Drafts = {
       list.innerHTML = `
         <div class="card p-6 sm:p-12 text-center">
           <div class="text-3xl sm:text-4xl mb-3">✓</div>
-          <h2 class="text-xl font-semibold mb-2">Tu es à jour.</h2>
+          <h2 class="text-xl font-semibold mb-2">Tu es à jour — rien à valider.</h2>
           <p class="text-text-secondary max-w-lg mx-auto">
-            Aucun brouillon en attente. Quand l'auto-pilote ou les relances en
-            prépareront en mode validation, ils atterriront ici.
+            Quand l'Auto-pilote ou les relances prépareront des mails,
+            ils attendront ton OK ici. Pour en avoir : lance une prospection,
+            les mails arrivent tout seuls derrière.
           </p>
-          <button class="btn btn-primary mt-6" onclick="App.show('autopilot')">Lancer une recherche</button>
+          <button class="btn btn-primary mt-6" onclick="App.show('prospection')">🚀 Lancer une prospection</button>
         </div>
       `;
       return;

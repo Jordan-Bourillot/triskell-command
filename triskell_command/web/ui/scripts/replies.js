@@ -110,9 +110,11 @@ const Replies = {
           <div class="text-3xl sm:text-4xl mb-3">✓</div>
           <h2 class="text-xl font-semibold mb-2">Aucune réponse en attente</h2>
           <p class="text-text-secondary max-w-md mx-auto">
-            L'app vérifie ta boîte mail toutes les 5 minutes.
-            Tu peux forcer une vérification immédiate avec le bouton plus haut.
+            L'app surveille ta boîte mail toutes les 5 minutes et déposera
+            ici chaque réponse de prospect, déjà triée. Plus tu envoies,
+            plus il y en aura.
           </p>
+          <button class="btn btn-secondary mt-6" onclick="App.show('prospection')">Lancer une prospection</button>
         </div>
       `;
       return;
