@@ -292,6 +292,8 @@ const Guide = {
         <span class="guide-where" title="Tu es ici">🧭</span>
         ${mid}
         ${chip}
+        <button class="guide-talk" title="Parler à Claude, ton copilote"
+                aria-label="Parler au copilote">💬<span class="copilot-badge-dot hidden"></span></button>
         <button class="guide-min" title="Réduire le guide (il reste en pastille)"
                 aria-label="Réduire le guide">▾</button>
       </div>
@@ -302,6 +304,19 @@ const Guide = {
       const v = go.dataset.go;
       if (typeof App !== 'undefined' && App.show) App.show(v);
     };
+    // Le copilote : un clic, depuis n'importe quel écran
+    const talk = el.querySelector('.guide-talk');
+    if (talk) {
+      if (typeof Copilot !== 'undefined' && Copilot.toggle) {
+        talk.onclick = () => Copilot.toggle();
+        if (typeof Claude !== 'undefined' && Claude.isAttention) {
+          const d = talk.querySelector('.copilot-badge-dot');
+          if (d) d.classList.remove('hidden');
+        }
+      } else {
+        talk.style.display = 'none';
+      }
+    }
     el.querySelector('.guide-min').onclick = () => this._setCollapsed(true);
   },
 
@@ -409,6 +424,18 @@ const Guide = {
         border-radius: 6px;
       }
       .guide-min:hover { background: hsl(var(--border) / .5); }
+      .guide-talk {
+        position: relative; flex-shrink: 0; border: 0; cursor: pointer;
+        background: hsl(var(--accent) / .12); color: hsl(var(--accent));
+        font-size: 13px; line-height: 1; padding: 5px 9px;
+        border-radius: 999px; transition: background .12s, transform .12s;
+      }
+      .guide-talk:hover { background: hsl(var(--accent) / .22); transform: translateY(-1px); }
+      .guide-talk .copilot-badge-dot {
+        position: absolute; top: -2px; right: -2px;
+        width: 9px; height: 9px; border-radius: 50%;
+        background: #ef4444; border: 2px solid hsl(var(--surface));
+      }
       .guide-tipline {
         margin-top: 6px; text-align: center;
         font-size: 11.5px; color: hsl(var(--text-muted));

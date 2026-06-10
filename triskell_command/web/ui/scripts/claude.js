@@ -189,20 +189,37 @@ const Claude = {
       if (dot) dot.classList.add('hidden');
       if (menuDot) menuDot.classList.add('hidden');
     }
+    // Répercute sur la pastille du copilote (bouton 💬 de la barre-guide)
+    if (typeof Copilot !== 'undefined' && Copilot.setBadge) {
+      try { Copilot.setBadge(this.isAttention && !Copilot.isOpen()); } catch (e) {}
+    }
   },
 
   async checkPending() {
     if (!App.api) return;
     try {
       const advice = await App.api.claude_consume_pending();
-      if (advice && advice.ok) {
+      // Un vrai conseil a du CONTENU. (Les vieux serveurs renvoyaient
+      // {ok:true} vide quand il n’y avait rien → pastille fantôme.)
+      if (advice && advice.ok && (advice.headline || advice.advice)) {
         this.pendingAdvice = advice;
         this.setAttention(true);
+        // Volet copilote déjà ouvert → le conseil s’affiche tout de suite
+        if (typeof Copilot !== 'undefined' && Copilot.isOpen && Copilot.isOpen()) {
+          try { Copilot._consumePendingAdvice(); } catch (e) {}
+        }
       }
     } catch (e) { /* silent */ }
   },
 
   async open() {
+    // Depuis le 10/06/2026, la porte d’entrée de l’assistant est le volet
+    // copilote (conversation écrite, persistante, avec les mêmes pouvoirs).
+    // L’ancien dialog ne sert plus que de secours si copilot.js manque.
+    if (typeof Copilot !== 'undefined' && Copilot.open) {
+      Copilot.open();
+      return;
+    }
     this.setAttention(false);
     const overlay = this._buildOverlay();
     document.body.appendChild(overlay);
@@ -350,6 +367,29 @@ const Claude = {
 
   // ---- Mode Conversation : boucle écoute → réponse vocale → écoute ----
 
+  /** Ouvre DIRECTEMENT le mode appel (sans passer par la fiche-conseil).
+   *  Appelé par le volet copilote ; seedHistory = derniers tours écrits,
+   *  pour que la voix reprenne la même conversation. */
+  openCall(seedHistory) {
+    this.setAttention(false);
+    const overlay = this._buildOverlay();
+    document.body.appendChild(overlay);
+    overlay.querySelector('.modal-card').classList.add('animate-slide-up');
+    const body = overlay.querySelector('#claude-body');
+    if (body) {
+      body.innerHTML = '<div class="text-center py-12 text-text-muted text-sm">' +
+        'Mode vocal — raccroche pour revenir à l’écrit.</div>';
+    }
+    this._fromCopilot = true;
+    this._startConversation(overlay);
+    // _startConversation vient de réinitialiser l’historique : on greffe
+    // le fil écrit APRÈS, pour que Claude suive la même discussion.
+    if (Array.isArray(seedHistory) && seedHistory.length) {
+      this._convoHistory = seedHistory.slice(-10);
+    }
+    this._convoSeedLen = (this._convoHistory || []).length;
+  },
+
   _startConversation(overlay) {
     if (this._convoMode) return;
     this._convoMode = true;
@@ -390,6 +430,18 @@ const Claude = {
     if (window.speechSynthesis) { try { window.speechSynthesis.cancel(); } catch (e) {} }
     const screen = overlay.querySelector('#claude-convo-screen');
     if (screen) screen.remove();
+    // Appel lancé depuis le volet copilote : on reverse les tours vocaux
+    // dans le fil écrit (une seule conversation) et on rouvre le volet.
+    if (this._fromCopilot) {
+      this._fromCopilot = false;
+      const seed = this._convoSeedLen || 0;
+      const turns = (this._convoHistory || []).slice(seed);
+      this._convoSeedLen = 0;
+      this.close(overlay);
+      if (typeof Copilot !== 'undefined' && Copilot.afterCall) {
+        try { Copilot.afterCall(turns); } catch (e) {}
+      }
+    }
   },
 
   _setConvoState(overlay, state, label) {

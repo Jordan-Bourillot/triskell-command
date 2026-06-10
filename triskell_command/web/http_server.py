@@ -19,6 +19,7 @@ Architecture :
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import os
 import threading
@@ -28,7 +29,13 @@ from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 
 from . import auth as tcauth
@@ -366,6 +373,48 @@ def create_app() -> FastAPI:
         names = [n for n, m in inspect.getmembers(api_instance, inspect.ismethod)
                  if not n.startswith("_")]
         return {"ok": True, "methods": sorted(names)}
+
+    # ---------------- Le Copilote : réponse au fil de l'eau (SSE) ----------------
+    # Le volet de discussion affiche la réponse mot à mot. Route protégée
+    # par le middleware d'auth (pas dans PUBLIC_API_PATHS). Le générateur
+    # est synchrone : Starlette l'itère dans un threadpool, l'event loop
+    # n'est pas bloqué pendant l'appel IA.
+
+    @app.post("/api/copilot_stream")
+    async def copilot_stream(request: Request) -> StreamingResponse:
+        user_id = getattr(request.state, "user_id", None) or "jordan"
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        question = str((payload or {}).get("question") or "")
+        view = str((payload or {}).get("view") or "")
+
+        from ..integrations import copilot as _copilot
+
+        def event_source():
+            try:
+                for evt in _copilot.stream_reply(
+                        api_instance._app_state, user_id, question, view=view):
+                    yield ("data: "
+                           + json.dumps(evt, ensure_ascii=False)
+                           + "\n\n")
+            except Exception as exc:  # ceinture : ne jamais couper sans mot
+                logger.warning("copilot_stream: %s", exc)
+                yield ("data: "
+                       + json.dumps({"type": "error",
+                                     "error": "Le serveur a perdu le fil — réessaie."},
+                                    ensure_ascii=False)
+                       + "\n\n")
+
+        return StreamingResponse(
+            event_source(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     # ---------------- Avatars (photo de profil par utilisateur) ----------------
     # Stockés dans ~/.triskell-command/avatars/{user_id}.{ext}. Chaque user du

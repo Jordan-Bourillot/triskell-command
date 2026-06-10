@@ -448,6 +448,16 @@ const App = {
     }
     this.currentView = viewId;
     this.currentParams = params || null;
+    // Prévient le serveur de l'écran ouvert (sans attendre la réponse) :
+    // l'assistant s'en sert pour situer ses réponses. Avant le 10/06/2026
+    // la version web ne l'envoyait jamais — il croyait Jordan toujours
+    // sur le Cockpit.
+    if (this.api && typeof this.api.set_active_view === 'function') {
+      try {
+        const p = this.api.set_active_view({ view: viewId });
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch (e) { /* jamais bloquant */ }
+    }
     // Pose la couleur d'ambiance sur <body> — consommée par le CSS pour
     // colorer le halo de fond de la zone main. Fallback "slate" pour les
     // vues utilitaires qui n'ont pas de section dans la sidebar.

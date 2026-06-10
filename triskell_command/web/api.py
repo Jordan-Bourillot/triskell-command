@@ -280,12 +280,90 @@ class Api:
             return {"ok": False, "text": "", "error": str(exc)}
 
     def claude_consume_pending(self) -> dict | None:
-        """Renvoie le conseil proactif en attente (ou None)."""
+        """Renvoie le conseil proactif en attente ({ok: False} si rien).
+
+        Ne JAMAIS renvoyer None ici : la route HTTP auto-générée transforme
+        None en {"ok": True}, et le front prenait ça pour un vrai conseil
+        (pastille allumée pour rien toutes les 60 s, carte vide dans le
+        volet copilote)."""
         try:
             from ..integrations import claude_proactive
-            return claude_proactive.consume_pending_advice()
+            return claude_proactive.consume_pending_advice() or {"ok": False}
         except Exception:
-            return None
+            return {"ok": False}
+
+    # ------------------------------------------------------------------
+    # Le Copilote — conversation écrite permanente (volet sur tous les
+    # écrans). Le streaming passe par la route dédiée /api/copilot_stream
+    # (http_server.py) ; ici : le fil persisté + un envoi « bloc » de
+    # secours + les utilitaires.
+    # ------------------------------------------------------------------
+    def copilot_thread(self, payload: dict | None = None) -> dict:
+        """Le fil de discussion persisté de l'utilisateur connecté."""
+        try:
+            from ..integrations import copilot
+            return copilot.thread_for_ui(copilot.current_user_id())
+        except Exception as exc:
+            logger.warning("copilot_thread: %s", exc)
+            return {"ok": False, "error": str(exc), "messages": []}
+
+    def copilot_send(self, payload: dict) -> dict:
+        """Un tour de copilote SANS streaming (secours navigateur / desktop).
+
+        payload = {question: str, view?: str}
+        Renvoie {ok, text, navigate?, action_done?, sent_to_thomas?, error?}.
+        """
+        p = payload or {}
+        question = str(p.get("question") or "")
+        view = str(p.get("view") or "")
+        try:
+            from ..integrations import copilot
+            return copilot.send_blocking(
+                self._app_state, copilot.current_user_id(), question,
+                view=view,
+            )
+        except Exception as exc:
+            logger.warning("copilot_send: %s", exc)
+            return {"ok": False, "text": "", "error": str(exc)}
+
+    def copilot_clear(self, payload: dict | None = None) -> dict:
+        """Efface le fil de discussion (« nouvelle discussion »)."""
+        try:
+            from ..integrations import copilot
+            copilot.clear_thread(copilot.current_user_id())
+            return {"ok": True}
+        except Exception as exc:
+            logger.warning("copilot_clear: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def copilot_append(self, payload: dict) -> dict:
+        """Reverse des tours de conversation au fil persisté — utilisé à la
+        fin d'un appel vocal pour que l'écrit et la voix ne fassent qu'UNE
+        conversation. payload = {messages: [{role, content}, ...]}."""
+        p = payload or {}
+        msgs = p.get("messages")
+        if not isinstance(msgs, list) or not msgs:
+            return {"ok": False, "error": "Aucun message à ajouter."}
+        try:
+            from ..integrations import copilot
+            added = copilot.append_messages(copilot.current_user_id(), msgs)
+            return {"ok": True, "added": added}
+        except Exception as exc:
+            logger.warning("copilot_append: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def set_active_view(self, payload: dict) -> dict:
+        """Mémorise l'écran que l'utilisateur regarde (le front l'envoie à
+        chaque navigation). Avant le 10/06/2026, la version web ne le
+        transmettait JAMAIS : l'assistant croyait Jordan en permanence sur
+        le Cockpit."""
+        view = str((payload or {}).get("view") or "").strip()[:60]
+        if view:
+            try:
+                self._app_state.set("active_view", value=view)
+            except Exception as exc:
+                logger.debug("set_active_view: %s", exc)
+        return {"ok": True}
 
     # ------------------------------------------------------------------
     # Réponses entrantes
