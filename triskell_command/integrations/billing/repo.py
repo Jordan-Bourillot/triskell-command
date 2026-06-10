@@ -111,7 +111,12 @@ def _sb():
     c = _client()
     if c is None:
         return None
-    return getattr(c, "client", None) or getattr(c, "_client", None)
+    # c.raw force l'init du SDK ; le getattr "_client" restait None en
+    # mode service_role tant que rien d'autre n'avait touché le client.
+    try:
+        return c.raw
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
