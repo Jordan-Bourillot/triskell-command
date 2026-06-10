@@ -374,6 +374,10 @@ _GENERIC_TRADE_WORDS = {
     "atelier", "maison", "service", "services", "studio", "fleuriste",
     "menuiserie", "plomberie", "electricite", "elec", "transport",
     "taxi", "bar", "cafe", "brasserie",
+    # Mots trop fréquents pour distinguer une boîte (forme juridique,
+    # géographie large) : "france" matchait n'importe quel site média.
+    "france", "sarl", "eurl", "sas", "sasu", "snc", "scop", "scic",
+    "groupe", "compagnie", "company", "and", "des", "les", "the",
 }
 
 
@@ -463,7 +467,10 @@ def _score_site_relevance(html: str, nom: str, ville: str) -> tuple[int, list[st
         score += 40
         reasons.append(f"ville '{ville_l}'")
 
+    # Tokens DISTINCTIFS du nom présents sur la page (hors mots génériques,
+    # déjà filtrés dans `tokens`).
     found_tokens = [t for t in tokens if t in text]
+    distinctive = [t for t in found_tokens if t not in _GENERIC_TRADE_WORDS]
     if found_tokens:
         per = 40 // max(1, len(tokens))
         score += per * len(found_tokens)
@@ -475,12 +482,16 @@ def _score_site_relevance(html: str, nom: str, ville: str) -> tuple[int, list[st
         score -= 30
         reasons.append(f"chaîne ? ({len(cps)} CP)")
 
-    # Garde-fou contre les homonymes : si la ville n'apparaît pas, on
-    # ne peut être confiant que si on a AU MOINS 2 tokens distinctifs du
-    # nom matchés. Sinon on plafonne le score sous le seuil de validation.
-    # Exemple : "SNC MICHEL" trouvant `michel.com` (un nom random) — le
-    # nom n'a qu'un seul token, sans ville on ne valide pas.
-    if not has_city and len(found_tokens) < 2:
+    # GARDE-FOU PRINCIPAL (corrige le bug réel du 2026-06-10 : "20minutes.fr"
+    # et "actu.fr" attribués à des fleuristes de Rennes). Un site n'est
+    # FIABLE que si au moins UN bout distinctif du nom du commerçant y
+    # apparaît. La ville seule ne suffit JAMAIS : un journal local mentionne
+    # « Rennes » à toutes les pages sans être le site du commerçant.
+    if not distinctive:
+        score = min(score, 30)
+        reasons.append("aucun mot distinctif du nom → non fiable (ville seule)")
+    elif not has_city and len(distinctive) < 2:
+        # Sans ville, un seul token distinctif peut être un homonyme.
         score = min(score, 30)
         reasons.append("ville absente + nom peu distinctif → non fiable")
 
@@ -497,6 +508,20 @@ _MOJEEK_BLACKLIST_EXTRA = {
     "chambresdhotes.org", "winamax.fr", "marchesonline.com",
     "lannion-emplois.com", "uacb.athle.fr", "dinard.com",
     "importation-auto.fr", "mojeek.com",
+    # Presse / médias nationaux et régionaux (observés attribués à tort à
+    # des fleuristes le 2026-06-10 : actu.fr, 20minutes.fr).
+    "actu.fr", "20minutes.fr", "lemonde.fr", "lefigaro.fr",
+    "liberation.fr", "letelegramme.fr", "francebleu.fr", "francetvinfo.fr",
+    "bfmtv.com", "lexpress.fr", "lepoint.fr", "nouvelobs.com",
+    "midilibre.fr", "ladepeche.fr", "sudouest.fr", "lavoixdunord.fr",
+    "estrepublicain.fr", "leprogres.fr", "nicematin.com", "lindependant.fr",
+    "lest-eclair.fr", "courrierdelouest.fr", "lyonmag.com", "rue89.com",
+    # Annuaires / avis / marketplaces qui ne sont jamais le site propre
+    "societe.com", "infogreffe.fr", "verif.com", "manageo.fr",
+    "kompass.com", "europages.fr", "yelp.fr", "yelp.com",
+    "tripadvisor.fr", "tripadvisor.com", "justacote.com", "petitfute.com",
+    "leboncoin.fr", "trustpilot.com", "wikipedia.org", "starofservice.com",
+    "fr.trustpilot.com", "lesfurets.com", "hoodspot.fr", "kelest.fr",
 }
 
 
