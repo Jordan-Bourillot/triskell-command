@@ -57,6 +57,12 @@ BRIEFING_GAP_HOURS = 8        # pas de nouveau briefing avant ce délai
 _LOCAL_FALLBACK_FILE = Path.home() / ".triskell-command" / "copilot_threads.json"
 _LOCAL_MEMORY_FILE = Path.home() / ".triskell-command" / "copilot_memory.json"
 _LOCAL_STATE_FILE = Path.home() / ".triskell-command" / "copilot_state.json"
+_LOCAL_PREFS_FILE = Path.home() / ".triskell-command" / "copilot_prefs.json"
+
+PREFS_SETTING_PREFIX = "copilot_prefs_"
+INITIATIVE_LEVELS = ("off", "discret", "normal", "bavard")
+DEFAULT_INITIATIVE = "normal"
+MESSAGE_KINDS = ("event", "briefing")  # kinds connus (sinon: message normal)
 
 _CTX_CACHE: dict[str, Any] = {"at": 0.0, "text": ""}
 _CTX_LOCK = threading.Lock()
@@ -96,7 +102,9 @@ def _setting_key(user_id: str) -> str:
 
 
 def _clean_message(msg: Any) -> Optional[dict]:
-    """Valide/normalise un message {role, content[, at]}. None si invalide."""
+    """Valide/normalise un message {role, content[, at, kind, nav]}.
+    None si invalide. kind/nav (messages d'évènement, briefing) ne sont
+    gardés que s'ils sont sains."""
     if not isinstance(msg, dict):
         return None
     role = str(msg.get("role") or "").strip().lower()
@@ -105,11 +113,18 @@ def _clean_message(msg: Any) -> Optional[dict]:
     content = str(msg.get("content") or "").strip()
     if not content:
         return None
-    return {
+    out = {
         "role": role,
         "content": content[:MAX_MESSAGE_CHARS],
         "at": str(msg.get("at") or datetime.now().isoformat(timespec="seconds")),
     }
+    kind = str(msg.get("kind") or "").strip().lower()
+    if kind in MESSAGE_KINDS:
+        out["kind"] = kind
+    nav = str(msg.get("nav") or "").strip()
+    if nav and nav.isidentifier() and len(nav) <= 40:
+        out["nav"] = nav
+    return out
 
 
 # Un seul écrivain à la fois sur les documents persistés (le résumé en
@@ -392,17 +407,77 @@ def _state_key(user_id: str) -> str:
 def load_state(user_id: str) -> dict:
     raw = _doc_read(_state_key(user_id), _LOCAL_STATE_FILE,
                     user_id or "jordan") or {}
+    try:
+        unseen = max(0, int(raw.get("unseen") or 0))
+    except Exception:
+        unseen = 0
     return {
         "last_seen_at": str(raw.get("last_seen_at") or ""),
         "last_briefing_at": str(raw.get("last_briefing_at") or ""),
+        "unseen": unseen,
     }
 
 
-def save_state(user_id: str, **fields: str) -> None:
+def save_state(user_id: str, **fields: Any) -> None:
     st = load_state(user_id)
     st.update({k: v for k, v in fields.items() if k in st})
     _doc_write(_state_key(user_id), _LOCAL_STATE_FILE,
                user_id or "jordan", st)
+
+
+def get_unseen(user_id: str) -> int:
+    """Messages du copilote déposés depuis la dernière ouverture du volet
+    (pour la pastille 💬 de la barre-guide)."""
+    return load_state(user_id)["unseen"]
+
+
+# ---------------------------------------------------------------------------
+# Préférences : le niveau d'initiative (off / discret / normal / bavard)
+# ---------------------------------------------------------------------------
+def _prefs_key(user_id: str) -> str:
+    safe = "".join(c for c in (user_id or "jordan") if c.isalnum() or c in "-_")
+    return PREFS_SETTING_PREFIX + (safe or "jordan")
+
+
+def get_prefs(user_id: str) -> dict:
+    raw = _doc_read(_prefs_key(user_id), _LOCAL_PREFS_FILE,
+                    user_id or "jordan") or {}
+    lvl = str(raw.get("initiative") or "").strip().lower()
+    if lvl not in INITIATIVE_LEVELS:
+        lvl = DEFAULT_INITIATIVE
+    return {"initiative": lvl}
+
+
+def set_prefs(user_id: str, initiative: str) -> dict:
+    lvl = str(initiative or "").strip().lower()
+    if lvl not in INITIATIVE_LEVELS:
+        return {"ok": False,
+                "error": "Niveau inconnu (off, discret, normal ou bavard)."}
+    _doc_write(_prefs_key(user_id), _LOCAL_PREFS_FILE, user_id or "jordan",
+               {"initiative": lvl})
+    return {"ok": True, "initiative": lvl}
+
+
+# ---------------------------------------------------------------------------
+# Dépôt d'évènements : le copilote vient vers l'utilisateur
+# ---------------------------------------------------------------------------
+def deposit_event_message(user_id: str, text: str, nav: str = "") -> bool:
+    """Dépose un message d'évènement dans le fil (rédigé par des règles,
+    pas par l'IA) et allume la pastille. Jamais d'exception."""
+    try:
+        text = str(text or "").strip()
+        if not text:
+            return False
+        added = append_messages(user_id, [{
+            "role": "assistant", "content": text[:600],
+            "kind": "event", "nav": nav,
+        }])
+        if added:
+            save_state(user_id, unseen=get_unseen(user_id) + 1)
+        return bool(added)
+    except Exception as exc:
+        logger.debug("copilot deposit: %s", exc)
+        return False
 
 
 def _hours_since(iso: str) -> float:
@@ -432,9 +507,11 @@ def thread_for_ui(user_id: str) -> dict:
         "display_name": _display_name(user_id),
         "messages": load_thread(user_id)[-60:],
         "briefing_due": briefing_due(user_id),
+        "initiative": get_prefs(user_id)["initiative"],
     }
+    # Volet ouvert : tout est vu → la pastille s'éteint.
     save_state(user_id, last_seen_at=datetime.now().isoformat(
-        timespec="seconds"))
+        timespec="seconds"), unseen=0)
     return out
 
 
@@ -943,7 +1020,8 @@ def stream_briefing(app_state, user_id: str, view: str = "") -> Iterator[dict]:
     text, _ = _extract_json_tag(text, _MEMOIRE_RE)
     text, _ = _extract_json_tag(text, _OUBLIE_RE)
     text = (header + text).strip()
-    append_messages(user_id, [{"role": "assistant", "content": text}])
+    append_messages(user_id, [{"role": "assistant", "content": text,
+                               "kind": "briefing"}])
     yield {"type": "done", "text": text}
 
 

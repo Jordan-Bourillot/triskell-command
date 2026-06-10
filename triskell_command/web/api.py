@@ -393,6 +393,27 @@ class Api:
             logger.warning("copilot_memory_delete: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def copilot_prefs(self, payload: dict | None = None) -> dict:
+        """Le niveau d'initiative du copilote (off/discret/normal/bavard)."""
+        try:
+            from ..integrations import copilot
+            return {"ok": True,
+                    **copilot.get_prefs(copilot.current_user_id())}
+        except Exception as exc:
+            logger.warning("copilot_prefs: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def copilot_prefs_set(self, payload: dict) -> dict:
+        """Règle le niveau d'initiative. payload = {initiative: str}."""
+        try:
+            from ..integrations import copilot
+            return copilot.set_prefs(
+                copilot.current_user_id(),
+                str((payload or {}).get("initiative") or ""))
+        except Exception as exc:
+            logger.warning("copilot_prefs_set: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def set_active_view(self, payload: dict) -> dict:
         """Mémorise l'écran que l'utilisateur regarde (le front l'envoie à
         chaque navigation). Avant le 10/06/2026, la version web ne le
@@ -5955,6 +5976,7 @@ class Api:
             ("dormant_recycler",      "Recyclage dormants"),
             ("stripe_poller",         "Polling paiements Stripe"),
             ("claude_proactive",      "Veille proactive Claude"),
+            ("copilot_watch",         "Guetteur du copilote"),
             ("mission_runner",        "Chef de gare des prospections"),
             ("autopilot_runner",      "Prospection nocturne (3h Paris)"),
             ("pixelpros.auto_builder", "Construction auto des sites payés"),
@@ -8770,7 +8792,7 @@ class Api:
         import time as _time
         cache = Api._GUIDE_CACHE
         if cache["data"] is not None and (_time.time() - cache["at"]) < Api._GUIDE_CACHE_TTL:
-            return cache["data"]
+            return self._with_copilot_unseen(cache["data"])
 
         out: dict = {
             "ok": True,
@@ -8875,6 +8897,18 @@ class Api:
 
         cache["data"] = out
         cache["at"] = _time.time()
+        return self._with_copilot_unseen(out)
+
+    def _with_copilot_unseen(self, snap: dict) -> dict:
+        """Ajoute le compteur de messages copilote non lus — PAR utilisateur,
+        donc calculé HORS du cache (le cache est partagé Jordan/Thomas)."""
+        out = dict(snap)
+        try:
+            from ..integrations import copilot
+            out["copilot_unseen"] = copilot.get_unseen(
+                copilot.current_user_id())
+        except Exception:
+            out["copilot_unseen"] = 0
         return out
 
     # ------------------------------------------------------------------

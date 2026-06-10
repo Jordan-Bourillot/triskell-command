@@ -82,8 +82,10 @@ const Copilot = {
     if (!msgs.length) {
       this._renderWelcome(box);
     } else {
-      msgs.forEach((m) => this._appendBubble(m.role, m.content, { md: true }));
+      msgs.forEach((m) => this._appendBubble(m.role, m.content,
+        { md: true, kind: m.kind, nav: m.nav }));
     }
+    this._initiative = (data && data.initiative) || 'normal';
     this._loaded = true;
     this._scrollDown(true);
     this._consumePendingAdvice();
@@ -321,6 +323,7 @@ const Copilot = {
     if (!box) return document.createElement('div');
     const el = document.createElement('div');
     el.className = 'cop-msg ' + (role === 'user' ? 'cop-user' : 'cop-assistant');
+    if (opts.kind === 'event') el.classList.add('cop-event');
     const inner = document.createElement('div');
     inner.className = 'cop-text';
     if (opts.streaming) {
@@ -332,6 +335,14 @@ const Copilot = {
       inner.textContent = content;
     }
     el.appendChild(inner);
+    // Message d'évènement avec destination → bouton « Y aller »
+    if (opts.kind === 'event' && opts.nav) {
+      const go = document.createElement('button');
+      go.className = 'cop-event-go';
+      go.textContent = 'Y aller →';
+      go.onclick = () => this._navigate(opts.nav);
+      el.appendChild(go);
+    }
     box.appendChild(el);
     return el;
   },
@@ -456,6 +467,16 @@ const Copilot = {
         <input id="copilot-mem-input" type="text" maxlength="300"
                placeholder="Ajouter une note à retenir…">
         <button id="copilot-mem-add-btn" title="Ajouter">＋</button>
+      </div>
+      <div class="cop-init">
+        <b>🔔 Mon niveau d’initiative</b>
+        <span>Quand je viens vers toi tout seul (réponse de prospect, chasse finie, rappels…)</span>
+        <div class="cop-init-row" id="copilot-init-row">
+          <button data-lvl="off" title="Je ne te signale plus rien">🔕 Coupé</button>
+          <button data-lvl="discret" title="Messages dans le fil + pastille, jamais de notification téléphone">🤫 Discret</button>
+          <button data-lvl="normal" title="Fil + pastille, et téléphone quand c’est chaud">🙂 Normal</button>
+          <button data-lvl="bavard" title="Tout, même les petites nouvelles">📣 Bavard</button>
+        </div>
       </div>`;
     const list = mem.querySelector('.cop-mem-list');
     if (!notes.length) {
@@ -489,6 +510,39 @@ const Copilot = {
     addBtn.onclick = doAdd;
     addInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
+    });
+
+    // Niveau d'initiative : charge l'état réel puis branche les boutons
+    const row = mem.querySelector('#copilot-init-row');
+    const paint = (lvl) => {
+      row.querySelectorAll('button').forEach((b) => {
+        b.classList.toggle('cop-init-on', b.dataset.lvl === lvl);
+      });
+    };
+    paint(this._initiative || 'normal');
+    try {
+      const p = await App.api.copilot_prefs({});
+      if (p && p.ok && p.initiative) {
+        this._initiative = p.initiative;
+        paint(p.initiative);
+      }
+    } catch (e) { /* on garde la valeur connue */ }
+    row.querySelectorAll('button').forEach((b) => {
+      b.onclick = async () => {
+        const lvl = b.dataset.lvl;
+        try {
+          const r = await App.api.copilot_prefs_set({ initiative: lvl });
+          if (r && r.ok) {
+            this._initiative = lvl;
+            paint(lvl);
+            if (typeof Guide !== 'undefined' && Guide.say) {
+              const labels = { off: 'Initiative coupée', discret: 'Mode discret',
+                               normal: 'Mode normal', bavard: 'Mode bavard' };
+              Guide.say('✓ ' + (labels[lvl] || lvl) + '.');
+            }
+          }
+        } catch (e) { /* réglage inchangé */ }
+      };
     });
   },
 
@@ -725,6 +779,35 @@ const Copilot = {
         margin-top: 7px; padding-top: 7px;
         border-top: 1px dashed hsl(var(--border));
         font-size: 11px; font-weight: 700; color: hsl(var(--success, 150 60% 40%));
+      }
+      .cop-event {
+        border-left: 3px solid hsl(var(--accent));
+        background: hsl(var(--accent) / .06);
+      }
+      .cop-event-go {
+        margin-top: 8px; border: 0; cursor: pointer; display: block;
+        background: hsl(var(--accent)); color: #fff;
+        font-size: 11.5px; font-weight: 700; padding: 5px 11px;
+        border-radius: 999px;
+      }
+      .cop-init {
+        margin-top: 14px; padding-top: 12px;
+        border-top: 1px solid hsl(var(--border));
+      }
+      .cop-init b { display: block; font-size: 13px; color: hsl(var(--text)); }
+      .cop-init > span { display: block; font-size: 11px;
+                         color: hsl(var(--text-muted)); margin: 2px 0 8px; }
+      .cop-init-row { display: flex; gap: 6px; flex-wrap: wrap; }
+      .cop-init-row button {
+        border: 1px solid hsl(var(--border)); cursor: pointer;
+        background: hsl(var(--surface)); color: hsl(var(--text-secondary));
+        font-size: 11.5px; font-weight: 600; padding: 6px 10px;
+        border-radius: 999px;
+      }
+      .cop-init-row button:hover { border-color: hsl(var(--accent) / .5); }
+      .cop-init-row button.cop-init-on {
+        background: hsl(var(--accent)); border-color: hsl(var(--accent));
+        color: #fff;
       }
       .cop-advice { border-left: 3px solid hsl(var(--accent)); }
       .cop-advice-kicker {

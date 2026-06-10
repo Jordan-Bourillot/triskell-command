@@ -304,12 +304,16 @@ const Guide = {
       const v = go.dataset.go;
       if (typeof App !== 'undefined' && App.show) App.show(v);
     };
-    // Le copilote : un clic, depuis n'importe quel écran
+    // Le copilote : un clic, depuis n'importe quel écran. La pastille
+    // s'allume si la veille a un conseil OU si le guetteur a déposé des
+    // messages depuis la dernière ouverture du volet (copilot_unseen).
     const talk = el.querySelector('.guide-talk');
     if (talk) {
       if (typeof Copilot !== 'undefined' && Copilot.toggle) {
         talk.onclick = () => Copilot.toggle();
-        if (typeof Claude !== 'undefined' && Claude.isAttention) {
+        const unseen = (this.snap && this.snap.copilot_unseen) || 0;
+        if (unseen > 0 ||
+            (typeof Claude !== 'undefined' && Claude.isAttention)) {
           const d = talk.querySelector('.copilot-badge-dot');
           if (d) d.classList.remove('hidden');
         }

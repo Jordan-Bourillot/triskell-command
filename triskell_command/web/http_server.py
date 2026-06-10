@@ -174,6 +174,16 @@ def create_app() -> FastAPI:
         # semaines — ne doit JAMAIS se reproduire.)
         _start_watchdog_thread(api_instance)
 
+        # Le guetteur du copilote : dépose les évènements (réponse de
+        # prospect, chasse finie, rappels) dans le fil + push si chaud.
+        try:
+            from ..integrations import copilot_watch
+            copilot_watch.start_worker()
+            logger.info("Guetteur du copilote démarré (cycle %d s).",
+                        copilot_watch.CYCLE_SECONDS)
+        except Exception as exc:
+            logger.warning("copilot_watch indisponible : %s", exc)
+
         # Démarre les workers backend (pollers IMAP, autopilot, drip, etc.)
         # SANS attendre que le front se connecte. Comme ça, le serveur fait
         # son boulot même si personne n'a la page ouverte.

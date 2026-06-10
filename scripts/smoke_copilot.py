@@ -22,7 +22,7 @@ try:
 except Exception:
     pass
 
-from triskell_command.integrations import claude_advisor, copilot
+from triskell_command.integrations import claude_advisor, copilot, copilot_watch
 
 PASS = 0
 FAIL = 0
@@ -107,11 +107,13 @@ def main() -> int:
     orig_file = copilot._LOCAL_FALLBACK_FILE
     orig_mem_file = copilot._LOCAL_MEMORY_FILE
     orig_state_file = copilot._LOCAL_STATE_FILE
+    orig_prefs_file = copilot._LOCAL_PREFS_FILE
     claude_advisor._client = lambda: None
     tmpdir = tempfile.mkdtemp(prefix="copilot_smoke_")
     copilot._LOCAL_FALLBACK_FILE = Path(tmpdir) / "threads.json"
     copilot._LOCAL_MEMORY_FILE = Path(tmpdir) / "memory.json"
     copilot._LOCAL_STATE_FILE = Path(tmpdir) / "state.json"
+    copilot._LOCAL_PREFS_FILE = Path(tmpdir) / "prefs.json"
     try:
         # 6. append + load
         copilot.clear_thread("jordan")
@@ -437,14 +439,173 @@ def main() -> int:
             copilot._context_block = orig_ctx
             claude_advisor._resolve_ai = orig_resolve
 
+        print("— Initiative : préférences, pastille, évènements —")
+
+        # 30. niveau d'initiative : défaut, réglage, refus
+        check("initiative par défaut : normal",
+              copilot.get_prefs("jordan")["initiative"] == "normal")
+        r = copilot.set_prefs("jordan", "bavard")
+        check("réglage bavard accepté et relu",
+              r.get("ok") and copilot.get_prefs("jordan")["initiative"] == "bavard")
+        r = copilot.set_prefs("jordan", "hurleur")
+        check("niveau inconnu refusé en français",
+              r.get("ok") is False and "off" in (r.get("error") or ""))
+        copilot.set_prefs("jordan", "normal")
+
+        # 31. dépôt d'évènement : fil + kind/nav + pastille
+        copilot.clear_thread("jordan")
+        copilot.save_state("jordan", unseen=0)
+        ok1 = copilot.deposit_event_message("jordan", "🔔 Test évènement",
+                                            nav="replies")
+        thread = copilot.load_thread("jordan")
+        check("évènement déposé avec kind et destination",
+              ok1 and len(thread) == 1 and thread[0].get("kind") == "event"
+              and thread[0].get("nav") == "replies")
+        check("pastille : compteur non-lu à 1",
+              copilot.get_unseen("jordan") == 1)
+        copilot.thread_for_ui("jordan")
+        check("volet ouvert → pastille éteinte",
+              copilot.get_unseen("jordan") == 0)
+
+        # 32. nav vicieuse rejetée par l'hygiène des messages
+        m = copilot._clean_message({"role": "assistant", "content": "x",
+                                    "kind": "event",
+                                    "nav": "../etc; rm -rf"})
+        check("destination malpropre écartée",
+              m is not None and "nav" not in m)
+
+        print("— Le guetteur (détection d'évènements) —")
+
+        BASE = {"replies_unhandled": 2, "drafts_pending": 1,
+                "prospects_total": 100, "prospects_new": 10,
+                "autopilot_enabled": True, "workers_error": 0,
+                "missions": {"m1": {"status": "hunting", "label": "PME 56",
+                                    "counts": {}}}}
+
+        # 33. premier passage : silence (on pose la base)
+        check("premier passage : aucun évènement",
+              copilot_watch.detect_events(None, BASE) == [])
+
+        # 34. rien ne bouge : silence
+        check("rien ne bouge : aucun évènement",
+              copilot_watch.detect_events(BASE, dict(BASE)) == [])
+
+        # 35. une réponse arrive → évènement chaud vers Réponses
+        cur = dict(BASE, replies_unhandled=3)
+        evts = copilot_watch.detect_events(BASE, cur)
+        check("réponse de prospect → évènement chaud",
+              len(evts) == 1 and evts[0]["hot"] is True
+              and evts[0]["nav"] == "replies")
+
+        # 36. chasse terminée → évènement doux avec le compte versé
+        cur = dict(BASE, missions={"m1": {"status": "handed", "label": "PME 56",
+                                          "counts": {"pushed": 7}}})
+        evts = copilot_watch.detect_events(BASE, cur)
+        check("chasse finie → « 7 prospect(s) versés », sans push",
+              len(evts) == 1 and evts[0]["hot"] is False
+              and "7" in evts[0]["text"])
+
+        # 37. mission en erreur → chaud
+        cur = dict(BASE, missions={"m1": {"status": "error", "label": "PME 56",
+                                          "counts": {}}})
+        evts = copilot_watch.detect_events(BASE, cur)
+        check("mission en erreur → évènement chaud",
+              len(evts) == 1 and evts[0]["hot"] is True)
+
+        # 38. robots en panne → déposé mais PAS chaud (le watchdog pushe déjà)
+        cur = dict(BASE, workers_error=2)
+        evts = copilot_watch.detect_events(BASE, cur)
+        check("robots en panne → fil oui, push non",
+              len(evts) == 1 and evts[0]["hot"] is False
+              and evts[0]["nav"] == "health")
+
+        # 39. brouillons/prospects → mineurs (mode bavard uniquement)
+        cur = dict(BASE, drafts_pending=3, prospects_total=104)
+        evts = copilot_watch.detect_events(BASE, cur)
+        check("brouillons et prospects → évènements mineurs",
+              len(evts) == 2 and all(e["minor"] for e in evts))
+
+        print("— Le guetteur (rappels quotidiens) —")
+
+        from datetime import datetime as _dt2
+        daily = {}
+        # 40. avant l'heure : rien
+        evts = copilot_watch.daily_checks(BASE, daily,
+                                          now=_dt2(2026, 6, 11, 7, 0))
+        check("pas de rappel avant l'heure", evts == [])
+        # 41. après l'heure : rappel réponses en attente, une fois par jour
+        evts = copilot_watch.daily_checks(BASE, daily,
+                                          now=_dt2(2026, 6, 11, 10, 0))
+        check("rappel du matin : réponses en attente",
+              any(e["key"] == "daily_replies" for e in evts))
+        evts2 = copilot_watch.daily_checks(BASE, daily,
+                                           now=_dt2(2026, 6, 11, 15, 0))
+        check("pas de second rappel le même jour", evts2 == [])
+        evts3 = copilot_watch.daily_checks(BASE, daily,
+                                           now=_dt2(2026, 6, 12, 10, 0))
+        check("le rappel revient le lendemain",
+              any(e["key"] == "daily_replies" for e in evts3))
+        # 42. Auto-pilote éteint + prospects qui attendent
+        cur = dict(BASE, autopilot_enabled=False, prospects_new=9)
+        evts = copilot_watch.daily_checks(cur, {},
+                                          now=_dt2(2026, 6, 11, 10, 0))
+        check("rappel Auto-pilote éteint + prospects en attente",
+              any(e["key"] == "daily_autopilot" for e in evts))
+
+        print("— Le guetteur (dépôt selon le niveau) —")
+
+        HOT = {"key": "k1", "text": "chaud", "nav": "replies",
+               "hot": True, "minor": False}
+        MINOR = {"key": "k2", "text": "mineur", "nav": "",
+                 "hot": False, "minor": True}
+
+        def run_deposit(level):
+            copilot.set_prefs("jordan", level)
+            copilot.set_prefs("thomas", "off")  # isole jordan
+            dropped, pushed = [], []
+            st = {"pushes": []}
+            copilot_watch.deposit(
+                [HOT, MINOR], st, users=("jordan", "thomas"),
+                deposit_fn=lambda u, t, n: dropped.append((u, t)) or True,
+                push_fn=lambda u, t, n: pushed.append((u, t)) or True,
+                now_ts=1000.0)
+            return dropped, pushed
+
+        d, p = run_deposit("off")
+        check("niveau coupé : rien du tout", d == [] and p == [])
+        d, p = run_deposit("discret")
+        check("discret : fil oui (sans le mineur), téléphone non",
+              len(d) == 1 and d[0][1] == "chaud" and p == [])
+        d, p = run_deposit("normal")
+        check("normal : fil + téléphone pour le chaud",
+              len(d) == 1 and len(p) == 1)
+        d, p = run_deposit("bavard")
+        check("bavard : tout dans le fil, téléphone pour le chaud",
+              len(d) == 2 and len(p) == 1)
+        copilot.set_prefs("jordan", "normal")
+        copilot.set_prefs("thomas", "normal")
+
+        # 43. ceinture anti-rafale de notifications
+        st = {"pushes": []}
+        sent = []
+        copilot_watch.deposit(
+            [dict(HOT, key=f"k{i}") for i in range(10)], st,
+            users=("jordan",),
+            deposit_fn=lambda u, t, n: True,
+            push_fn=lambda u, t, n: sent.append(t) or True,
+            now_ts=2000.0)
+        check(f"jamais plus de {copilot_watch.PUSH_CAP_PER_HOUR} notifs/heure",
+              len(sent) == copilot_watch.PUSH_CAP_PER_HOUR, str(len(sent)))
+
         print("— Surface API web —")
 
-        # 30. les méthodes existent sur la classe Api (sans l'instancier)
+        # 44. les méthodes existent sur la classe Api (sans l'instancier)
         from triskell_command.web.api import Api
         missing = [m for m in ("copilot_thread", "copilot_send",
                                "copilot_clear", "copilot_append",
                                "copilot_memory", "copilot_memory_add",
-                               "copilot_memory_delete",
+                               "copilot_memory_delete", "copilot_prefs",
+                               "copilot_prefs_set", "_with_copilot_unseen",
                                "set_active_view") if not hasattr(Api, m)]
         check("méthodes copilote exposées", not missing, str(missing))
 
@@ -453,6 +614,7 @@ def main() -> int:
         copilot._LOCAL_FALLBACK_FILE = orig_file
         copilot._LOCAL_MEMORY_FILE = orig_mem_file
         copilot._LOCAL_STATE_FILE = orig_state_file
+        copilot._LOCAL_PREFS_FILE = orig_prefs_file
 
     print()
     total = PASS + FAIL
