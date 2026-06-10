@@ -23,6 +23,7 @@ const VIEW_COLOR_MAP = {
   replies: 'purple',
   prospects_crm: 'fuchsia',
   obelisk: 'fuchsia',
+  prospection: 'fuchsia',
   chasseur: 'fuchsia',
   chasseur_createurs: 'fuchsia',
   prospecteur_google: 'fuchsia',
@@ -493,6 +494,7 @@ const App = {
       case 'tutorial':  return Tutorial.render(target);
       case 'autopilot': return Autopilot.render(target);
       case 'convoy':    return Convoy.render(target);
+      case 'prospection': return Prospection.render(target);
       case 'chasseur':  return Chasseur.render(target);
       case 'chasseur_createurs': return ChasseurCreateurs.render(target);
       case 'prospecteur_google': return ProspecteurGoogle.render(target);

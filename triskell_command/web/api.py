@@ -37,10 +37,23 @@ class _AutopilotStopped(Exception):
     """Levée dans _push_log quand le bouton Stop a été cliqué."""
 
 
+# Registre du singleton Api : permet aux robots de fond (ex : le chef de
+# gare des missions) de réutiliser EXACTEMENT les mêmes chemins que les
+# boutons de l'interface (mêmes verrous, mêmes interrupteurs).
+_API_SINGLETON = None
+
+
+def get_api_instance():
+    """Renvoie l'instance Api du process (None si pas encore créée)."""
+    return _API_SINGLETON
+
+
 class Api:
     """Toutes les méthodes appelables depuis le front (pywebview)."""
 
     def __init__(self):
+        global _API_SINGLETON
+        _API_SINGLETON = self
         self._app_state = AppState()
         self._workers_started = False
         # État du run auto-pilote en cours (un seul à la fois)
@@ -5775,6 +5788,7 @@ class Api:
             ("dormant_recycler",      "Recyclage dormants"),
             ("stripe_poller",         "Polling paiements Stripe"),
             ("claude_proactive",      "Veille proactive Claude"),
+            ("mission_runner",        "Chef de gare des prospections"),
             ("autopilot_runner",      "Prospection nocturne (3h Paris)"),
         ]
         for mod_name, label in worker_modules:
@@ -7161,6 +7175,7 @@ class Api:
             ("claude_proactive",       "start_worker", "claude_proactive"),
             ("scheduled_mail_runner",  "start_worker", "scheduled_mails"),
             ("backup_runner",          "start_worker", "backup_runner"),
+            ("mission_runner",         "start_worker", "mission_runner"),
             ("autopilot_runner",       "start_worker", "autopilot_nightly"),
         ]:
             try:
@@ -8555,6 +8570,79 @@ class Api:
     # ------------------------------------------------------------------
     # Le Chasseur — découverte de PME et extraction de mails publics
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Missions de prospection — UNE commande pour TOUTE la chaîne
+    # (cherche → verse dans la base → transmet à l'Auto-pilote)
+    # ------------------------------------------------------------------
+    def prospection_start(self, payload: dict) -> dict:
+        """Lance une mission complète.
+
+        payload = {
+          source: "pme" | "local" | "createurs",
+          params: {
+            pme        → {metier, departement?, code_postal?, volume?,
+                          sites_pourris?}
+            local      → {metier, zone, volume?, sans_site?, pays?}
+            createurs  → {niche, plateformes?: [..], volume?}
+          }
+        }
+        Renvoie {ok, mission}. Le chef de gare (mission_runner) fait
+        avancer la chaîne ensuite, sans intervention.
+        """
+        p = payload or {}
+        source = (p.get("source") or "").strip().lower()
+        params = p.get("params") or {}
+        try:
+            from .auth import get_current_local_user
+            who = get_current_local_user() or ""
+        except Exception:
+            who = ""
+        try:
+            from ..integrations import missions
+            return missions.create_mission(source, params, created_by=who,
+                                            client=self._supabase())
+        except Exception as exc:
+            logger.exception("prospection_start")
+            return {"ok": False, "error": str(exc)}
+
+    def prospection_missions(self, payload: dict | None = None) -> dict:
+        """Liste des missions (récentes d'abord) + état de l'Auto-pilote
+        (pour que l'écran montre toute la chaîne d'un coup d'œil)."""
+        limit = int((payload or {}).get("limit") or 12)
+        out = {"ok": True, "missions": [], "autopilot": {}}
+        try:
+            from ..integrations import missions
+            lst = missions.load_missions(self._supabase())
+            lst = sorted(lst, key=lambda m: m.get("created_at") or "",
+                         reverse=True)
+            out["missions"] = lst[:limit]
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        try:
+            from triskell_core.prospect.pipeline import PipelineConfig
+            cfg = PipelineConfig.load()
+            modes = (self.autopilot_get_stage_modes() or {}).get("modes") or {}
+            out["autopilot"] = {
+                "enabled": bool(cfg.enabled),
+                "daily_cap": int(cfg.daily_cap or 0),
+                "send_mode": modes.get("send", "manual"),
+            }
+        except Exception as exc:
+            logger.debug("prospection_missions autopilot: %s", exc)
+        return out
+
+    def prospection_mission_cancel(self, payload: dict) -> dict:
+        """Abandonne le suivi d'une mission (la chasse déjà lancée n'est
+        pas tuée, ses résultats restent consultables dans son outil)."""
+        mid = ((payload or {}).get("id") or "").strip()
+        if not mid:
+            return {"ok": False, "error": "id requis"}
+        try:
+            from ..integrations import missions
+            return missions.cancel_mission(mid, client=self._supabase())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def chasseur_presets(self, payload: dict | None = None) -> dict:
         """Renvoie la liste des secteurs préconfigurés (clé → libellé NAF)."""
         try:
