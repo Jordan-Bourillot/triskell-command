@@ -335,12 +335,21 @@ def _scrap_youtube(hunt: CreatorHunt, niche: str, min_subs: int, max_subs: int,
                     # ou de lib absente, on garde).
                     if not _is_french_text(f"{title} {desc}"):
                         continue
+                    ch_country = (info["snippet"].get("country", "") or "").upper()
+                    # Pays demandé précis (pas « ALL ») : on écarte les chaînes
+                    # qui déclarent un AUTRE pays. Avant, une chasse « France »
+                    # ramenait des chaînes du Canada / Suisse / Maurice (toutes
+                    # francophones → le filtre langue les laissait passer).
+                    # Pays non déclaré (vide) = gardé, le filtre langue tranche.
+                    if pays != "ALL" and ch_country and ch_country != pays:
+                        log(f"  ⏭️ {title} écarté (pays {ch_country} ≠ {pays})")
+                        continue
                     channels.append({
                         "id": channel_id,
                         "title": title,
                         "subs": sub_count,
                         "description": desc,
-                        "country": info["snippet"].get("country", ""),
+                        "country": ch_country,
                         "created": info["snippet"].get("publishedAt", ""),
                         "video_count": int(info["statistics"].get("videoCount", 0)),
                     })
