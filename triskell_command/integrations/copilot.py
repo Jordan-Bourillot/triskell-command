@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from datetime import datetime
@@ -37,13 +38,25 @@ from . import claude_advisor
 # Réglages
 # ---------------------------------------------------------------------------
 THREAD_SETTING_PREFIX = "copilot_thread_"   # + user_id (jordan / thomas)
+MEMORY_SETTING_PREFIX = "copilot_memory_"   # le carnet (mémoire longue durée)
+STATE_SETTING_PREFIX = "copilot_state_"     # last_seen / last_briefing
 MAX_STORED_MESSAGES = 80      # messages conservés dans le fil persistant
 MAX_PROMPT_TURNS = 16         # messages (user+assistant) injectés dans le prompt
 MAX_MESSAGE_CHARS = 4000      # tronque les messages monstres
 MAX_TOKENS = 2048             # réponses écrites courtes par design
 CONTEXT_CACHE_SECONDS = 45    # le snapshot d'app coûte cher → petit cache
 
+MAX_NOTES = 60                # notes du carnet
+MAX_NOTE_CHARS = 300
+SUMMARY_TRIGGER = MAX_STORED_MESSAGES        # on résume quand le fil déborde
+SUMMARY_KEEP_RECENT = 50      # messages gardés tels quels après résumé
+MAX_SUMMARY_CHARS = 2200
+SUMMARY_MODEL = "claude-haiku-4-5"           # petit cerveau pour condenser
+BRIEFING_GAP_HOURS = 8        # pas de nouveau briefing avant ce délai
+
 _LOCAL_FALLBACK_FILE = Path.home() / ".triskell-command" / "copilot_threads.json"
+_LOCAL_MEMORY_FILE = Path.home() / ".triskell-command" / "copilot_memory.json"
+_LOCAL_STATE_FILE = Path.home() / ".triskell-command" / "copilot_state.json"
 
 _CTX_CACHE: dict[str, Any] = {"at": 0.0, "text": ""}
 _CTX_LOCK = threading.Lock()
@@ -99,75 +112,113 @@ def _clean_message(msg: Any) -> Optional[dict]:
     }
 
 
-def _read_local_threads() -> dict:
+# Un seul écrivain à la fois sur les documents persistés (le résumé en
+# arrière-plan et le tour suivant peuvent se chevaucher).
+_PERSIST_LOCK = threading.Lock()
+
+
+def _local_read_doc(path: Path, user_id: str) -> Optional[dict]:
     try:
-        if _LOCAL_FALLBACK_FILE.is_file():
-            data = json.loads(_LOCAL_FALLBACK_FILE.read_text(encoding="utf-8"))
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                return data
+                doc = data.get(user_id)
+                return doc if isinstance(doc, dict) else None
     except Exception as exc:
-        logger.debug("copilot fallback read: %s", exc)
-    return {}
+        logger.debug("copilot local read %s: %s", path.name, exc)
+    return None
 
 
-def _write_local_thread(user_id: str, messages: list[dict]) -> None:
+def _local_write_doc(path: Path, user_id: str, payload: dict) -> None:
     try:
-        data = _read_local_threads()
-        data[user_id] = {
-            "messages": messages,
-            "updated_at": datetime.now().isoformat(timespec="seconds"),
-        }
-        _LOCAL_FALLBACK_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _LOCAL_FALLBACK_FILE.write_text(
-            json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        data = {}
+        if path.is_file():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    data = raw
+            except Exception:
+                data = {}
+        data[user_id] = payload
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False),
+                        encoding="utf-8")
     except Exception as exc:
-        logger.debug("copilot fallback write: %s", exc)
+        logger.debug("copilot local write %s: %s", path.name, exc)
 
 
-def load_thread(user_id: str) -> list[dict]:
-    """Le fil de discussion persisté (liste de messages, du plus ancien au
-    plus récent). Jamais d'exception : au pire, liste vide."""
-    user_id = user_id or "jordan"
-    raw = None
+def _doc_read(setting_key: str, local_file: Path, user_id: str) -> Optional[dict]:
+    """Lit un document {clé: dict} : Supabase d'abord, fichier local sinon."""
     client = claude_advisor._client()
     if client is not None:
         try:
-            raw = client.get_shared_setting(_setting_key(user_id), None)
+            raw = client.get_shared_setting(setting_key, None)
+            if isinstance(raw, dict):
+                return raw
         except Exception as exc:
-            logger.debug("copilot load supabase: %s", exc)
-            raw = None
-    if raw is None:
-        raw = _read_local_threads().get(user_id)
-    msgs = (raw or {}).get("messages") if isinstance(raw, dict) else None
+            logger.debug("copilot read %s: %s", setting_key, exc)
+    return _local_read_doc(local_file, user_id)
+
+
+def _doc_write(setting_key: str, local_file: Path, user_id: str,
+               payload: dict) -> None:
+    payload = dict(payload)
+    payload["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    client = claude_advisor._client()
+    if client is not None:
+        try:
+            client.set_shared_setting(setting_key, payload)
+            return
+        except Exception as exc:
+            logger.debug("copilot write %s: %s", setting_key, exc)
+    _local_write_doc(local_file, user_id, payload)
+
+
+def _load_thread_doc(user_id: str) -> dict:
+    """Le document complet du fil : {messages: [...], summary: str}."""
+    user_id = user_id or "jordan"
+    raw = _doc_read(_setting_key(user_id), _LOCAL_FALLBACK_FILE, user_id) or {}
+    msgs = raw.get("messages") if isinstance(raw, dict) else None
     out: list[dict] = []
     for m in (msgs or []):
         cm = _clean_message(m)
         if cm:
             out.append(cm)
-    return out[-MAX_STORED_MESSAGES:]
-
-
-def save_thread(user_id: str, messages: list[dict]) -> None:
-    """Écrit le fil (tronqué). Supabase d'abord, fichier local en secours."""
-    user_id = user_id or "jordan"
-    messages = messages[-MAX_STORED_MESSAGES:]
-    payload = {
-        "messages": messages,
-        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    summary = raw.get("summary") if isinstance(raw, dict) else ""
+    return {
+        "messages": out[-MAX_STORED_MESSAGES:],
+        "summary": str(summary or "")[:MAX_SUMMARY_CHARS],
     }
-    client = claude_advisor._client()
-    if client is not None:
-        try:
-            client.set_shared_setting(_setting_key(user_id), payload)
-            return
-        except Exception as exc:
-            logger.debug("copilot save supabase: %s", exc)
-    _write_local_thread(user_id, messages)
+
+
+def load_thread(user_id: str) -> list[dict]:
+    """Le fil de discussion persisté (du plus ancien au plus récent).
+    Jamais d'exception : au pire, liste vide."""
+    return _load_thread_doc(user_id)["messages"]
+
+
+def load_summary(user_id: str) -> str:
+    """Le résumé des échanges plus anciens (peut être vide)."""
+    return _load_thread_doc(user_id)["summary"]
+
+
+def save_thread(user_id: str, messages: list[dict],
+                summary: Optional[str] = None) -> None:
+    """Écrit le fil (tronqué). summary=None → conserve le résumé existant."""
+    user_id = user_id or "jordan"
+    if summary is None:
+        summary = load_summary(user_id)
+    _doc_write(_setting_key(user_id), _LOCAL_FALLBACK_FILE, user_id, {
+        "messages": messages[-MAX_STORED_MESSAGES:],
+        "summary": str(summary or "")[:MAX_SUMMARY_CHARS],
+    })
 
 
 def append_messages(user_id: str, new_messages: list[Any]) -> int:
-    """Ajoute des messages au fil (ex : tours du mode vocal reversés à la
-    fin d'un appel). Renvoie le nombre réellement ajouté."""
+    """Ajoute des messages au fil (tour de chat, tours vocaux reversés…).
+    Si le fil déborde, les plus anciens partent se faire condenser en
+    arrière-plan dans le résumé (au lieu d'être jetés). Renvoie le nombre
+    de messages réellement ajoutés."""
     cleaned = []
     for m in (new_messages or [])[:20]:
         cm = _clean_message(m)
@@ -175,9 +226,17 @@ def append_messages(user_id: str, new_messages: list[Any]) -> int:
             cleaned.append(cm)
     if not cleaned:
         return 0
-    thread = load_thread(user_id)
-    thread.extend(cleaned)
-    save_thread(user_id, thread)
+    user_id = user_id or "jordan"
+    with _PERSIST_LOCK:
+        doc = _load_thread_doc(user_id)
+        thread = doc["messages"] + cleaned
+        overflow: list[dict] = []
+        if len(thread) > SUMMARY_TRIGGER:
+            overflow = thread[:-SUMMARY_KEEP_RECENT]
+            thread = thread[-SUMMARY_KEEP_RECENT:]
+        save_thread(user_id, thread, summary=doc["summary"])
+    if overflow:
+        _schedule_condense(user_id, doc["summary"], overflow)
     return len(cleaned)
 
 
@@ -189,18 +248,194 @@ def append_turn(user_id: str, question: str, answer: str) -> None:
 
 
 def clear_thread(user_id: str) -> None:
-    save_thread(user_id, [])
+    """Nouvelle discussion : vide le fil ET le résumé. (Le carnet, lui,
+    survit — c'est sa raison d'être.)"""
+    with _PERSIST_LOCK:
+        save_thread(user_id, [], summary="")
+
+
+# ---------------------------------------------------------------------------
+# Condensation : les vieux tours deviennent un résumé (rien ne se perd)
+# ---------------------------------------------------------------------------
+def _summarize_with_ai(app_state, prev_summary: str,
+                       old_messages: list[dict]) -> str:
+    """Condense (résumé précédent + vieux messages) en un nouveau résumé.
+    Petit modèle, appel bloc. Lève en cas d'échec (l'appelant décide)."""
+    from triskell_core.ai.providers import call_anthropic
+
+    ai = claude_advisor._resolve_ai(app_state)
+    if not ai.get("api_key") or ai.get("provider") != "anthropic":
+        raise CopilotError("pas de clé Anthropic pour condenser")
+    convo = "\n".join(
+        f"{'U' if m['role'] == 'user' else 'C'} : {m['content'][:500]}"
+        for m in old_messages
+    )
+    prompt = (
+        "Tu condenses l'historique d'une conversation entre un utilisateur "
+        "(U) et son copilote (C) dans une app de pilotage d'agence web.\n"
+        "RÉSUMÉ EXISTANT DES ÉCHANGES ENCORE PLUS ANCIENS (à conserver et "
+        "fusionner) :\n" + (prev_summary or "(aucun)") + "\n\n"
+        "NOUVEAUX ÉCHANGES À INTÉGRER :\n" + convo + "\n\n"
+        "Écris le NOUVEAU résumé fusionné : uniquement les faits, décisions, "
+        "préférences et sujets en cours UTILES pour la suite de la "
+        "conversation. Français, puces courtes, 15 lignes max, pas de "
+        "politesse. Réponds par le résumé seul."
+    )
+    text = call_anthropic(prompt, SUMMARY_MODEL, ai["api_key"])
+    return (text or "").strip()[:MAX_SUMMARY_CHARS]
+
+
+def _condense_now(app_state, user_id: str, prev_summary: str,
+                  overflow: list[dict]) -> bool:
+    """Fait la condensation et range le nouveau résumé. True si OK."""
+    try:
+        new_summary = _summarize_with_ai(app_state, prev_summary, overflow)
+    except Exception as exc:
+        logger.debug("copilot condense: %s", exc)
+        return False
+    if not new_summary:
+        return False
+    with _PERSIST_LOCK:
+        doc = _load_thread_doc(user_id)
+        save_thread(user_id, doc["messages"], summary=new_summary)
+    return True
+
+
+_CONDENSE_APP_STATE = None  # posé par stream_reply (le worker en a besoin)
+
+
+def _schedule_condense(user_id: str, prev_summary: str,
+                       overflow: list[dict]) -> None:
+    """Lance la condensation dans un fil d'arrière-plan : le tour de chat
+    qui a fait déborder le fil ne doit pas attendre 3 s de plus."""
+    app_state = _CONDENSE_APP_STATE
+    if app_state is None:
+        return  # pas d'app_state connu (tests…) : on tronque comme avant
+    t = threading.Thread(
+        target=_condense_now, args=(app_state, user_id, prev_summary,
+                                    overflow),
+        name="copilot-condense", daemon=True)
+    t.start()
+
+
+# ---------------------------------------------------------------------------
+# Le carnet — mémoire longue durée (préférences, décisions, faits)
+# ---------------------------------------------------------------------------
+def _memory_key(user_id: str) -> str:
+    safe = "".join(c for c in (user_id or "jordan") if c.isalnum() or c in "-_")
+    return MEMORY_SETTING_PREFIX + (safe or "jordan")
+
+
+def load_memory(user_id: str) -> list[dict]:
+    """Les notes du carnet : [{id, text, at}], de la plus ancienne à la
+    plus récente. Jamais d'exception."""
+    user_id = user_id or "jordan"
+    raw = _doc_read(_memory_key(user_id), _LOCAL_MEMORY_FILE, user_id) or {}
+    notes = raw.get("notes") if isinstance(raw, dict) else None
+    out: list[dict] = []
+    for n in (notes or []):
+        if not isinstance(n, dict):
+            continue
+        text = str(n.get("text") or "").strip()
+        nid = str(n.get("id") or "").strip()
+        if text and nid:
+            out.append({"id": nid, "text": text[:MAX_NOTE_CHARS],
+                        "at": str(n.get("at") or "")})
+    return out[-MAX_NOTES:]
+
+
+def save_memory(user_id: str, notes: list[dict]) -> None:
+    _doc_write(_memory_key(user_id), _LOCAL_MEMORY_FILE, user_id,
+               {"notes": notes[-MAX_NOTES:]})
+
+
+def add_note(user_id: str, text: str) -> Optional[dict]:
+    """Ajoute une note au carnet (dédoublonnée). Renvoie la note ou None."""
+    import uuid
+    text = " ".join(str(text or "").split()).strip()
+    if not text:
+        return None
+    text = text[:MAX_NOTE_CHARS]
+    notes = load_memory(user_id)
+    low = text.lower()
+    for n in notes:
+        if n["text"].lower() == low:
+            return n  # déjà connue — pas de doublon
+    note = {"id": uuid.uuid4().hex[:8], "text": text,
+            "at": datetime.now().isoformat(timespec="seconds")}
+    notes.append(note)
+    save_memory(user_id, notes)
+    return note
+
+
+def delete_note(user_id: str, note_id: str) -> bool:
+    notes = load_memory(user_id)
+    kept = [n for n in notes if n["id"] != str(note_id or "")]
+    if len(kept) == len(notes):
+        return False
+    save_memory(user_id, kept)
+    return True
+
+
+def memory_for_ui(user_id: str) -> dict:
+    return {"ok": True, "notes": load_memory(user_id or "jordan")}
+
+
+# ---------------------------------------------------------------------------
+# État léger : dernier passage, dernier briefing
+# ---------------------------------------------------------------------------
+def _state_key(user_id: str) -> str:
+    safe = "".join(c for c in (user_id or "jordan") if c.isalnum() or c in "-_")
+    return STATE_SETTING_PREFIX + (safe or "jordan")
+
+
+def load_state(user_id: str) -> dict:
+    raw = _doc_read(_state_key(user_id), _LOCAL_STATE_FILE,
+                    user_id or "jordan") or {}
+    return {
+        "last_seen_at": str(raw.get("last_seen_at") or ""),
+        "last_briefing_at": str(raw.get("last_briefing_at") or ""),
+    }
+
+
+def save_state(user_id: str, **fields: str) -> None:
+    st = load_state(user_id)
+    st.update({k: v for k, v in fields.items() if k in st})
+    _doc_write(_state_key(user_id), _LOCAL_STATE_FILE,
+               user_id or "jordan", st)
+
+
+def _hours_since(iso: str) -> float:
+    if not iso:
+        return 1e9
+    try:
+        then = datetime.fromisoformat(iso)
+        return max(0.0, (datetime.now() - then).total_seconds() / 3600.0)
+    except Exception:
+        return 1e9
+
+
+def briefing_due(user_id: str) -> bool:
+    """Un point du jour est-il dû ? (jamais fait, ou il date de plus de
+    BRIEFING_GAP_HOURS heures)."""
+    st = load_state(user_id)
+    return _hours_since(st["last_briefing_at"]) >= BRIEFING_GAP_HOURS
 
 
 def thread_for_ui(user_id: str) -> dict:
-    """Le fil prêt à afficher dans le volet."""
+    """Le fil prêt à afficher dans le volet (+ signale si un point du
+    jour est dû — le front le déclenche alors en streaming)."""
     user_id = user_id or "jordan"
-    return {
+    out = {
         "ok": True,
         "user": user_id,
         "display_name": _display_name(user_id),
         "messages": load_thread(user_id)[-60:],
+        "briefing_due": briefing_due(user_id),
     }
+    save_state(user_id, last_seen_at=datetime.now().isoformat(
+        timespec="seconds"))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +468,26 @@ TON ET FORMAT (ÉCRIT)
 - Si tu ne comprends pas la demande, pose UNE question de clarification, courte.
 - N'invente JAMAIS un chiffre ou un fait : tout vient du JSON ou du fil de la conversation.
 - Quand tu viens d'AGIR (action exécutée), ne promets rien que le système ne fait pas : décris ce qui va réellement se passer.
+"""
+
+# Le carnet : comment le copilote retient (et oublie) — bloc fixe du prompt.
+MEMORY_RULES_BLOCK = """═══════════════════════════════════════════════════════════════
+TON CARNET — TU RETIENS CE QUI COMPTE, SANS QU'ON TE LE REDISE
+═══════════════════════════════════════════════════════════════
+Tu reçois plus bas ton CARNET : les notes que tu as prises au fil du temps (numérotées). Elles sont vraies jusqu'à preuve du contraire — appuie-toi dessus, ne refais pas répéter ce qui y est déjà.
+
+NOTER : quand {PRENOM} exprime une PRÉFÉRENCE durable (« écris-moi plus court », « jamais de mails le week-end »), une DÉCISION (« on laisse tomber les avocats », « objectif du mois : 10 ventes »), ou un FAIT stable et utile (« Thomas gère le SEO », « le client X est susceptible »), termine ta réponse par UNE ligne invisible :
+[MEMOIRE:{"note":"<la note, formulée courte et claire, max 200 caractères>"}]
+
+OUBLIER : si {PRENOM} te demande d'oublier quelque chose ou te corrige (« c'est plus le cas », « oublie ça »), termine par :
+[OUBLIE:{"n":<numéro de la note dans le carnet>}]
+
+RÈGLES DU CARNET (non négociables) :
+- Une seule note prise OU oubliée par tour, en toute fin de réponse, JSON valide.
+- Tu notes l'utile DURABLE. Jamais l'éphémère (« il est fatigué aujourd'hui »), jamais ce que l'app sait déjà (les chiffres du JSON), JAMAIS un mot de passe, une clé ou une donnée sensible.
+- Pas de note « au cas où » à chaque tour : un carnet utile est un carnet court.
+- Tu n'annonces pas le tag — si tu veux le dire, dis simplement « C'est noté. ».
+- Si une note du carnet contredit ce que {PRENOM} dit MAINTENANT : ce qu'il dit maintenant gagne, et tu mets le carnet à jour (note corrigée = [OUBLIE] de l'ancienne ce tour-ci, puis nouvelle [MEMOIRE] au tour suivant si besoin).
 """
 
 # Bloc « messages à Thomas » : pertinent seulement quand c'est Jordan qui écrit.
@@ -282,6 +537,17 @@ def _context_block(app_state) -> str:
     return block
 
 
+def _memory_block(user_id: str, name: str) -> str:
+    """Le carnet, numéroté pour permettre [OUBLIE:{"n":…}]."""
+    notes = load_memory(user_id)
+    if not notes:
+        return (f"TON CARNET SUR {name.upper()} : (vide pour l'instant — "
+                "il se remplira au fil des discussions)")
+    lines = [f"{i + 1}. {n['text']}" for i, n in enumerate(notes)]
+    return (f"TON CARNET SUR {name.upper()} (notes numérotées, des plus "
+            "anciennes aux plus récentes) :\n" + "\n".join(lines))
+
+
 def build_prompt(app_state, user_id: str, thread: list[dict],
                  question: str, view: str = "") -> str:
     """Assemble le prompt complet d'un tour de copilote."""
@@ -289,9 +555,15 @@ def build_prompt(app_state, user_id: str, thread: list[dict],
     system = COPILOT_SYSTEM_PROMPT.replace("{PRENOM}", name)
 
     blocks: list[str] = [system]
+    blocks.append(MEMORY_RULES_BLOCK.replace("{PRENOM}", name))
     if (user_id or "jordan") == "jordan":
         blocks.append(CHAT_THOMAS_BLOCK)
     blocks.append(claude_advisor.ASSISTANT_ACTIONS_PROMPT)
+    blocks.append(_memory_block(user_id, name))
+    summary = load_summary(user_id)
+    if summary:
+        blocks.append("RÉSUMÉ DES ÉCHANGES PLUS ANCIENS (le fil ci-dessous "
+                      "ne montre que la fin) :\n" + summary)
     blocks.append(_context_block(app_state))
     if view:
         blocks.append(f"Écran actuellement ouvert devant {name} : {view}")
@@ -308,9 +580,9 @@ def build_prompt(app_state, user_id: str, thread: list[dict],
 
 
 # ---------------------------------------------------------------------------
-# Anti-fuite : masque les tags [ACTION:…] / [CHAT_THOMAS] pendant le stream
+# Anti-fuite : masque les tags de commande pendant le stream
 # ---------------------------------------------------------------------------
-_TAG_MARKERS = ("[ACTION:", "[CHAT_THOMAS]")
+_TAG_MARKERS = ("[ACTION:", "[CHAT_THOMAS]", "[MEMOIRE:", "[OUBLIE:")
 
 
 class TagScrubber:
@@ -423,19 +695,65 @@ def _stream_anthropic(prompt: str, model: str, api_key: str) -> Iterator[str]:
 # ---------------------------------------------------------------------------
 # Fin de tour : extraire/exécuter les commandes, nettoyer le texte
 # ---------------------------------------------------------------------------
-def _finalize_reply(raw: str, *, execute=None) -> dict:
+_MEMOIRE_RE = re.compile(r"\[MEMOIRE:\s*(\{.*?\})\s*\]",
+                         re.DOTALL | re.IGNORECASE)
+_OUBLIE_RE = re.compile(r"\[OUBLIE:\s*(\{.*?\})\s*\]",
+                        re.DOTALL | re.IGNORECASE)
+
+
+def _extract_json_tag(raw: str, regex: re.Pattern) -> tuple[str, Optional[dict]]:
+    """Détache le dernier tag JSON du texte. JSON cassé → ignoré proprement."""
+    matches = list(regex.finditer(raw or ""))
+    if not matches:
+        return raw, None
+    m = matches[-1]
+    cleaned = (raw[:m.start()] + raw[m.end():]).strip()
+    try:
+        data = json.loads(m.group(1))
+        return cleaned, data if isinstance(data, dict) else None
+    except Exception:
+        return cleaned, None
+
+
+def _apply_memory_tags(user_id: str, text: str) -> tuple[str, dict]:
+    """Traite [MEMOIRE:{note}] et [OUBLIE:{n}]. Renvoie (texte nettoyé,
+    {memorized?: str, forgotten?: bool})."""
+    out: dict[str, Any] = {}
+    text, mem = _extract_json_tag(text, _MEMOIRE_RE)
+    if mem is not None:
+        note = add_note(user_id, str(mem.get("note") or ""))
+        if note:
+            out["memorized"] = note["text"]
+    text, forget = _extract_json_tag(text, _OUBLIE_RE)
+    if forget is not None:
+        try:
+            n = int(forget.get("n"))
+        except Exception:
+            n = 0
+        notes = load_memory(user_id)
+        if 1 <= n <= len(notes):
+            if delete_note(user_id, notes[n - 1]["id"]):
+                out["forgotten"] = True
+    return text, out
+
+
+def _finalize_reply(raw: str, *, user_id: str = "jordan",
+                    execute=None) -> dict:
     """À partir du texte BRUT complet du modèle : poste l'éventuel message à
-    Thomas, exécute l'éventuelle action (liste blanche stricte), renvoie
-    {text, navigate, action_done, sent_to_thomas}."""
+    Thomas, exécute l'éventuelle action (liste blanche stricte), range les
+    notes du carnet, renvoie {text, navigate, action_done, sent_to_thomas,
+    memorized?, forgotten?}."""
     execute = execute or claude_advisor.execute_assistant_action
     text, sent_thomas = claude_advisor._extract_chat_to_thomas(raw or "")
     text, action = claude_advisor._extract_action(text)
+    text, mem_out = _apply_memory_tags(user_id, text)
     out: dict[str, Any] = {
         "text": (text or "").strip(),
         "navigate": "",
         "action_done": None,
         "sent_to_thomas": bool(sent_thomas),
     }
+    out.update(mem_out)
     if action is not None:
         try:
             result = execute(action) or {}
@@ -473,6 +791,10 @@ def stream_reply(app_state, user_id: str, question: str,
         return
     question = question[:MAX_MESSAGE_CHARS]
     view = str(view or "").strip()[:60]
+
+    # La condensation d'arrière-plan aura besoin d'un app_state
+    global _CONDENSE_APP_STATE
+    _CONDENSE_APP_STATE = app_state
 
     # L'écran courant : utile au prompt ET aux autres modes (vocal, veille)
     if view:
@@ -522,7 +844,7 @@ def stream_reply(app_state, user_id: str, question: str,
                "error": "Réponse vide de l'IA — réessaie dans un instant."}
         return
 
-    final = _finalize_reply(raw)
+    final = _finalize_reply(raw, user_id=user_id)
     append_turn(user_id, question, final["text"])
 
     done: dict[str, Any] = {"type": "done", "text": final["text"]}
@@ -532,15 +854,109 @@ def stream_reply(app_state, user_id: str, question: str,
         done["action_done"] = final["action_done"]
     if final.get("sent_to_thomas"):
         done["sent_to_thomas"] = True
+    if final.get("memorized"):
+        done["memorized"] = final["memorized"]
+    if final.get("forgotten"):
+        done["forgotten"] = True
     yield done
 
 
+# ---------------------------------------------------------------------------
+# Le point du jour (briefing) — à l'ouverture du volet, si c'est l'heure
+# ---------------------------------------------------------------------------
+BRIEFING_INSTRUCTION = """MISSION DE CE TOUR : fais LE POINT pour {PRENOM} (il vient d'ouvrir le volet, il ne t'a rien demandé — c'est ton accueil du jour).
+
+Structure attendue, en 5 à 10 lignes, markdown léger :
+1. Ce qui a BOUGÉ depuis son dernier passage (réel, tiré du JSON : réponses arrivées, missions finies, envois, sites…). S'il s'est passé peu de choses, une ligne suffit.
+2. Les 2-3 choses qui COMPTENT maintenant, triées par impact business (réponses intéressées à traiter > brouillons à valider > robot en panne > relancer la machine). Chiffres réels à l'appui.
+3. Si tout est calme et à jour : dis-le franchement en deux lignes, sans inventer de l'urgence.
+
+Interdits pour CE tour : les tags [ACTION:…], [MEMOIRE:…], [OUBLIE:…], [CHAT_THOMAS]. Tu informes, tu ne lances rien.
+Commence directement par le contenu (pas de « Salut » — l'en-tête est déjà posé)."""
+
+
+def stream_briefing(app_state, user_id: str, view: str = "") -> Iterator[dict]:
+    """Le point du jour, streamé comme un tour normal, persisté dans le fil.
+    Mêmes évènements que stream_reply."""
+    user_id = (user_id or "jordan").strip() or "jordan"
+    ai = claude_advisor._resolve_ai(app_state)
+    if not ai.get("api_key") or ai.get("provider") != "anthropic":
+        yield {"type": "error",
+               "error": "L'IA n'est pas configurée — ajoute ta clé Anthropic "
+                        "dans Réglages."}
+        return
+
+    # Posé AVANT le stream : si le volet est rouvert pendant la génération,
+    # pas de second briefing en parallèle.
+    save_state(user_id, last_briefing_at=datetime.now().isoformat(
+        timespec="seconds"))
+
+    name = _display_name(user_id)
+    st = load_state(user_id)
+    hours = _hours_since(st["last_seen_at"])
+    since = ("(premier passage enregistré)" if hours > 24 * 365 else
+             f"dernier passage il y a environ {max(1, int(round(hours)))} h")
+
+    blocks = [
+        COPILOT_SYSTEM_PROMPT.replace("{PRENOM}", name),
+        _memory_block(user_id, name),
+    ]
+    summary = load_summary(user_id)
+    if summary:
+        blocks.append("RÉSUMÉ DES ÉCHANGES PLUS ANCIENS :\n" + summary)
+    blocks.append(_context_block(app_state))
+    if view:
+        blocks.append(f"Écran actuellement ouvert devant {name} : {view}")
+    blocks.append(f"Repère temporel : {since}.")
+    blocks.append(BRIEFING_INSTRUCTION.replace("{PRENOM}", name))
+    prompt = "\n\n---\n\n".join(blocks)
+
+    scrub = TagScrubber()
+    header = "☀️ **Le point**\n"
+    yield {"type": "delta", "text": header}
+    pieces: list[str] = []
+    try:
+        for piece in _stream_anthropic(prompt, ai.get("model") or "",
+                                       ai["api_key"]):
+            pieces.append(piece)
+            visible = scrub.push(piece)
+            if visible:
+                yield {"type": "delta", "text": visible}
+    except CopilotError as exc:
+        logger.warning("copilot briefing: %s", exc)
+        yield {"type": "error",
+               "error": f"Le point du jour n'a pas pu se faire ({exc})."}
+        return
+    except Exception as exc:
+        logger.warning("copilot briefing inattendu: %s", exc)
+        yield {"type": "error",
+               "error": "Le point du jour n'a pas pu se faire. Réessaie."}
+        return
+
+    raw = "".join(pieces).strip()
+    if not raw:
+        yield {"type": "error", "error": "Point du jour vide — réessaie."}
+        return
+
+    # Pas d'action au briefing : on retire les tags sans RIEN exécuter.
+    text, _ = claude_advisor._extract_action(raw)
+    text, _ = _extract_json_tag(text, _MEMOIRE_RE)
+    text, _ = _extract_json_tag(text, _OUBLIE_RE)
+    text = (header + text).strip()
+    append_messages(user_id, [{"role": "assistant", "content": text}])
+    yield {"type": "done", "text": text}
+
+
 def send_blocking(app_state, user_id: str, question: str,
-                  view: str = "") -> dict:
+                  view: str = "", briefing: bool = False) -> dict:
     """Version « réponse en bloc » (secours quand le navigateur ne peut pas
     streamer, et chemin naturel du mode desktop)."""
+    if briefing:
+        gen = stream_briefing(app_state, user_id, view=view)
+    else:
+        gen = stream_reply(app_state, user_id, question, view=view)
     final: Optional[dict] = None
-    for evt in stream_reply(app_state, user_id, question, view=view):
+    for evt in gen:
         if evt.get("type") == "error":
             return {"ok": False, "text": "", "error": evt.get("error") or "erreur"}
         if evt.get("type") == "done":
@@ -548,7 +964,8 @@ def send_blocking(app_state, user_id: str, question: str,
     if not final:
         return {"ok": False, "text": "", "error": "Réponse vide de l'IA."}
     out = {"ok": True, "text": final.get("text") or ""}
-    for k in ("navigate", "action_done", "sent_to_thomas"):
+    for k in ("navigate", "action_done", "sent_to_thomas", "memorized",
+              "forgotten"):
         if k in final:
             out[k] = final[k]
     return out

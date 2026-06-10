@@ -389,13 +389,19 @@ def create_app() -> FastAPI:
             payload = {}
         question = str((payload or {}).get("question") or "")
         view = str((payload or {}).get("view") or "")
+        briefing = bool((payload or {}).get("briefing"))
 
         from ..integrations import copilot as _copilot
 
         def event_source():
             try:
-                for evt in _copilot.stream_reply(
-                        api_instance._app_state, user_id, question, view=view):
+                if briefing:
+                    gen = _copilot.stream_briefing(
+                        api_instance._app_state, user_id, view=view)
+                else:
+                    gen = _copilot.stream_reply(
+                        api_instance._app_state, user_id, question, view=view)
+                for evt in gen:
                     yield ("data: "
                            + json.dumps(evt, ensure_ascii=False)
                            + "\n\n")

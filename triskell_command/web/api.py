@@ -310,8 +310,10 @@ class Api:
     def copilot_send(self, payload: dict) -> dict:
         """Un tour de copilote SANS streaming (secours navigateur / desktop).
 
-        payload = {question: str, view?: str}
-        Renvoie {ok, text, navigate?, action_done?, sent_to_thomas?, error?}.
+        payload = {question: str, view?: str, briefing?: bool}
+        (briefing=true → le point du jour, sans question.)
+        Renvoie {ok, text, navigate?, action_done?, sent_to_thomas?,
+        memorized?, forgotten?, error?}.
         """
         p = payload or {}
         question = str(p.get("question") or "")
@@ -320,7 +322,7 @@ class Api:
             from ..integrations import copilot
             return copilot.send_blocking(
                 self._app_state, copilot.current_user_id(), question,
-                view=view,
+                view=view, briefing=bool(p.get("briefing")),
             )
         except Exception as exc:
             logger.warning("copilot_send: %s", exc)
@@ -350,6 +352,45 @@ class Api:
             return {"ok": True, "added": added}
         except Exception as exc:
             logger.warning("copilot_append: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def copilot_memory(self, payload: dict | None = None) -> dict:
+        """Le carnet du copilote (ce qu'il a retenu) — pour l'écran
+        « ce que je sais de toi » du volet."""
+        try:
+            from ..integrations import copilot
+            return copilot.memory_for_ui(copilot.current_user_id())
+        except Exception as exc:
+            logger.warning("copilot_memory: %s", exc)
+            return {"ok": False, "error": str(exc), "notes": []}
+
+    def copilot_memory_add(self, payload: dict) -> dict:
+        """Ajoute une note au carnet à la main. payload = {text: str}."""
+        text = str((payload or {}).get("text") or "").strip()
+        if not text:
+            return {"ok": False, "error": "La note est vide."}
+        try:
+            from ..integrations import copilot
+            note = copilot.add_note(copilot.current_user_id(), text)
+            if note is None:
+                return {"ok": False, "error": "La note est vide."}
+            return {"ok": True, "note": note}
+        except Exception as exc:
+            logger.warning("copilot_memory_add: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def copilot_memory_delete(self, payload: dict) -> dict:
+        """Supprime une note du carnet. payload = {id: str}."""
+        nid = str((payload or {}).get("id") or "").strip()
+        if not nid:
+            return {"ok": False, "error": "Identifiant de note manquant."}
+        try:
+            from ..integrations import copilot
+            ok = copilot.delete_note(copilot.current_user_id(), nid)
+            return {"ok": ok} if ok else {"ok": False,
+                                          "error": "Note introuvable."}
+        except Exception as exc:
+            logger.warning("copilot_memory_delete: %s", exc)
             return {"ok": False, "error": str(exc)}
 
     def set_active_view(self, payload: dict) -> dict:

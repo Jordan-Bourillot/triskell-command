@@ -70,6 +70,12 @@ def main() -> int:
     check("tag CHAT_THOMAS (minuscules) masqué",
           "Salut" not in out and "chat" not in out.lower(), repr(out))
 
+    # 2bis. Tags mémoire coupés en plein vol : masqués aussi
+    sc = copilot.TagScrubber()
+    out = sc.push("C'est noté. [MEMO") + sc.push('IRE:{"note":"x"}]')
+    check("tag MEMOIRE coupé en deux : rien ne fuit",
+          "MEMOIRE" not in out and out.startswith("C'est noté."), repr(out))
+
     # 3. Crochets innocents : tout passe
     sc = copilot.TagScrubber()
     out = sc.push("Bilan [2026] : 3 réponses [voir détail] ok.")
@@ -96,12 +102,16 @@ def main() -> int:
 
     print("— Persistance du fil (secours fichier local) —")
 
-    # Coupe Supabase + redirige le fichier de secours vers un tmp
+    # Coupe Supabase + redirige les fichiers de secours vers un tmp
     orig_client = claude_advisor._client
     orig_file = copilot._LOCAL_FALLBACK_FILE
+    orig_mem_file = copilot._LOCAL_MEMORY_FILE
+    orig_state_file = copilot._LOCAL_STATE_FILE
     claude_advisor._client = lambda: None
     tmpdir = tempfile.mkdtemp(prefix="copilot_smoke_")
     copilot._LOCAL_FALLBACK_FILE = Path(tmpdir) / "threads.json"
+    copilot._LOCAL_MEMORY_FILE = Path(tmpdir) / "memory.json"
+    copilot._LOCAL_STATE_FILE = Path(tmpdir) / "state.json"
     try:
         # 6. append + load
         copilot.clear_thread("jordan")
@@ -111,14 +121,15 @@ def main() -> int:
               len(thread) == 2 and thread[0]["role"] == "user"
               and thread[1]["content"] == "Salut Jordan.")
 
-        # 7. cap de stockage
-        many = [{"role": "user", "content": f"m{i}"} for i in range(120)]
-        copilot.append_messages("jordan", many[:20])  # append borne à 20/coup
-        for _ in range(7):
-            copilot.append_messages("jordan", many[:20])
+        # 7. débordement : le fil retombe à SUMMARY_KEEP_RECENT (les vieux
+        # partent en condensation — ici sans app_state, ils sont tronqués)
+        many = [{"role": "user", "content": f"m{i}"} for i in range(20)]
+        copilot.clear_thread("jordan")
+        for _ in range(5):  # 5 × 20 = 100 > 80 au dernier paquet
+            copilot.append_messages("jordan", many)
         thread = copilot.load_thread("jordan")
-        check(f"fil borné à {copilot.MAX_STORED_MESSAGES} messages",
-              len(thread) == copilot.MAX_STORED_MESSAGES, str(len(thread)))
+        check(f"débordement → fil ramené à {copilot.SUMMARY_KEEP_RECENT}",
+              len(thread) == copilot.SUMMARY_KEEP_RECENT, str(len(thread)))
 
         # 8. fils séparés par utilisateur
         copilot.clear_thread("thomas")
@@ -265,18 +276,183 @@ def main() -> int:
             copilot._context_block = orig_ctx
             claude_advisor._resolve_ai = orig_resolve
 
+        print("— Le carnet (mémoire longue durée) —")
+
+        # 19. add/load/delete + dédoublonnage + troncature
+        copilot.save_memory("jordan", [])
+        n1 = copilot.add_note("jordan", "  Préfère les réponses courtes  ")
+        n_dup = copilot.add_note("jordan", "préfère les réponses courtes")
+        check("note ajoutée et dédoublonnée",
+              n1 is not None and n_dup is not None
+              and n_dup["id"] == n1["id"]
+              and len(copilot.load_memory("jordan")) == 1)
+        n2 = copilot.add_note("jordan", "x" * 900)
+        check("note monstre tronquée",
+              n2 is not None and len(n2["text"]) == copilot.MAX_NOTE_CHARS)
+        check("suppression d'une note",
+              copilot.delete_note("jordan", n2["id"])
+              and len(copilot.load_memory("jordan")) == 1)
+        check("suppression d'un id inconnu refusée sans casse",
+              copilot.delete_note("jordan", "zzz") is False)
+
+        # 20. cap du carnet
+        for i in range(80):
+            copilot.add_note("jordan", f"note numero {i}")
+        check(f"carnet borné à {copilot.MAX_NOTES} notes",
+              len(copilot.load_memory("jordan")) == copilot.MAX_NOTES)
+
+        # 21. les tags mémoire du modèle
+        copilot.save_memory("jordan", [])
+        text, meta = copilot._apply_memory_tags(
+            "jordan", 'Noté !\n[MEMOIRE:{"note":"Jamais de mails le week-end"}]')
+        notes = copilot.load_memory("jordan")
+        check("[MEMOIRE:…] crée la note et disparaît du texte",
+              text == "Noté !" and meta.get("memorized")
+              and len(notes) == 1
+              and notes[0]["text"] == "Jamais de mails le week-end")
+        text, meta = copilot._apply_memory_tags(
+            "jordan", 'Je l’oublie.\n[OUBLIE:{"n":1}]')
+        check("[OUBLIE:{n:1}] supprime la bonne note",
+              meta.get("forgotten") is True
+              and copilot.load_memory("jordan") == [])
+        text, meta = copilot._apply_memory_tags(
+            "jordan", 'Rien.\n[OUBLIE:{"n":99}]')
+        check("[OUBLIE] hors bornes ignoré proprement",
+              "forgotten" not in meta and text == "Rien.")
+
+        # 22. nouvelle discussion : fil et résumé vidés, carnet conservé
+        copilot.add_note("jordan", "Le carnet survit")
+        copilot.append_turn("jordan", "a", "b")
+        copilot.save_thread("jordan", copilot.load_thread("jordan"),
+                            summary="vieux résumé")
+        copilot.clear_thread("jordan")
+        check("clear : fil et résumé vidés, carnet conservé",
+              copilot.load_thread("jordan") == []
+              and copilot.load_summary("jordan") == ""
+              and len(copilot.load_memory("jordan")) == 1)
+
+        print("— Condensation des vieux échanges —")
+
+        # 23. le résumé se range et se relit
+        copilot.save_thread("jordan", [], summary="résumé de test")
+        check("résumé persisté et relu",
+              copilot.load_summary("jordan") == "résumé de test")
+
+        # 24. _condense_now avec une fausse IA
+        orig_sum = copilot._summarize_with_ai
+        copilot._summarize_with_ai = (
+            lambda app_state, prev, old: f"FUSION({prev}|{len(old)} msgs)")
+        try:
+            ok = copilot._condense_now(FakeState(), "jordan",
+                                       "résumé de test",
+                                       [{"role": "user", "content": "x"}] * 6)
+            check("condensation : résumé fusionné rangé",
+                  ok and "FUSION(résumé de test|6 msgs)"
+                  == copilot.load_summary("jordan"))
+        finally:
+            copilot._summarize_with_ai = orig_sum
+
+        # 25. condensation en échec → résumé existant conservé
+        copilot._summarize_with_ai = (lambda *a: (_ for _ in ()).throw(
+            copilot.CopilotError("pas d'IA")))
+        try:
+            ok = copilot._condense_now(FakeState(), "jordan", "garde-moi", [])
+            check("condensation en échec : rien de cassé",
+                  ok is False and "FUSION" in copilot.load_summary("jordan"))
+        finally:
+            copilot._summarize_with_ai = orig_sum
+
+        # 26. le prompt embarque carnet + résumé + règles du carnet
+        orig_ctx = copilot._context_block
+        copilot._context_block = lambda app_state: "ÉTAT (test)"
+        try:
+            copilot.save_memory("jordan", [])
+            copilot.add_note("jordan", "Tutoiement obligatoire")
+            copilot.save_thread("jordan", [], summary="il bosse sur X")
+            prompt = copilot.build_prompt(FakeState(), "jordan", [],
+                                          "salut", view="")
+            check("prompt : carnet numéroté injecté",
+                  "1. Tutoiement obligatoire" in prompt)
+            check("prompt : résumé des vieux échanges injecté",
+                  "il bosse sur X" in prompt)
+            check("prompt : règles du carnet présentes",
+                  "[MEMOIRE:" in prompt and "[OUBLIE:" in prompt)
+        finally:
+            copilot._context_block = orig_ctx
+
+        print("— Le point du jour (briefing) —")
+
+        # 27. briefing_due : jamais fait → oui ; tout frais → non
+        copilot._doc_write(copilot._state_key("jordan"),
+                           copilot._LOCAL_STATE_FILE, "jordan", {})
+        check("briefing dû quand jamais fait", copilot.briefing_due("jordan"))
+        from datetime import datetime as _dt
+        copilot.save_state("jordan", last_briefing_at=_dt.now().isoformat(
+            timespec="seconds"))
+        check("pas de briefing si déjà fait il y a peu",
+              copilot.briefing_due("jordan") is False)
+
+        # 28. thread_for_ui : signale briefing_due et pose last_seen
+        copilot._doc_write(copilot._state_key("jordan"),
+                           copilot._LOCAL_STATE_FILE, "jordan", {})
+        ui = copilot.thread_for_ui("jordan")
+        check("thread_for_ui signale le briefing dû",
+              ui.get("briefing_due") is True)
+        check("le passage est horodaté",
+              bool(copilot.load_state("jordan")["last_seen_at"]))
+
+        # 29. stream_briefing simulé : en-tête, persistance, tags neutralisés
+        claude_advisor._resolve_ai = lambda s: {"provider": "anthropic",
+                                                "model": "claude-test",
+                                                "api_key": "sk-test"}
+        orig_stream = copilot._stream_anthropic
+
+        def fake_brief(prompt, model, api_key):
+            yield "Tout roule : 2 réponses à traiter."
+            yield '\n[ACTION:{"do":"navigate","view":"replies"}]'
+
+        copilot._stream_anthropic = fake_brief
+        copilot._context_block = lambda app_state: "ÉTAT (test)"
+        try:
+            copilot.clear_thread("jordan")
+            copilot.append_turn("jordan", "salut", "salut !")
+            evts = list(copilot.stream_briefing(FakeState(), "jordan",
+                                                view="morning"))
+            done = next((e for e in evts if e["type"] == "done"), None)
+            deltas = "".join(e.get("text", "") for e in evts
+                             if e["type"] == "delta")
+            check("briefing : en-tête « Le point » streamé",
+                  deltas.startswith("☀️ **Le point**"))
+            check("briefing : tag ACTION neutralisé (pas de navigation)",
+                  done is not None and "navigate" not in done
+                  and "[ACTION" not in done["text"])
+            thread = copilot.load_thread("jordan")
+            check("briefing persisté dans le fil",
+                  len(thread) == 3 and thread[-1]["role"] == "assistant"
+                  and "Le point" in thread[-1]["content"])
+            check("briefing : plus dû juste après",
+                  copilot.briefing_due("jordan") is False)
+        finally:
+            copilot._stream_anthropic = orig_stream
+            copilot._context_block = orig_ctx
+            claude_advisor._resolve_ai = orig_resolve
+
         print("— Surface API web —")
 
-        # 19. les méthodes existent sur la classe Api (sans l'instancier)
+        # 30. les méthodes existent sur la classe Api (sans l'instancier)
         from triskell_command.web.api import Api
         missing = [m for m in ("copilot_thread", "copilot_send",
                                "copilot_clear", "copilot_append",
+                               "copilot_memory", "copilot_memory_add",
+                               "copilot_memory_delete",
                                "set_active_view") if not hasattr(Api, m)]
         check("méthodes copilote exposées", not missing, str(missing))
 
     finally:
         claude_advisor._client = orig_client
         copilot._LOCAL_FALLBACK_FILE = orig_file
+        copilot._LOCAL_MEMORY_FILE = orig_mem_file
+        copilot._LOCAL_STATE_FILE = orig_state_file
 
     print()
     total = PASS + FAIL

@@ -31,10 +31,12 @@ const Copilot = {
     this._open = true;
     panel.classList.add('cop-visible');
     this.setBadge(false);
+    if (this._memoryOpen) this.toggleMemory(); // toujours rouvrir sur le fil
     if (!this._loaded) {
       this._loadThread();
     } else {
       this._consumePendingAdvice();
+      this._renderQuickChips();
     }
     // Focus différé : laisse l’animation d’ouverture se finir
     setTimeout(() => {
@@ -85,6 +87,64 @@ const Copilot = {
     this._loaded = true;
     this._scrollDown(true);
     this._consumePendingAdvice();
+    this._renderQuickChips();
+    // Le point du jour : si c’est l’heure (et qu’on a déjà fait
+    // connaissance), il arrive tout seul, en streaming.
+    if (msgs.length && data && data.briefing_due) this._runBriefing();
+  },
+
+  /** Le point du jour — généré par le serveur, streamé, persisté au fil. */
+  async _runBriefing() {
+    if (this._busy) return;
+    this._busy = true;
+    this._setComposerBusy(true);
+    const bubble = this._appendBubble('assistant', '', { streaming: true });
+    this._scrollDown(true);
+    let finalEvt = null;
+    let errorMsg = null;
+    let gotAnything = false;
+    try {
+      const streamed = await this._streamInto(bubble, { briefing: true }, (evt) => {
+        gotAnything = true;
+        if (evt.type === 'done') finalEvt = evt;
+        if (evt.type === 'error') errorMsg = evt.error || 'Erreur inconnue.';
+      });
+      if (!streamed && !gotAnything) {
+        const r = await App.api.copilot_send({
+          briefing: true,
+          view: (typeof App !== 'undefined' && App.currentView) || '',
+        });
+        if (r && r.ok) finalEvt = { type: 'done', text: r.text };
+        else errorMsg = (r && r.error) || null;
+      }
+    } catch (e) { /* le point du jour n’est jamais bloquant */ }
+    if (finalEvt) {
+      this._finishBubble(bubble, finalEvt);
+    } else if (errorMsg) {
+      this._errorBubble(bubble, errorMsg);
+    } else {
+      bubble.remove(); // rien à dire / pas de réseau : pas de bulle vide
+    }
+    this._busy = false;
+    this._setComposerBusy(false);
+    this._scrollDown();
+  },
+
+  /** Raccourcis contextuels au-dessus du champ (ex : récap du soir). */
+  _renderQuickChips() {
+    const bar = document.getElementById('copilot-quick');
+    if (!bar) return;
+    const h = new Date().getHours();
+    const evening = (h >= 17 || h < 4);
+    bar.innerHTML = '';
+    if (evening) {
+      const b = document.createElement('button');
+      b.className = 'cop-chip';
+      b.textContent = '🌙 Récap du jour';
+      b.onclick = () => this.send('Fais-moi le récap de ma journée : ce qui a été accompli, et ce qui reste pour demain.');
+      bar.appendChild(b);
+    }
+    bar.style.display = bar.children.length ? 'flex' : 'none';
   },
 
   _renderWelcome(box) {
@@ -97,7 +157,9 @@ const Copilot = {
       <div class="cop-w-body">
         Je suis ton copilote. Je vois ton app et ton business en direct,
         je réponds à tes questions, et je peux <b>agir pour toi</b>.
-        On reprend toujours la discussion là où on l’a laissée.
+        On reprend toujours la discussion là où on l’a laissée — et je
+        <b>retiens ce qui compte</b> (dis-moi « retiens que… », et le 📌
+        en haut montre tout ce que je sais).
       </div>
       <div class="cop-w-chips">
         <button class="cop-chip" data-q="Où en est ma prospection ?">Où en est ma prospection ?</button>
@@ -159,7 +221,7 @@ const Copilot = {
     let gotAnything = false;
 
     try {
-      const streamed = await this._streamInto(bubble, text, (evt) => {
+      const streamed = await this._streamInto(bubble, { question: text }, (evt) => {
         gotAnything = true;
         if (evt.type === 'done') finalEvt = evt;
         if (evt.type === 'error') errorMsg = evt.error || 'Erreur inconnue.';
@@ -203,8 +265,9 @@ const Copilot = {
   },
 
   /** Stream SSE → remplit la bulle au fil de l’eau.
+   *  body = {question} ou {briefing:true} ; la vue courante est ajoutée ici.
    *  Renvoie true si le flux a démarré (HTTP ok + body lisible). */
-  async _streamInto(bubble, text, onEvent) {
+  async _streamInto(bubble, body, onEvent) {
     if (typeof window.fetch !== 'function' || typeof TextDecoder === 'undefined') return false;
     let res = null;
     try {
@@ -212,10 +275,9 @@ const Copilot = {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: text,
+        body: JSON.stringify(Object.assign({
           view: (typeof App !== 'undefined' && App.currentView) || '',
-        }),
+        }, body)),
       });
     } catch (e) {
       return false; // réseau/file:// → secours bloc
@@ -283,6 +345,8 @@ const Copilot = {
     if (evt.action_done === true) tags.push('✓ Fait');
     if (evt.action_done === false) tags.push('⚠ Action refusée');
     if (evt.sent_to_thomas) tags.push('✉ Message posté à Thomas');
+    if (evt.memorized) tags.push('📌 Noté dans mon carnet');
+    if (evt.forgotten) tags.push('🗑 Oublié');
     if (tags.length) {
       const t = document.createElement('div');
       t.className = 'cop-tags';
@@ -346,7 +410,7 @@ const Copilot = {
 
   async clearThread() {
     if (this._busy) return;
-    if (!window.confirm('Repartir sur une discussion vierge ? L’historique sera effacé.')) return;
+    if (!window.confirm('Repartir sur une discussion vierge ? Le fil sera effacé (le carnet 📌, lui, est conservé).')) return;
     try {
       if (typeof App !== 'undefined' && App.api && App.api.copilot_clear) {
         await App.api.copilot_clear({});
@@ -354,6 +418,78 @@ const Copilot = {
     } catch (e) { /* au pire le fil restera */ }
     const box = document.getElementById('copilot-messages');
     if (box) { box.innerHTML = ''; this._renderWelcome(box); }
+  },
+
+  // ---------------------------------------------------------------- carnet
+  _memoryOpen: false,
+
+  toggleMemory() {
+    this._memoryOpen = !this._memoryOpen;
+    const mem = document.getElementById('copilot-memory');
+    const msgs = document.getElementById('copilot-messages');
+    const btn = document.getElementById('copilot-memory-btn');
+    if (!mem || !msgs) return;
+    mem.style.display = this._memoryOpen ? 'flex' : 'none';
+    msgs.style.display = this._memoryOpen ? 'none' : 'flex';
+    if (btn) btn.classList.toggle('cop-btn-active', this._memoryOpen);
+    if (this._memoryOpen) this._loadMemory();
+  },
+
+  async _loadMemory() {
+    const mem = document.getElementById('copilot-memory');
+    if (!mem) return;
+    mem.innerHTML = '<div class="cop-loading">…</div>';
+    let data = null;
+    try {
+      if (typeof App !== 'undefined' && App.api && App.api.copilot_memory) {
+        data = await App.api.copilot_memory({});
+      }
+    } catch (e) { /* affichage dégradé plus bas */ }
+    const notes = (data && data.ok && Array.isArray(data.notes)) ? data.notes : [];
+    mem.innerHTML = `
+      <div class="cop-mem-head">
+        <b>📌 Ce que je sais de toi</b>
+        <span>${notes.length} note${notes.length > 1 ? 's' : ''} — je m’en sers à chaque réponse</span>
+      </div>
+      <div class="cop-mem-list"></div>
+      <div class="cop-mem-add">
+        <input id="copilot-mem-input" type="text" maxlength="300"
+               placeholder="Ajouter une note à retenir…">
+        <button id="copilot-mem-add-btn" title="Ajouter">＋</button>
+      </div>`;
+    const list = mem.querySelector('.cop-mem-list');
+    if (!notes.length) {
+      list.innerHTML = '<div class="cop-mem-empty">Rien pour l’instant. Dis-moi tes préférences en discutant (« retiens que… ») ou ajoute une note ci-dessous.</div>';
+    } else {
+      notes.slice().reverse().forEach((n) => {
+        const row = document.createElement('div');
+        row.className = 'cop-mem-note';
+        row.innerHTML = `<span>${this._esc(n.text)}</span>
+          <button title="Supprimer cette note" data-id="${this._esc(n.id)}">🗑</button>`;
+        row.querySelector('button').onclick = async (e) => {
+          const id = e.currentTarget.dataset.id;
+          try {
+            const r = await App.api.copilot_memory_delete({ id });
+            if (r && r.ok) row.remove();
+          } catch (err) { /* la note restera visible */ }
+        };
+        list.appendChild(row);
+      });
+    }
+    const addBtn = mem.querySelector('#copilot-mem-add-btn');
+    const addInput = mem.querySelector('#copilot-mem-input');
+    const doAdd = async () => {
+      const text = (addInput.value || '').trim();
+      if (!text) return;
+      try {
+        const r = await App.api.copilot_memory_add({ text });
+        if (r && r.ok) { addInput.value = ''; this._loadMemory(); }
+      } catch (e) { /* tant pis pour cette fois */ }
+    };
+    addBtn.onclick = doAdd;
+    addInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
+    });
   },
 
   // ---------------------------------------------------------------- dictée
@@ -420,12 +556,15 @@ const Copilot = {
           </div>
         </div>
         <div class="cop-head-actions">
+          <button id="copilot-memory-btn" title="Mon carnet : ce que je sais de toi">📌</button>
           <button id="copilot-call" title="Passer en vocal (conversation à la voix)">📞</button>
-          <button id="copilot-new" title="Nouvelle discussion (efface le fil)">⟲</button>
+          <button id="copilot-new" title="Nouvelle discussion (efface le fil, garde le carnet)">⟲</button>
           <button id="copilot-close" title="Fermer">×</button>
         </div>
       </div>
       <div id="copilot-messages" class="cop-messages"></div>
+      <div id="copilot-memory" class="cop-memory" style="display:none;"></div>
+      <div id="copilot-quick" class="cop-quick" style="display:none;"></div>
       <div class="cop-composer">
         <button id="copilot-mic" title="Dicter au lieu de taper">🎤</button>
         <textarea id="copilot-input" rows="1"
@@ -438,6 +577,7 @@ const Copilot = {
     panel.querySelector('#copilot-new').onclick = () => this.clearThread();
     panel.querySelector('#copilot-call').onclick = () => this.startCall();
     panel.querySelector('#copilot-send').onclick = () => this.send();
+    panel.querySelector('#copilot-memory-btn').onclick = () => this.toggleMemory();
 
     const mic = panel.querySelector('#copilot-mic');
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -611,6 +751,52 @@ const Copilot = {
         font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 999px;
       }
       .cop-chip:hover { background: hsl(var(--accent) / .16); }
+      .cop-quick {
+        display: flex; gap: 6px; flex-wrap: wrap;
+        padding: 6px 12px 0;
+      }
+      .cop-memory {
+        flex: 1; display: flex; flex-direction: column; overflow: hidden;
+        padding: 14px;
+      }
+      .cop-mem-head { margin-bottom: 10px; }
+      .cop-mem-head b { display: block; font-size: 14px; color: hsl(var(--text)); }
+      .cop-mem-head span { font-size: 11.5px; color: hsl(var(--text-muted)); }
+      .cop-mem-list { flex: 1; overflow-y: auto; display: flex;
+                      flex-direction: column; gap: 6px; }
+      .cop-mem-note {
+        display: flex; align-items: flex-start; gap: 8px;
+        background: hsl(var(--surface));
+        border: 1px solid hsl(var(--border));
+        border-radius: 12px; padding: 8px 10px;
+        font-size: 12.5px; line-height: 1.5; color: hsl(var(--text-secondary));
+      }
+      .cop-mem-note span { flex: 1; min-width: 0; word-wrap: break-word; }
+      .cop-mem-note button {
+        border: 0; background: transparent; cursor: pointer;
+        font-size: 13px; opacity: .55; flex-shrink: 0; padding: 0 2px;
+      }
+      .cop-mem-note button:hover { opacity: 1; }
+      .cop-mem-empty {
+        font-size: 12.5px; color: hsl(var(--text-muted));
+        border: 1px dashed hsl(var(--border)); border-radius: 12px;
+        padding: 14px; line-height: 1.55;
+      }
+      .cop-mem-add { display: flex; gap: 8px; margin-top: 10px; }
+      .cop-mem-add input {
+        flex: 1; min-width: 0; padding: 8px 12px; font-size: 12.5px;
+        border-radius: 12px; border: 1px solid hsl(var(--border));
+        background: hsl(var(--surface)); color: hsl(var(--text));
+        outline: none;
+      }
+      .cop-mem-add input:focus { border-color: hsl(var(--accent)); }
+      .cop-mem-add button {
+        width: 36px; height: 36px; flex-shrink: 0; border-radius: 12px;
+        border: 1px solid hsl(var(--accent)); cursor: pointer;
+        background: hsl(var(--accent)); color: #fff; font-size: 16px;
+      }
+      .cop-btn-active { background: hsl(var(--accent) / .15) !important;
+                        color: hsl(var(--accent)) !important; }
       .cop-composer {
         display: flex; align-items: flex-end; gap: 8px;
         padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
