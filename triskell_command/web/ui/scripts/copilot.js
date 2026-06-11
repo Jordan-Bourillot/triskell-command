@@ -209,7 +209,7 @@ const Copilot = {
     const el = document.createElement('div');
     el.className = 'cop-welcome';
     el.innerHTML = `
-      <div class="cop-w-title">👋 Salut ${this._esc(name)} !</div>
+      <div class="cop-w-title">👋 Salut ${this._esc(name)}, moi c’est Perceval.</div>
       <div class="cop-w-body">
         Je suis ton copilote. Je vois ton app et ton business en direct,
         je réponds à tes questions, et je peux <b>agir pour toi</b>.
@@ -1094,9 +1094,17 @@ const Copilot = {
     panel.innerHTML = `
       <div class="cop-head">
         <div class="cop-head-id">
-          <span class="cop-head-orb"></span>
+          <span class="cop-head-orb" aria-hidden="true">
+            <svg viewBox="0 0 140 152" style="display:block;width:100%;height:100%">
+              <path d="M70,22 L70,12" fill="none" stroke="#534AB7" stroke-width="4" stroke-linecap="round"/>
+              <path d="M70,2 L76,9 L70,16 L64,9 Z" fill="#7F77DD"/>
+              <path d="M70,24 C94,24 108,29 110,34 C110,72 106,100 70,128 C34,100 30,72 30,34 C32,29 46,24 70,24 Z" fill="#3C3489" stroke="#7F77DD" stroke-width="5"/>
+              <rect x="47" y="55" width="15" height="25" rx="7.5" fill="#EEEDFE"/>
+              <rect x="78" y="55" width="15" height="25" rx="7.5" fill="#EEEDFE"/>
+            </svg>
+          </span>
           <div>
-            <div class="cop-head-title">Claude</div>
+            <div class="cop-head-title">Perceval</div>
             <div class="cop-head-sub">ton copilote — il voit l’app en direct</div>
           </div>
         </div>
@@ -1215,10 +1223,8 @@ const Copilot = {
       }
       .cop-head-id { display: flex; align-items: center; gap: 10px; min-width: 0; }
       .cop-head-orb {
-        width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
-        background: radial-gradient(circle at 35% 35%,
-          hsl(var(--accent)) 0%, hsl(var(--accent) / .55) 65%, hsl(var(--accent) / .25) 100%);
-        box-shadow: 0 4px 14px hsl(var(--accent) / .35);
+        width: 32px; height: 34px; flex-shrink: 0;
+        filter: drop-shadow(0 2px 6px hsl(var(--accent) / .35));
       }
       .cop-head-title { font-weight: 800; font-size: 14px; color: hsl(var(--text)); line-height: 1.1; }
       .cop-head-sub { font-size: 11px; color: hsl(var(--text-muted)); }
