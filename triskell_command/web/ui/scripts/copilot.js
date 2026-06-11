@@ -31,7 +31,8 @@ const Copilot = {
     this._open = true;
     panel.classList.add('cop-visible');
     this.setBadge(false);
-    if (this._memoryOpen) this.toggleMemory(); // toujours rouvrir sur le fil
+    if (this._memoryOpen) this.toggleMemory();   // toujours rouvrir sur le fil
+    if (this._journalOpen) this.toggleJournal();
     if (!this._loaded) {
       this._loadThread();
     } else {
@@ -78,14 +79,17 @@ const Copilot = {
       }
     } catch (e) { /* fil indisponible : on repart à zéro visuellement */ }
     box.innerHTML = '';
+    this._proposals = (data && data.proposals && typeof data.proposals === 'object')
+      ? data.proposals : {};
     const msgs = (data && data.ok && Array.isArray(data.messages)) ? data.messages : [];
     if (!msgs.length) {
       this._renderWelcome(box);
     } else {
       msgs.forEach((m) => this._appendBubble(m.role, m.content,
-        { md: true, kind: m.kind, nav: m.nav }));
+        { md: true, kind: m.kind, nav: m.nav, pid: m.pid }));
     }
     this._initiative = (data && data.initiative) || 'normal';
+    this._trust = (data && data.trust) || null;
     this._loaded = true;
     this._scrollDown(true);
     this._consumePendingAdvice();
@@ -232,7 +236,8 @@ const Copilot = {
         // Le flux n’a pas pu s’établir → chemin de secours en bloc
         const r = await this._sendBlocking(text);
         if (r && r.ok) finalEvt = { type: 'done', text: r.text, navigate: r.navigate,
-                                    action_done: r.action_done, sent_to_thomas: r.sent_to_thomas };
+                                    action_done: r.action_done, sent_to_thomas: r.sent_to_thomas,
+                                    proposed: r.proposed };
         else errorMsg = (r && r.error) || 'Je n’ai pas réussi à répondre. Réessaie.';
       }
     } catch (e) {
@@ -240,7 +245,8 @@ const Copilot = {
         try {
           const r = await this._sendBlocking(text);
           if (r && r.ok) finalEvt = { type: 'done', text: r.text, navigate: r.navigate,
-                                      action_done: r.action_done, sent_to_thomas: r.sent_to_thomas };
+                                      action_done: r.action_done, sent_to_thomas: r.sent_to_thomas,
+                                      proposed: r.proposed };
           else errorMsg = (r && r.error) || 'Je n’ai pas réussi à répondre. Réessaie.';
         } catch (e2) {
           errorMsg = 'Le serveur ne répond pas. Réessaie dans un instant.';
@@ -325,6 +331,12 @@ const Copilot = {
     opts = opts || {};
     const box = document.getElementById('copilot-messages');
     if (!box) return document.createElement('div');
+    // Message « proposition » → carte Confirmer/Annuler (état réel serveur)
+    if (opts.kind === 'proposal' && opts.pid) {
+      const prop = (this._proposals && this._proposals[opts.pid]) || null;
+      return this._appendProposalCard(prop || { id: opts.pid, title: content,
+                                                status: 'expired' });
+    }
     const el = document.createElement('div');
     el.className = 'cop-msg ' + (role === 'user' ? 'cop-user' : 'cop-assistant');
     if (opts.kind === 'event') el.classList.add('cop-event');
@@ -351,6 +363,108 @@ const Copilot = {
     return el;
   },
 
+  /** La carte « ✋ À confirmer » : l'action n'est PAS exécutée tant que
+   *  l'utilisateur n'a pas cliqué Confirmer. L'état vient du serveur. */
+  _appendProposalCard(prop) {
+    const box = document.getElementById('copilot-messages');
+    if (!box) return document.createElement('div');
+    const el = document.createElement('div');
+    el.className = 'cop-msg cop-assistant cop-proposal';
+    el.dataset.pid = (prop && prop.id) || '';
+    this._renderProposalInner(el, prop || {});
+    box.appendChild(el);
+    return el;
+  },
+
+  _renderProposalInner(el, prop) {
+    const status = prop.status || 'pending';
+    const pv = prop.preview || null;
+    let html = '<div class="cop-prop-kicker">✋ À confirmer</div>';
+    html += `<div class="cop-prop-title">${this._esc(prop.title || 'Action proposée')}</div>`;
+    if (pv && (pv.to || pv.subject || pv.body)) {
+      html += '<div class="cop-prop-mail">';
+      if (pv.to) {
+        const who = pv.to_name ? `${pv.to_name} — ${pv.to}` : pv.to;
+        html += `<div class="cop-prop-line"><b>À :</b> ${this._esc(who)}</div>`;
+      }
+      if (pv.subject) {
+        html += `<div class="cop-prop-line"><b>Objet :</b> ${this._esc(pv.subject)}</div>`;
+      }
+      if (pv.context) {
+        html += `<div class="cop-prop-ctx">Il t’a écrit : « ${this._esc(pv.context)} »</div>`;
+      }
+      if (pv.body) {
+        html += `<div class="cop-prop-body">${this._esc(pv.body)}</div>`;
+      }
+      html += '</div>';
+    } else if (pv && pv.info) {
+      html += `<div class="cop-prop-info">${this._esc(pv.info)}</div>`;
+    }
+    if (status === 'pending') {
+      html += `
+        <div class="cop-prop-actions">
+          <button class="cop-prop-confirm">✓ Confirmer</button>
+          <button class="cop-prop-dismiss">Annuler</button>
+        </div>`;
+    } else {
+      const states = {
+        done: '✅ Fait',
+        failed: '⚠ Échec',
+        dismissed: '✋ Annulée — rien n’est parti',
+        expired: '⏰ Expirée — redemande-moi si besoin',
+      };
+      html += `<div class="cop-prop-state cop-prop-state-${this._esc(status)}">`
+            + this._esc(states[status] || status);
+      if (prop.result_summary) {
+        html += `<span> · ${this._esc(prop.result_summary)}</span>`;
+      }
+      html += '</div>';
+    }
+    el.innerHTML = html;
+
+    const confirm = el.querySelector('.cop-prop-confirm');
+    const dismiss = el.querySelector('.cop-prop-dismiss');
+    const lock = () => {
+      if (confirm) { confirm.disabled = true; confirm.textContent = '…'; }
+      if (dismiss) dismiss.disabled = true;
+    };
+    if (confirm) {
+      confirm.onclick = async () => {
+        lock();
+        let r = null;
+        try {
+          r = await App.api.copilot_action_confirm({ id: el.dataset.pid });
+        } catch (e) { /* rendu d’échec ci-dessous */ }
+        const ok = !!(r && r.ok);
+        const next = {
+          ...prop,
+          status: (r && r.status) || (ok ? 'done' : 'failed'),
+          result_summary: (r && r.summary) || (ok ? '' : 'Le serveur n’a pas répondu — réessaie.'),
+        };
+        if (this._proposals) this._proposals[next.id] = next;
+        this._renderProposalInner(el, next);
+        if (r && r.navigate) this._navigate(r.navigate);
+        if (ok && typeof Guide !== 'undefined' && Guide.say) {
+          try { Guide.say('✓ Action confirmée — le copilote l’a faite.'); } catch (e) {}
+        }
+        this._scrollDown();
+      };
+    }
+    if (dismiss) {
+      dismiss.onclick = async () => {
+        lock();
+        let r = null;
+        try {
+          r = await App.api.copilot_action_dismiss({ id: el.dataset.pid });
+        } catch (e) { /* au pire la carte restera */ }
+        const next = { ...prop, status: (r && r.ok) ? 'dismissed' : 'pending',
+                       result_summary: '' };
+        if (this._proposals) this._proposals[next.id] = next;
+        this._renderProposalInner(el, next);
+      };
+    }
+  },
+
   _finishBubble(bubble, evt) {
     bubble.classList.remove('cop-streaming');
     const textEl = bubble.querySelector('.cop-text');
@@ -367,6 +481,14 @@ const Copilot = {
       t.className = 'cop-tags';
       t.textContent = tags.join(' · ');
       bubble.appendChild(t);
+    }
+
+    // Le serveur a transformé l'action en proposition → la carte
+    // Confirmer/Annuler suit la réponse, rien n'a été exécuté.
+    if (evt.proposed && evt.proposed.id) {
+      if (!this._proposals) this._proposals = {};
+      this._proposals[evt.proposed.id] = evt.proposed;
+      this._appendProposalCard(evt.proposed);
     }
 
     if (evt.navigate) this._navigate(evt.navigate);
@@ -399,7 +521,8 @@ const Copilot = {
     // Donne au vocal les derniers tours écrits comme mémoire de départ
     const turns = [];
     document.querySelectorAll('#copilot-messages .cop-msg').forEach((el) => {
-      if (el.classList.contains('cop-advice') || el.classList.contains('cop-error')) return;
+      if (el.classList.contains('cop-advice') || el.classList.contains('cop-error')
+          || el.classList.contains('cop-proposal')) return;
       const role = el.classList.contains('cop-user') ? 'user' : 'assistant';
       const t = el.querySelector('.cop-text');
       const content = t ? (t.innerText || '').trim() : '';
@@ -443,6 +566,7 @@ const Copilot = {
   _memoryOpen: false,
 
   toggleMemory() {
+    if (!this._memoryOpen && this._journalOpen) this.toggleJournal();
     this._memoryOpen = !this._memoryOpen;
     const mem = document.getElementById('copilot-memory');
     const msgs = document.getElementById('copilot-messages');
@@ -452,6 +576,83 @@ const Copilot = {
     msgs.style.display = this._memoryOpen ? 'none' : 'flex';
     if (btn) btn.classList.toggle('cop-btn-active', this._memoryOpen);
     if (this._memoryOpen) this._loadMemory();
+  },
+
+  // ---------------------------------------------------------------- journal
+  _journalOpen: false,
+
+  toggleJournal() {
+    if (!this._journalOpen && this._memoryOpen) this.toggleMemory();
+    this._journalOpen = !this._journalOpen;
+    const jr = document.getElementById('copilot-journal');
+    const msgs = document.getElementById('copilot-messages');
+    const btn = document.getElementById('copilot-journal-btn');
+    if (!jr || !msgs) return;
+    jr.style.display = this._journalOpen ? 'flex' : 'none';
+    msgs.style.display = this._journalOpen ? 'none' : 'flex';
+    if (btn) btn.classList.toggle('cop-btn-active', this._journalOpen);
+    if (this._journalOpen) this._loadJournal();
+  },
+
+  async _loadJournal() {
+    const jr = document.getElementById('copilot-journal');
+    if (!jr) return;
+    jr.innerHTML = '<div class="cop-loading">…</div>';
+    let data = null;
+    try {
+      if (typeof App !== 'undefined' && App.api && App.api.copilot_journal) {
+        data = await App.api.copilot_journal({ limit: 60 });
+      }
+    } catch (e) { /* affichage dégradé plus bas */ }
+    const entries = (data && data.ok && Array.isArray(data.entries)) ? data.entries : [];
+    jr.innerHTML = `
+      <div class="cop-mem-head">
+        <b>📜 Ce que j’ai fait pour toi</b>
+        <span>${entries.length ? `${entries.length} action${entries.length > 1 ? 's' : ''} tracée${entries.length > 1 ? 's' : ''} — les plus récentes d’abord` : 'Chaque action que j’exécute (ou que tu confirmes/annules) sera tracée ici'}</span>
+      </div>
+      <div class="cop-j-list"></div>`;
+    const list = jr.querySelector('.cop-j-list');
+    if (!entries.length) {
+      list.innerHTML = '<div class="cop-mem-empty">Rien pour l’instant. Demande-moi d’agir (« lance une prospection », « réponds à ce prospect »…) et tu retrouveras chaque acte ici, noir sur blanc.</div>';
+      return;
+    }
+    const originLabels = {
+      direct: 'fait seul (à l’écrit)',
+      vocal: 'fait seul (à la voix)',
+      confirme: 'confirmé par toi',
+      annule: 'annulé par toi',
+    };
+    entries.forEach((e) => {
+      const row = document.createElement('div');
+      let icon = '•';
+      let cls = '';
+      if (e.origin === 'annule') { icon = '✋'; cls = 'cop-j-neutral'; }
+      else if (e.ok === true) { icon = '✓'; cls = 'cop-j-ok'; }
+      else if (e.ok === false) { icon = '✗'; cls = 'cop-j-ko'; }
+      row.className = 'cop-j-entry ' + cls;
+      const when = this._shortDate(e.at);
+      row.innerHTML = `
+        <span class="cop-j-icon">${icon}</span>
+        <div class="cop-j-main">
+          <div class="cop-j-label">${this._esc(e.label || '(action)')}</div>
+          ${e.summary ? `<div class="cop-j-sum">${this._esc(e.summary)}</div>` : ''}
+          <div class="cop-j-meta">${this._esc(when)} · ${this._esc(originLabels[e.origin] || e.origin || '')}</div>
+        </div>`;
+      list.appendChild(row);
+    });
+  },
+
+  _shortDate(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso).slice(0, 16);
+      const today = new Date();
+      const sameDay = d.toDateString() === today.toDateString();
+      const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      if (sameDay) return `aujourd’hui ${hm}`;
+      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${hm}`;
+    } catch (e) { return String(iso).slice(0, 16); }
   },
 
   async _loadMemory() {
@@ -485,6 +686,12 @@ const Copilot = {
           <button data-lvl="normal" title="Fil + pastille, et téléphone quand c’est chaud">🙂 Normal</button>
           <button data-lvl="bavard" title="Tout, même les petites nouvelles">📣 Bavard</button>
         </div>
+      </div>
+      <div class="cop-init cop-trust">
+        <b>🔑 Ce que j’ai le droit de faire</b>
+        <span>Famille par famille : je fais seul, je te demande d’abord, ou jamais</span>
+        <div id="copilot-trust-rows"></div>
+        <div class="cop-trust-note">✉️ Un mail ne part JAMAIS sans ton accord : pour les envois, « je fais seul » n’existe pas.</div>
       </div>`;
     const list = mem.querySelector('.cop-mem-list');
     if (!notes.length) {
@@ -528,13 +735,67 @@ const Copilot = {
       });
     };
     paint(this._initiative || 'normal');
+
+    // Curseur de confiance : 3 familles, 3 positions (les mails n'ont
+    // jamais « je fais seul » — plafond tenu aussi côté serveur).
+    const FAMILIES = [
+      { key: 'prospection', label: 'Prospection & machines',
+        desc: 'chasses, missions, Auto-pilote on/off', solo: true },
+      { key: 'notes', label: 'Notes & fiches',
+        desc: 'notes du Cerveau, fiches prospects', solo: true },
+      { key: 'mails', label: 'Envois de mails',
+        desc: 'brouillons, réponses, relances, convoi', solo: false },
+    ];
+    const LEVELS = [
+      { key: 'solo', label: 'Je fais seul' },
+      { key: 'ask', label: 'Je te demande' },
+      { key: 'never', label: 'Jamais' },
+    ];
+    const trustBox = mem.querySelector('#copilot-trust-rows');
+    const paintTrust = (trust) => {
+      trust = trust || {};
+      trustBox.innerHTML = '';
+      FAMILIES.forEach((fam) => {
+        const line = document.createElement('div');
+        line.className = 'cop-trust-row';
+        line.innerHTML = `
+          <div class="cop-trust-id">
+            <div class="cop-trust-label">${this._esc(fam.label)}</div>
+            <div class="cop-trust-desc">${this._esc(fam.desc)}</div>
+          </div>
+          <div class="cop-init-row cop-trust-btns"></div>`;
+        const btns = line.querySelector('.cop-trust-btns');
+        LEVELS.forEach((lv) => {
+          if (lv.key === 'solo' && !fam.solo) return;
+          const b = document.createElement('button');
+          b.textContent = lv.label;
+          b.classList.toggle('cop-init-on', (trust[fam.key] || 'ask') === lv.key);
+          b.onclick = async () => {
+            try {
+              const r = await App.api.copilot_prefs_set({ trust: { [fam.key]: lv.key } });
+              if (r && r.ok) {
+                this._trust = r.trust || this._trust;
+                paintTrust(this._trust);
+                if (typeof Guide !== 'undefined' && Guide.say) {
+                  Guide.say(`✓ ${fam.label} : « ${lv.label.toLowerCase()} ».`);
+                }
+              }
+            } catch (e) { /* réglage inchangé */ }
+          };
+          btns.appendChild(b);
+        });
+        trustBox.appendChild(line);
+      });
+    };
+    paintTrust(this._trust);
+
     try {
       const p = await App.api.copilot_prefs({});
-      if (p && p.ok && p.initiative) {
-        this._initiative = p.initiative;
-        paint(p.initiative);
+      if (p && p.ok) {
+        if (p.initiative) { this._initiative = p.initiative; paint(p.initiative); }
+        if (p.trust) { this._trust = p.trust; paintTrust(p.trust); }
       }
-    } catch (e) { /* on garde la valeur connue */ }
+    } catch (e) { /* on garde les valeurs connues */ }
     row.querySelectorAll('button').forEach((b) => {
       b.onclick = async () => {
         const lvl = b.dataset.lvl;
@@ -618,7 +879,8 @@ const Copilot = {
           </div>
         </div>
         <div class="cop-head-actions">
-          <button id="copilot-memory-btn" title="Mon carnet : ce que je sais de toi">📌</button>
+          <button id="copilot-memory-btn" title="Mon carnet + mes permissions">📌</button>
+          <button id="copilot-journal-btn" title="Le journal : tout ce que j’ai fait pour toi">📜</button>
           <button id="copilot-call" title="Passer en vocal (conversation à la voix)">📞</button>
           <button id="copilot-new" title="Nouvelle discussion (efface le fil, garde le carnet)">⟲</button>
           <button id="copilot-close" title="Fermer">×</button>
@@ -626,6 +888,7 @@ const Copilot = {
       </div>
       <div id="copilot-messages" class="cop-messages"></div>
       <div id="copilot-memory" class="cop-memory" style="display:none;"></div>
+      <div id="copilot-journal" class="cop-memory" style="display:none;"></div>
       <div id="copilot-quick" class="cop-quick" style="display:none;"></div>
       <div class="cop-composer">
         <button id="copilot-mic" title="Dicter au lieu de taper">🎤</button>
@@ -640,6 +903,7 @@ const Copilot = {
     panel.querySelector('#copilot-call').onclick = () => this.startCall();
     panel.querySelector('#copilot-send').onclick = () => this.send();
     panel.querySelector('#copilot-memory-btn').onclick = () => this.toggleMemory();
+    panel.querySelector('#copilot-journal-btn').onclick = () => this.toggleJournal();
 
     const mic = panel.querySelector('#copilot-mic');
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -817,6 +1081,84 @@ const Copilot = {
         background: hsl(var(--accent)); border-color: hsl(var(--accent));
         color: #fff;
       }
+      .cop-proposal {
+        max-width: 96%; width: 96%;
+        border-left: 3px solid hsl(35 92% 50%);
+        background: hsl(35 92% 50% / .07);
+      }
+      .cop-prop-kicker {
+        font-size: 10px; font-weight: 800; letter-spacing: .8px;
+        text-transform: uppercase; color: hsl(35 80% 38%); margin-bottom: 4px;
+      }
+      .cop-prop-title { font-weight: 700; color: hsl(var(--text)); margin-bottom: 6px; }
+      .cop-prop-mail {
+        background: hsl(var(--surface));
+        border: 1px solid hsl(var(--border));
+        border-radius: 12px; padding: 9px 11px; margin: 4px 0 2px;
+      }
+      .cop-prop-line { font-size: 12px; margin-bottom: 3px; color: hsl(var(--text-secondary)); }
+      .cop-prop-line b { color: hsl(var(--text)); }
+      .cop-prop-ctx {
+        font-size: 11.5px; font-style: italic; color: hsl(var(--text-muted));
+        margin: 4px 0; padding: 4px 8px;
+        border-left: 2px solid hsl(var(--border-strong));
+      }
+      .cop-prop-body {
+        margin-top: 6px; padding-top: 6px;
+        border-top: 1px dashed hsl(var(--border));
+        font-size: 12.5px; line-height: 1.55; color: hsl(var(--text-secondary));
+        white-space: pre-wrap; max-height: 200px; overflow-y: auto;
+      }
+      .cop-prop-info { font-size: 12.5px; color: hsl(var(--text-secondary)); margin: 2px 0; }
+      .cop-prop-actions { display: flex; gap: 8px; margin-top: 9px; }
+      .cop-prop-actions button {
+        border: 0; cursor: pointer; font-size: 12px; font-weight: 700;
+        padding: 7px 14px; border-radius: 999px;
+      }
+      .cop-prop-actions button:disabled { opacity: .55; cursor: default; }
+      .cop-prop-confirm { background: hsl(var(--accent)); color: #fff; }
+      .cop-prop-dismiss {
+        background: transparent; color: hsl(var(--text-secondary));
+        border: 1px solid hsl(var(--border-strong)) !important;
+      }
+      .cop-prop-state {
+        margin-top: 8px; font-size: 12px; font-weight: 700;
+        color: hsl(var(--text-secondary));
+      }
+      .cop-prop-state-done { color: hsl(150 60% 35%); }
+      .cop-prop-state-failed { color: hsl(0 60% 45%); }
+      .cop-prop-state span { font-weight: 500; }
+      .cop-j-list { flex: 1; overflow-y: auto; display: flex;
+                    flex-direction: column; gap: 6px; }
+      .cop-j-entry {
+        display: flex; gap: 9px; align-items: flex-start;
+        background: hsl(var(--surface));
+        border: 1px solid hsl(var(--border));
+        border-radius: 12px; padding: 8px 10px;
+      }
+      .cop-j-icon { font-size: 13px; font-weight: 800; flex-shrink: 0;
+                    width: 16px; text-align: center; }
+      .cop-j-ok .cop-j-icon { color: hsl(150 60% 35%); }
+      .cop-j-ko .cop-j-icon { color: hsl(0 60% 45%); }
+      .cop-j-neutral .cop-j-icon { color: hsl(var(--text-muted)); }
+      .cop-j-main { flex: 1; min-width: 0; }
+      .cop-j-label { font-size: 12.5px; font-weight: 700; color: hsl(var(--text)); }
+      .cop-j-sum { font-size: 12px; color: hsl(var(--text-secondary));
+                   line-height: 1.45; margin-top: 1px; word-wrap: break-word; }
+      .cop-j-meta { font-size: 10.5px; color: hsl(var(--text-muted)); margin-top: 3px; }
+      .cop-trust-row {
+        display: flex; flex-direction: column; gap: 5px;
+        padding: 8px 0; border-bottom: 1px dashed hsl(var(--border));
+      }
+      .cop-trust-row:last-child { border-bottom: 0; }
+      .cop-trust-label { font-size: 12.5px; font-weight: 700; color: hsl(var(--text)); }
+      .cop-trust-desc { font-size: 11px; color: hsl(var(--text-muted)); }
+      .cop-trust-note {
+        margin-top: 8px; font-size: 11px; line-height: 1.5;
+        color: hsl(var(--text-muted));
+        border: 1px dashed hsl(var(--border)); border-radius: 10px;
+        padding: 7px 9px;
+      }
       .cop-advice { border-left: 3px solid hsl(var(--accent)); }
       .cop-advice-kicker {
         font-size: 10px; font-weight: 800; letter-spacing: .8px;
@@ -847,14 +1189,15 @@ const Copilot = {
         padding: 6px 12px 0;
       }
       .cop-memory {
-        flex: 1; display: flex; flex-direction: column; overflow: hidden;
+        flex: 1; display: flex; flex-direction: column; overflow-y: auto;
         padding: 14px;
       }
-      .cop-mem-head { margin-bottom: 10px; }
+      .cop-mem-head { margin-bottom: 10px; flex-shrink: 0; }
       .cop-mem-head b { display: block; font-size: 14px; color: hsl(var(--text)); }
       .cop-mem-head span { font-size: 11.5px; color: hsl(var(--text-muted)); }
-      .cop-mem-list { flex: 1; overflow-y: auto; display: flex;
-                      flex-direction: column; gap: 6px; }
+      .cop-mem-list { flex: 0 0 auto; max-height: 200px; overflow-y: auto;
+                      display: flex; flex-direction: column; gap: 6px; }
+      #copilot-journal .cop-j-list { flex: 1 1 auto; min-height: 0; }
       .cop-mem-note {
         display: flex; align-items: flex-start; gap: 8px;
         background: hsl(var(--surface));

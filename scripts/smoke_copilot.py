@@ -22,7 +22,8 @@ try:
 except Exception:
     pass
 
-from triskell_command.integrations import claude_advisor, copilot, copilot_watch
+from triskell_command.integrations import (claude_advisor, copilot,
+                                           copilot_actions, copilot_watch)
 
 PASS = 0
 FAIL = 0
@@ -114,6 +115,10 @@ def main() -> int:
     copilot._LOCAL_MEMORY_FILE = Path(tmpdir) / "memory.json"
     copilot._LOCAL_STATE_FILE = Path(tmpdir) / "state.json"
     copilot._LOCAL_PREFS_FILE = Path(tmpdir) / "prefs.json"
+    orig_props_file = copilot_actions._LOCAL_PROPS_FILE
+    orig_journal_file = copilot_actions._LOCAL_JOURNAL_FILE
+    copilot_actions._LOCAL_PROPS_FILE = Path(tmpdir) / "props.json"
+    copilot_actions._LOCAL_JOURNAL_FILE = Path(tmpdir) / "journal.json"
     try:
         # 6. append + load
         copilot.clear_thread("jordan")
@@ -597,15 +602,377 @@ def main() -> int:
         check(f"jamais plus de {copilot_watch.PUSH_CAP_PER_HOUR} notifs/heure",
               len(sent) == copilot_watch.PUSH_CAP_PER_HOUR, str(len(sent)))
 
+        print("— Étape 4 : le registre des actions —")
+
+        # 45. chaque action déclare famille/risque/libellé/exécuteur
+        bad = [do for do, s in copilot_actions.ACTIONS.items()
+               if s.get("risk") not in ("lecture", "reversible", "sensible")
+               or s.get("family") not in (None, "prospection", "notes",
+                                          "mails")
+               or not s.get("label") or not callable(s.get("run"))
+               or not callable(s.get("title"))]
+        check("registre : 12 actions complètes",
+              len(copilot_actions.ACTIONS) == 12 and not bad, str(bad))
+        historiques = {"navigate", "start_prospection", "toggle_autopilot",
+                       "cancel_mission"}
+        check("les 4 actions historiques sont au registre",
+              historiques <= set(copilot_actions.ACTIONS))
+
+        # 46. action inconnue → refus, jamais d'exception
+        r = copilot_actions.execute_action({"do": "format_disque"},
+                                           user_id="jordan")
+        check("action inconnue refusée proprement",
+              r.get("ok") is False and "inconnue" in r.get("summary", ""))
+
+        print("— Étape 4 : le curseur de confiance —")
+
+        # 47. défauts « équilibrés » + plafond mails
+        copilot._doc_write(copilot._prefs_key("jordan"),
+                           copilot._LOCAL_PREFS_FILE, "jordan", {})
+        t = copilot_actions.get_trust("jordan")
+        check("défauts : prospection seul, notes seul, mails demande",
+              t == {"prospection": "solo", "notes": "solo", "mails": "ask"},
+              str(t))
+        check("plafond : un envoi de mail n'est jamais « seul »",
+              copilot_actions.effective_trust("jordan", "approve_draft")
+              == "ask")
+        check("lecture toujours permise (hors curseur)",
+              copilot_actions.effective_trust("jordan", "view_prospect")
+              == "solo"
+              and copilot_actions.effective_trust("jordan", "navigate")
+              == "solo")
+        r = copilot.set_prefs("jordan", trust={"mails": "solo"})
+        check("réglage mails=seul refusé en français",
+              r.get("ok") is False and "validation" in (r.get("error") or ""))
+        check("clean_trust répare une base trafiquée",
+              copilot_actions.clean_trust({"mails": "solo"})["mails"] == "ask")
+        r = copilot.set_prefs("jordan", trust={"droids": "solo"})
+        check("famille inconnue refusée",
+              r.get("ok") is False and "inconnue" in (r.get("error") or ""))
+
+        # 48. prefs fusionnées : initiative et confiance cohabitent
+        copilot.set_prefs("jordan", "bavard")
+        copilot.set_prefs("jordan", trust={"prospection": "ask"})
+        p = copilot.get_prefs("jordan")
+        check("initiative conservée quand on règle la confiance",
+              p["initiative"] == "bavard"
+              and p["trust"]["prospection"] == "ask")
+        copilot.set_prefs("jordan", "normal",
+                          trust={"prospection": "solo"})
+
+        print("— Étape 4 : propositions (demander d'abord) —")
+
+        # 49. famille mails (ask) → proposition, RIEN exécuté
+        ran = []
+        orig_run = copilot_actions.ACTIONS["reject_draft"]["run"]
+        copilot_actions.ACTIONS["reject_draft"]["run"] = (
+            lambda a: ran.append(a) or {"ok": True, "summary": "Refusé."})
+        try:
+            r = copilot_actions.execute_action(
+                {"do": "reject_draft", "id": "d1", "source": "prospect"},
+                user_id="jordan")
+            prop = r.get("proposed") or {}
+            check("curseur « demande » → proposition, rien exécuté",
+                  r.get("ok") is True and prop.get("status") == "pending"
+                  and ran == [])
+            check("la proposition est listée pour le volet",
+                  prop.get("id") in copilot_actions.list_proposals("jordan"))
+
+            # 50. confirmation → exécute LA version stockée + journal
+            res = copilot_actions.confirm_proposal("jordan", prop["id"])
+            check("confirmation : action exécutée depuis le serveur",
+                  res.get("ok") is True and len(ran) == 1
+                  and ran[0]["id"] == "d1")
+            check("statut passé à « fait »",
+                  copilot_actions.list_proposals("jordan")[prop["id"]]
+                  ["status"] == "done")
+            res2 = copilot_actions.confirm_proposal("jordan", prop["id"])
+            check("double confirmation refusée",
+                  res2.get("ok") is False and len(ran) == 1)
+
+            # 51. annulation → close, rien exécuté
+            r = copilot_actions.execute_action(
+                {"do": "reject_draft", "id": "d2"}, user_id="jordan")
+            pid2 = r["proposed"]["id"]
+            d = copilot_actions.dismiss_proposal("jordan", pid2)
+            check("annulation : close sans exécution",
+                  d.get("ok") is True and len(ran) == 1
+                  and copilot_actions.list_proposals("jordan")[pid2]
+                  ["status"] == "dismissed")
+
+            # 52. expiration : une proposition trop vieille ne s'exécute plus
+            r = copilot_actions.execute_action(
+                {"do": "reject_draft", "id": "d3"}, user_id="jordan")
+            pid3 = r["proposed"]["id"]
+            with copilot_actions._PROPS_LOCK:
+                items = copilot_actions._load_props("jordan")
+                for it in items:
+                    if it.get("id") == pid3:
+                        it["expires_at"] = "2000-01-01T00:00:00"
+                copilot_actions._save_props("jordan", items)
+            res = copilot_actions.confirm_proposal("jordan", pid3)
+            check("proposition expirée → refus, rien exécuté",
+                  res.get("ok") is False and len(ran) == 1
+                  and "expir" in res.get("summary", "").lower())
+
+            # 53. proposition inconnue
+            res = copilot_actions.confirm_proposal("jordan", "zzz")
+            check("proposition inconnue → refus propre",
+                  res.get("ok") is False)
+
+            # 54. le curseur re-vérifié AU CLIC (passé à jamais entre-temps)
+            r = copilot_actions.execute_action(
+                {"do": "reject_draft", "id": "d4"}, user_id="jordan")
+            pid4 = r["proposed"]["id"]
+            copilot.set_prefs("jordan", trust={"mails": "never"})
+            res = copilot_actions.confirm_proposal("jordan", pid4)
+            check("« jamais » posé après coup → la confirmation refuse",
+                  res.get("ok") is False and len(ran) == 1)
+            copilot.set_prefs("jordan", trust={"mails": "ask"})
+
+            # 55. famille en « jamais » → refus poli, pas de proposition
+            copilot.set_prefs("jordan", trust={"prospection": "never"})
+            r = copilot_actions.execute_action(
+                {"do": "cancel_mission", "id": "m1"}, user_id="jordan")
+            check("famille « jamais » → refus poli sans proposition",
+                  r.get("ok") is False and not r.get("proposed")
+                  and "réglages" in r.get("summary", ""))
+            copilot.set_prefs("jordan", trust={"prospection": "solo"})
+
+            # 56. cap : les vieilles propositions sont bornées
+            with copilot_actions._PROPS_LOCK:
+                many = [{"id": f"p{i}", "do": "reject_draft", "action": {},
+                         "title": f"t{i}", "preview": None,
+                         "status": "dismissed",
+                         "created_at": "2026-01-01T00:00:00",
+                         "expires_at": "2026-01-02T00:00:00",
+                         "result_summary": ""}
+                        for i in range(50)]
+                copilot_actions._save_props("jordan", many)
+            check(f"propositions bornées à {copilot_actions.MAX_PROPOSALS}",
+                  len(copilot_actions._load_props("jordan"))
+                  == copilot_actions.MAX_PROPOSALS)
+        finally:
+            copilot_actions.ACTIONS["reject_draft"]["run"] = orig_run
+
+        print("— Étape 4 : aperçu obligatoire avant envoi —")
+
+        # 57. approuver un brouillon sans aperçu fiable → refus (pas de
+        # confirmation à l'aveugle) — ici Supabase est coupé donc pas
+        # d'aperçu possible.
+        r = copilot_actions.execute_action(
+            {"do": "approve_draft", "id": "d9", "source": "prospect"},
+            user_id="jordan")
+        check("envoi sans aperçu → refus « pas à l'aveugle »",
+              r.get("ok") is False and not r.get("proposed")
+              and "aveugle" in r.get("summary", ""))
+
+        print("— Étape 4 : le journal des actes —")
+
+        # 58. les actes tracés : direct, confirmé, annulé — antichrono
+        copilot_actions._doc_write(copilot_actions.JOURNAL_SETTING_PREFIX,
+                                   copilot_actions._LOCAL_JOURNAL_FILE,
+                                   "jordan", {"items": []})
+        copilot_actions.add_journal_entry(
+            "jordan", do="cancel_mission", label="Abandonner une mission",
+            origin="direct", ok=True, summary="Mission abandonnée.")
+        copilot_actions.add_journal_entry(
+            "jordan", do="reject_draft", label="Refuser le brouillon",
+            origin="confirme", ok=True, summary="Refusé.")
+        copilot_actions.add_journal_entry(
+            "jordan", do="approve_draft", label="Envoyer le brouillon",
+            origin="annule", ok=None, summary="Annulée par toi.")
+        j = copilot_actions.journal_for_ui("jordan")
+        check("journal : 3 actes, plus récent en premier",
+              j.get("ok") and len(j["entries"]) == 3
+              and j["entries"][0]["origin"] == "annule"
+              and j["entries"][2]["origin"] == "direct")
+        check("journal : famille et risque déclarés présents",
+              j["entries"][0]["family"] == "mails"
+              and j["entries"][0]["risk"] == "sensible")
+
+        # 59. cap du journal
+        with copilot_actions._JOURNAL_LOCK:
+            copilot_actions._doc_write(
+                copilot_actions.JOURNAL_SETTING_PREFIX,
+                copilot_actions._LOCAL_JOURNAL_FILE, "jordan",
+                {"items": [{"at": "x", "do": "d", "label": "l",
+                            "family": "", "risk": "", "origin": "direct",
+                            "ok": True, "summary": ""}] * 230})
+        copilot_actions.add_journal_entry(
+            "jordan", do="cancel_mission", label="encore", origin="direct",
+            ok=True, summary="")
+        with copilot_actions._JOURNAL_LOCK:
+            doc = copilot_actions._doc_read(
+                copilot_actions.JOURNAL_SETTING_PREFIX,
+                copilot_actions._LOCAL_JOURNAL_FILE, "jordan")
+        check(f"journal borné à {copilot_actions.MAX_JOURNAL} entrées",
+              len(doc.get("items") or []) == copilot_actions.MAX_JOURNAL)
+
+        # 60. une exécution directe écrit au journal (origin=direct)
+        copilot_actions._doc_write(copilot_actions.JOURNAL_SETTING_PREFIX,
+                                   copilot_actions._LOCAL_JOURNAL_FILE,
+                                   "jordan", {"items": []})
+        orig_run = copilot_actions.ACTIONS["cancel_mission"]["run"]
+        copilot_actions.ACTIONS["cancel_mission"]["run"] = (
+            lambda a: {"ok": True, "summary": "Mission abandonnée."})
+        try:
+            copilot_actions.execute_action({"do": "cancel_mission",
+                                            "id": "m1"}, user_id="jordan")
+        finally:
+            copilot_actions.ACTIONS["cancel_mission"]["run"] = orig_run
+        j = copilot_actions.journal_for_ui("jordan")
+        check("exécution directe tracée au journal",
+              len(j["entries"]) == 1 and j["entries"][0]["origin"] == "direct"
+              and j["entries"][0]["ok"] is True)
+
+        # 61. une lecture (view_prospect/navigate) n'encombre PAS le journal
+        copilot_actions.execute_action({"do": "navigate",
+                                        "view": "drafts"}, user_id="jordan")
+        j = copilot_actions.journal_for_ui("jordan")
+        check("navigation non tracée (le journal = les vrais actes)",
+              len(j["entries"]) == 1)
+
+        print("— Étape 4 : garde-fous métier —")
+
+        # 62. le garde-fou « envoi AUTO ne s'allume pas d'ici » est INTACT
+        import triskell_command.web.api as _webapi
+
+        class _FakeApi:
+            def autopilot_get_stage_modes(self):
+                return {"modes": {"send": "auto"}}
+
+        orig_get_inst = _webapi.get_api_instance
+        _webapi.get_api_instance = lambda: _FakeApi()
+        try:
+            r = copilot_actions._run_toggle_autopilot({"enabled": True})
+            check("envoi AUTO → l'assistant refuse d'allumer l'Auto-pilote",
+                  r.get("ok") is False and "AUTOMATIQUE" in r["summary"]
+                  and r.get("navigate") == "prospection")
+        finally:
+            _webapi.get_api_instance = orig_get_inst
+
+        # 63. update_prospect : validations en français
+        r = copilot_actions._run_update_prospect({"email": "pas-un-mail",
+                                                  "note": "x"})
+        check("fiche : email invalide refusé",
+              r.get("ok") is False and "adresse mail" in r["summary"])
+        r = copilot_actions._run_update_prospect({"email": "a@b.fr",
+                                                  "status": "zinzin"})
+        check("fiche : statut inconnu refusé avec la liste",
+              r.get("ok") is False and "interested" in r["summary"])
+        r = copilot_actions._run_update_prospect({"email": "a@b.fr"})
+        check("fiche : rien à changer → refus clair",
+              r.get("ok") is False and "Rien à changer" in r["summary"])
+
+        # 64. view_prospect : demande vide refusée
+        r = copilot_actions._run_view_prospect({})
+        check("fiche : recherche vide → question posée",
+              r.get("ok") is False and "quel prospect" in r["summary"])
+
+        print("— Étape 4 : prompt généré + canaux —")
+
+        # 65. le prompt généré reflète le curseur (✋ sur les mails,
+        # 🚫 quand une famille est sur jamais)
+        pr = copilot_actions.build_actions_prompt("jordan")
+        check("prompt : les envois portent le marqueur confirmation",
+              "LE MAIL PART" in pr and "✋" in pr
+              and '"do":"approve_draft"' in pr)
+        check("prompt : les 12 actions documentées",
+              all(f'"do":"{do}"' in pr
+                  for do in copilot_actions.ACTIONS))
+        copilot.set_prefs("jordan", trust={"prospection": "never"})
+        pr2 = copilot_actions.build_actions_prompt("jordan")
+        check("prompt : famille « jamais » marquée interdite",
+              "🚫" in pr2)
+        copilot.set_prefs("jordan", trust={"prospection": "solo"})
+
+        # 66. build_prompt (volet) : protocole généré + prénom remplacé
+        orig_ctx = copilot._context_block
+        copilot._context_block = lambda app_state: "ÉTAT (test)"
+        try:
+            prompt = copilot.build_prompt(FakeState(), "jordan", [],
+                                          "salut", view="")
+            check("prompt du volet : actions étape 4 présentes",
+                  '"do":"reply_prospect"' in prompt
+                  and "{PRENOM}" not in prompt)
+        finally:
+            copilot._context_block = orig_ctx
+
+        # 67. le canal vocal : une action « à confirmer » dépose la carte
+        # dans le fil + pastille + annonce parlée (rien d'exécuté)
+        copilot.clear_thread("jordan")
+        copilot.save_state("jordan", unseen=0)
+        ran2 = []
+        orig_run = copilot_actions.ACTIONS["reject_draft"]["run"]
+        copilot_actions.ACTIONS["reject_draft"]["run"] = (
+            lambda a: ran2.append(a) or {"ok": True, "summary": "fait"})
+        try:
+            r = claude_advisor.execute_assistant_action(
+                {"do": "reject_draft", "id": "d5"})
+            th = copilot.load_thread("jordan")
+            check("vocal : carte déposée au fil, pastille allumée",
+                  r.get("ok") is True and "volet" in r.get("summary", "")
+                  and ran2 == [] and th
+                  and th[-1].get("kind") == "proposal"
+                  and bool(th[-1].get("pid"))
+                  and copilot.get_unseen("jordan") == 1)
+        finally:
+            copilot_actions.ACTIONS["reject_draft"]["run"] = orig_run
+
+        # 68. _finalize_reply : tag ACTION famille mails → proposed,
+        # pas de « action refusée », texte par défaut si réponse nue
+        out = copilot._finalize_reply(
+            '[ACTION:{"do":"reject_draft","id":"d6"}]', user_id="jordan")
+        check("fin de tour : proposition remontée à l'appelant",
+              out.get("proposed") and out["action_done"] is None
+              and "confirme" in out["text"].lower())
+
+        # 69. stream_reply bout en bout : réponse PUIS carte dans le fil
+        claude_advisor._resolve_ai = lambda s: {"provider": "anthropic",
+                                                "model": "claude-test",
+                                                "api_key": "sk-test"}
+        orig_stream = copilot._stream_anthropic
+
+        def fake_stream_prop(prompt, model, api_key):
+            yield "Je te prépare le refus."
+            yield '\n[ACTION:{"do":"reject_draft","id":"d7"}]'
+
+        copilot._stream_anthropic = fake_stream_prop
+        copilot._context_block = lambda app_state: "ÉTAT (test)"
+        try:
+            copilot.clear_thread("jordan")
+            evts = list(copilot.stream_reply(FakeState(), "jordan",
+                                             "refuse le brouillon d7"))
+            done = next((e for e in evts if e["type"] == "done"), None)
+            th = copilot.load_thread("jordan")
+            check("tour streamé : done porte la proposition",
+                  done is not None and (done.get("proposed") or {})
+                  .get("status") == "pending")
+            check("fil : réponse puis carte, dans l'ordre",
+                  len(th) == 3 and th[1]["role"] == "assistant"
+                  and th[2].get("kind") == "proposal")
+            check("volet : thread_for_ui sert cartes + curseur",
+                  done["proposed"]["id"]
+                  in copilot.thread_for_ui("jordan")["proposals"]
+                  and copilot.thread_for_ui("jordan")["trust"]["mails"]
+                  == "ask")
+        finally:
+            copilot._stream_anthropic = orig_stream
+            copilot._context_block = orig_ctx
+            claude_advisor._resolve_ai = orig_resolve
+
         print("— Surface API web —")
 
-        # 44. les méthodes existent sur la classe Api (sans l'instancier)
+        # 70. les méthodes existent sur la classe Api (sans l'instancier)
         from triskell_command.web.api import Api
         missing = [m for m in ("copilot_thread", "copilot_send",
                                "copilot_clear", "copilot_append",
                                "copilot_memory", "copilot_memory_add",
                                "copilot_memory_delete", "copilot_prefs",
-                               "copilot_prefs_set", "_with_copilot_unseen",
+                               "copilot_prefs_set", "copilot_action_confirm",
+                               "copilot_action_dismiss", "copilot_journal",
+                               "_with_copilot_unseen",
                                "set_active_view") if not hasattr(Api, m)]
         check("méthodes copilote exposées", not missing, str(missing))
 
@@ -615,6 +982,8 @@ def main() -> int:
         copilot._LOCAL_MEMORY_FILE = orig_mem_file
         copilot._LOCAL_STATE_FILE = orig_state_file
         copilot._LOCAL_PREFS_FILE = orig_prefs_file
+        copilot_actions._LOCAL_PROPS_FILE = orig_props_file
+        copilot_actions._LOCAL_JOURNAL_FILE = orig_journal_file
 
     print()
     total = PASS + FAIL

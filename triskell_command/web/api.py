@@ -408,14 +408,59 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     def copilot_prefs_set(self, payload: dict) -> dict:
-        """Règle le niveau d'initiative. payload = {initiative: str}."""
+        """Règle le niveau d'initiative et/ou le curseur de confiance.
+        payload = {initiative?: str, trust?: {famille: niveau}} — trust
+        peut être partiel ({"mails": "never"}). Le plafond (jamais de
+        « solo » pour les mails) est tenu côté copilot.set_prefs."""
         try:
             from ..integrations import copilot
-            return copilot.set_prefs(
-                copilot.current_user_id(),
-                str((payload or {}).get("initiative") or ""))
+            p = payload or {}
+            initiative = p.get("initiative")
+            if initiative is not None:
+                initiative = str(initiative)
+            trust = p.get("trust")
+            return copilot.set_prefs(copilot.current_user_id(),
+                                     initiative=initiative, trust=trust)
         except Exception as exc:
             logger.warning("copilot_prefs_set: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def copilot_action_confirm(self, payload: dict) -> dict:
+        """Jordan a cliqué Confirmer sur une carte du fil : exécute LA
+        proposition stockée côté serveur (le navigateur n'envoie qu'un
+        id — jamais l'action elle-même). payload = {id}."""
+        try:
+            from ..integrations import copilot, copilot_actions
+            return copilot_actions.confirm_proposal(
+                copilot.current_user_id(),
+                str((payload or {}).get("id") or ""))
+        except Exception as exc:
+            logger.warning("copilot_action_confirm: %s", exc)
+            return {"ok": False, "summary": "La confirmation a échoué — "
+                                            "réessaie dans un instant."}
+
+    def copilot_action_dismiss(self, payload: dict) -> dict:
+        """Jordan a cliqué Annuler sur une carte : la proposition est
+        close, rien n'est exécuté. payload = {id}."""
+        try:
+            from ..integrations import copilot, copilot_actions
+            return copilot_actions.dismiss_proposal(
+                copilot.current_user_id(),
+                str((payload or {}).get("id") or ""))
+        except Exception as exc:
+            logger.warning("copilot_action_dismiss: %s", exc)
+            return {"ok": False, "summary": "L'annulation a échoué."}
+
+    def copilot_journal(self, payload: dict | None = None) -> dict:
+        """Le journal des actes du copilote (onglet 📜 du volet).
+        payload = {limit?}."""
+        try:
+            from ..integrations import copilot, copilot_actions
+            return copilot_actions.journal_for_ui(
+                copilot.current_user_id(),
+                limit=int((payload or {}).get("limit") or 60))
+        except Exception as exc:
+            logger.warning("copilot_journal: %s", exc)
             return {"ok": False, "error": str(exc)}
 
     def set_active_view(self, payload: dict) -> dict:

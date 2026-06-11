@@ -78,6 +78,17 @@ print("2) Les actions de l'assistant…")
 from triskell_command.integrations.claude_advisor import (  # noqa: E402
     _extract_action, execute_assistant_action,
 )
+from triskell_command.integrations import copilot_actions as _ca  # noqa: E402
+
+# Hermétique depuis l'étape 4 du copilote : on force le curseur de
+# confiance par défaut (les réglages perso de Jordan en base ne doivent
+# pas changer le résultat de ces tests) et on coupe le journal des actes
+# (un run local de cette batterie ne doit JAMAIS écrire dans le vrai
+# journal du copilote en base partagée).
+_orig_get_trust = _ca.get_trust
+_orig_journal = _ca.add_journal_entry
+_ca.get_trust = lambda user_id: dict(_ca.DEFAULT_TRUST)
+_ca.add_journal_entry = lambda *a, **k: None
 
 # Extraction du tag
 t, a = _extract_action(
@@ -126,6 +137,9 @@ with mock.patch.object(Api, "autopilot_get_stage_modes",
                                        "enabled": True})
 check("envoi en brouillons → allumage vocal accepté (config sauvée)",
       r["ok"] is True and "brouillons" in r["summary"] and sv.called)
+
+_ca.get_trust = _orig_get_trust
+_ca.add_journal_entry = _orig_journal
 
 print("3) Cohérence de l'interface après rationalisation…")
 ui = HERE / "triskell_command/web/ui"

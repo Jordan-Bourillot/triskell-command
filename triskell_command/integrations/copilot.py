@@ -62,7 +62,8 @@ _LOCAL_PREFS_FILE = Path.home() / ".triskell-command" / "copilot_prefs.json"
 PREFS_SETTING_PREFIX = "copilot_prefs_"
 INITIATIVE_LEVELS = ("off", "discret", "normal", "bavard")
 DEFAULT_INITIATIVE = "normal"
-MESSAGE_KINDS = ("event", "briefing")  # kinds connus (sinon: message normal)
+# kinds connus (sinon: message normal). proposal = carte Confirmer/Annuler.
+MESSAGE_KINDS = ("event", "briefing", "proposal")
 
 _CTX_CACHE: dict[str, Any] = {"at": 0.0, "text": ""}
 _CTX_LOCK = threading.Lock()
@@ -124,6 +125,10 @@ def _clean_message(msg: Any) -> Optional[dict]:
     nav = str(msg.get("nav") or "").strip()
     if nav and nav.isidentifier() and len(nav) <= 40:
         out["nav"] = nav
+    # pid : l'identifiant de la proposition liée (carte Confirmer/Annuler)
+    pid = str(msg.get("pid") or "").strip().lower()
+    if pid and len(pid) <= 16 and all(c in "0123456789abcdef" for c in pid):
+        out["pid"] = pid
     return out
 
 
@@ -432,7 +437,7 @@ def get_unseen(user_id: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Préférences : le niveau d'initiative (off / discret / normal / bavard)
+# Préférences : niveau d'initiative + curseur de confiance par famille
 # ---------------------------------------------------------------------------
 def _prefs_key(user_id: str) -> str:
     safe = "".join(c for c in (user_id or "jordan") if c.isalnum() or c in "-_")
@@ -440,22 +445,58 @@ def _prefs_key(user_id: str) -> str:
 
 
 def get_prefs(user_id: str) -> dict:
+    from . import copilot_actions
     raw = _doc_read(_prefs_key(user_id), _LOCAL_PREFS_FILE,
                     user_id or "jordan") or {}
     lvl = str(raw.get("initiative") or "").strip().lower()
     if lvl not in INITIATIVE_LEVELS:
         lvl = DEFAULT_INITIATIVE
-    return {"initiative": lvl}
+    return {"initiative": lvl,
+            "trust": copilot_actions.clean_trust(raw.get("trust"))}
 
 
-def set_prefs(user_id: str, initiative: str) -> dict:
-    lvl = str(initiative or "").strip().lower()
-    if lvl not in INITIATIVE_LEVELS:
-        return {"ok": False,
-                "error": "Niveau inconnu (off, discret, normal ou bavard)."}
+def set_prefs(user_id: str, initiative: Optional[str] = None,
+              trust: Optional[dict] = None) -> dict:
+    """Met à jour le niveau d'initiative et/ou le curseur de confiance
+    (trust peut être partiel : {"mails": "never"}). Les deux réglages
+    cohabitent dans le même document — on fusionne, jamais d'écrasement."""
+    from . import copilot_actions
+    current = get_prefs(user_id)
+
+    if initiative is not None:
+        lvl = str(initiative or "").strip().lower()
+        if lvl not in INITIATIVE_LEVELS:
+            return {"ok": False,
+                    "error": "Niveau inconnu (off, discret, normal ou "
+                             "bavard)."}
+        current["initiative"] = lvl
+
+    if trust is not None:
+        if not isinstance(trust, dict):
+            return {"ok": False, "error": "Réglage de confiance invalide."}
+        merged = dict(current["trust"])
+        for fam, value in trust.items():
+            fam = str(fam or "").strip().lower()
+            value = str(value or "").strip().lower()
+            if fam not in copilot_actions.FAMILIES:
+                return {"ok": False,
+                        "error": f"Famille inconnue ({fam})."}
+            if value not in copilot_actions.TRUST_LEVELS:
+                return {"ok": False,
+                        "error": "Niveau inconnu (solo, ask ou never)."}
+            if fam == "mails" and value == "solo":
+                # Plafond non négociable : les envois de mails ne passent
+                # JAMAIS en « il fait seul ».
+                return {"ok": False,
+                        "error": "Les envois de mails restent sous ta "
+                                 "validation — « il fait seul » n'existe "
+                                 "pas pour cette famille."}
+            merged[fam] = value
+        current["trust"] = copilot_actions.clean_trust(merged)
+
     _doc_write(_prefs_key(user_id), _LOCAL_PREFS_FILE, user_id or "jordan",
-               {"initiative": lvl})
-    return {"ok": True, "initiative": lvl}
+               current)
+    return {"ok": True, **current}
 
 
 # ---------------------------------------------------------------------------
@@ -480,6 +521,30 @@ def deposit_event_message(user_id: str, text: str, nav: str = "") -> bool:
         return False
 
 
+def deposit_proposal_message(user_id: str, prop: dict,
+                             bump: bool = True) -> bool:
+    """Dépose la carte « à confirmer » d'une proposition dans le fil.
+    bump=True allume la pastille (utile quand Jordan n'est pas dans le
+    volet : tour vocal, veille). Jamais d'exception."""
+    try:
+        prop = prop or {}
+        pid = str(prop.get("id") or "").strip()
+        title = str(prop.get("title") or "une action").strip()
+        if not pid:
+            return False
+        added = append_messages(user_id, [{
+            "role": "assistant",
+            "content": ("✋ À confirmer : " + title)[:600],
+            "kind": "proposal", "pid": pid,
+        }])
+        if added and bump:
+            save_state(user_id, unseen=get_unseen(user_id) + 1)
+        return bool(added)
+    except Exception as exc:
+        logger.debug("copilot deposit proposal: %s", exc)
+        return False
+
+
 def _hours_since(iso: str) -> float:
     if not iso:
         return 1e9
@@ -499,15 +564,21 @@ def briefing_due(user_id: str) -> bool:
 
 def thread_for_ui(user_id: str) -> dict:
     """Le fil prêt à afficher dans le volet (+ signale si un point du
-    jour est dû — le front le déclenche alors en streaming)."""
+    jour est dû — le front le déclenche alors en streaming).
+    Embarque aussi les propositions (cartes Confirmer/Annuler) et le
+    curseur de confiance, pour que le volet peigne l'état réel."""
+    from . import copilot_actions
     user_id = user_id or "jordan"
+    prefs = get_prefs(user_id)
     out = {
         "ok": True,
         "user": user_id,
         "display_name": _display_name(user_id),
         "messages": load_thread(user_id)[-60:],
         "briefing_due": briefing_due(user_id),
-        "initiative": get_prefs(user_id)["initiative"],
+        "initiative": prefs["initiative"],
+        "trust": prefs["trust"],
+        "proposals": copilot_actions.list_proposals(user_id),
     }
     # Volet ouvert : tout est vu → la pastille s'éteint.
     save_state(user_id, last_seen_at=datetime.now().isoformat(
@@ -635,7 +706,11 @@ def build_prompt(app_state, user_id: str, thread: list[dict],
     blocks.append(MEMORY_RULES_BLOCK.replace("{PRENOM}", name))
     if (user_id or "jordan") == "jordan":
         blocks.append(CHAT_THOMAS_BLOCK)
-    blocks.append(claude_advisor.ASSISTANT_ACTIONS_PROMPT)
+    # Le catalogue d'actions est GÉNÉRÉ depuis le registre central :
+    # toujours fidèle aux pouvoirs réels ET au curseur de confiance.
+    from . import copilot_actions
+    blocks.append(copilot_actions.build_actions_prompt(user_id)
+                  .replace("{PRENOM}", name))
     blocks.append(_memory_block(user_id, name))
     summary = load_summary(user_id)
     if summary:
@@ -817,10 +892,16 @@ def _apply_memory_tags(user_id: str, text: str) -> tuple[str, dict]:
 def _finalize_reply(raw: str, *, user_id: str = "jordan",
                     execute=None) -> dict:
     """À partir du texte BRUT complet du modèle : poste l'éventuel message à
-    Thomas, exécute l'éventuelle action (liste blanche stricte), range les
-    notes du carnet, renvoie {text, navigate, action_done, sent_to_thomas,
-    memorized?, forgotten?}."""
-    execute = execute or claude_advisor.execute_assistant_action
+    Thomas, route l'éventuelle action (registre central : exécution directe
+    OU proposition à confirmer, selon le curseur de confiance), range les
+    notes du carnet. Renvoie {text, navigate, action_done, sent_to_thomas,
+    proposed?, memorized?, forgotten?}."""
+    if execute is None:
+        from . import copilot_actions
+
+        def execute(a):  # canal écrit : le curseur s'applique ici
+            return copilot_actions.execute_action(
+                a, user_id=user_id, channel="copilot")
     text, sent_thomas = claude_advisor._extract_chat_to_thomas(raw or "")
     text, action = claude_advisor._extract_action(text)
     text, mem_out = _apply_memory_tags(user_id, text)
@@ -836,13 +917,22 @@ def _finalize_reply(raw: str, *, user_id: str = "jordan",
             result = execute(action) or {}
         except Exception as exc:  # ceinture : execute ne lève normalement pas
             result = {"ok": False, "summary": f"L'action a échoué : {exc}"}
-        summary = (result.get("summary") or "").strip()
-        if summary:
-            out["text"] = (out["text"] + ("\n\n" if out["text"] else "")
-                           + summary).strip()
-        if result.get("navigate"):
-            out["navigate"] = result["navigate"]
-        out["action_done"] = bool(result.get("ok"))
+        prop = result.get("proposed")
+        if prop:
+            # Rien n'est exécuté : la carte Confirmer/Annuler suit la
+            # réponse (déposée par l'appelant, APRÈS le tour, pour que
+            # le fil garde l'ordre réponse → carte).
+            out["proposed"] = prop
+            if not out["text"]:
+                out["text"] = "Je te l'ai préparé — confirme ci-dessous."
+        else:
+            summary = (result.get("summary") or "").strip()
+            if summary:
+                out["text"] = (out["text"] + ("\n\n" if out["text"] else "")
+                               + summary).strip()
+            if result.get("navigate"):
+                out["navigate"] = result["navigate"]
+            out["action_done"] = bool(result.get("ok"))
     if not out["text"]:
         out["text"] = "…"
     return out
@@ -925,6 +1015,20 @@ def stream_reply(app_state, user_id: str, question: str,
     append_turn(user_id, question, final["text"])
 
     done: dict[str, Any] = {"type": "done", "text": final["text"]}
+    prop = final.get("proposed")
+    if prop:
+        # La carte suit la réponse dans le fil (ordre : réponse → carte).
+        # Pas de pastille : l'utilisateur est déjà dans le volet.
+        deposit_proposal_message(user_id, prop, bump=False)
+        done["proposed"] = {
+            "id": prop.get("id") or "",
+            "do": prop.get("do") or "",
+            "title": prop.get("title") or "",
+            "preview": prop.get("preview"),
+            "status": prop.get("status") or "pending",
+            "created_at": prop.get("created_at") or "",
+            "result_summary": "",
+        }
     if final.get("navigate"):
         done["navigate"] = final["navigate"]
     if final.get("action_done") is not None:
@@ -1043,7 +1147,7 @@ def send_blocking(app_state, user_id: str, question: str,
         return {"ok": False, "text": "", "error": "Réponse vide de l'IA."}
     out = {"ok": True, "text": final.get("text") or ""}
     for k in ("navigate", "action_done", "sent_to_thomas", "memorized",
-              "forgotten"):
+              "forgotten", "proposed"):
         if k in final:
             out[k] = final[k]
     return out

@@ -448,6 +448,66 @@ def gather_voice_context(app_state) -> dict[str, Any]:
     except Exception as exc:
         logger.debug("voice ctx funnel: %s", exc)
 
+    # Brouillons en attente + réponses reçues, AVEC leurs ids : c'est ce
+    # qui permet à l'assistant de viser approve_draft / reject_draft /
+    # reply_prospect sans rien inventer. Volontairement courts (le
+    # snapshot est déjà gros) — le détail vit sur les écrans de l'app.
+    def _cut(s, n):
+        s = " ".join(str(s or "").split())
+        return s[:n] + ("…" if len(s) > n else "")
+
+    api_inst = None
+    try:
+        from ..web.api import get_api_instance
+        api_inst = get_api_instance()
+    except Exception:
+        api_inst = None
+    if api_inst is not None:
+        try:
+            d_rows = (api_inst.get_drafts() or {}).get("rows") or []
+            ctx["pending_drafts"] = [
+                {
+                    "id": r.get("id") or "",
+                    "source": r.get("source") or "prospect",
+                    "to_name": r.get("name") or "",
+                    "to_email": r.get("email") or "",
+                    "subject": _cut(r.get("subject"), 90),
+                    "preview": _cut(r.get("body"), 120),
+                    "kind": r.get("kind") or "",
+                }
+                for r in d_rows[:12] if r.get("id")
+            ]
+            if len(d_rows) > 12:
+                ctx["pending_drafts_total"] = len(d_rows)
+        except Exception as exc:
+            logger.debug("voice ctx drafts: %s", exc)
+        try:
+            rep = api_inst.get_replies({"category": "all"}) or {}
+            r_rows = rep.get("rows") or []
+            r_pros = rep.get("prospects") or {}
+            out_replies = []
+            for r in r_rows[:12]:
+                if not r.get("id"):
+                    continue
+                extra = r.get("extra") or {}
+                sug = extra.get("suggested_reply") or {}
+                pro = r_pros.get(r.get("prospect_id")) or {}
+                out_replies.append({
+                    "id": r.get("id"),
+                    "from": extra.get("from") or "",
+                    "prospect_name": pro.get("name") or "",
+                    "category": ((extra.get("classification") or {})
+                                 .get("category") or "unknown"),
+                    "subject": _cut(r.get("subject"), 90),
+                    "excerpt": _cut(extra.get("body_excerpt"), 140),
+                    "at": (r.get("ts") or "")[:16],
+                    "suggested_reply_ready": (
+                        (sug.get("status") or "") == "pending"),
+                })
+            ctx["recent_replies"] = out_replies
+        except Exception as exc:
+            logger.debug("voice ctx replies: %s", exc)
+
     return ctx
 
 
@@ -592,7 +652,7 @@ def chat_with_claude(app_state, *, question: str,
         logger.debug("convo missions context: %s", exc)
 
     full_prompt = (CONVO_SYSTEM_PROMPT + "\n\n---\n\n"
-                   + ASSISTANT_ACTIONS_PROMPT + "\n\n---\n\n"
+                   + _actions_prompt_for_voice() + "\n\n---\n\n"
                    + context_block + "\n\n---\n\n"
                    + "\n\n".join(convo_parts))
 
@@ -638,38 +698,22 @@ def chat_with_claude(app_state, *, question: str,
 # ═══════════════════════════════════════════════════════════════
 # L'assistant AGIT — protocole d'action du mode conversation
 # ═══════════════════════════════════════════════════════════════
-ASSISTANT_ACTIONS_PROMPT = """TU PEUX AGIR SUR L'APP (pas seulement répondre).
-
-Quand Jordan te demande de FAIRE quelque chose, tu termines ta réponse par
-UNE seule ligne de commande, invisible pour lui :
-[ACTION:{"do":"...", ...}]
-
-Actions disponibles :
-1. Lancer une prospection complète (recherche → base → Auto-pilote) :
-   [ACTION:{"do":"start_prospection","source":"pme","params":{"metier":"plombier","departement":"71","volume":30},"dry_run":false}]
-   - source "pme" (PME françaises) → params {metier, departement?, code_postal?, volume}
-   - source "local" (commerces Google Maps) → params {metier, zone, volume}
-   - source "createurs" (YouTube/Twitch) → params {niche, plateformes:["youtube"], volume}
-   - "dry_run":true = TEST À BLANC (rien n'est enregistré, juste un rapport).
-2. Allumer / éteindre l'Auto-pilote :
-   [ACTION:{"do":"toggle_autopilot","enabled":true}]
-3. Abandonner une mission : [ACTION:{"do":"cancel_mission","id":"abc123"}]
-4. Ouvrir un écran pour Jordan :
-   [ACTION:{"do":"navigate","view":"prospection"}]
-   (vues : prospection, prospects_crm, drafts, replies, autopilot, convoy,
-    health, funnel, revenue, mails, catalogue, obelisk)
-
-RÈGLES DE PRUDENCE (non négociables) :
-- Une action RÉELLE qui écrit ou lance des machines (start_prospection sans
-  dry_run, toggle_autopilot) : tu l'exécutes UNIQUEMENT si Jordan l'a
-  demandée clairement. S'il est vague (« on devrait prospecter »), tu
-  proposes d'abord — et tu peux suggérer le test à blanc.
-- En cas de doute sur les paramètres (quel métier ? quelle zone ?), tu
-  POSES LA QUESTION au lieu d'inventer.
-- JAMAIS plus d'une action par tour. Le tag en DERNIÈRE ligne, JSON valide.
-- Après le tag, rien. Le système exécute et colle la confirmation à ta voix.
-- Tu n'annonces jamais le tag ni son contenu technique : tu parles
-  naturellement (« C'est parti, je lance ça » + le tag)."""
+def _actions_prompt_for_voice() -> str:
+    """Le bloc « TU PEUX AGIR » du prompt vocal — généré depuis le registre
+    central (copilot_actions), donc toujours fidèle au catalogue ET au
+    curseur de confiance de l'utilisateur courant. Sans registre (panne,
+    import impossible), l'assistant n'expose pas le protocole d'action :
+    il dégrade en simple conseiller."""
+    try:
+        from . import copilot, copilot_actions
+        user_id = copilot.current_user_id()
+        name = copilot._display_name(user_id)
+        return (copilot_actions.build_actions_prompt(user_id)
+                .replace("{PRENOM}", name))
+    except Exception as exc:
+        logger.warning("actions prompt vocal indisponible: %s", exc)
+        return ("TU NE PEUX PAS AGIR CE TOUR-CI (catalogue d'actions "
+                "indisponible) : réponds normalement, sans tag [ACTION:].")
 
 
 def _extract_action(raw: str):
@@ -700,74 +744,30 @@ _ALLOWED_NAV_VIEWS = {
 
 
 def execute_assistant_action(action: dict) -> dict:
-    """Exécute une action de l'assistant — liste blanche stricte.
+    """Exécute une action de l'assistant — délègue au registre central
+    (copilot_actions : liste blanche, curseur de confiance, journal).
 
+    Canal vocal et anciens points d'entrée : si le curseur exige une
+    confirmation, RIEN n'est exécuté — la proposition part dans le fil
+    écrit du copilote (carte Confirmer/Annuler) et la voix l'annonce.
     Renvoie {ok, summary (français, parlé), navigate?}. Ne lève jamais.
     """
-    do = (action or {}).get("do") or ""
     try:
-        from ..web.api import get_api_instance
-        api = get_api_instance()
-
-        if do == "navigate":
-            view = (action.get("view") or "").strip()
-            if view in _ALLOWED_NAV_VIEWS:
-                return {"ok": True, "summary": "", "navigate": view}
-            return {"ok": False, "summary": "(écran inconnu)"}
-
-        if api is None:
-            return {"ok": False,
-                    "summary": "Le serveur démarre encore — redemande dans "
-                               "une minute."}
-
-        if do == "start_prospection":
-            r = api.prospection_start({
-                "source": action.get("source") or "",
-                "params": action.get("params") or {},
-                "dry_run": bool(action.get("dry_run")),
-            })
-            if r.get("ok"):
-                label = ((r.get("mission") or {}).get("label") or "")
-                mode = ("Test à blanc lancé" if action.get("dry_run")
-                        else "Mission lancée")
-                return {"ok": True,
-                        "summary": f"{mode} : {label}. Je suivrai "
-                                   f"l'avancée — tu verras tout sur l'écran "
-                                   f"Prospection.",
-                        "navigate": "prospection"}
-            return {"ok": False,
-                    "summary": f"Impossible de lancer : {r.get('error')}"}
-
-        if do == "toggle_autopilot":
-            enabled = bool(action.get("enabled"))
-            from triskell_core.prospect.pipeline import PipelineConfig
-            cfg = PipelineConfig.load()
-            if enabled:
-                modes = (api.autopilot_get_stage_modes() or {}).get("modes") or {}
-                if modes.get("send") == "auto":
-                    # Garde-fou : l'envoi AUTO ne s'allume pas à la voix.
-                    return {"ok": False,
-                            "summary": "L'envoi est réglé sur AUTOMATIQUE — "
-                                       "par sécurité je ne l'allume pas d'ici. "
-                                       "Va sur l'écran Prospection, le bouton "
-                                       "te demandera confirmation.",
-                            "navigate": "prospection"}
-            cfg.enabled = enabled
-            cfg.save()
+        from . import copilot, copilot_actions
+        user_id = copilot.current_user_id()
+        result = copilot_actions.execute_action(
+            action or {}, user_id=user_id, channel="vocal") or {}
+        prop = result.get("proposed")
+        if prop:
+            copilot.deposit_proposal_message(user_id, prop)
             return {"ok": True,
-                    "summary": ("Auto-pilote allumé — il préparera des "
-                                "brouillons à valider." if enabled
-                                else "Auto-pilote éteint.")}
-
-        if do == "cancel_mission":
-            r = api.prospection_mission_cancel({"id": action.get("id") or ""})
-            return {"ok": bool(r.get("ok")),
-                    "summary": ("Mission abandonnée." if r.get("ok")
-                                else f"Échec : {r.get('error')}")}
-
-        return {"ok": False, "summary": "(action inconnue, rien fait)"}
+                    "summary": "Je t'ai préparé ça — ouvre le volet de "
+                               "discussion (bouton 💬) et confirme : rien "
+                               "ne part sans ton accord écrit."}
+        return result
     except Exception as exc:
-        logger.warning("assistant action %s: %s", do, exc)
+        logger.warning("assistant action %s: %s",
+                       (action or {}).get("do"), exc)
         return {"ok": False, "summary": f"L'action a échoué : {exc}"}
 
 
