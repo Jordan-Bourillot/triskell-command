@@ -16,6 +16,7 @@ Méthodes principales :
   - get_client_360(client_id) → dict avec compteurs agrégés
   - get_client_timeline(client_id) → list d'événements (intakes, factures, mails)
   - update_client(client_id, **patch) → bool
+  - add_tag(client_id, tag) / remove_tag(client_id, tag) → bool
 """
 from __future__ import annotations
 
@@ -337,8 +338,14 @@ def get_client_timeline(client_id: str, *, limit: int = 100,
 # Modifications
 # ---------------------------------------------------------------------------
 def update_client(client_id: str, **patch: Any) -> bool:
-    """Met à jour les champs fournis (whitelisting des colonnes autorisées)."""
+    """Met à jour les champs fournis (whitelisting des colonnes autorisées).
+
+    L'email est accepté mais contrôlé : format valide + unicité (jamais
+    deux fiches avec le même email). En cas de refus → ValueError avec
+    un message en français, remonté tel quel à l'interface.
+    """
     allowed = {
+        "email",
         "first_name", "last_name", "phone",
         "is_pro", "company_name", "siret", "vat_number",
         "address_line1", "address_line2", "address_zip", "address_city",
@@ -352,6 +359,29 @@ def update_client(client_id: str, **patch: Any) -> bool:
     sb = _sb()
     if sb is None:
         return False
+
+    if "email" in clean:
+        email = (clean.get("email") or "").strip().lower()
+        if not email or "@" not in email or "." not in email.split("@")[-1]:
+            raise ValueError("Adresse email invalide.")
+        # ilike = match exact insensible à la casse ; % et _ sont des
+        # jokers LIKE → on les échappe pour comparer le texte littéral
+        # (les _ sont courants dans les adresses).
+        pattern = (email.replace("\\", "\\\\")
+                   .replace("%", "\\%").replace("_", "\\_"))
+        try:
+            existing = (sb.table("clients").select("id")
+                        .ilike("email", pattern).limit(2).execute().data) or []
+        except Exception as exc:
+            logger.warning("update_client (vérif email): %s", exc)
+            raise ValueError(
+                "Impossible de vérifier l'email — réessaie dans un instant.")
+        others = [r for r in existing if str(r.get("id")) != str(client_id)]
+        if others:
+            raise ValueError(
+                "Cette adresse email est déjà utilisée par une autre fiche client.")
+        clean["email"] = email
+
     try:
         sb.table("clients").update(clean).eq("id", client_id).execute()
         return True
@@ -369,4 +399,16 @@ def add_tag(client_id: str, tag: str) -> bool:
     if tag in tags:
         return True
     tags = list(tags) + [tag]
+    return update_client(client_id, tags=tags)
+
+
+def remove_tag(client_id: str, tag: str) -> bool:
+    """Retire un tag de la liste (idempotent, miroir de add_tag)."""
+    client = get_client(client_id)
+    if not client:
+        return False
+    tags = client.get("tags") or []
+    if tag not in tags:
+        return True
+    tags = [t for t in tags if t != tag]
     return update_client(client_id, tags=tags)

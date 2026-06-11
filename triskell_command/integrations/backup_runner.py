@@ -251,6 +251,23 @@ def read_backup(filename: str) -> dict | None:
         return None
 
 
+def read_backup_raw(filename: str) -> bytes | None:
+    """Lit les octets bruts d'un backup (téléchargement à l'identique).
+    Mêmes protections de chemin que read_backup."""
+    if not filename or "/" in filename or ".." in filename or "\\" in filename:
+        return None   # paranoïa path traversal
+    if not filename.endswith(".json"):
+        return None
+    p = _backups_dir() / filename
+    if not p.exists():
+        return None
+    try:
+        return p.read_bytes()
+    except Exception as exc:
+        logger.warning("read_backup_raw: %s", exc)
+        return None
+
+
 def start_worker(app_state):
     """Lance le thread background. Idempotent."""
     global _worker_thread

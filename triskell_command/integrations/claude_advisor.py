@@ -814,11 +814,14 @@ def _extract_chat_to_thomas(raw: str) -> tuple[str, bool]:
 
 
 def ask_claude(app_state, *, mode: str = "interactive",
-                user_question: Optional[str] = None) -> dict[str, Any]:
+                user_question: Optional[str] = None,
+                history: Optional[list] = None) -> dict[str, Any]:
     """Appelle Claude avec le contexte courant. Renvoie le dict de conseil.
 
     `mode`  : "interactive" (Jordan a cliqué) ou "proactive" (worker).
     `user_question` : question libre si Jordan veut creuser un sujet.
+    `history` : tours précédents du mode texte ([{role, content}, ...]) —
+                permet les questions de suite (« et ensuite ? »).
     """
     out = {
         "ok": False,
@@ -849,6 +852,24 @@ def ask_claude(app_state, *, mode: str = "interactive",
         user_msg_parts.append(
             "Mode : Jordan a cliqué « Allô Claude ». Donne-lui sa "
             "prochaine action concrète."
+        )
+
+    # Tours précédents de la conversation texte (10 max, même mécanique
+    # que le mode vocal) : sans eux, « et ensuite ? » repartait de zéro.
+    convo_parts: list[str] = []
+    for turn in (history or [])[-10:]:
+        if not isinstance(turn, dict):
+            continue
+        role = (turn.get("role") or "user").lower()
+        content = (turn.get("content") or "").strip()
+        if not content:
+            continue
+        speaker = "Jordan" if role == "user" else "Toi (Claude)"
+        convo_parts.append(f"{speaker} : {content}")
+    if convo_parts:
+        user_msg_parts.append(
+            "Conversation en cours (tours précédents) :\n"
+            + "\n".join(convo_parts)
         )
 
     if user_question:

@@ -33,14 +33,17 @@ const Obelisk = {
   // il ne doit JAMAIS faire apparaître un bouton de suppression).
   _FILTER_KEYS: ['q', 'platform', 'status', 'has_email', 'country', 'job_id',
                  'exported', 'contacted', 'city', 'audience'],
-  // Filtres que le serveur sait vraiment appliquer à la suppression filtrée
-  // (cf. obelisk_delete_creators_filtered côté serveur)…
-  _DELETE_FILTER_KEYS: ['platform', 'status', 'q', 'has_email', 'audience', 'city'],
-  // …et ceux qu'il IGNORE : si l'un d'eux est actif, proposer la suppression
-  // filtrée supprimerait BIEN PLUS que ce qui est affiché. On masque.
-  _DELETE_UNSUPPORTED_KEYS: ['job_id', 'country', 'exported', 'contacted'],
-  // L'export, lui, ignore "exported" et "contacted" → boutons désactivés.
-  _EXPORT_UNSUPPORTED_KEYS: ['exported', 'contacted'],
+  // Filtres que le serveur sait appliquer à la suppression filtrée
+  // (cf. obelisk_delete_creators_filtered côté serveur). Depuis le
+  // 11/06/2026 il honore TOUS les filtres de la vue.
+  _DELETE_FILTER_KEYS: ['platform', 'status', 'q', 'has_email', 'audience',
+                        'city', 'job_id', 'country', 'exported', 'contacted'],
+  // Garde-fou : filtres que le serveur IGNORERAIT à la suppression. Si un
+  // nouveau filtre arrive un jour côté UI sans son pendant serveur, le
+  // remettre ici → le bouton destructeur se masque tout seul.
+  _DELETE_UNSUPPORTED_KEYS: [],
+  // Même mécanisme pour l'export (le serveur honore tout depuis le 11/06/2026).
+  _EXPORT_UNSUPPORTED_KEYS: [],
 
   _AUDIENCE_KEY: 'obelisk-search-audience',
   _LIST_AUDIENCE_KEY: 'obelisk-list-audience',
@@ -921,11 +924,11 @@ const Obelisk = {
 
     // Persistance du toggle "Type" (Tous / Créateurs / Pros)
     const listAud = this._getListAudience();
-    // L'export ne sait pas filtrer sur "déjà exporté" / "déjà contacté" :
-    // si l'un de ces filtres est actif, le fichier sorti ne correspondrait
-    // pas à la liste affichée → boutons désactivés avec explication.
+    // Garde-fou dormant : si un filtre listé dans _EXPORT_UNSUPPORTED_KEYS
+    // est actif, les boutons d'export se désactivent avec explication
+    // (liste vide aujourd'hui — le serveur honore tous les filtres).
     const exportBlocked = this._activeAmong(this._EXPORT_UNSUPPORTED_KEYS).length > 0;
-    const exportBlockTitle = 'Indisponible avec les filtres « Export » ou « Contact » : le fichier exporté ne saurait pas les respecter et serait différent de la liste affichée.';
+    const exportBlockTitle = 'Indisponible avec un des filtres en cours : le fichier exporté ne saurait pas le respecter et serait différent de la liste affichée.';
 
     c.innerHTML = `
       <div class="ob-audience-toggle" role="tablist" aria-label="Type de prospect">
@@ -972,6 +975,7 @@ const Obelisk = {
         <select id="ob-f-sort" aria-label="Ordre de tri" title="Ordre de tri de la liste">
           <option value="subs_desc" ${(!this.state.filters.sort_by || this.state.filters.sort_by === 'subs_desc' || this.state.filters.sort_by === 'score') ? 'selected' : ''}>Tri : Abonnés (+ → -)</option>
           <option value="subs_asc" ${this.state.filters.sort_by === 'subs_asc' ? 'selected' : ''}>Tri : Abonnés (- → +)</option>
+          <option value="created_desc" ${this.state.filters.sort_by === 'created_desc' ? 'selected' : ''}>Tri : Arrivés récemment</option>
         </select>
       </div>
 
@@ -1091,7 +1095,7 @@ const Obelisk = {
   // sans re-render (appelé à chaque changement de filtre).
   _syncExportButtons() {
     const blocked = this._activeAmong(this._EXPORT_UNSUPPORTED_KEYS).length > 0;
-    const blockTitle = 'Indisponible avec les filtres « Export » ou « Contact » : le fichier exporté ne saurait pas les respecter et serait différent de la liste affichée.';
+    const blockTitle = 'Indisponible avec un des filtres en cours : le fichier exporté ne saurait pas le respecter et serait différent de la liste affichée.';
     [['ob-export-xlsx', 'Télécharger la liste filtrée en Excel'],
      ['ob-export-pdf',  'Télécharger la liste filtrée en PDF']].forEach(([id, normalTitle]) => {
       const b = document.getElementById(id);
@@ -1327,16 +1331,23 @@ const Obelisk = {
         if (res) Toast.friendlyError(res.error, 'Le fichier n’a pas pu être importé.');
         return;
       }
-      // Bilan détaillé : ajoutés / fusionnés / refusés
-      const added   = res.inserted   || 0;
-      const merged  = res.duplicates || 0;
+      // Bilan détaillé : ajoutés / fusionnés / écartés (déjà client,
+      // désinscrit — détail renvoyé par le serveur) / refusés
+      const added   = res.inserted       || 0;
+      const merged  = res.duplicates     || 0;
+      const clients = res.already_client || 0;
+      const unsub   = res.unsubscribed   || 0;
       const refused = (res.skipped || 0) + (res.errors || 0);
       const totalRead = res.total || 0;
-      const detail =
-        `${added} ajouté${added > 1 ? 's' : ''} · ` +
-        `${merged} fusionné${merged > 1 ? 's' : ''} (déjà connus) · ` +
-        `${refused} refusé${refused > 1 ? 's' : ''} (lignes vides, incomplètes ou en erreur) — ` +
-        `${totalRead} ligne${totalRead > 1 ? 's' : ''} lue${totalRead > 1 ? 's' : ''}.`;
+      const parts = [
+        `${added} ajouté${added > 1 ? 's' : ''}`,
+        `${merged} fusionné${merged > 1 ? 's' : ''} (déjà connus)`,
+      ];
+      if (clients) parts.push(`${clients} écarté${clients > 1 ? 's' : ''} (déjà client${clients > 1 ? 's' : ''})`);
+      if (unsub)   parts.push(`${unsub} écarté${unsub > 1 ? 's' : ''} (désinscrit${unsub > 1 ? 's' : ''})`);
+      if (refused) parts.push(`${refused} refusé${refused > 1 ? 's' : ''} (lignes vides, incomplètes ou en erreur)`);
+      const detail = parts.join(' · ') +
+        ` — ${totalRead} ligne${totalRead > 1 ? 's' : ''} lue${totalRead > 1 ? 's' : ''}.`;
       if (added > 0) Toast.success(detail, 'Import terminé');
       else Toast.warn(detail, 'Import terminé — rien d’ajouté');
       // Recharge stats + vue complète (l'import peut partir de l'écran
@@ -1355,10 +1366,9 @@ const Obelisk = {
 
   // ── Export Excel / PDF (depuis les filtres en cours) ──────────────
   async _exportList(format) {
-    // Le serveur ne sait pas filtrer l'export sur "déjà exporté" /
-    // "déjà contacté" : le fichier ne correspondrait pas à la liste.
+    // Garde-fou dormant (cf. _EXPORT_UNSUPPORTED_KEYS — vide aujourd'hui).
     if (this._activeAmong(this._EXPORT_UNSUPPORTED_KEYS).length > 0) {
-      Toast.warn('Retire d’abord les filtres « Export » et « Contact » : l’export ne sait pas les respecter.');
+      Toast.warn('Retire d’abord ce filtre : l’export ne sait pas le respecter.');
       return;
     }
     const btn = document.getElementById(format === 'xlsx' ? 'ob-export-xlsx' : 'ob-export-pdf');
@@ -1384,6 +1394,8 @@ const Obelisk = {
         country:   f.country   || '',
         job_id:    f.job_id    || '',
         audience:  f.audience  || '',
+        exported:  f.exported  || '',
+        contacted: f.contacted || '',
       };
       if (limit) payload.limit = limit;
       const res = await this._api('export', payload);
@@ -1721,9 +1733,8 @@ const Obelisk = {
     const hasFilters = this._hasActiveFilters();
     // « Supprimer les résultats filtrés » n'est proposé QUE si tous les
     // filtres actifs sont ceux que le serveur sait appliquer à la
-    // suppression. Avec un filtre non géré (recherche récente, pays,
-    // exportés, contactés), le serveur supprimerait BIEN PLUS que la liste
-    // affichée → bouton masqué.
+    // suppression (tous aujourd'hui — _DELETE_UNSUPPORTED_KEYS est le
+    // garde-fou dormant si un filtre orphelin réapparaît un jour).
     const supportedOn   = this._activeAmong(this._DELETE_FILTER_KEYS);
     const unsupportedOn = this._activeAmong(this._DELETE_UNSUPPORTED_KEYS);
     const canDeleteFiltered = supportedOn.length > 0 && unsupportedOn.length === 0 && total > 0;
@@ -1802,10 +1813,10 @@ const Obelisk = {
       return;
     }
     if (action === 'delete-filtered') {
-      // Garde-fou : on revérifie qu'aucun filtre NON géré par le serveur
-      // n'est actif (sinon il supprimerait bien plus que l'affiché).
+      // Garde-fou dormant : on revérifie qu'aucun filtre NON géré par le
+      // serveur n'est actif (liste vide aujourd'hui — il les honore tous).
       if (this._activeAmong(this._DELETE_UNSUPPORTED_KEYS).length > 0) {
-        Toast.warn('Ce type de filtre (recherche récente, pays, exportés, contactés) ne peut pas servir à une suppression groupée.');
+        Toast.warn('Ce filtre ne peut pas servir à une suppression groupée.');
         return;
       }
       const supportedOn = this._activeAmong(this._DELETE_FILTER_KEYS);

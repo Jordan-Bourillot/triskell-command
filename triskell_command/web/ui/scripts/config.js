@@ -213,9 +213,12 @@ const Config = {
                   <td class="py-2 font-mono text-text">${this._esc(b.filename)}</td>
                   <td class="py-2 text-text-muted">${(b.ts || '').slice(0, 16).replace('T', ' ')}</td>
                   <td class="py-2 text-right text-text-muted">${Math.round(b.size_bytes / 1024)} Ko</td>
-                  <td class="py-2 text-right">
+                  <td class="py-2 text-right whitespace-nowrap">
                     <button data-backup-preview="${this._esc(b.filename)}"
                             class="text-[11px] text-accent hover:underline">Voir le contenu</button>
+                    <button data-backup-download="${this._esc(b.filename)}"
+                            class="text-[11px] text-accent hover:underline ml-3"
+                            title="Récupérer ce fichier de sauvegarde sur cet appareil">Télécharger</button>
                   </td>
                 </tr>
               `).join('')}
@@ -224,6 +227,9 @@ const Config = {
         `;
         list.querySelectorAll('[data-backup-preview]').forEach(pb => {
           pb.onclick = () => this._openBackupPreview(pb.dataset.backupPreview);
+        });
+        list.querySelectorAll('[data-backup-download]').forEach(db => {
+          db.onclick = () => this._downloadBackup(db, db.dataset.backupDownload);
         });
       } catch (e) {
         console.warn('backup_list :', e);
@@ -309,6 +315,37 @@ const Config = {
     document.addEventListener('keydown', esc);
     overlay.querySelector('#bkp-close').onclick = close;
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  },
+
+  /** Télécharge un fichier de sauvegarde tel quel (JSON) sur l'appareil. */
+  async _downloadBackup(btn, filename) {
+    if (!App.api || !filename) return;
+    const original = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Préparation…'; }
+    try {
+      const r = await App.api.backup_download({ filename });
+      if (!r || !r.ok || !r.b64) {
+        Toast.error((r && r.error) || 'Impossible de récupérer cette sauvegarde.');
+        return;
+      }
+      const bin = atob(r.b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: r.mime || 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = r.filename || filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      Toast.success('La sauvegarde est téléchargée.');
+    } catch (e) {
+      Toast.friendlyError(e, 'Impossible de récupérer cette sauvegarde.');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = original; }
+    }
   },
 
   _renderDemoMode() {

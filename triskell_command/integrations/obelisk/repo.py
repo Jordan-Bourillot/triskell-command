@@ -168,7 +168,8 @@ def list_creators(*,
       - contacted  : "yes" → uniquement ceux déjà contactés par mail ;
                      "no" → ceux jamais contactés ;
                      "" (défaut) → tout
-      - sort_by    : "score" (défaut, décroissant), "subs_desc", "subs_asc"
+      - sort_by    : "score" (défaut, décroissant), "subs_desc", "subs_asc",
+                     "created_desc" (les plus récents d'abord)
       - audience   : "creator" → uniquement les prospects dont platform_url
                      matche une plateforme créateur connue (YouTube, Twitch,
                      GitHub, LinkedIn, Instagram, TikTok…) ;
@@ -259,12 +260,14 @@ def list_creators(*,
             qy = qy.not_.is_("last_contact_at", "null")
         elif contacted == "no":
             qy = qy.is_("last_contact_at", "null")
-        # Ordre : score (défaut), abonnés desc/asc
+        # Ordre : score (défaut), abonnés desc/asc, arrivée récente
         sb_sort = (sort_by or "").strip().lower()
         if sb_sort == "subs_desc":
             qy = qy.order("subscribers", desc=True, nullsfirst=False).order("score", desc=True)
         elif sb_sort == "subs_asc":
             qy = qy.order("subscribers", desc=False, nullsfirst=False).order("score", desc=True)
+        elif sb_sort == "created_desc":
+            qy = qy.order("created_at", desc=True).order("score", desc=True)
         else:
             qy = qy.order("score", desc=True).order("updated_at", desc=True)
         qy = qy.range(offset, offset + max(0, limit - 1))
@@ -723,9 +726,15 @@ def delete_creators_filtered(*,
                               city: str = "",
                               q: str = "",
                               has_email: Optional[bool] = None,
-                              audience: str = "") -> dict:
+                              audience: str = "",
+                              country: str = "",
+                              job_id: str = "",
+                              exported: str = "",
+                              contacted: str = "") -> dict:
     """Supprime tous les créateurs qui matchent les filtres donnés.
     Réutilise list_creators pour récupérer les IDs, puis delete_bulk.
+    Honore TOUS les filtres de la vue (sinon « supprimer les résultats
+    filtrés » pourrait toucher bien plus large que ce qui est affiché).
 
     Renvoie {ok, deleted, matched}.
     """
@@ -737,6 +746,8 @@ def delete_creators_filtered(*,
         page = list_creators(platform=platform, status=status,
                               min_score=min_score, city=city, q=q,
                               has_email=has_email, audience=audience,
+                              country=country, job_id=job_id,
+                              exported=exported, contacted=contacted,
                               limit=page_size, offset=offset)
         rows = (page or {}).get("rows") or []
         if not rows:

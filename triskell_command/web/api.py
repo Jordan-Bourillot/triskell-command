@@ -250,11 +250,15 @@ class Api:
     # ------------------------------------------------------------------
     def claude_ask(self, payload: dict) -> dict:
         question = (payload or {}).get("question") or None
+        history = (payload or {}).get("history") or []
+        if not isinstance(history, list):
+            history = []
         try:
             from ..integrations import claude_advisor
             return claude_advisor.ask_claude(
                 self._app_state, mode="interactive",
                 user_question=question,
+                history=history,
             )
         except Exception as exc:
             logger.warning("claude_ask: %s", exc)
@@ -1700,6 +1704,10 @@ class Api:
             from ..integrations import clients_master_repo as cm
             ok = cm.update_client(cid, **patch)
             return {"ok": ok}
+        except ValueError as exc:
+            # Refus métier (email invalide / déjà pris) — message français
+            # écrit pour être affiché tel quel à l'utilisateur.
+            return {"ok": False, "error": str(exc), "user_message": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -1712,6 +1720,20 @@ class Api:
         try:
             from ..integrations import clients_master_repo as cm
             ok = cm.add_tag(cid, tag)
+            return {"ok": ok}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def client_master_remove_tag(self, payload: dict) -> dict:
+        """Retire un tag d'une fiche client (miroir de add_tag)."""
+        p = payload or {}
+        cid = (p.get("id") or "").strip()
+        tag = (p.get("tag") or "").strip()
+        if not cid or not tag:
+            return {"ok": False, "error": "id et tag requis"}
+        try:
+            from ..integrations import clients_master_repo as cm
+            ok = cm.remove_tag(cid, tag)
             return {"ok": ok}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -3707,6 +3729,31 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def backup_download(self, payload: dict) -> dict:
+        """Renvoie le contenu complet d'une sauvegarde, encodé en base64 —
+        le front le transforme en téléchargement. Octets identiques au
+        fichier sur le disque du serveur (lecture brute protégée contre
+        les chemins forgés)."""
+        p = payload or {}
+        filename = (p.get("filename") or "").strip()
+        if not filename:
+            return {"ok": False, "error": "filename manquant"}
+        try:
+            from ..integrations import backup_runner
+            raw = backup_runner.read_backup_raw(filename)
+            if raw is None:
+                return {"ok": False, "error": "Sauvegarde introuvable"}
+            import base64
+            return {
+                "ok": True,
+                "filename": filename,
+                "mime": "application/json",
+                "b64": base64.b64encode(raw).decode("ascii"),
+                "size_bytes": len(raw),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ------------------------------------------------------------------
     # Signalement de bug (depuis le bouton flottant côté front)
     # ------------------------------------------------------------------
@@ -3858,6 +3905,36 @@ class Api:
                 q = q.eq("extra->>account_id", account_id)
             mails = q.execute().data or []
             return {"ok": True, "mails": mails}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def mail_mark_read(self, payload: dict) -> dict:
+        """Marque un mail comme lu côté serveur (extra.read_at sur
+        email_history) — partagé entre appareils. Avant : mémoire du
+        navigateur seulement, donc un mail lu sur le PC restait « non lu »
+        sur le téléphone."""
+        p = payload or {}
+        mid = str(p.get("id") or "").strip()
+        if not mid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            client = self._supabase()
+            if not client:
+                return {"ok": False, "error": "Base partagée non connectée"}
+            sb = client.raw
+            rows = (sb.table("email_history").select("id, extra")
+                    .eq("id", mid).limit(1).execute().data) or []
+            if not rows:
+                return {"ok": False, "error": "mail introuvable"}
+            extra = rows[0].get("extra") or {}
+            if not isinstance(extra, dict):
+                extra = {}
+            if extra.get("read_at"):
+                return {"ok": True, "already": True}
+            from datetime import datetime, timezone
+            extra["read_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            sb.table("email_history").update({"extra": extra}).eq("id", mid).execute()
+            return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -4397,6 +4474,22 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def pixelpros_mark_contact_handled(self, payload: dict) -> dict:
+        """Marque un message de contact / demande de rappel comme « traité »
+        côté serveur (payload : { id, handled?: bool=true }). Partagé entre
+        appareils — remplace l'ancienne mémoire locale du navigateur."""
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid:
+            return {"ok": False, "error": "id manquant"}
+        handled = (payload or {}).get("handled")
+        handled = True if handled is None else bool(handled)
+        try:
+            from ..integrations.pixelpros import repo as r
+            ok, msg = r.mark_contact_handled(iid, handled=handled)
+            return {"ok": bool(ok), "message": msg} if ok else {"ok": False, "error": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def pixelpros_update_data(self, payload: dict) -> dict:
         """Modifie des champs du formulaire (textes, listes) d'un intake.
 
@@ -4718,7 +4811,10 @@ class Api:
 
     def obelisk_delete_creators_filtered(self, payload: dict | None = None) -> dict:
         """Supprime tous les créateurs qui matchent les filtres en cours.
-        Filtres : platform, status, min_score, city, q, has_email."""
+        Honore TOUS les filtres de la vue : platform, status, min_score,
+        city, q, has_email, audience, country, job_id, exported, contacted
+        — sinon le bouton « Supprimer les résultats filtrés » toucherait
+        plus large que ce que l'écran affiche."""
         p = payload or {}
         has_email = p.get("has_email")
         if has_email == "yes":   has_email = True
@@ -4734,6 +4830,10 @@ class Api:
                 q=str(p.get("q") or "").strip(),
                 has_email=has_email,
                 audience=str(p.get("audience") or "").strip(),
+                country=str(p.get("country") or "").strip(),
+                job_id=str(p.get("job_id") or "").strip(),
+                exported=str(p.get("exported") or "").strip(),
+                contacted=str(p.get("contacted") or "").strip(),
             )
         except Exception as exc:
             return {"ok": False, "error": str(exc), "deleted": 0}
@@ -4823,7 +4923,8 @@ class Api:
             { "format": "xlsx" | "pdf",
               "platform": "", "status": "", "min_score": 0, "city": "",
               "q": "", "has_email": "yes"|"no"|"", "country": "",
-              "job_id": "" }
+              "job_id": "", "exported": "yes"|"no"|"",
+              "contacted": "yes"|"no"|"" }
 
         Renvoie {ok, filename, mime, b64, count}. Le front décode le b64 et
         déclenche un téléchargement.
@@ -4857,6 +4958,8 @@ class Api:
                 country=str(p.get("country") or "").strip(),
                 job_id=str(p.get("job_id") or "").strip(),
                 audience=str(p.get("audience") or "").strip(),
+                exported=str(p.get("exported") or "").strip(),
+                contacted=str(p.get("contacted") or "").strip(),
             )
             if not res.get("ok"):
                 return res
@@ -4896,12 +4999,18 @@ class Api:
         """Import d'un fichier Excel/CSV de prospects → table Supabase prospects.
 
         Payload : { filename, data (base64), industry? }
-        Réponse : { ok, inserted, skipped, duplicates, total, errors, error? }
+        Réponse : { ok, inserted, skipped, duplicates, already_client,
+                    unsubscribed, total, errors, error? }
 
         Le mapping des colonnes est auto-détecté à partir des en-têtes
         (suggest_mapping). Dédup sur (email principal) ou (website) pour
         éviter les doublons. L'industrie passée par l'UI est appliquée à
         toutes les lignes qui n'ont pas de colonne secteur mappée.
+
+        Détail des refus : une ligne dont l'email appartient à un prospect
+        désinscrit compte dans `unsubscribed` (jamais recontacté) ; une
+        ligne dont l'email est déjà un client compte dans `already_client`
+        (refusée par le verrou SQL `client_email_collision`).
         """
         import base64
         import tempfile
@@ -4980,6 +5089,8 @@ class Api:
             duplicates = 0
             skipped = 0
             errors = 0
+            already_client = 0
+            unsubscribed = 0
 
             for raw_row in rows:
                 try:
@@ -4999,17 +5110,22 @@ class Api:
                 industry = (prospect.industry or industry_override or "").strip()
 
                 # Dédup : si email ou website déjà connu, on saute.
+                # Cas particulier : la fiche existante est un DÉSINSCRIT →
+                # compté à part (la personne ne doit jamais être recontactée).
                 is_dup = False
+                is_unsub = False
                 try:
                     if emails:
                         first_email = emails[0].strip().lower()
                         if first_email:
                             res = (sb.table("prospects")
-                                   .select("id")
+                                   .select("id, status")
                                    .contains("emails", [first_email])
                                    .limit(1).execute())
                             if res.data:
                                 is_dup = True
+                                if (res.data[0].get("status") or "") == "unsubscribed":
+                                    is_unsub = True
                     if not is_dup and website:
                         wn = website.rstrip("/").lower()
                         if wn:
@@ -5025,6 +5141,9 @@ class Api:
                 except Exception as exc:
                     logger.warning("obelisk_import_file dedup: %s", exc)
 
+                if is_unsub:
+                    unsubscribed += 1
+                    continue
                 if is_dup:
                     duplicates += 1
                     continue
@@ -5074,17 +5193,29 @@ class Api:
                     sb.table("prospects").insert(row).execute()
                     inserted += 1
                 except Exception as exc:
-                    logger.warning("obelisk_import_file insert: %s", exc)
-                    errors += 1
+                    # Les verrous SQL refusent avec un message reconnaissable :
+                    #  - client_email_collision  → l'email est déjà un CLIENT
+                    #  - prospect_email_duplicate → doublon (email secondaire
+                    #    déjà présent, passé sous le radar de la dédup ci-dessus)
+                    msg = str(exc)
+                    if "client_email_collision" in msg:
+                        already_client += 1
+                    elif "prospect_email_duplicate" in msg:
+                        duplicates += 1
+                    else:
+                        logger.warning("obelisk_import_file insert: %s", exc)
+                        errors += 1
 
             return {
                 "ok": True,
-                "inserted":   inserted,
-                "duplicates": duplicates,
-                "skipped":    skipped,
-                "errors":     errors,
-                "total":      len(rows),
-                "filename":   source_label,
+                "inserted":       inserted,
+                "duplicates":     duplicates,
+                "already_client": already_client,
+                "unsubscribed":   unsubscribed,
+                "skipped":        skipped,
+                "errors":         errors,
+                "total":          len(rows),
+                "filename":       source_label,
             }
         finally:
             try:
@@ -6205,6 +6336,78 @@ class Api:
 
         out["delivrabilité"] = deliv
         return out
+
+    def worker_restart(self, payload: dict) -> dict:
+        """Relance un robot arrêté, par son id system_health (payload.name).
+
+        Sécurité : on ne relance QUE les threads morts. Si le robot tourne
+        encore, on ne touche à rien — un stop+start sur un thread vivant
+        risquerait de le tuer pour de bon (le drapeau d'arrêt resterait
+        posé pendant que le « start » voit l'ancien thread encore vivant).
+        Une erreur sur un robot qui tourne vient de son dernier passage :
+        il réessaiera tout seul au prochain cycle.
+        """
+        p = payload or {}
+        name = (p.get("name") or "").strip()
+        # id system_health → (module, fonction de démarrage, app_state requis)
+        restartable = {
+            "replies_poller":         ("replies_poller",         "start_poller", True),
+            "reply_responder":        ("reply_responder",        "start_worker", True),
+            "drip_runner":            ("drip_runner",            "start_worker", True),
+            "post_sale_runner":       ("post_sale_runner",       "start_worker", True),
+            "lead_to_client":         ("lead_to_client",         "start_worker", True),
+            "multichannel_followup":  ("multichannel_followup",  "start_worker", True),
+            "dormant_recycler":       ("dormant_recycler",       "start_worker", True),
+            "stripe_poller":          ("stripe_poller",          "start_worker", True),
+            "claude_proactive":       ("claude_proactive",       "start_worker", True),
+            "copilot_watch":          ("copilot_watch",          "start_worker", False),
+            "mission_runner":         ("mission_runner",         "start_worker", True),
+            "autopilot_runner":       ("autopilot_runner",       "start_worker", True),
+            "pixelpros.auto_builder": ("pixelpros.auto_builder", "start_worker", True),
+        }
+        entry = restartable.get(name)
+        if entry is None:
+            return {"ok": False,
+                    "error": ("Ce robot ne peut pas être relancé d'ici "
+                              "(il ne tourne pas sur ce serveur).")}
+        mod_name, starter, needs_state = entry
+        try:
+            mod = __import__(
+                f"triskell_command.integrations.{mod_name}",
+                fromlist=[starter, "get_status"],
+            )
+        except Exception as exc:
+            return {"ok": False, "error": f"module introuvable : {exc}"}
+        try:
+            status = mod.get_status() if hasattr(mod, "get_status") else {}
+        except Exception:
+            status = {}
+        if status.get("running"):
+            return {"ok": True, "already_running": True,
+                    "message": ("Ce robot tourne déjà. S'il affiche une "
+                                "erreur, elle vient de son dernier passage — "
+                                "il réessaiera tout seul au prochain cycle.")}
+        try:
+            fn = getattr(mod, starter)
+            if needs_state:
+                fn(self._app_state)
+            else:
+                fn()
+        except Exception as exc:
+            logger.warning("worker_restart %s : %s", name, exc)
+            return {"ok": False, "error": f"relance impossible : {exc}"}
+        # Vérifie que le thread est bien reparti
+        try:
+            now = mod.get_status() if hasattr(mod, "get_status") else {}
+            running = bool(now.get("running"))
+        except Exception:
+            running = True   # pas de get_status → on fait confiance au start
+        if not running:
+            return {"ok": False,
+                    "error": ("Le robot n'est pas reparti — un détail "
+                              "bloque côté serveur, regarde les journaux.")}
+        logger.info("worker_restart : %s relancé depuis l'écran Santé", name)
+        return {"ok": True, "restarted": True, "message": "Robot relancé."}
 
     def reply_convert_to_client(self, payload: dict) -> dict:
         """Bascule manuelle d'une réponse interested vers un projet client.

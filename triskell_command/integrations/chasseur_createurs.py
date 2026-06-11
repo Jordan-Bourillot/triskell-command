@@ -685,6 +685,7 @@ def list_hunts(limit: int = 20) -> list[dict]:
                 "created_at": data.get("created_at"),
                 "status": data.get("status"),
                 "progress": data.get("progress"),
+                "error": data.get("error") or "",
                 "stats": data.get("stats") or {},
                 "filters": data.get("filters") or {},
                 "running": running,
@@ -893,8 +894,14 @@ def push_to_prospects(hunt_id: str) -> dict:
         "facebook": "page Facebook",
     }
 
+    # Contrôle qualité AVANT versement (emails fabriqués, noms fantômes,
+    # doublons internes) — le rapport remonte jusqu'à la mission.
+    from .data_quality import filter_for_push
+    clean_creators, quality = filter_for_push(
+        h.creators, email_key="email", name_key="name")
+
     core_prospects: list[CoreProspect] = []
-    for c in h.creators:
+    for c in clean_creators:
         email = (c.get("email") or "").strip()
         if not email:
             continue
@@ -950,6 +957,7 @@ def push_to_prospects(hunt_id: str) -> dict:
             "merged":   int(result.get("merged") or 0),
             "total":    int(result.get("total") or 0),
             "pushed":   len(core_prospects),
+            "quality":  quality,
         }
     except Exception as exc:
         return {"ok": False, "error": f"upsert échoué : {exc}"}

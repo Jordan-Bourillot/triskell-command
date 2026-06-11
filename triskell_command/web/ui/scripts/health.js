@@ -38,7 +38,7 @@ const Health = {
     // On saute le tour si une vérification DNS est en cours pour ne pas
     // écraser son état à l'écran.
     App.viewInterval(() => {
-      if (!this._dnsChecking && !this._refreshing) this.refresh();
+      if (!this._dnsChecking && !this._refreshing && !this._restarting) this.refresh();
     }, 15000);
   },
 
@@ -92,6 +92,7 @@ const Health = {
       if (openDetails.has(d.dataset.w)) d.open = true;
     });
     this._bindDnsCard();
+    this._bindRestartButtons();
   },
 
   _renderLoadError() {
@@ -389,6 +390,14 @@ const Health = {
       : (result.errors > 0
         ? `<div class="text-xs text-warning mt-2">${result.errors} erreur${result.errors > 1 ? 's' : ''} au dernier passage</div>`
         : '');
+    // Robot à l'arrêt : bouton « Relancer » (sauf le Phare, qui tourne sur
+    // GitHub et ne se relance pas d'ici). Le serveur ne relance que les
+    // robots vraiment arrêtés — un robot qui tourne n'est jamais touché.
+    const canRestart = !w.running && w.name && w.name !== 'phare_scheduler';
+    const restartBtn = canRestart
+      ? `<button class="text-xs text-accent underline mt-2 mr-4" data-restart="${this._esc(w.name)}"
+                 title="Redémarre ce robot sur le serveur">Relancer</button>`
+      : '';
     // Robot en panne : on donne au moins une action (vérifier les réglages).
     const fixLink = (w.health === 'error' || rawError)
       ? `<button class="text-xs text-accent underline mt-2" onclick="App.show('config')">Vérifier les réglages</button>`
@@ -405,10 +414,40 @@ const Health = {
           ${counters ? `<div class="text-xs">${counters}</div>` : ''}
           ${skipReason}
           ${errors}
-          ${fixLink}
+          ${restartBtn}${fixLink}
         </div>
       </article>
     `;
+  },
+
+  // ---- Relance d'un robot arrêté (bouton « Relancer ») ----
+  _restarting: false,
+
+  async _restartWorker(btn, name) {
+    if (!App.api || !name || this._restarting) return;
+    this._restarting = true;
+    const original = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Relance…'; }
+    try {
+      const r = await App.api.worker_restart({ name });
+      if (r && r.ok) {
+        Toast.success(r.message || 'Robot relancé.');
+      } else {
+        Toast.error((r && r.error) || 'La relance a échoué — réessaie dans un instant.');
+      }
+    } catch (e) {
+      Toast.friendlyError(e, 'La relance a échoué — réessaie dans un instant.');
+    } finally {
+      this._restarting = false;
+      if (btn) { btn.disabled = false; btn.textContent = original; }
+    }
+    await this.refresh();
+  },
+
+  _bindRestartButtons() {
+    document.querySelectorAll('#h-content [data-restart]').forEach(b => {
+      b.onclick = () => this._restartWorker(b, b.dataset.restart);
+    });
   },
 
   _humanTime(iso) {

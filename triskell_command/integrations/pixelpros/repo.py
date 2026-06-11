@@ -296,6 +296,41 @@ def update_intake_contact(intake_id: str, *, email: str | None = None,
         return False, str(exc)
 
 
+def mark_contact_handled(intake_id: str, *, handled: bool = True) -> tuple[bool, str]:
+    """Marque un message de contact / une demande de rappel comme « traité »
+    (ou l'inverse avec handled=False). Posé dans data.handled_at — même
+    convention que data.error : pas de colonne dédiée sur pp_client_drafts.
+
+    Partagé entre appareils (avant : mémorisé dans le navigateur, donc un
+    message traité sur le PC réapparaissait sur le téléphone).
+    """
+    sb = _sb()
+    if sb is None:
+        return False, "Supabase non configuré."
+    intake = get_intake(intake_id)
+    if intake is None:
+        return False, "Message introuvable."
+    if (intake.get("status") or "") not in ("contact", "recall"):
+        return False, "Cette fiche n'est pas un message de contact."
+    data = intake.get("data") or {}
+    if not isinstance(data, dict):
+        data = {}
+    if handled:
+        data["handled_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        data.pop("handled_at", None)
+    patch = {
+        "data": data,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        sb.table(TABLE).update(patch).eq("id", intake_id).execute()
+        return True, "Message marqué traité." if handled else "Message remis en attente."
+    except Exception as exc:
+        logger.warning("pixelpros.mark_contact_handled: %s", exc)
+        return False, str(exc)
+
+
 def mark_paid_manual(intake_id: str) -> tuple[bool, str]:
     """Override manuel : passe un draft directement au statut 'paid' sans
     attendre le webhook Stripe.

@@ -91,9 +91,17 @@ const Mails = {
     if (set.has(sid)) return;
     set.add(sid);
     this._saveReadIds();
+    // Côté serveur aussi (partagé entre appareils) — en arrière-plan :
+    // si l'appel rate, la mémoire locale couvre cet appareil en attendant.
+    if (App.api && App.api.mail_mark_read) {
+      App.api.mail_mark_read({ id: sid }).catch(() => {});
+    }
   },
 
-  _isRead(id) {
+  // Lu si le serveur le dit (extra.read_at, partagé entre appareils)
+  // OU si la mémoire locale de cet appareil le dit (héritage + secours).
+  _isRead(id, mail) {
+    if (mail && mail.extra && mail.extra.read_at) return true;
     return this._loadReadIds().has(String(id));
   },
 
@@ -439,6 +447,9 @@ const Mails = {
       return;
     }
     const allMails = r.mails || [];
+    // Liste brute chargée (avant filtre notifs auto) : sert de base à la
+    // pagination par décalage (« Charger plus » = page suivante serveur).
+    this.state.rawMails = allMails;
 
     // Bouton bascule "afficher les mails auto" : visible uniquement sur
     // l'onglet Boîte de réception. Met à jour son label + filtre la liste.
@@ -460,11 +471,12 @@ const Mails = {
       if (toggleBtn) toggleBtn.style.display = 'none';
     }
 
-    // Le serveur a-t-il probablement plus de mails que le plafond demandé ?
+    // Le serveur a-t-il probablement plus de mails que ce qui est chargé ?
+    // (la pagination par décalage va chercher la suite — garde-fou à 1000)
     const limit = this.state.listLimit || 100;
     const maybeMore = allMails.length >= limit;
-    this.state.hasMore = maybeMore && limit < 500;
-    const recentNote = maybeMore ? ` — les ${limit} plus récents` : '';
+    this.state.hasMore = maybeMore && allMails.length < 1000;
+    const recentNote = maybeMore ? ` — les ${allMails.length} plus récents` : '';
 
     countEl.textContent = (hiddenAutoCount > 0
       ? `${this.state.mails.length} mail(s) — ${hiddenAutoCount} notif(s) auto cachée(s)`
@@ -617,12 +629,57 @@ const Mails = {
     this._wireListEvents(root);
     const loadMoreBtn = root.querySelector('#m-load-more');
     if (loadMoreBtn) {
-      loadMoreBtn.onclick = () => {
-        // L'endpoint ne pagine pas par décalage : on augmente le plafond.
-        this.state.listLimit = this.state.listLimit >= 300 ? 500 : 300;
-        this._load();
-      };
+      loadMoreBtn.onclick = () => this._loadMore(loadMoreBtn);
     }
+  },
+
+  // Pagination réelle : va chercher les 100 mails SUIVANTS (décalage côté
+  // serveur) et les ajoute à la liste — sans re-télécharger ce qui est là.
+  async _loadMore(btn) {
+    const kindMap = { reply: 'reply', sent: 'sent', inbound: 'inbound' };
+    const pageSize = 100;
+    const already = (this.state.rawMails || []).length;
+    if (btn) { btn.disabled = true; btn.textContent = 'Chargement…'; }
+    let r = null;
+    try {
+      r = await App.api.mails_list({
+        kind: kindMap[this.state.tab] || 'all',
+        account_id: this.state.accountFilter || '',
+        limit: pageSize,
+        offset: already,
+      });
+    } catch (e) {
+      console.error('[mails] mails_list (page suivante)', e);
+      r = null;
+    }
+    if (!r || !r.ok) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Charger plus de mails'; }
+      Toast.friendlyError(r && r.error, 'Impossible de charger la suite. Réessaie dans un instant.');
+      return;
+    }
+    const page = r.mails || [];
+    this.state.rawMails = (this.state.rawMails || []).concat(page);
+    // « Rafraîchir » et les retours d'action rechargent en UNE requête tout
+    // ce qui est affiché : on aligne le plafond sur le volume chargé.
+    this.state.listLimit = Math.min(Math.max(this.state.rawMails.length, 100), 1000);
+    this.state.hasMore = page.length >= pageSize && this.state.rawMails.length < 1000;
+    // Re-filtre (notifs auto sur la Boîte de réception) + re-render
+    let hiddenAutoCount = 0;
+    if (this.state.tab === 'inbound' && !this._loadShowAuto()) {
+      hiddenAutoCount = this.state.rawMails.filter(m => this._isAutoMail(m)).length;
+      this.state.mails = this.state.rawMails.filter(m => !this._isAutoMail(m));
+    } else {
+      this.state.mails = this.state.rawMails;
+    }
+    const countEl = document.getElementById('m-count');
+    if (countEl) {
+      const recentNote = this.state.hasMore ? ` — les ${this.state.rawMails.length} plus récents` : '';
+      countEl.textContent = (hiddenAutoCount > 0
+        ? `${this.state.mails.length} mail(s) — ${hiddenAutoCount} notif(s) auto cachée(s)`
+        : `${this.state.mails.length} mail(s)`) + recentNote;
+    }
+    const root = document.getElementById('m-content');
+    if (root) this._renderListAndBulk(root, this.state.limitedBanner || '', this.state.mails);
   },
 
   _renderBulkBar() {
@@ -796,7 +853,7 @@ const Mails = {
     }
     const snippet = (bodyExcerpt || '').replace(/\s+/g, ' ').trim();
     const idStr = String(m.id);
-    const isRead = this._isRead(idStr);
+    const isRead = this._isRead(idStr, m);
     const isSelected = this.state.selectedIds && this.state.selectedIds.has(idStr);
     const stateClass = `${isRead ? 'is-read' : 'is-unread'}${isSelected ? ' is-selected' : ''}`;
     const fromCellInner = sentFromEmail

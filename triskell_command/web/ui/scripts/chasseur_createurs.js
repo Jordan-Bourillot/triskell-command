@@ -390,7 +390,7 @@ const ChasseurCreateurs = {
       const stats = h.stats || {};
       const retenus = stats.retenus ?? 0;
       const withMail = stats.avec_mail ?? 0;
-      const statusBadge = this._statusBadge(h.status, h.running);
+      const statusBadge = this._statusBadge(h.status, h.running, h.error);
       const pushed = this._pushedInfo(h.id);
       return `
         <div class="cc-hunt-row group relative rounded-lg border transition-all

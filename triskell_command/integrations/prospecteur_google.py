@@ -258,6 +258,7 @@ def list_hunts(limit: int = 20) -> list[dict]:
                 "created_at": data.get("created_at"),
                 "status": data.get("status"),
                 "progress": data.get("progress"),
+                "error": data.get("error") or "",
                 "stats": data.get("stats") or {},
                 "filters": data.get("filters") or {},
                 "running": running,

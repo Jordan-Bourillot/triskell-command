@@ -1147,10 +1147,13 @@ const PixelPros = {
     const groups = {};
     for (const col of columns) groups[col.status] = [];
     const filtered = this._filteredIntakes();
-    const handled = this._handledIds();
+    const handledLegacy = this._handledIds();
     for (const it of filtered) {
-      // Les fiches Contact marquées « Traité » sont rangées (masquées côté front).
-      if ((it.status === 'contact' || it.status === 'recall') && handled.has(it.id)) continue;
+      // Les fiches Contact marquées « Traité » sont rangées (masquées) :
+      // marqueur serveur data.handled_at (partagé entre appareils) +
+      // héritage de l'ancienne mémoire navigateur.
+      if ((it.status === 'contact' || it.status === 'recall') &&
+          (((it.data || {}).handled_at) || handledLegacy.has(it.id))) continue;
       if (groups[it.status]) groups[it.status].push(it);
     }
 
@@ -1180,9 +1183,11 @@ const PixelPros = {
   _updateCommBadge() {
     const badge = document.getElementById('pp-comm-badge');
     if (!badge) return;
-    const handled = this._handledIds();
+    const handledLegacy = this._handledIds();
     const n = (this.state.intakes || [])
-      .filter(it => (it.status === 'contact' || it.status === 'recall') && !handled.has(it.id)).length;
+      .filter(it => (it.status === 'contact' || it.status === 'recall')
+                    && !((it.data || {}).handled_at)
+                    && !handledLegacy.has(it.id)).length;
     if (n > 0) { badge.textContent = n; badge.hidden = false; }
     else { badge.hidden = true; }
   },
@@ -2396,11 +2401,15 @@ const PixelPros = {
           return;
         }
         case 'mark_handled': {
-          // Rangement côté navigateur uniquement (pas d'endpoint serveur dédié) :
-          // la fiche reste en base, elle quitte juste l'onglet Contact.
-          this._markHandled(id);
-          this._toast('Fiche rangée — elle n’apparaît plus dans l’onglet Contact.');
-          this._closeDetail();
+          // Rangement côté SERVEUR (partagé entre appareils) : la fiche
+          // reste en base, elle quitte juste l'onglet Contact.
+          res = await this._call('pixelpros_mark_contact_handled', { id });
+          if (res?.ok) {
+            this._toast('Fiche rangée — elle n’apparaît plus dans l’onglet Contact.');
+            this._closeDetail();
+          } else {
+            this._failToast('Impossible de ranger cette fiche.', res);
+          }
           break;
         }
         case 'delete': {
@@ -2464,19 +2473,15 @@ const PixelPros = {
     }
   },
 
-  // ----- Fiches Contact « traitées » (rangées côté navigateur) -----
-  // Pas d'endpoint serveur dédié : on mémorise les ids traités en local,
-  // ils sont filtrés à l'affichage. La suppression définitive reste possible.
+  // ----- Fiches Contact « traitées » -----
+  // Le marqueur vit côté serveur (data.handled_at — partagé entre appareils,
+  // via pixelpros_mark_contact_handled). L'ancienne mémoire navigateur
+  // (pp_handled_contacts) reste LUE pour ne pas faire réapparaître les
+  // fiches rangées avant la bascule — on n'y écrit plus.
   HANDLED_KEY: 'pp_handled_contacts',
   _handledIds() {
     try { return new Set(JSON.parse(localStorage.getItem(this.HANDLED_KEY) || '[]')); }
     catch (e) { return new Set(); }
-  },
-  _markHandled(id) {
-    const ids = [...this._handledIds()];
-    if (!ids.includes(id)) ids.push(id);
-    // Plafond : on garde les 500 plus récents pour ne pas grossir sans fin.
-    try { localStorage.setItem(this.HANDLED_KEY, JSON.stringify(ids.slice(-500))); } catch (e) {}
   },
 
   // Touche Échap : ferme la couche la plus « au-dessus » d'abord.

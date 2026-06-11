@@ -328,7 +328,7 @@ const ProspecteurGoogle = {
       const stats = h.stats || {};
       const retenus = stats.retenus ?? 0;
       const sansSite = stats.sans_site ?? 0;
-      const statusBadge = this._statusBadge(h.status, h.running);
+      const statusBadge = this._statusBadge(h.status, h.running, h.error);
       const pushed = this._pushedInfo(h.id);
       return `
         <div class="pg-hunt-row group relative rounded-lg border transition-all

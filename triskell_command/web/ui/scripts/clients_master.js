@@ -388,9 +388,14 @@ const ClientsMaster = {
           <h3 class="text-[11px] font-bold tracking-widest text-text-muted mb-3">TAGS</h3>
           <div class="flex flex-wrap gap-2 items-center" id="cm-tags">
             ${(c.tags && c.tags.length) ? c.tags.map(t => `
-              <span class="text-[11px] font-semibold px-2 py-1 rounded-full
-                           bg-accent/10 text-accent border border-accent/20">
+              <span class="text-[11px] font-semibold pl-2 pr-1 py-1 rounded-full
+                           bg-accent/10 text-accent border border-accent/20
+                           inline-flex items-center gap-1">
                 ${this._esc(t)}
+                <button type="button" data-rmtag="${this._esc(t)}"
+                        class="w-4 h-4 rounded-full inline-flex items-center justify-center
+                               hover:bg-accent/20 leading-none"
+                        title="Retirer ce tag" aria-label="Retirer le tag ${this._esc(t)}">×</button>
               </span>
             `).join('') : '<span class="text-sm text-text-muted">Aucun tag</span>'}
             <button id="cm-add-tag" class="text-[11px] text-text-muted hover:text-accent underline">
@@ -427,6 +432,9 @@ const ClientsMaster = {
 
     detail.querySelector('#cm-edit').onclick = () => this._openEditDialog();
     detail.querySelector('#cm-add-tag').onclick = () => this._addTag();
+    detail.querySelectorAll('[data-rmtag]').forEach(btn => {
+      btn.onclick = () => this._removeTag(btn.dataset.rmtag);
+    });
     const composeBtn = detail.querySelector('#cm-compose');
     if (composeBtn) composeBtn.onclick = () => {
       Mails._openComposer({ prefilledTo: c.email });
@@ -520,6 +528,21 @@ const ClientsMaster = {
     }
   },
 
+  async _removeTag(tag) {
+    if (!tag || !this._selectedId) return;
+    try {
+      const r = await App.api.client_master_remove_tag({ id: this._selectedId, tag });
+      if (r && r.ok) {
+        Toast.success(`Tag « ${tag} » retiré.`);
+        await this._select(this._selectedId);
+      } else {
+        Toast.friendlyError(r, 'Impossible de retirer ce tag.');
+      }
+    } catch (e) {
+      Toast.friendlyError(e, 'Impossible de retirer ce tag.');
+    }
+  },
+
   _openEditDialog() {
     const c = this._detail.client;
     const overlay = document.createElement('div');
@@ -553,9 +576,10 @@ const ClientsMaster = {
             </select>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            ${field('cmd-email', 'Email', c.email, 'email')}
+            ${field('cmd-phone', 'Téléphone', c.phone, 'tel')}
             ${field('cmd-first', 'Prénom', c.first_name)}
             ${field('cmd-last', 'Nom', c.last_name)}
-            ${field('cmd-phone', 'Téléphone', c.phone, 'tel')}
             ${field('cmd-company', 'Entreprise', c.company_name)}
             ${field('cmd-siret', 'SIRET', c.siret)}
             ${field('cmd-vat', 'N° TVA', c.vat_number)}
@@ -583,11 +607,11 @@ const ClientsMaster = {
     `;
     document.body.appendChild(overlay);
 
-    // Photo des 13 champs à l'ouverture : avant de fermer (clic à côté /
+    // Photo des 14 champs à l'ouverture : avant de fermer (clic à côté /
     // Échap), on vérifie qu'aucune saisie ne serait perdue.
-    const FIELD_IDS = ['#cmd-status', '#cmd-first', '#cmd-last', '#cmd-phone',
-      '#cmd-company', '#cmd-siret', '#cmd-vat', '#cmd-addr1', '#cmd-addr2',
-      '#cmd-zip', '#cmd-city', '#cmd-country', '#cmd-notes'];
+    const FIELD_IDS = ['#cmd-status', '#cmd-email', '#cmd-first', '#cmd-last',
+      '#cmd-phone', '#cmd-company', '#cmd-siret', '#cmd-vat', '#cmd-addr1',
+      '#cmd-addr2', '#cmd-zip', '#cmd-city', '#cmd-country', '#cmd-notes'];
     const snapshot = () => FIELD_IDS
       .map(sel => { const el = overlay.querySelector(sel); return el ? el.value : ''; })
       .join(' ');
@@ -617,6 +641,20 @@ const ClientsMaster = {
 
     const saveBtn = overlay.querySelector('#cmd-save');
     saveBtn.onclick = async () => {
+      // Email : envoyé seulement s'il a changé (le serveur contrôle le
+      // format ET l'unicité — jamais deux fiches avec la même adresse).
+      const emailVal = overlay.querySelector('#cmd-email').value.trim().toLowerCase();
+      const oldEmail = (c.email || '').trim().toLowerCase();
+      if (emailVal !== oldEmail) {
+        if (!emailVal) {
+          Toast.error('L’email ne peut pas rester vide.');
+          return;
+        }
+        if (!/^\S+@\S+\.\S+$/.test(emailVal)) {
+          Toast.error('Cette adresse email ne semble pas valide.');
+          return;
+        }
+      }
       const patch = {
         first_name: overlay.querySelector('#cmd-first').value.trim(),
         last_name:  overlay.querySelector('#cmd-last').value.trim(),
@@ -632,13 +670,20 @@ const ClientsMaster = {
         status: overlay.querySelector('#cmd-status').value,
         notes:  overlay.querySelector('#cmd-notes').value,
       };
+      if (emailVal !== oldEmail) patch.email = emailVal;
       patch.is_pro = !!(patch.company_name || patch.siret);
       saveBtn.disabled = true;
       const saveLabel = saveBtn.textContent;
       saveBtn.textContent = 'Enregistrement…';
       const fail = (errOrRes) => {
-        // Échec → la modale RESTE ouverte, la saisie est conservée
-        Toast.friendlyError(errOrRes, 'Enregistrement impossible. Ta saisie est conservée, réessaie.');
+        // Échec → la modale RESTE ouverte, la saisie est conservée.
+        // Les refus métier du serveur (email déjà pris…) arrivent en
+        // français clair → on les montre tels quels.
+        if (errOrRes && errOrRes.user_message && errOrRes.error) {
+          Toast.error(errOrRes.error, 'Fiche client');
+        } else {
+          Toast.friendlyError(errOrRes, 'Enregistrement impossible. Ta saisie est conservée, réessaie.');
+        }
         saveBtn.disabled = false;
         saveBtn.textContent = saveLabel;
       };
