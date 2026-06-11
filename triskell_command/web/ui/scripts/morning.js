@@ -59,10 +59,12 @@ const Morning = {
         </div>
 
         <!-- Salutation discrète + citation du jour + quickbar.
-             ≥1280px : titre à GAUCHE, citation à DROITE sur la même ligne
+             ≥1120px : titre à GAUCHE, citation à DROITE sur la même ligne
              (la citation se resserre, voir .cockpit-greeting dans main.css) ;
-             en dessous, la citation repasse sous le titre. -->
-        <div class="cockpit-greeting mt-5 flex items-end justify-between gap-6 flex-wrap xl:flex-nowrap">
+             en dessous, la citation repasse sous le titre.
+             Seuil 1120 et pas 1280 : avec l'affichage Windows à 150 %,
+             un écran 1920 ne fait "que" ~1276px aux yeux du site. -->
+        <div class="cockpit-greeting mt-5 flex items-end justify-between gap-6 flex-wrap min-[1120px]:flex-nowrap">
           <h1 class="hero-title">${userName ? `${greeting} ${nameWithCrown}.` : `${greeting}.`}</h1>
           ${typeof DailyQuote !== 'undefined' ? DailyQuote.renderHTML() : ''}
         </div>
