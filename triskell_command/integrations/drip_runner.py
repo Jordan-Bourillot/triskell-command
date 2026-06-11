@@ -118,6 +118,26 @@ def save_config(client, config: dict) -> None:
     client.set_shared_setting("drip_runner", config)
 
 
+def _initial_sender(sent_row: dict) -> tuple:
+    """(adresse, account_id) d'expéditeur du mail initial, d'après sa trace.
+
+    Une relance doit partir de la MÊME adresse que le mail qu'elle suit
+    (un « Re: » venu d'une adresse inconnue casse le fil et sent le spam).
+    L'autopilote pose extra.from + extra.account_id sur chaque envoi ; les
+    vieux envois n'ont rien → ("", "") = comportement historique conservé.
+    """
+    extra = sent_row.get("extra") or {}
+    if isinstance(extra, str):
+        try:
+            extra = json.loads(extra)
+        except Exception:
+            extra = {}
+    if not isinstance(extra, dict):
+        extra = {}
+    return (str(extra.get("from") or "").strip(),
+            str(extra.get("account_id") or "").strip())
+
+
 def run_now(app_state) -> dict:
     return _do_one_cycle(app_state)
 
@@ -377,16 +397,31 @@ def _create_drip_draft(client, app_state, sent_row: dict,
         subject = "Petit suivi de mon message"
 
     # Crée le draft dans prospect_drafts pour qu'il apparaisse dans
-    # la vue "Drafts à valider".
+    # la vue "Drafts à valider". La relance porte l'adresse d'expéditeur
+    # du mail initial (cohérence du fil) — colonne de la migration 46,
+    # insertion dégradée si la base ne l'a pas encore.
+    initial_from, initial_account = _initial_sender(sent_row)
+    _row = {
+        "prospect_id": prospect_id,
+        "subject": subject[:200],
+        "body": body[:8000],
+        "kind": stage,
+        "status": "pending",
+        "created_by": client.user_id,
+    }
     try:
-        sb.table("prospect_drafts").insert(with_workspace(client, {
-            "prospect_id": prospect_id,
-            "subject": subject[:200],
-            "body": body[:8000],
-            "kind": stage,
-            "status": "pending",
-            "created_by": client.user_id,
-        })).execute()
+        if initial_from:
+            try:
+                _ext = dict(_row)
+                _ext["sender_address"] = initial_from
+                sb.table("prospect_drafts").insert(
+                    with_workspace(client, _ext)).execute()
+            except Exception:
+                sb.table("prospect_drafts").insert(
+                    with_workspace(client, _row)).execute()
+        else:
+            sb.table("prospect_drafts").insert(
+                with_workspace(client, _row)).execute()
         out["created"] = True
     except Exception as exc:
         out["error"] = f"insert_draft: {exc}"
@@ -405,9 +440,41 @@ def _create_drip_draft(client, app_state, sent_row: dict,
                 return out
         except Exception:
             pass
-        smtp_cfg = _resolve_smtp_config(app_state, client)
-        if not smtp_cfg:
-            return out  # draft créé mais pas envoyé : skip
+        # Cohérence d'expéditeur : la relance part de la MÊME adresse que
+        # le mail initial. Compte introuvable → on n'envoie PAS par une
+        # autre adresse, le brouillon reste à valider à la main.
+        smtp_cfg = None
+        if initial_from or initial_account:
+            try:
+                from . import shared_secrets
+                acc = None
+                if initial_from:
+                    acc = shared_secrets.get_account_by_address(
+                        initial_from, client=client, app_state=app_state)
+                if acc is None and initial_account:
+                    acc = shared_secrets.get_account_by_id(
+                        initial_account, client=client, app_state=app_state)
+                _required = ("smtp_host", "smtp_user", "smtp_password",
+                             "from_email")
+                if acc and all(acc.get(k) for k in _required):
+                    smtp_cfg = {
+                        "smtp_host":     acc.get("smtp_host"),
+                        "smtp_port":     int(acc.get("smtp_port") or 587),
+                        "smtp_user":     acc.get("smtp_user"),
+                        "smtp_password": acc.get("smtp_password"),
+                        "from_email":    acc.get("from_email"),
+                        "from_name":     acc.get("from_name", ""),
+                    }
+            except Exception:
+                smtp_cfg = None
+            if smtp_cfg is None:
+                out["error"] = ("compte d'envoi du mail initial introuvable "
+                                "-> relance laissée en brouillon")
+                return out
+        else:
+            smtp_cfg = _resolve_smtp_config(app_state, client)
+            if not smtp_cfg:
+                return out  # draft créé mais pas envoyé : skip
         try:
             from triskell_core.prospect.outreach.smtp_sender import (
                 prospection_headers, send_email,
@@ -435,7 +502,9 @@ def _create_drip_draft(client, app_state, sent_row: dict,
                 "subject": subject[:200],
                 "body": body[:2000],
                 "message_id": msg_id,
-                "extra": {"drip_stage": stage, "auto_drip": True},
+                "extra": {"drip_stage": stage, "auto_drip": True,
+                          "to": to,
+                          "from": smtp_cfg.get("from_email", "")},
                 "created_by": client.user_id,
             })).execute()
             sb.table("prospects").update({

@@ -26,6 +26,7 @@ const MailTemplates = {
     audienceFilter: 'all', // sous-filtre prospection : 'all' | 'creator' | 'pro'
     categoryMode: 'transactionnel', // 'transactionnel' | 'prospection'
     catalogueProducts: [], // produits du catalogue Triskell, chargés à la demande pour la prospection
+    mailAccounts: [], // adresses d’envoi configurées (câblage modèle→adresse en prospection)
   },
 
   // Produits "techniques" historiques (réservés aux mails transactionnels).
@@ -678,12 +679,16 @@ const MailTemplates = {
     const list = document.getElementById('mt-list');
     if (list) list.innerHTML = '<div class="p-4 text-[12px] text-text-muted">Chargement…</div>';
 
-    // Charge en parallèle : templates + catalogue produits (pour le mode prospection)
-    const [res, prods] = await Promise.all([
+    // Charge en parallèle : templates + catalogue produits (pour le mode
+    // prospection) + adresses d'envoi (liste de choix du câblage
+    // modèle→adresse).
+    const [res, prods, accs] = await Promise.all([
       this._api('list'),
       this._loadCatalogueProducts(),
+      this._loadMailAccounts(),
     ]);
     this._state.catalogueProducts = prods || [];
+    this._state.mailAccounts = accs || [];
 
     if (!res || !res.ok) {
       // Échec de chargement : bandeau d'erreur VISIBLE + état d'erreur dans
@@ -783,6 +788,20 @@ const MailTemplates = {
       return Array.isArray(items) ? items : [];
     } catch (e) {
       console.warn('mail_templates: chargement catalogue produits raté', e);
+      return [];
+    }
+  },
+
+  // Adresses d’envoi configurées (compte principal + secondaires). Sert de
+  // liste de choix au champ « Envoyé depuis » des modèles de prospection.
+  // En cas d’échec : liste vide, le champ reste saisissable à la main.
+  async _loadMailAccounts() {
+    try {
+      if (!App.api || typeof App.api.mail_accounts_list !== 'function') return [];
+      const res = await App.api.mail_accounts_list({});
+      return (res && res.ok && Array.isArray(res.accounts)) ? res.accounts : [];
+    } catch (e) {
+      console.warn('mail_templates: chargement des adresses d’envoi raté', e);
       return [];
     }
   },
@@ -1254,6 +1273,13 @@ const MailTemplates = {
     const headerLabel = t._label || t.label || this._humanKey(t.key);
     const isPipeline = t._runtime === 'pipeline';
 
+    // Adresses d’envoi configurées → liste de choix pour le câblage
+    // modèle→adresse (champ « Envoyé depuis » des modèles de prospection).
+    const senderChoices = (this._state.mailAccounts || [])
+      .filter(a => a && a.from_email)
+      .map(a => `<option value="${this._esc(a.from_email)}">${this._esc(a.label || a.from_email)}</option>`)
+      .join('');
+
     // En prospection on affiche le produit du catalogue plutôt que l'adresse mail
     const cat = this._state.catalogProspection || {};
     const productLabel = (cat[t.product] && cat[t.product].label)
@@ -1377,6 +1403,19 @@ const MailTemplates = {
               </div>
             ` : ''}
 
+            ${isProspection ? `
+              <div class="mt-field">
+                <label for="mt-from-address">Envoyé depuis (adresse d’expéditeur)</label>
+                <input id="mt-from-address" list="mt-sender-choices" value="${this._esc(t.from_address || '')}" placeholder="vide = n’importe quelle adresse du pool de l’Auto-pilote">
+                <datalist id="mt-sender-choices">${senderChoices}</datalist>
+                <div class="text-[11px] text-text-muted pt-1 leading-snug">
+                  📮 L’Auto-pilote enverra ce modèle <strong>uniquement depuis cette adresse</strong> — si elle est indisponible
+                  (absente de ses adresses d’envoi, ou plafond du jour atteint), le mail attend en brouillon au lieu de partir
+                  d’une autre adresse. Le nom d’expéditeur affiché est celui du compte d’envoi.
+                  Vide&nbsp;= l’Auto-pilote choisit librement parmi ses adresses.
+                </div>
+              </div>
+            ` : `
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div class="mt-field">
                 <label for="mt-from-name">Expéditeur (nom)</label>
@@ -1387,6 +1426,7 @@ const MailTemplates = {
                 <input id="mt-from-address" value="${this._esc(t.from_address || '')}" placeholder="noreply@triskell-studio.fr">
               </div>
             </div>
+            `}
 
             <div class="mt-field">
               <label for="mt-body-text">Version texte (pour les boîtes mail qui n’affichent pas le HTML)</label>
@@ -1539,8 +1579,11 @@ const MailTemplates = {
     const isProspection = (t.category === 'prospection');
     const isPipeline = t._runtime === 'pipeline';
 
+    // En prospection le champ « nom d’expéditeur » n’est pas affiché (le
+    // nom vient du compte d’envoi) : on préserve la valeur existante.
+    const fromNameEl = document.getElementById('mt-from-name');
     const fields = {
-      from_name:    document.getElementById('mt-from-name').value.trim(),
+      from_name:    fromNameEl ? fromNameEl.value.trim() : (t.from_name || ''),
       from_address: document.getElementById('mt-from-address').value.trim(),
       subject:      document.getElementById('mt-subject').value,
       body_html:    document.getElementById('mt-body-html').value,
@@ -1573,11 +1616,14 @@ const MailTemplates = {
       return;
     }
     if (!fields.from_address) {
-      Toast.error('L’adresse d’expéditeur est obligatoire.');
-      return;
-    }
-    // Contrôle simple du format d'adresse (un @ et un point après).
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.from_address)) {
+      // Prospection : vide = pas d’exigence, l’Auto-pilote choisit dans
+      // son pool d’adresses. Transactionnel : l’adresse reste obligatoire.
+      if (!isProspection) {
+        Toast.error('L’adresse d’expéditeur est obligatoire.');
+        return;
+      }
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.from_address)) {
+      // Contrôle simple du format d'adresse (un @ et un point après).
       Toast.error('L’adresse d’expéditeur n’a pas un format valide (ex. contact@triskell-studio.fr).');
       return;
     }

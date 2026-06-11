@@ -157,6 +157,30 @@ def get_account_by_id(account_id: str, client=None, app_state=None) -> Optional[
     return None
 
 
+def get_account_by_address(address: str, client=None, app_state=None) -> Optional[dict]:
+    """Renvoie le compte mail (avec mots de passe) dont l'adresse
+    d'expéditeur (from_email) correspond, ou None. Usage backend.
+
+    Sert au câblage modèle→adresse : un modèle de prospection qui exige
+    une adresse d'envoi doit partir par le compte configuré correspondant
+    — jamais par un autre. Comparaison insensible à la casse/espaces.
+    Le compte principal est renvoyé avec un champ id='primary' pour la
+    traçabilité (il n'en a pas dans smtp_config).
+    """
+    addr = (address or "").strip().lower()
+    if not addr or "@" not in addr:
+        return None
+    primary = get_smtp_config(client=client, app_state=app_state) or {}
+    if (primary.get("from_email") or "").strip().lower() == addr:
+        out = dict(primary)
+        out.setdefault("id", "primary")
+        return out
+    for a in list_secondary_accounts(client=client):
+        if (a.get("from_email") or "").strip().lower() == addr:
+            return dict(a)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # SMTP / IMAP — config mail partagée
 # ---------------------------------------------------------------------------

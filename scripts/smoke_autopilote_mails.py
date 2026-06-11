@@ -13,6 +13,10 @@ Vérifie SANS réseau et SANS envoyer le moindre mail :
      toujours. Textes par défaut en vouvoiement.
   5. La décision de validation d'un brouillon rejouée au moment de
      l'envoi (désinscrit / rebond / déjà contacté / relance légitime).
+  6. Le câblage modèle→adresse d'envoi : un modèle qui exige son adresse
+     d'expéditeur part par CE compte ou ne part pas (jamais une autre
+     adresse) ; le brouillon transporte l'exigence ; la relance repart
+     de l'adresse du mail initial.
 
 Usage :  python scripts/smoke_autopilote_mails.py
 """
@@ -418,6 +422,141 @@ check("prospect propre jamais contacté → envoi autorisé",
                            draft_kind="first_contact")["ok"] is True)
 check("variable non remplie dans un brouillon → détectée avant envoi",
       mail_is_safe_to_send("Sujet", "Bonjour {{name}}")["ok"] is False)
+
+print("6) Câblage modèle→adresse d'envoi…")
+import inspect  # noqa: E402
+
+from triskell_core.prospect import pipeline as _pl  # noqa: E402
+from triskell_core.prospect.pipeline import (  # noqa: E402
+    _route_for_template_address,
+)
+from triskell_command.integrations import shared_secrets  # noqa: E402
+from triskell_command.integrations import (  # noqa: E402
+    prospection_templates,
+)
+
+_POOL_IDX = {"contact@pixel-pros.fr": "pixelpros",
+             "contact@lagriffe-studio.fr": "lagriffe"}
+_REMAIN = {"pixelpros": 3, "lagriffe": 0}
+
+check("modèle sans adresse exigée → tirage au sort habituel (rien ne change)",
+      _route_for_template_address("", _POOL_IDX, _REMAIN) == ("none", ""))
+check("adresse exigée disponible → envoi par CE compte précisément",
+      _route_for_template_address("contact@pixel-pros.fr", _POOL_IDX,
+                                  _REMAIN) == ("ok", "pixelpros"))
+check("casse et espaces ignorés dans l'adresse exigée",
+      _route_for_template_address("  Contact@PIXEL-pros.FR ", _POOL_IDX,
+                                  _REMAIN) == ("ok", "pixelpros"))
+check("adresse exigée au plafond 24h → brouillon, jamais une autre adresse",
+      _route_for_template_address("contact@lagriffe-studio.fr", _POOL_IDX,
+                                  _REMAIN) == ("cap", "lagriffe"))
+check("adresse exigée absente du pool → brouillon, jamais une autre adresse",
+      _route_for_template_address("jordan@triskell-studio.fr", _POOL_IDX,
+                                  _REMAIN) == ("missing", ""))
+check("pool vide (mode mono-adresse) + adresse exigée → brouillon aussi",
+      _route_for_template_address("contact@pixel-pros.fr", {}, {})
+      == ("missing", ""))
+
+
+class _FakeSecretClient:
+    """Comptes d'envoi factices : un principal + un secondaire."""
+
+    def get_shared_setting(self, key, default=None):
+        if key == "smtp_config":
+            return {"smtp_host": "smtp.x.fr", "smtp_port": 587,
+                    "smtp_user": "u", "smtp_password": "p",
+                    "from_email": "jordan@triskell-studio.fr",
+                    "from_name": "Jordan"}
+        if key == "mail_accounts":
+            return {"accounts": [{
+                "id": "pixelpros", "label": "Pixel Pros",
+                "from_email": "contact@pixel-pros.fr",
+                "from_name": "Pixel Pros", "smtp_host": "smtp.x.fr",
+                "smtp_port": 587, "smtp_user": "u2",
+                "smtp_password": "p2"}]}
+        return default
+
+
+_sc = _FakeSecretClient()
+check("compte principal retrouvé par son adresse",
+      (shared_secrets.get_account_by_address(
+          "jordan@triskell-studio.fr", client=_sc) or {}).get("id")
+      == "primary")
+check("compte secondaire retrouvé par son adresse (casse ignorée)",
+      (shared_secrets.get_account_by_address(
+          "Contact@Pixel-Pros.fr", client=_sc) or {}).get("id")
+      == "pixelpros")
+check("adresse inconnue → aucun compte (rien ne pourra partir)",
+      shared_secrets.get_account_by_address(
+          "inconnu@nulle-part.fr", client=_sc) is None)
+
+check("la lecture des modèles de prospection ramène l'adresse exigée",
+      "from_address" in inspect.getsource(
+          prospection_templates.list_prospection_templates))
+
+
+class _FakeRemoteCRM:
+    """Assez de surface pour _store_validation_draft (base partagée)."""
+
+    def __init__(self, store):
+        self.store = store
+        self._client = _FakeClient(store)
+
+    def get_row_id(self, prospect):
+        return "P1"
+
+
+_FakeRemoteCRM.__name__ = "RemoteCRM"
+
+store7 = {"prospects": []}
+
+
+class _Pr:
+    pass
+
+
+ok7 = _pl._store_validation_draft(_FakeRemoteCRM(store7), _Pr(), {
+    "subject": "S", "body": "B", "template_key": "k1",
+    "kind": "first_contact", "sender_address": "contact@pixel-pros.fr",
+})
+_rows7 = store7.get("prospect_drafts_inserted") or []
+check("le brouillon en base transporte l'adresse exigée",
+      ok7 is True and len(_rows7) == 1
+      and _rows7[0].get("sender_address") == "contact@pixel-pros.fr")
+
+check("relance : l'adresse du mail initial est lue dans sa trace",
+      drip_runner._initial_sender(
+          {"extra": {"from": "contact@pixel-pros.fr",
+                     "account_id": "pixelpros"}})
+      == ("contact@pixel-pros.fr", "pixelpros"))
+check("relance : trace stockée en texte JSON tolérée",
+      drip_runner._initial_sender(
+          {"extra": '{"from": "a@b.fr", "account_id": "x"}'})
+      == ("a@b.fr", "x"))
+check("vieux mail sans trace d'expéditeur → comportement historique",
+      drip_runner._initial_sender({"extra": {}}) == ("", ""))
+
+store8 = _fresh_store()
+store8["email_history"][0]["extra"]["from"] = "contact@pixel-pros.fr"
+client8 = _FakeClient(store8)
+res8 = drip_runner._create_drip_draft(
+    client8, _FakeAppState(), store8["email_history"][0], "follow_up_7d",
+    drip_runner.load_config(client8))
+_rows8 = store8.get("prospect_drafts_inserted") or []
+check("le brouillon de relance porte l'adresse du mail initial",
+      bool(res8.get("created")) and len(_rows8) == 1
+      and _rows8[0].get("sender_address") == "contact@pixel-pros.fr")
+
+_api_src = (HERE / "triskell_command" / "web" / "api.py").read_text(
+    encoding="utf-8")
+check("validation web : l'adresse exigée du brouillon est respectée",
+      "sender_address" in _api_src
+      and "get_account_by_address" in _api_src)
+check("validation web : filet via le modèle d'origine (vieux brouillons)",
+      "_template_required_address" in _api_src)
+check("validation locale de secours : même règle, jamais une autre adresse",
+      "sender_address" in inspect.getsource(_pl.approve_draft)
+      and "get_account_by_address" in inspect.getsource(_pl.approve_draft))
 
 print()
 print(f"{len(PASS)} OK / {len(FAIL)} échec(s)")

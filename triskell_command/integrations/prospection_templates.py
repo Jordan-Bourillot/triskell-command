@@ -133,6 +133,9 @@ def list_prospection_templates(product: str,
 
     Chaque dict contient les champs utiles pour l'IA :
     - key, label, description, subject, body_text, placeholders, audience.
+    Plus `from_address` : l'adresse d'expéditeur EXIGÉE par le modèle
+    (câblage modèle→adresse). Vide = pas d'exigence, le moteur choisit
+    librement dans son pool d'adresses.
     """
     if not product:
         return []
@@ -152,7 +155,7 @@ def list_prospection_templates(product: str,
         rows = (sb.table("triskell_email_templates")
                   .select("key, label, description, subject, body_text, "
                           "body_html, placeholders, enabled, category, "
-                          "product, audience")
+                          "product, audience, from_address")
                   .eq("product", product.strip())
                   .eq("category", "prospection")
                   .execute().data or [])

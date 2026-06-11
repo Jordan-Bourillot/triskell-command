@@ -1008,6 +1008,36 @@ class Api:
         from datetime import datetime
         return datetime.now().isoformat(timespec="seconds")
 
+    def _template_required_address(self, template_key: str) -> str:
+        """Adresse d'envoi exigée par le modèle d'origine d'un brouillon.
+
+        Filet pour les brouillons créés AVANT la colonne sender_address
+        (migration 46) : on retrouve le modèle de prospection par sa clé
+        et on lit son champ « Expéditeur (adresse) ». Renvoie "" si modèle
+        introuvable, sans adresse, ou ambigu (même clé sur plusieurs
+        produits avec des adresses différentes — on n'invente rien).
+        """
+        key = (template_key or "").strip()
+        if not key or key in ("auto", "ai_pipeline"):
+            return ""
+        try:
+            client = self._supabase_client_or_none()
+            if client is None:
+                return ""
+            rows = (client.raw.table("triskell_email_templates")
+                    .select("from_address")
+                    .eq("category", "prospection")
+                    .eq("key", key)
+                    .execute().data or [])
+            addrs = {(r.get("from_address") or "").strip().lower()
+                     for r in rows}
+            addrs.discard("")
+            if len(addrs) == 1:
+                return next(iter(addrs))
+        except Exception as exc:
+            logger.debug("template_required_address(%s): %s", key, exc)
+        return ""
+
     # ----- prospect_drafts : approve = update body + envoi SMTP + log ----
     def _approve_prospect_draft(self, draft_id: str, body) -> dict:
         if not draft_id:
@@ -1022,25 +1052,25 @@ class Api:
 
         sb = client.raw
 
-        # 1) lit le draft + prospect lié. La colonne body_html n'existe que
-        # si la migration 45 est passée → lecture tolérante (retry sans).
-        try:
+        # 1) lit le draft + prospect lié. Colonnes bonus selon migrations
+        # passées : sender_address (46) puis body_html (45) → lecture en
+        # cascade pour rester compatible avec une base pas encore migrée.
+        _base_cols = ("id, subject, body, template_key, kind, created_at, "
+                      "prospect_id, "
+                      "prospects:prospect_id(id, name, emails, status)")
+        res = None
+        _read_exc = None
+        for _bonus in ("body_html, sender_address, ", "body_html, ", ""):
             try:
                 res = (sb.table("prospect_drafts")
-                        .select("id, subject, body, body_html, kind, "
-                                "created_at, prospect_id, "
-                                "prospects:prospect_id(id, name, emails, "
-                                "status)")
+                        .select(_bonus + _base_cols)
                         .eq("id", draft_id).limit(1).execute())
-            except Exception:
-                res = (sb.table("prospect_drafts")
-                        .select("id, subject, body, kind, created_at, "
-                                "prospect_id, "
-                                "prospects:prospect_id(id, name, emails, "
-                                "status)")
-                        .eq("id", draft_id).limit(1).execute())
-        except Exception as exc:
-            return {"ok": False, "error": f"lecture draft KO : {exc}"}
+                break
+            except Exception as exc:
+                _read_exc = exc
+                res = None
+        if res is None:
+            return {"ok": False, "error": f"lecture draft KO : {_read_exc}"}
 
         data = res.data or []
         if not data:
@@ -1093,9 +1123,36 @@ class Api:
                               + ", ".join(_safe.get("unrendered") or [])
                               + ") — rien envoyé, corrige le brouillon")}
 
-        # 2) résout la config SMTP avant de toucher au statut
-        smtp_cfg = shared_secrets.resolve_smtp_for_send(
-            client=client, app_state=self._app_state)
+        # 2) résout la config SMTP avant de toucher au statut.
+        # Câblage modèle→adresse : un brouillon qui exige une adresse
+        # d'expéditeur (posée à sa création, ou héritée du modèle d'origine
+        # pour les brouillons d'avant la migration 46) part par CE compte
+        # ou ne part pas — jamais par une autre adresse.
+        _wanted = (d.get("sender_address") or "").strip()
+        if not _wanted:
+            _wanted = self._template_required_address(
+                d.get("template_key") or "")
+        if _wanted:
+            _acc = shared_secrets.get_account_by_address(
+                _wanted, client=client, app_state=self._app_state)
+            _required = ("smtp_host", "smtp_user", "smtp_password",
+                         "from_email")
+            if not _acc or any(not _acc.get(k) for k in _required):
+                return {"ok": False, "blocked": "sender",
+                        "error": (f"ce brouillon doit partir de l'adresse "
+                                  f"{_wanted}, introuvable dans tes "
+                                  f"adresses d'envoi — rien envoyé")}
+            smtp_cfg = {
+                "smtp_host":     _acc.get("smtp_host"),
+                "smtp_port":     int(_acc.get("smtp_port") or 587),
+                "smtp_user":     _acc.get("smtp_user"),
+                "smtp_password": _acc.get("smtp_password"),
+                "from_email":    _acc.get("from_email"),
+                "from_name":     _acc.get("from_name", ""),
+            }
+        else:
+            smtp_cfg = shared_secrets.resolve_smtp_for_send(
+                client=client, app_state=self._app_state)
         if not smtp_cfg:
             return {"ok": False,
                     "error": "config SMTP introuvable — rien envoyé"}
@@ -1151,8 +1208,10 @@ class Api:
                 "message_id": msg_id,
                 # "to" est indispensable : le filet anti-doublon par adresse
                 # (has_recent_send via extra->>to) ne voit pas les envois
-                # qui ne le portent pas.
+                # qui ne le portent pas. "from" sert aux relances : elles
+                # repartent de la MÊME adresse que le mail initial.
                 "extra": {"to": to,
+                          "from": smtp_cfg.get("from_email", ""),
                           "from_draft_id": draft_id,
                           "approved_from_sas": True},
                 "created_by": client.user_id,
