@@ -9549,6 +9549,11 @@ class Api:
             out["autopilot"] = {
                 "enabled": bool(cfg.enabled),
                 "daily_cap": int(cfg.daily_cap or 0),
+                # Rythme réel d'écriture : l'écran l'affiche pour qu'on ne
+                # soit pas surpris (« j'ai versé 100 prospects, pourquoi
+                # seulement 5 brouillons ? » → parce que 5 par passage).
+                "per_run": int(cfg.nightly_target or 0),
+                "hour": int(cfg.nightly_hour or 3),
                 "send_mode": modes.get("send", "manual"),
             }
         except Exception as exc:

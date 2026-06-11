@@ -299,7 +299,7 @@ const Drafts = {
     } else if (s.stop_requested) {
       Toast.info(`Envoi arrêté — ${sent} mail(s) parti(s) avant l’arrêt.`);
     } else {
-      Toast.success(`Envoi groupé terminé : ${sent} mail(s) envoyé(s).`);
+      Toast.success(`Envoi groupé terminé : ${sent} mail(s) envoyé(s) — tu peux les revoir dans Mails → Envoyés.`);
     }
   },
 
@@ -609,9 +609,12 @@ const Drafts = {
           approveBtn.textContent = originalLabel;
           return;
         }
+        // Pas de doute après le clic : à qui c'est parti, et où le revoir.
+        const sentTo = ((rows[idx] || {}).email || '').trim();
         Toast.success(source === 'convoy'
-          ? 'Brouillon approuvé — mis en file d’envoi.'
-          : 'Mail envoyé.');
+          ? 'Brouillon approuvé — mis en file d’envoi (il part au rythme du Convoi).'
+          : ('Mail envoyé' + (sentTo ? ` à ${sentTo}` : '') +
+             ' ✓ — tu peux le revoir dans Mails → Envoyés.'));
         card.style.transition = 'opacity 200ms';
         card.style.opacity = '0';
         setTimeout(() => { try { card.remove(); } catch (e) {} }, 220);

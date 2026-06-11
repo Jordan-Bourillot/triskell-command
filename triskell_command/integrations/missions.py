@@ -455,11 +455,14 @@ def advance_mission(mission: dict, *,
 def default_kick_autopilot() -> tuple[bool, str]:
     """Donne un coup d'épaule à l'Auto-pilote (même chemin que le bouton
     « Lancer maintenant » → respecte les interrupteurs et le verrou)."""
+    per_run = 0
     try:
         from triskell_core.prospect.pipeline import PipelineConfig
-        if not PipelineConfig.load().enabled:
+        cfg = PipelineConfig.load()
+        if not cfg.enabled:
             return False, ("Auto-pilote éteint — les prospects attendent "
                            "dans la base (allume-le pour qu'il écrive)")
+        per_run = int(getattr(cfg, "nightly_target", 0) or 0)
     except Exception:
         return False, "état de l'Auto-pilote inconnu"
     try:
@@ -469,6 +472,11 @@ def default_kick_autopilot() -> tuple[bool, str]:
             return False, "serveur en cours de démarrage"
         r = api.autopilot_run(None)
         if r.get("ok"):
+            # Le rythme dans la note — pas de surprise « j'ai versé 100
+            # prospects, pourquoi 5 brouillons ? » (parce que 5 par passage).
+            if per_run > 0:
+                return True, (f"Auto-pilote lancé — il écrit par paquets de "
+                              f"{per_run} mails, à valider dans Brouillons")
             return True, "Auto-pilote lancé sur la base"
         err = (r.get("error") or "").strip()
         if "déjà en cours" in err or "nocturne" in err:

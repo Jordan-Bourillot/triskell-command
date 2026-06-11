@@ -345,9 +345,19 @@ const Prospection = {
     // L'essai est lancé : on décoche la case pour que le prochain clic
     // parte en réel par défaut (et pas en essai par surprise).
     if (dryRun && dryBox) dryBox.checked = false;
-    Toast.success(dryRun
-      ? 'Essai lancé — je te montre l’aperçu dès que c’est prêt.'
-      : 'C’est parti — la recherche tourne, je m’occupe de la suite.');
+    // Pas de surprise : si l'Auto-pilote est éteint, le dire AU MOMENT du
+    // lancement (pas seulement en fin de chasse sur la carte de mission) —
+    // sinon on croit que les mails vont partir alors que rien n'écrira.
+    const apOn = !!(this.state.autopilot || {}).enabled;
+    if (dryRun) {
+      Toast.success('Essai lancé — je te montre l’aperçu dès que c’est prêt.');
+    } else if (apOn) {
+      Toast.success('C’est parti — la recherche tourne, je m’occupe de la suite.');
+    } else {
+      Toast.warn('Recherche lancée ! Mais l’Auto-pilote est éteint : les fiches '
+        + 'trouvées attendront dans ta base sans recevoir de mail. '
+        + 'Allume-le (carte en haut de l’écran) pour qu’il écrive.');
+    }
     if (typeof Guide !== 'undefined' && Guide.say) {
       Guide.say('✓ Recherche lancée — je te préviens dès qu’elle a fini.');
     }
@@ -440,9 +450,12 @@ const Prospection = {
     }
     // 3bis · Des prospects en base, mais l'Auto-pilote est éteint
     if (newProspects > 0 && !ap.enabled) {
+      const perRun = ap.per_run || 0;
       return { step: 3, tone: 'go', icon: '🤖',
         title: `${newProspects} prospect${newProspects > 1 ? 's' : ''} ${newProspects > 1 ? 'attendent' : 'attend'} qu'on leur écrive`,
-        msg: 'Allume l’Auto-pilote : il va leur préparer des mails (que tu valides avant l’envoi).',
+        msg: 'Allume l’Auto-pilote : il leur préparera des mails'
+             + (perRun ? ` par petits paquets de ${perRun} par passage` : '')
+             + ' (que tu valides avant l’envoi).',
         btn: 'Allumer l’Auto-pilote', action: () => this._toggleAutopilot(true) };
     }
     // Premier écran / base vide → accueil qui dit exactement quoi faire
@@ -462,9 +475,14 @@ const Prospection = {
           msg: 'Lance une première recherche ci-dessous — je range tout sans doublon, et l’Auto-pilote prendra le relais.',
           btn: 'Choisir une cible', finder: true, action: () => this._focusFinder() };
       }
+      const perRunOn = ap.per_run || 0;
       return { step: 1, tone: 'calm', icon: '✅',
         title: 'Tout roule. L’Auto-pilote travaille pour toi.',
         msg: `Tu as ${totalProspects} prospect${totalProspects > 1 ? 's' : ''} en base. ` +
+             (perRunOn
+               ? `L’Auto-pilote écrit ${perRunOn} mail${perRunOn > 1 ? 's' : ''} par passage `
+                 + `(chaque nuit vers ${ap.hour || 3}h) et les dépose dans tes Brouillons. `
+               : '') +
              'Quand tu veux en trouver d’autres, lance une nouvelle recherche ci-dessous.',
         btn: 'Lancer une recherche', finder: true, action: () => this._focusFinder() };
     }
@@ -610,8 +628,14 @@ const Prospection = {
       cfg.enabled = !!turnOn;
       const s = await App.api.autopilot_save_config({ config: cfg });
       if (!s || !s.ok) throw new Error((s && s.error) || 'enregistrement refusé');
+      const apSnap = this.state.autopilot || {};
+      const perRun = apSnap.per_run || 0;
       Toast.success(turnOn
-        ? 'Auto-pilote allumé — il va préparer les mails de tes prospects.'
+        ? ('Auto-pilote allumé — il prépare les mails'
+           + (perRun ? ` par paquets de ${perRun}` : '')
+           + ', à valider dans Brouillons. Premier passage cette nuit vers '
+           + `${apSnap.hour || 3}h — ou tout de suite avec « Lancer `
+           + 'maintenant » (écran Auto-pilote).')
         : 'Auto-pilote éteint.');
     } catch (e) {
       Toast.friendlyError(e, 'Impossible de changer l’Auto-pilote pour le moment.');
