@@ -1,18 +1,20 @@
-/* Triskell Apps Launcher — Spotlight type Linear / Raycast / Cmd+K
+/* Triskell Apps Launcher — Spotlight des outils Triskell.
  *
- * Overlay full-screen avec :
+ * Overlay plein écran avec :
  * - Backdrop blur fort
  * - Champ recherche live (autofocus) en haut
  * - Grille immersive de tuiles avec les vrais logos normalisés
- * - Filtre par catégorie + statut
- * - Click sur une tuile → ouvre l'URL produit dans le navigateur par défaut
+ * - Filtre par catégorie
+ * - Clic sur une tuile → ouvre la page web de l'outil dans un nouvel onglet
  *
- * Raccourci : Ctrl+K (ou Cmd+K sur Mac) depuis n'importe où.
- * Échap pour fermer.
+ * Raccourci : Ctrl+O (ou Cmd+O sur Mac) depuis n'importe où — Ctrl+K est
+ * réservé à la recherche globale. Échap pour fermer. Bouton « Outils »
+ * en bas de la barre latérale.
  */
 
 const Launcher = {
-  apps: null,
+  apps: null,        // null = catalogue pas encore chargé
+  loadError: false,  // échec du dernier chargement (bouton Réessayer)
   isOpen: false,
   query: '',
   category: 'all',  // all | quotidien | pro
@@ -26,24 +28,37 @@ const Launcher = {
 
   // ---- Bootstrap ----
   init() {
-    // Raccourci global Ctrl+K / Cmd+K
+    // Raccourci global Ctrl+O / Cmd+O (Ctrl+K appartient à la recherche globale)
     window.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey
+          && e.key.toLowerCase() === 'o') {
         e.preventDefault();
         this.toggle();
       }
       if (this.isOpen) {
+        // Dans le champ de recherche, ←/→ servent à déplacer le curseur :
+        // on ne les détourne pas. ↑/↓ restent pour la grille (saut de ligne).
+        const ae = document.activeElement;
+        const inField = !!(ae && ae.id === 'launcher-search');
         if (e.key === 'Escape') {
           e.preventDefault();
           this.close();
         }
-        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        if (e.key === 'ArrowRight' && !inField) {
           e.preventDefault();
           this._move(1);
         }
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        if (e.key === 'ArrowLeft' && !inField) {
           e.preventDefault();
           this._move(-1);
+        }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          this._move(4); // une ligne de grille plus bas
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          this._move(-4); // une ligne de grille plus haut
         }
         if (e.key === 'Enter') {
           e.preventDefault();
@@ -61,18 +76,37 @@ const Launcher = {
   async open() {
     if (this.isOpen) return;
     this.isOpen = true;
-    // Charge le catalogue (pas de cache → on récupère l'état frais)
-    if (App.api) {
-      try {
-        const data = await App.api.get_apps_catalog();
-        this.apps = (data && data.ok) ? data.apps : [];
-      } catch (e) {
-        this.apps = [];
-      }
-    } else {
-      this.apps = this._previewCatalog();
-    }
+    // L'overlay s'affiche TOUT DE SUITE (avec un indicateur de chargement),
+    // l'appel réseau se fait après — sur connexion lente, Ctrl+O répond
+    // donc instantanément au lieu de sembler mort.
+    this.apps = null;       // null = chargement en cours
+    this.loadError = false;
     this._render();
+    await this._load();
+  },
+
+  async _load() {
+    if (!App.api) {
+      this.apps = this._previewCatalog();
+      this.loadError = false;
+      if (this.isOpen) this._renderGrid();
+      return;
+    }
+    this.apps = null;
+    this.loadError = false;
+    try {
+      const data = await App.api.get_apps_catalog();
+      if (data && data.ok) {
+        this.apps = data.apps || [];
+      } else {
+        if (data && data.error) console.warn('[launcher] catalogue :', data.error);
+        this.loadError = true;
+      }
+    } catch (e) {
+      console.warn('[launcher] catalogue :', e);
+      this.loadError = true;
+    }
+    if (this.isOpen) this._renderGrid();
   },
 
   close() {
@@ -139,7 +173,7 @@ const Launcher = {
                           placeholder:text-text-muted text-text"
                    autocomplete="off" spellcheck="false" />
             <kbd class="text-[10px] font-bold text-text-muted bg-bg
-                        px-2 py-1 rounded-md border border-border">ESC</kbd>
+                        px-2 py-1 rounded-md border border-border">Échap</kbd>
           </div>
           <div class="flex gap-2">${cats}</div>
         </div>
@@ -153,8 +187,9 @@ const Launcher = {
             <span class="flex items-center gap-1"><kbd class="text-[10px] font-bold bg-bg px-1.5 py-0.5 rounded border border-border">↑↓</kbd> naviguer</span>
             <span class="flex items-center gap-1"><kbd class="text-[10px] font-bold bg-bg px-1.5 py-0.5 rounded border border-border">↵</kbd> ouvrir</span>
           </div>
-          <div>
-            <span><kbd class="text-[10px] font-bold bg-bg px-1.5 py-0.5 rounded border border-border">Ctrl K</kbd> rouvrir</span>
+          <div class="flex items-center gap-4">
+            <span><kbd class="text-[10px] font-bold bg-bg px-1.5 py-0.5 rounded border border-border">Ctrl O</kbd> fermer</span>
+            <span><kbd class="text-[10px] font-bold bg-bg px-1.5 py-0.5 rounded border border-border">Échap</kbd> fermer</span>
           </div>
         </div>
       </div>
@@ -190,6 +225,32 @@ const Launcher = {
   _renderGrid() {
     const grid = document.getElementById('launcher-grid');
     if (!grid) return;
+
+    // Chargement en cours (apps pas encore arrivées)
+    if (this.apps === null && !this.loadError) {
+      grid.innerHTML = `
+        <div class="text-center py-16 text-text-muted">
+          <span class="inline-block w-8 h-8 rounded-full border-[3px] border-accent/30 border-t-accent animate-spin mb-3"></span>
+          <div class="text-sm">Chargement des outils…</div>
+        </div>
+      `;
+      return;
+    }
+
+    // Échec de chargement : on le DIT (avant : faux « aucun outil »)
+    if (this.loadError) {
+      grid.innerHTML = `
+        <div class="text-center py-16 text-text-muted">
+          <div class="text-4xl mb-3 opacity-50">⚠</div>
+          <div class="text-sm mb-4">Impossible de charger la liste des outils.</div>
+          <button data-launcher-retry class="btn btn-secondary">Réessayer</button>
+        </div>
+      `;
+      const retry = grid.querySelector('[data-launcher-retry]');
+      if (retry) retry.onclick = () => { this._renderGridLoading(); this._load(); };
+      return;
+    }
+
     const items = this._filtered();
     if (items.length === 0) {
       grid.innerHTML = `
@@ -213,7 +274,23 @@ const Launcher = {
         this._highlightSelected();
       };
     });
+    // Logo introuvable → lettre de secours (au lieu d'une icône cassée)
+    grid.querySelectorAll('img[data-fallback-letter]').forEach(img => {
+      img.onerror = () => {
+        const span = document.createElement('span');
+        span.className = 'w-14 h-14 rounded-xl shrink-0 inline-flex items-center '
+                       + 'justify-center text-xl font-bold bg-accent/15 text-accent';
+        span.textContent = img.dataset.fallbackLetter || '?';
+        img.replaceWith(span);
+      };
+    });
     this._highlightSelected();
+  },
+
+  _renderGridLoading() {
+    this.apps = null;
+    this.loadError = false;
+    this._renderGrid();
   },
 
   _tile(a, idx) {
@@ -234,6 +311,7 @@ const Launcher = {
                      focus:outline-none">
         <div class="flex items-start gap-4 mb-3">
           <img src="${a.logo}" alt=""
+               data-fallback-letter="${this._esc(((a.name || '?').trim()[0] || '?').toUpperCase())}"
                class="w-14 h-14 rounded-xl shrink-0"
                style="object-fit: contain;" />
           <div class="flex-1 min-w-0">
@@ -265,14 +343,34 @@ const Launcher = {
   _move(delta) {
     const items = this._filtered();
     if (items.length === 0) return;
-    this.selectedIndex = (this.selectedIndex + delta + items.length) % items.length;
+    let next = this.selectedIndex + delta;
+    if (Math.abs(delta) === 1) {
+      // ←/→ : on boucle d'un bout à l'autre
+      next = (next + items.length) % items.length;
+    } else {
+      // ↑/↓ (saut de ligne) : on borne aux extrémités
+      next = Math.max(0, Math.min(items.length - 1, next));
+    }
+    this.selectedIndex = next;
     this._highlightSelected();
     // Scroll into view si nécessaire
     const sel = document.querySelector(`[data-app-idx="${this.selectedIndex}"]`);
     if (sel) sel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   },
 
-  async _activateSelected() {
+  // La première page web disponible pour un outil du catalogue :
+  // page d'achat, puis page du service, puis premier lien web de la fiche.
+  _appUrl(a) {
+    if (!a) return '';
+    if (a.buy_url) return a.buy_url;
+    if (a.service && a.service.url) return a.service.url;
+    for (const l of (a.links || [])) {
+      if (l && l.url && /^https?:\/\//i.test(l.url)) return l.url;
+    }
+    return '';
+  },
+
+  _activateSelected() {
     const items = this._filtered();
     const a = items[this.selectedIndex];
     if (!a) return;
@@ -287,19 +385,16 @@ const Launcher = {
       }
       return;
     }
-    if (App.api) {
-      try {
-        await App.api.launch_app({
-          exe_path: a.exe_path || '',
-          url:      a.buy_url  || '',
-        });
-      } catch (e) { console.warn(e); }
-      this.close();
-    } else if (a.buy_url) {
-      // Mode preview standalone (pas de pywebview) : ouvre dans le navigateur
-      window.open(a.buy_url, '_blank');
-      this.close();
+    // Version web : on ouvre la page de l'outil DANS LE NAVIGATEUR de
+    // l'utilisateur. (Avant : launch_app côté serveur → la page s'ouvrait
+    // sur le serveur Linux, donc nulle part.)
+    const url = this._appUrl(a);
+    if (!url) {
+      Toast.info('Cet outil n’a pas de page web.');
+      return;
     }
+    window.open(url, '_blank', 'noopener');
+    this.close();
   },
 
   _esc(s) {

@@ -18,16 +18,26 @@ const Phare = {
   filter: 'all',         // 'all' | 'internal' | 'external'
   _onboardKey: 'phare_onboarded_v1',
   _currentActions: {},   // map id → action (alimentée au render pour la modale d'aperçu)
+  _homeSites: [],        // cache du dernier chargement (filtres sans re-fetch)
+  _coulissesFrom: 'home',// d'où on est entré dans Coulisses (pour le bouton Retour)
+  _navIntent: false,     // true = navigation interne via _go (état explicite)
+  _selectedSiteName: '', // nom du site ouvert (libellés de Coulisses)
 
   async render(container) {
+    // Entrée par le menu (sans navigation interne explicite) → toujours l'accueil.
+    // Le re-clic sur « Le Phare » dans le menu rouvre donc la grille des sites.
+    if (!this._navIntent) this.view = 'home';
+    this._navIntent = false;
     if (this.view === 'site')      return this._renderSite(container);
     if (this.view === 'coulisses') return this._renderCoulisses(container);
     return this._renderHome(container);
   },
 
   _go(view, opts = {}) {
+    if (view === 'coulisses') this._coulissesFrom = this.view; // mémorise l'origine
     this.view = view;
     if (opts.siteId) this.selectedSite = opts.siteId;
+    this._navIntent = true;
     App.show('phare');
   },
 
@@ -55,8 +65,8 @@ const Phare = {
           <button class="phare-filter-btn ${this.filter === 'all' ? 'is-active' : ''}" data-filter="all">Tous</button>
           <button class="phare-filter-btn ${this.filter === 'internal' ? 'is-active' : ''}" data-filter="internal">Nos sites</button>
           <button class="phare-filter-btn ${this.filter === 'external' ? 'is-active' : ''}" data-filter="external">Clients</button>
-          <button class="phare-filter-spacer" aria-hidden="true"></button>
-          <button class="phare-coulisses-btn" data-act="coulisses" title="Voir les 8 robots qui surveillent tes sites">
+          <div class="phare-filter-spacer" aria-hidden="true"></div>
+          <button class="phare-coulisses-btn" data-act="coulisses" title="Voir les robots qui surveillent tes sites">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
             En coulisses
           </button>
@@ -70,35 +80,70 @@ const Phare = {
 
     container.querySelector('[data-act="add"]').onclick = () => this._openQuickAddDialog();
     container.querySelector('[data-act="coulisses"]').onclick = () => this._go('coulisses');
+    // Filtrage local : on réutilise les sites déjà chargés, sans re-fetch ni flash
     container.querySelectorAll('[data-filter]').forEach(b => {
-      b.onclick = () => { this.filter = b.dataset.filter; this._renderHome(container); };
+      b.onclick = () => {
+        this.filter = b.dataset.filter;
+        container.querySelectorAll('[data-filter]').forEach(x => x.classList.toggle('is-active', x === b));
+        this._renderHomeGrid(this._homeSites || []);
+      };
     });
 
     // Onboarding au premier lancement (après que le DOM soit posé)
     setTimeout(() => this._maybeShowOnboarding(), 100);
 
     if (!App.api) {
-      this._renderHomeGrid(this._previewSites());
+      this._homeSites = this._previewSites();
+      this._renderHomeGrid(this._homeSites);
       return;
     }
     let data;
     try { data = await App.api.phare_home({}); }
     catch (e) {
-      document.getElementById('ph-home-grid').innerHTML =
-        `<div class="phare-empty"><div class="phare-empty-icon">⚠️</div>
-         <h2>Connexion à la base impossible</h2>
-         <p>Le Phare lit ses chiffres dans Supabase. Vérifie ta connexion ou tes réglages.</p>
-         <button class="btn btn-secondary" onclick="App.show('config')">Aller dans Réglages</button></div>`;
+      console.warn('[Phare] phare_home injoignable :', e);
+      this._renderHomeError(container);
       return;
     }
     if (!data || !data.ok) {
-      document.getElementById('ph-home-grid').innerHTML =
-        `<div class="phare-empty"><div class="phare-empty-icon">🔌</div>
-         <h2>Le Phare n'est pas encore branché</h2>
-         <p>${this._esc(data?.error || 'Impossible de lire les sites.')}</p></div>`;
+      console.warn('[Phare] phare_home en erreur :', data);
+      this._renderHomeError(container);
       return;
     }
-    this._renderHomeGrid(data.sites || []);
+    this._homeSites = data.sites || [];
+    this._renderHomeGrid(this._homeSites);
+  },
+
+  // Bloc d'erreur de chargement de l'accueil, avec bouton Réessayer
+  // (le détail technique part en console, jamais à l'écran).
+  _renderHomeError(container) {
+    const slot = document.getElementById('ph-home-grid');
+    if (!slot) return;
+    slot.innerHTML =
+      `<div class="phare-empty"><div class="phare-empty-icon">⚠️</div>
+       <h2>Connexion à la base impossible</h2>
+       <p>Impossible de lire tes sites pour l'instant. Vérifie ta connexion internet, puis réessaie.</p>
+       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+         <button class="btn btn-primary" data-retry>Réessayer</button>
+         <button class="btn btn-secondary" onclick="App.show('config', {tab:'account'})">Aller dans Réglages</button>
+       </div></div>`;
+    slot.querySelector('[data-retry]').onclick = () => this._renderHome(container);
+  },
+
+  // Bloc d'erreur de chargement d'une fiche site, avec bouton Réessayer
+  // (même esprit que l'accueil : message français, détail en console).
+  _renderSiteError(container, message) {
+    const slot = document.getElementById('ph-site-body');
+    if (!slot) return;
+    slot.innerHTML =
+      `<div class="phare-empty"><div class="phare-empty-icon">⚠️</div>
+       <h2>Connexion à la base impossible</h2>
+       <p>${this._esc(message || "Impossible de charger ce site pour l'instant. Réessaie dans un instant.")}</p>
+       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+         <button class="btn btn-primary" data-retry>Réessayer</button>
+         <button class="btn btn-secondary" data-back-home>Retour à tes sites</button>
+       </div></div>`;
+    slot.querySelector('[data-retry]').onclick = () => this._renderSite(container);
+    slot.querySelector('[data-back-home]').onclick = () => this._go('home');
   },
 
   _renderHomeGrid(sites) {
@@ -129,7 +174,7 @@ const Phare = {
     const tone = s.health_tone || 'unknown';
     const dot = { ok: '🟢', warn: '🟠', bad: '🔴', unknown: '⚪' }[tone] || '⚪';
     const healthLabel = { ok: 'Santé bonne', warn: 'À surveiller', bad: 'Problèmes',
-                          unknown: 'Pas encore d\'audit' }[tone];
+                          unknown: 'Pas encore d’audit' }[tone];
     const pending = s.pending_count || 0;
     const delta = s.delta_pct;
     const clicks = s.clicks_30d || 0;
@@ -201,13 +246,13 @@ const Phare = {
     let data;
     try { data = await App.api.phare_site_dashboard({ id: this.selectedSite }); }
     catch (e) {
-      document.getElementById('ph-site-body').innerHTML =
-        `<div class="phare-empty"><div class="phare-empty-icon">⚠️</div><h2>Erreur</h2><p>${this._esc(String(e))}</p></div>`;
+      console.warn('[Phare] phare_site_dashboard injoignable :', e);
+      this._renderSiteError(container, "Impossible de charger ce site pour l'instant. Vérifie ta connexion internet, puis réessaie.");
       return;
     }
     if (!data || !data.ok) {
-      document.getElementById('ph-site-body').innerHTML =
-        `<div class="phare-empty"><div class="phare-empty-icon">⚠️</div><h2>Erreur</h2><p>${this._esc(data?.error || 'Site introuvable')}</p></div>`;
+      console.warn('[Phare] phare_site_dashboard en erreur :', data);
+      this._renderSiteError(container, "Ce site n'a pas pu être lu pour l'instant. Réessaie dans un instant.");
       return;
     }
     const s = data.site || {};
@@ -215,6 +260,7 @@ const Phare = {
     const toReview = data.to_review || [];
     const done = data.recently_done || [];
     const bull = data.bulletin || null;
+    this._selectedSiteName = s.name || s.domain || '';
 
     // Indexer les propositions pour la modale d'aperçu
     this._currentActions = {};
@@ -228,7 +274,7 @@ const Phare = {
           <p class="phare-subtitle"><a href="https://${this._esc(s.domain || '')}" target="_blank" rel="noopener">${this._esc(s.domain || '')}</a></p>
         </div>
         <div class="phare-site-hero-right">
-          <button class="btn btn-secondary" data-act="audit">Lancer un audit</button>
+          <button class="btn btn-secondary" data-act="audit" title="Un grand contrôle complet du site : vitesse, balises, liens cassés">Lancer un audit</button>
           <button class="btn btn-secondary" data-act="edit">Réglages du site</button>
         </div>
       </header>
@@ -279,7 +325,7 @@ const Phare = {
                                  : `Les ${done.length} dernières modifications validées.`}
           </span>
         </header>
-        <div>
+        <div id="ph-done-list">
           ${done.length === 0
             ? `<div class="phare-empty-inline">Quand tu valideras une proposition, elle apparaîtra ici.</div>`
             : done.map(a => this._actionCard(a, 'done')).join('')}
@@ -293,17 +339,36 @@ const Phare = {
           En coulisses — qui surveille ce site ?
         </summary>
         <div class="phare-coulisses-mini">
-          <p>8 robots Claude tournent en arrière-plan sur ton site, chacun avec sa spécialité.</p>
-          <button class="btn btn-secondary btn-sm" data-act="coulisses">Voir les 8 robots</button>
+          <p>Des robots Claude tournent en arrière-plan sur ton site, chacun avec sa spécialité.</p>
+          <button class="btn btn-secondary btn-sm" data-act="coulisses">Voir les robots</button>
         </div>
       </details>
     `;
 
-    document.getElementById('ph-site-body').querySelector('[data-act="audit"]').onclick = async () => {
+    const auditBtn = document.getElementById('ph-site-body').querySelector('[data-act="audit"]');
+    auditBtn.onclick = async () => {
+      auditBtn.disabled = true;
+      const lbl = auditBtn.textContent;
+      auditBtn.textContent = 'Lancement…';
       try {
-        await App.api.phare_run_audit({ id: this.selectedSite });
-        this._toast('✓ Audit lancé — le résultat apparaîtra dans quelques minutes');
-      } catch (e) { this._toast('Erreur : ' + e, 'error'); }
+        const res = await App.api.phare_run_audit({ id: this.selectedSite });
+        if (res && res.ok) {
+          Toast.success('Audit lancé — le résultat arrive dans quelques minutes.');
+          auditBtn.textContent = 'Audit en cours…'; // reste désactivé : pas de double audit
+          this._showAuditPendingNote();
+          // L'écran se rafraîchit tout seul quand le résultat a eu le temps d'arriver
+          // (minuteur auto-nettoyé si on quitte la vue).
+          App.viewTimeout(() => {
+            if (this.view === 'site') this._renderSite(document.getElementById('content'));
+          }, 60000);
+        } else {
+          Toast.friendlyError(res && res.error, 'L’audit n’a pas pu être lancé. Réessaie dans un instant.');
+          auditBtn.disabled = false; auditBtn.textContent = lbl;
+        }
+      } catch (e) {
+        Toast.friendlyError(e);
+        auditBtn.disabled = false; auditBtn.textContent = lbl;
+      }
     };
     document.getElementById('ph-site-body').querySelector('[data-act="edit"]').onclick = () => {
       this._openSiteDialog({ site: s, externalOnly: !!s.is_external_client });
@@ -314,22 +379,43 @@ const Phare = {
     this._wireActionButtons(document.getElementById('ph-site-body'));
   },
 
+  // Petit bandeau « audit en cours » sous l'en-tête du site, avec un bouton
+  // Actualiser visible (en plus du rafraîchissement automatique programmé).
+  _showAuditPendingNote() {
+    const body = document.getElementById('ph-site-body');
+    if (!body) return;
+    let note = body.querySelector('#ph-audit-note');
+    if (!note) {
+      note = document.createElement('div');
+      note.id = 'ph-audit-note';
+      note.className = 'phare-empty-inline';
+      note.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0';
+      const hero = body.querySelector('.phare-site-hero');
+      if (hero) hero.insertAdjacentElement('afterend', note);
+      else body.prepend(note);
+    }
+    note.innerHTML = `
+      <span>⏳ Audit en cours — le résultat arrive dans quelques minutes. L’écran se mettra à jour tout seul.</span>
+      <button class="btn btn-secondary btn-sm" data-refresh>Actualiser</button>`;
+    note.querySelector('[data-refresh]').onclick = () =>
+      this._renderSite(document.getElementById('content'));
+  },
+
   // ════════════════════════════════════════════════════════════════════
   //  Carte d'action (proposition) — affichage + boutons
   // ════════════════════════════════════════════════════════════════════
   _actionCard(a, mode) {
     const agentLabel = this._agentShortName(a.agent || '');
-    const date = (a.created_at || '').slice(0, 10);
-    const impact = a.impact || 0;
-    const impactDots = '●'.repeat(Math.max(0, Math.min(5, impact)))
-                     + '○'.repeat(5 - Math.max(0, Math.min(5, impact)));
+    const date = this._frDate(a.created_at);
+    const impact = Math.max(0, Math.min(5, a.impact || 0));
+    const impactDots = '●'.repeat(impact) + '○'.repeat(5 - impact);
     const summary = a.detail_md || a.summary || '';
     const summaryShort = summary.length > 240
       ? this._esc(summary.slice(0, 240)) + '…'
       : this._esc(summary);
     if (mode === 'done') {
       return `
-        <article class="phare-action phare-action--done">
+        <article class="phare-action phare-action--done" data-aid="${this._esc(a.id || '')}">
           <div class="phare-action-head">
             <div class="phare-action-icon">✓</div>
             <div class="phare-action-body">
@@ -365,7 +451,7 @@ const Phare = {
             <div class="phare-action-title">${this._esc(a.title || a.kind || '—')}</div>
             <div class="phare-action-meta">
               Proposition de ${this._esc(agentLabel)} · ${date || '—'}
-              ${impact ? `<span class="phare-action-impact" title="Impact estimé">${impactDots}</span>` : ''}
+              ${impact ? `<span class="phare-action-impact" title="Impact estimé">${impactDots} <span style="font-size:11px">impact ${impact}/5</span></span>` : ''}
             </div>
           </div>
         </div>
@@ -401,55 +487,11 @@ const Phare = {
   },
 
   _wireActionButtons(root) {
-    const approveHtmlAuto = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M5 3l14 9-14 9V3z"/></svg>Publier sur le site';
-    const approveHtmlManual = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>J\'ai fait, suivant';
-    const rejectHtml = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>Poubelle';
     root.querySelectorAll('[data-approve]').forEach(b => {
-      b.onclick = async () => {
-        const id = b.dataset.approve;
-        const isAuto = b.dataset.approveAuto === '1';
-        b.disabled = true; b.textContent = isAuto ? 'Publication…' : 'Enregistrement…';
-        const restore = () => { b.disabled = false; b.innerHTML = isAuto ? approveHtmlAuto : approveHtmlManual; };
-        try {
-          const res = await App.api.phare_merge_action({ id, force: false });
-          if (res && res.ok) {
-            this._toast(res.kind === 'note_only' ? '✓ Marquée comme faite — à toi de jouer' : '✓ Publié sur ton site');
-            this._renderSite(document.getElementById('content'));
-            return;
-          }
-          // Si checks KO, propose "Publier quand même"
-          if (res && res.decision && res.decision !== 'merge') {
-            if (confirm("Les vérifications automatiques ne sont pas toutes vertes. Publier quand même ?")) {
-              const r2 = await App.api.phare_merge_action({ id, force: true });
-              if (r2 && r2.ok) { this._toast('✓ Publié (forcé)'); this._renderSite(document.getElementById('content')); return; }
-              this._toast('Erreur : ' + (r2?.error || 'inconnue'), 'error');
-              restore();
-            } else { restore(); }
-          } else {
-            this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
-            restore();
-          }
-        } catch (e) { this._toast('Erreur : ' + e, 'error'); restore(); }
-      };
+      b.onclick = () => this._approveAction(b.dataset.approve, b.dataset.approveAuto === '1', b);
     });
     root.querySelectorAll('[data-reject]').forEach(b => {
-      b.onclick = async () => {
-        const id = b.dataset.reject;
-        const reason = prompt("Pourquoi refuser cette proposition ?\n(Tu peux laisser vide.)", "");
-        if (reason === null) return; // annulé
-        b.disabled = true; b.textContent = 'Refus…';
-        const restore = () => { b.disabled = false; b.innerHTML = rejectHtml; };
-        try {
-          const res = await App.api.phare_reject_action({ id, reason: reason || '' });
-          if (res && res.ok) {
-            this._toast('Proposition mise à la poubelle');
-            this._renderSite(document.getElementById('content'));
-            return;
-          }
-          this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
-          restore();
-        } catch (e) { this._toast('Erreur : ' + e, 'error'); restore(); }
-      };
+      b.onclick = () => this._rejectAction(b.dataset.reject, b);
     });
     root.querySelectorAll('[data-preview]').forEach(b => {
       b.onclick = () => {
@@ -459,22 +501,130 @@ const Phare = {
       };
     });
     root.querySelectorAll('[data-archive]').forEach(b => {
-      b.onclick = async () => {
-        const id = b.dataset.archive;
-        if (!confirm("Retirer cette modification de la liste « Ce qui a été fait » ?\n(La modification reste appliquée sur ton site — on la cache juste de ta vue.)")) return;
-        b.disabled = true;
-        try {
-          const res = await App.api.phare_archive_action({ id });
-          if (res && res.ok) {
-            this._toast('Retiré de la liste');
-            this._renderSite(document.getElementById('content'));
-            return;
-          }
-          this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
-          b.disabled = false;
-        } catch (e) { this._toast('Erreur : ' + e, 'error'); b.disabled = false; }
-      };
+      b.onclick = () => this._archiveAction(b.dataset.archive, b);
     });
+  },
+
+  // ── Actions partagées cartes + modale d'aperçu ──────────────────────
+  // Chaque action met la carte à jour LOCALEMENT (retrait en fondu) au lieu
+  // de re-rendre toute la page : le scroll ne bouge plus.
+  // Retourne true si l'action a abouti (la modale d'aperçu s'en sert).
+
+  async _approveAction(id, isAuto, btn) {
+    const prevHtml = btn ? btn.innerHTML : '';
+    const setBusy = (on) => {
+      if (!btn) return;
+      btn.disabled = on;
+      if (on) btn.textContent = isAuto ? 'Publication…' : 'Enregistrement…';
+      else btn.innerHTML = prevHtml;
+    };
+    setBusy(true);
+    try {
+      const res = await App.api.phare_merge_action({ id, force: false });
+      if (res && res.ok) {
+        Toast.success(res.kind === 'note_only' ? 'Marquée comme faite — à toi de jouer' : 'Publié sur ton site');
+        this._removeActionCard(id);
+        return true;
+      }
+      // Si checks KO, propose "Publier quand même"
+      if (res && res.decision && res.decision !== 'merge') {
+        const goOn = await Dialog.confirm(
+          'Les vérifications automatiques ne sont pas toutes vertes. Publier quand même ?',
+          { title: 'Vérifications incomplètes', okLabel: 'Publier quand même', cancelLabel: 'Annuler', danger: true });
+        if (!goOn) { setBusy(false); return false; }
+        const r2 = await App.api.phare_merge_action({ id, force: true });
+        if (r2 && r2.ok) {
+          Toast.success('Publié sur ton site (malgré les vérifications)');
+          this._removeActionCard(id);
+          return true;
+        }
+        Toast.friendlyError(r2 && r2.error, 'La publication n’a pas abouti. Réessaie dans un instant.');
+        setBusy(false);
+        return false;
+      }
+      Toast.friendlyError(res && res.error, 'La publication n’a pas abouti. Réessaie dans un instant.');
+      setBusy(false);
+      return false;
+    } catch (e) { Toast.friendlyError(e); setBusy(false); return false; }
+  },
+
+  async _rejectAction(id, btn) {
+    const reason = prompt("Pourquoi refuser cette proposition ?\n(Tu peux laisser vide.)", "");
+    if (reason === null) return false; // Annuler → on ne touche à rien
+    const prevHtml = btn ? btn.innerHTML : '';
+    const restore = () => { if (btn) { btn.disabled = false; btn.innerHTML = prevHtml; } };
+    if (btn) { btn.disabled = true; btn.textContent = 'Refus…'; }
+    try {
+      const res = await App.api.phare_reject_action({ id, reason: reason || '' });
+      if (res && res.ok) {
+        Toast.success('Proposition mise à la poubelle');
+        this._removeActionCard(id);
+        return true;
+      }
+      Toast.friendlyError(res && res.error, 'Le refus n’a pas pu être enregistré. Réessaie dans un instant.');
+      restore();
+      return false;
+    } catch (e) { Toast.friendlyError(e); restore(); return false; }
+  },
+
+  async _archiveAction(id, btn) {
+    const sure = await Dialog.confirm(
+      'Retirer cette modification de la liste « Ce qui a été fait » ?\n(La modification reste appliquée sur ton site — on la cache juste de ta vue.)',
+      { title: 'Retirer de la liste', okLabel: 'Retirer', cancelLabel: 'Annuler' });
+    if (!sure) return false;
+    if (btn) btn.disabled = true;
+    try {
+      const res = await App.api.phare_archive_action({ id });
+      if (res && res.ok) {
+        Toast.success('Retiré de la liste');
+        this._removeActionCard(id);
+        return true;
+      }
+      Toast.friendlyError(res && res.error, 'Impossible de retirer cette ligne pour l’instant.');
+      if (btn) btn.disabled = false;
+      return false;
+    } catch (e) { Toast.friendlyError(e); if (btn) btn.disabled = false; return false; }
+  },
+
+  // Retire une carte de la page avec un petit fondu, puis remet à jour le
+  // compteur de la section et le message « rien à faire » si besoin.
+  _removeActionCard(id) {
+    delete this._currentActions[id];
+    let card = null;
+    document.querySelectorAll('.phare-action[data-aid]').forEach(el => {
+      if (el.dataset.aid === String(id)) card = el;
+    });
+    if (!card) return;
+    const list = card.parentElement;
+    card.style.transition = 'opacity .25s ease, transform .25s ease';
+    card.style.opacity = '0';
+    card.style.transform = 'translateY(-4px)';
+    setTimeout(() => {
+      card.remove();
+      this._refreshSectionAfterRemoval(list);
+    }, 260);
+  },
+
+  _refreshSectionAfterRemoval(list) {
+    if (!list || !list.id) return;
+    const remaining = list.querySelectorAll('.phare-action').length;
+    const section = list.closest('.phare-section');
+    const sub = section ? section.querySelector('.phare-section-sub') : null;
+    if (list.id === 'ph-todo-list') {
+      if (sub) sub.textContent = remaining === 0
+        ? 'Rien en attente — tu peux respirer.'
+        : `${remaining} proposition${remaining > 1 ? 's' : ''} des robots, à valider ou refuser.`;
+      if (remaining === 0) {
+        list.innerHTML = `<div class="phare-empty-inline">✓ Rien à valider pour l'instant. Les robots travaillent en arrière-plan.</div>`;
+      }
+    } else if (list.id === 'ph-done-list') {
+      if (sub) sub.textContent = remaining === 0
+        ? 'Pas encore de modifications appliquées.'
+        : `Les ${remaining} dernières modifications validées.`;
+      if (remaining === 0) {
+        list.innerHTML = `<div class="phare-empty-inline">Quand tu valideras une proposition, elle apparaîtra ici.</div>`;
+      }
+    }
   },
 
   // ════════════════════════════════════════════════════════════════════
@@ -482,7 +632,7 @@ const Phare = {
   // ════════════════════════════════════════════════════════════════════
   _openPreviewDialog(a) {
     const agentLabel = this._agentShortName(a.agent || '');
-    const date = (a.created_at || '').slice(0, 10);
+    const date = this._frDate(a.created_at);
     const impact = Math.max(0, Math.min(5, a.impact || 0));
     const impactDots = impact
       ? '●'.repeat(impact) + '○'.repeat(5 - impact)
@@ -502,7 +652,7 @@ const Phare = {
             <h2 class="text-xl font-semibold">${this._esc(a.title || a.kind || '—')}</h2>
             <div class="phare-action-meta" style="margin-top:6px">
               Proposition de ${this._esc(agentLabel)} · ${date || '—'}
-              ${impactDots ? `<span class="phare-action-impact" title="Impact estimé">${impactDots}</span>` : ''}
+              ${impactDots ? `<span class="phare-action-impact" title="Impact estimé">${impactDots} <span style="font-size:11px">impact ${impact}/5</span></span>` : ''}
             </div>
           </div>
           <button class="phare-modal-close" data-close aria-label="Fermer">×</button>
@@ -554,28 +704,27 @@ const Phare = {
       </div>
     `;
     document.body.appendChild(dlg);
-    const close = () => dlg.remove();
+    // Fermer avec Échap — l'écouteur est retiré quelle que soit la façon de fermer
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    const close = () => { document.removeEventListener('keydown', onKey); dlg.remove(); };
+    document.addEventListener('keydown', onKey);
     dlg.querySelectorAll('[data-close]').forEach(el => el.onclick = close);
-    // Relier OK / Poubelle de la modale aux mêmes handlers que les cartes
+    // Publier / Poubelle : on appelle DIRECTEMENT les actions partagées
+    // (plus de re-clic fragile sur les boutons de la carte derrière).
     const approveBtn = dlg.querySelector('[data-preview-approve]');
     const rejectBtn = dlg.querySelector('[data-preview-reject]');
     if (approveBtn) {
-      approveBtn.onclick = () => {
-        close();
-        const cardBtn = document.querySelector(`[data-approve="${a.id}"]`);
-        if (cardBtn) cardBtn.click();
+      approveBtn.onclick = async () => {
+        const ok = await this._approveAction(a.id, this._isAuto(a), approveBtn);
+        if (ok) close();
       };
     }
     if (rejectBtn) {
-      rejectBtn.onclick = () => {
-        close();
-        const cardBtn = document.querySelector(`[data-reject="${a.id}"]`);
-        if (cardBtn) cardBtn.click();
+      rejectBtn.onclick = async () => {
+        const ok = await this._rejectAction(a.id, rejectBtn);
+        if (ok) close();
       };
     }
-    // Fermer avec Échap
-    const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
-    document.addEventListener('keydown', onKey);
   },
 
   // Markdown minimaliste : paragraphes + gras + retours à la ligne
@@ -587,7 +736,7 @@ const Phare = {
   },
 
   _bulletinCard(b) {
-    const date = (b.created_at || '').slice(0, 10);
+    const date = this._frDate(b.created_at);
     const summary = (b.detail_md || b.summary || '').slice(0, 320);
     return `
       <article class="phare-bulletin">
@@ -636,7 +785,7 @@ const Phare = {
         <header class="phare-home-head">
           <div class="phare-home-head-left">
             <div class="phare-kicker">EN COULISSES</div>
-            <h1 class="phare-title">Les 8 robots.</h1>
+            <h1 class="phare-title">Les robots.</h1>
             <p class="phare-subtitle">Chacun a sa spécialité. Ensemble, ils gardent tes sites au sommet, 24/7.</p>
           </div>
         </header>
@@ -644,7 +793,10 @@ const Phare = {
         <div id="ph-coulisses-grid"><div class="phare-loading">Chargement…</div></div>
       </section>
     `;
-    container.querySelector('[data-act="back"]').onclick = () => this._go(this.selectedSite ? 'site' : 'home');
+    // Retour : revient là d'où on est entré en Coulisses (accueil ou fiche site),
+    // mémorisé dans _go() — plus de retour vers une fiche résiduelle.
+    container.querySelector('[data-act="back"]').onclick = () =>
+      this._go(this._coulissesFrom === 'site' && this.selectedSite ? 'site' : 'home');
     this._renderAutomergePanel();
     let agents = this._defaultAgents();
     if (App.api) {
@@ -681,14 +833,24 @@ const Phare = {
     `;
     grid.querySelectorAll('[data-run]').forEach(b => {
       b.onclick = async () => {
+        // Périmètre réel : un site précis seulement si on vient de sa fiche,
+        // sinon le robot passe sur tous les sites suivis.
+        const onSite = (this._coulissesFrom === 'site' && this.selectedSite) ? this.selectedSite : null;
+        const scope = onSite
+          ? `sur le site « ${this._selectedSiteName || 'sélectionné'} »`
+          : 'sur tous les sites suivis';
+        const sure = await Dialog.confirm(
+          `Lancer ce robot maintenant, ${scope} ?`,
+          { title: 'Lancer maintenant', okLabel: 'Lancer', cancelLabel: 'Annuler' });
+        if (!sure) return;
         b.disabled = true; const lbl = b.textContent; b.textContent = 'Lancement…';
         try {
           const payload = { agent: b.dataset.run };
-          if (this.selectedSite) payload.site_id = this.selectedSite;
+          if (onSite) payload.site_id = onSite;
           const res = await App.api.phare_run_agent(payload);
-          if (res && res.ok) this._toast('✓ Mission lancée en arrière-plan');
-          else this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
-        } catch (e) { this._toast('Erreur : ' + e, 'error'); }
+          if (res && res.ok) Toast.success(`Mission lancée en arrière-plan ${scope}`);
+          else Toast.friendlyError(res && res.error, 'La mission n’a pas pu être lancée. Réessaie dans un instant.');
+        } catch (e) { Toast.friendlyError(e); }
         finally { b.disabled = false; b.textContent = lbl; }
       };
     });
@@ -726,30 +888,31 @@ const Phare = {
         </div>`;
       host.querySelector('[data-act="toggle"]').onclick = async () => {
         const next = !on;
-        if (next && !window.confirm(
-          'Activer la publication automatique ?\n\n' +
-          'Les améliorations préparées par les robots seront mises en ligne ' +
-          'toutes seules UNIQUEMENT si toutes les vérifications passent ' +
-          '(vitesse, rendu visuel, aucun lien cassé). Maximum 3 par jour.\n\n' +
-          'Tu seras prévenu à chaque publication, et si le trafic d’un site ' +
-          'décroche dans les 14 jours, tu seras alerté pour retour arrière.')) {
-          return;
+        if (next) {
+          const sure = await Dialog.confirm(
+            'Les améliorations préparées par les robots seront mises en ligne ' +
+            'toutes seules UNIQUEMENT si toutes les vérifications passent ' +
+            '(vitesse, rendu visuel, aucun lien cassé). Maximum 3 par jour.\n\n' +
+            'Tu seras prévenu à chaque publication, et si le trafic d’un site ' +
+            'décroche dans les 14 jours, tu seras alerté pour retour arrière.',
+            { title: 'Activer la publication automatique ?', okLabel: 'Activer', cancelLabel: 'Annuler' });
+          if (!sure) return;
         }
         paint(on, true);
         try {
           const r = await App.api.phare_automerge_set({ enabled: next });
           if (r && r.ok) {
             paint(!!r.enabled, false);
-            this._toast(r.enabled
-              ? '🟢 Publication automatique activée (passage chaque jour à 15h)'
+            Toast.success(r.enabled
+              ? 'Publication automatique activée (passage chaque jour à 15h)'
               : 'Publication automatique coupée — tout repasse par ton OK');
           } else {
             paint(on, false);
-            this._toast('Erreur : ' + ((r && r.error) || 'réglage non enregistré'), 'error');
+            Toast.friendlyError(r && r.error, 'Le réglage n’a pas pu être enregistré. Réessaie dans un instant.');
           }
         } catch (e) {
           paint(on, false);
-          this._toast('Erreur : ' + e, 'error');
+          Toast.friendlyError(e);
         }
       };
     };
@@ -768,7 +931,7 @@ const Phare = {
       <div class="phare-onboard-card">
         <div class="phare-onboard-emoji">💡</div>
         <h2>Bienvenue dans Le Phare</h2>
-        <p class="phare-onboard-lead">Voici tes sites. Sur chacun, <strong>8 robots Claude</strong> préparent des améliorations SEO pendant que tu dors.</p>
+        <p class="phare-onboard-lead">Voici tes sites. Sur chacun, <strong>des robots Claude</strong> préparent des améliorations SEO pendant que tu dors.</p>
         <div class="phare-onboard-steplabel">Tu as juste deux choses à faire :</div>
         <div class="phare-onboard-steps">
           <div class="phare-onboard-step">
@@ -843,8 +1006,28 @@ const Phare = {
       </div>
     `;
     document.body.appendChild(dlg);
-    const close = () => dlg.remove();
-    dlg.querySelectorAll('[data-close]').forEach(el => el.onclick = close);
+    let busy = false;     // analyse en cours → fermeture et double envoi bloqués
+    let created = false;  // site créé → on peut fermer sans garde de saisie
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    const close = async (force = false) => {
+      if (busy) return; // pas de fermeture pendant l'analyse
+      if (!force && !created) {
+        const typed = (dlg.querySelector('#ph-quick-url')?.value || '').trim();
+        if (typed) {
+          const sure = await Dialog.confirm(
+            'Fermer sans ajouter le site ? L’adresse saisie sera perdue.',
+            { title: 'Fermer la fenêtre', okLabel: 'Fermer', cancelLabel: 'Continuer', danger: true });
+          if (!sure) return;
+        }
+      }
+      document.removeEventListener('keydown', onKey);
+      dlg.remove();
+      // Si un site a été créé, on rafraîchit la grille quelle que soit la
+      // façon de fermer (bouton Terminé, croix, fond, Échap).
+      if (created && this.view === 'home') this._renderHome(document.getElementById('content'));
+    };
+    document.addEventListener('keydown', onKey);
+    dlg.querySelectorAll('[data-close]').forEach(el => el.onclick = () => close());
     const showStep = (step) => {
       dlg.querySelectorAll('[data-step]').forEach(el => {
         el.style.display = el.dataset.step === step ? '' : 'none';
@@ -854,15 +1037,34 @@ const Phare = {
       });
     };
 
-    dlg.querySelector('[data-save]').onclick = async () => {
+    const saveBtn = dlg.querySelector('[data-save]');
+    const setBusy = (on) => {
+      busy = on;
+      saveBtn.disabled = on;
+      saveBtn.textContent = on ? 'Analyse en cours…' : 'Créer le site';
+      // Annuler et la croix sont neutralisés pendant l'analyse
+      dlg.querySelectorAll('button[data-close]').forEach(el => { el.disabled = on; });
+    };
+
+    // Entrée dans le champ = clic sur « Créer le site » (jamais de rechargement
+    // de page par soumission implicite du formulaire).
+    dlg.querySelector('#ph-quick-form').onsubmit = (e) => {
+      e.preventDefault();
+      if (!busy) saveBtn.click();
+    };
+
+    saveBtn.onclick = async () => {
+      if (busy) return; // anti double création
       const url = (dlg.querySelector('#ph-quick-url')?.value || '').trim();
-      if (!url) { this._toast('Mets l’adresse du site.', 'error'); return; }
+      if (!url) { Toast.error('Mets l’adresse du site.'); return; }
+      setBusy(true);
       showStep('loading');
       let res;
       try { res = await App.api.phare_site_quick_add({ url }); }
-      catch (e) { this._toast('Erreur : ' + e, 'error'); showStep('form'); return; }
+      catch (e) { Toast.friendlyError(e); setBusy(false); showStep('form'); return; }
       if (!res || !res.ok) {
-        this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error');
+        Toast.friendlyError(res && res.error, 'Le site n’a pas pu être ajouté. Vérifie l’adresse, puis réessaie.');
+        setBusy(false);
         showStep('form');
         return;
       }
@@ -892,7 +1094,7 @@ const Phare = {
           </div>` : ''}
           <div class="phare-summary-row">
             <span class="phare-summary-label">Pages surveillées</span>
-            <span>${paths.map(p => `<code style="background:rgba(0,0,0,.06);padding:1px 5px;border-radius:3px;margin-right:4px">${this._esc(p)}</code>`).join(' ')}</span>
+            <span>${paths.map(p => `<code style="background:hsl(var(--surface-elevated));border:1px solid hsl(var(--border));padding:1px 5px;border-radius:3px;margin-right:4px">${this._esc(p)}</code>`).join(' ')}</span>
           </div>
         </div>
         <p class="text-xs text-text-muted" style="margin-top:14px;text-align:center">
@@ -901,12 +1103,10 @@ const Phare = {
         </p>
       `;
       dlg.querySelector('[data-summary]').innerHTML = summary;
+      created = true;
+      setBusy(false);
       showStep('done');
-      this._toast('✓ Site ajouté — les robots prennent le relais');
-      dlg.querySelector('[data-foot="done"] [data-close]').onclick = () => {
-        close();
-        this._renderHome(document.getElementById('content'));
-      };
+      Toast.success('Site ajouté — les robots prennent le relais');
     };
 
     setTimeout(() => dlg.querySelector('#ph-quick-url')?.focus(), 50);
@@ -937,31 +1137,63 @@ const Phare = {
           <form id="ph-site-form" class="space-y-3">
             ${this._field('name', 'Nom du site', s.name || '', 'Ex : Cabinet Dupont', true)}
             ${this._field('domain', 'Domaine', s.domain || '', 'cabinet-dupont.fr', true)}
-            ${this._field('repo_github', 'Repo GitHub (owner/repo)', s.repo_github || '', 'Jordan-Bourillot/cabinet-dupont', false)}
-            ${this._field('repo_branch_main', 'Branche de production', s.repo_branch_main || 'main', 'main', false)}
-            ${this._field('netlify_site_id', 'Netlify site ID', s.netlify_site_id || '', '(uuid Netlify)', false)}
-            ${this._selectField('stack', 'Techno', s.stack || 'html', ['astro','next','vite','html','autre'])}
-            ${this._field('priority', 'Priorité (0-100)', String(s.priority ?? 50), '50', false, 'number')}
-            ${this._textareaField('key_paths', 'Pages clés à surveiller (1 par ligne)', (s.key_paths || ['/']).join('\n'), '/, /contact, /services…')}
+            ${this._field('priority', 'Priorité (0-100)', String(s.priority ?? 50), '50', false, 'number', 'min="0" max="100" step="1"')}
+            ${this._textareaField('key_paths', 'Pages clés à surveiller (1 par ligne, 10 max)', (s.key_paths || ['/']).join('\n'), '/, /contact, /services…')}
             ${this._field('notes', 'Notes internes', s.notes || '', '(secteur, particularités…)', false)}
             <label class="flex items-center gap-2 pt-2">
               <input type="checkbox" name="is_external_client" ${(externalOnly || s.is_external_client) ? 'checked' : ''}>
               <span class="text-sm">Site d'un client externe</span>
             </label>
+            <details style="border:1px solid hsl(var(--border));border-radius:8px;padding:10px 12px">
+              <summary style="cursor:pointer;font-weight:600;font-size:13px">Réglages techniques (avancé)</summary>
+              <p class="text-xs text-text-muted" style="margin:8px 0 0">Ces champs servent aux robots — n'y touche pas sans raison.</p>
+              <div class="space-y-3" style="margin-top:10px">
+                ${this._field('repo_github', 'Repo GitHub (owner/repo)', s.repo_github || '', 'Jordan-Bourillot/cabinet-dupont', false)}
+                ${this._field('repo_branch_main', 'Branche de production', s.repo_branch_main || 'main', 'main', false)}
+                ${this._field('netlify_site_id', 'Netlify site ID', s.netlify_site_id || '', '(uuid Netlify)', false)}
+                ${this._selectField('stack', 'Techno', s.stack || 'html', ['astro','next','vite','html','autre'])}
+              </div>
+            </details>
           </form>
         </div>
         <footer class="phare-modal-foot">
+          ${isEdit ? `<button class="btn btn-secondary" data-deactivate style="margin-right:auto;color:hsl(var(--danger-text))">Ne plus suivre ce site</button>` : ''}
           <button class="btn btn-secondary" data-close>Annuler</button>
           <button class="btn btn-primary" data-save>${isEdit ? 'Enregistrer' : 'Créer le site'}</button>
         </footer>
       </div>
     `;
     document.body.appendChild(dlg);
-    const close = () => dlg.remove();
-    dlg.querySelectorAll('[data-close]').forEach(el => el.onclick = close);
+    const form = dlg.querySelector('#ph-site-form');
+    // Garde anti-perte de saisie : si un champ a été modifié, on confirme
+    // avant de fermer (croix, Annuler, clic sur le fond, Échap).
+    let dirty = false;
+    form.addEventListener('input', () => { dirty = true; });
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    const close = async (force = false) => {
+      if (!force && dirty) {
+        const sure = await Dialog.confirm(
+          'Fermer sans enregistrer ? Tes modifications seront perdues.',
+          { title: 'Fermer la fenêtre', okLabel: 'Fermer sans enregistrer', cancelLabel: 'Continuer', danger: true });
+        if (!sure) return;
+      }
+      document.removeEventListener('keydown', onKey);
+      dlg.remove();
+    };
+    document.addEventListener('keydown', onKey);
+    dlg.querySelectorAll('[data-close]').forEach(el => el.onclick = () => close());
+    // Entrée dans un champ ne doit jamais recharger la page
+    form.onsubmit = (e) => { e.preventDefault(); dlg.querySelector('[data-save]').click(); };
+
     dlg.querySelector('[data-save]').onclick = async () => {
-      const form = dlg.querySelector('#ph-site-form');
+      const saveBtn = dlg.querySelector('[data-save]');
+      if (saveBtn.disabled) return;
       const fd = new FormData(form);
+      // Priorité : bornée 0-100, 0 accepté (champ vide → 50)
+      let priority = parseInt((fd.get('priority') ?? '').toString().trim(), 10);
+      if (isNaN(priority)) priority = 50;
+      priority = Math.max(0, Math.min(100, priority));
+      const allPaths = (fd.get('key_paths') || '/').toString().split('\n').map(x => x.trim()).filter(Boolean);
       const payload = {
         id: s.id || undefined,
         name: (fd.get('name') || '').toString().trim(),
@@ -970,35 +1202,78 @@ const Phare = {
         repo_branch_main: (fd.get('repo_branch_main') || 'main').toString().trim(),
         netlify_site_id: (fd.get('netlify_site_id') || '').toString().trim(),
         stack: (fd.get('stack') || 'html').toString().trim(),
-        priority: parseInt(fd.get('priority') || '50', 10) || 50,
-        key_paths: (fd.get('key_paths') || '/').toString().split('\n').map(x => x.trim()).filter(Boolean).slice(0, 10),
+        priority,
+        key_paths: allPaths.slice(0, 10),
         notes: (fd.get('notes') || '').toString().trim(),
         is_external_client: form.querySelector('[name="is_external_client"]').checked,
         is_active: true,
       };
       if (!payload.name || !payload.domain) {
-        this._toast('Le nom et le domaine sont obligatoires.', 'error');
+        Toast.error('Le nom et le domaine sont obligatoires.');
         return;
       }
+      saveBtn.disabled = true;
+      const lbl = saveBtn.textContent;
+      saveBtn.textContent = 'Enregistrement…';
       try {
         const res = await App.api.phare_site_upsert(payload);
-        if (!res || !res.ok) { this._toast('Erreur : ' + (res?.error || 'inconnue'), 'error'); return; }
-        close();
-        this._toast(isEdit ? '✓ Site mis à jour' : '✓ Site ajouté — les robots prennent le relais');
+        if (!res || !res.ok) {
+          Toast.friendlyError(res && res.error, 'Le site n’a pas pu être enregistré. Réessaie dans un instant.');
+          saveBtn.disabled = false; saveBtn.textContent = lbl;
+          return;
+        }
+        await close(true);
+        Toast.success(isEdit ? 'Site mis à jour' : 'Site ajouté — les robots prennent le relais');
+        if (allPaths.length > 10) {
+          Toast.info(`Seules les 10 premières pages clés ont été gardées (${allPaths.length} saisies).`);
+        }
         if (isEdit && this.view === 'site') this._renderSite(document.getElementById('content'));
         else this._renderHome(document.getElementById('content'));
-      } catch (e) { this._toast('Erreur : ' + e, 'error'); }
+      } catch (e) {
+        Toast.friendlyError(e);
+        saveBtn.disabled = false; saveBtn.textContent = lbl;
+      }
     };
+
+    // « Ne plus suivre ce site » : les robots arrêtent de le surveiller,
+    // il disparaît de la liste (le site lui-même reste en ligne).
+    const deactBtn = dlg.querySelector('[data-deactivate]');
+    if (deactBtn) {
+      deactBtn.onclick = async () => {
+        const sure = await Dialog.confirm(
+          `Ne plus suivre « ${s.name || s.domain || 'ce site'} » ?\n\nLes robots arrêtent de le surveiller et il disparaît de ta liste. Le site lui-même n'est pas touché — il reste en ligne.`,
+          { title: 'Ne plus suivre ce site', okLabel: 'Ne plus suivre', cancelLabel: 'Annuler', danger: true });
+        if (!sure) return;
+        deactBtn.disabled = true;
+        const prev = deactBtn.textContent;
+        deactBtn.textContent = 'Retrait…';
+        try {
+          const res = await App.api.phare_site_deactivate({ id: s.id });
+          if (res && res.ok) {
+            await close(true);
+            Toast.success('Site retiré du suivi — les robots ne s’en occupent plus');
+            this.selectedSite = null;
+            this._go('home');
+            return;
+          }
+          Toast.friendlyError(res && res.error, 'Le site n’a pas pu être retiré du suivi. Réessaie dans un instant.');
+          deactBtn.disabled = false; deactBtn.textContent = prev;
+        } catch (e) {
+          Toast.friendlyError(e);
+          deactBtn.disabled = false; deactBtn.textContent = prev;
+        }
+      };
+    }
     setTimeout(() => dlg.querySelector('input[name="name"]').focus(), 50);
   },
 
-  _field(name, label, value, placeholder, required = false, type = 'text') {
+  _field(name, label, value, placeholder, required = false, type = 'text', extra = '') {
     return `
       <div>
         <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">${this._esc(label)}${required ? ' *' : ''}</label>
         <input type="${type}" name="${this._esc(name)}" value="${this._esc(value)}"
                placeholder="${this._esc(placeholder)}"
-               class="phare-input" ${required ? 'required' : ''}>
+               class="phare-input" ${required ? 'required' : ''} ${extra}>
       </div>`;
   },
   _selectField(name, label, value, options) {
@@ -1105,8 +1380,17 @@ const Phare = {
     if (n == null || n === '') return '—';
     const x = Number(n);
     if (isNaN(x)) return String(n);
-    if (x >= 10000) return (x / 1000).toFixed(1) + 'k';
+    if (x >= 10000) return (x / 1000).toFixed(1).replace('.', ',') + ' k';
     return x.toLocaleString('fr-FR');
+  },
+  // Date ISO (« 2026-06-10 » ou horodatage complet) → format français lisible
+  _frDate(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso).slice(0, 10);
+      return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+    } catch (e) { return String(iso).slice(0, 10); }
   },
   _relTime(iso) {
     if (!iso) return 'jamais';
@@ -1118,13 +1402,5 @@ const Phare = {
       if (sec < 86400) return `il y a ${Math.floor(sec/3600)} h`;
       return `il y a ${Math.floor(sec/86400)} j`;
     } catch (e) { return iso; }
-  },
-  _toast(msg, kind = 'success') {
-    const t = document.createElement('div');
-    t.textContent = msg;
-    const bg = kind === 'error' ? 'hsl(var(--danger))' : 'hsl(var(--success))';
-    t.style.cssText = `position:fixed;bottom:32px;right:32px;background:${bg};color:white;padding:12px 20px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.18);z-index:9999;font-weight:600;font-size:14px`;
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 3500);
   },
 };

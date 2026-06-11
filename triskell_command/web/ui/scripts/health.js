@@ -1,18 +1,16 @@
-/* Vue Santé du système — état des workers + délivrabilité.
+/* Vue Santé du système — état des robots + délivrabilité.
  *
  * Affiche :
  *  - Bandeau récap : healthy / warning / error
- *  - Carte par worker avec son dernier run (counters + erreurs)
+ *  - Carte par robot avec son dernier passage (compteurs + erreurs)
  *  - Bloc délivrabilité : envois/réponses sur 24h et 7j, taux de réponse
  *  - Auto-refresh toutes les 15 s tant que la vue est ouverte
+ *    (via App.viewInterval : coupé automatiquement en quittant la vue)
  */
 
 const Health = {
-  refreshTimer: null,
-  isOpen: false,
 
   async render(container) {
-    this.isOpen = true;
     container.innerHTML = `
       <section class="animate-slide-up max-w-5xl">
         <div class="mb-8">
@@ -20,7 +18,7 @@ const Health = {
             <div>
               <div class="hero-kicker mb-2">SANTÉ DU SYSTÈME</div>
               <h1 class="hero-title mb-3" style="font-size: 36px;">Tout est-il en marche ?</h1>
-              <p class="hero-subtitle">Tes 10 outils autonomes, leur dernière exécution, et la santé de tes envois.</p>
+              <p class="hero-subtitle"><span id="h-worker-count">Tes robots autonomes</span>, leur dernier passage, et la santé de tes envois.</p>
             </div>
             ${Help.button('health')}
           </div>
@@ -36,21 +34,15 @@ const Health = {
 
     await this.refresh();
 
-    // Auto-refresh
-    if (this.refreshTimer) clearInterval(this.refreshTimer);
-    this.refreshTimer = setInterval(() => {
-      if (App.currentView === 'health' && this.isOpen) this.refresh();
-      else this._stop();
+    // Auto-refresh : minuteur auto-nettoyé au changement de vue.
+    // On saute le tour si une vérification DNS est en cours pour ne pas
+    // écraser son état à l'écran.
+    App.viewInterval(() => {
+      if (!this._dnsChecking && !this._refreshing) this.refresh();
     }, 15000);
   },
 
-  _stop() {
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = null;
-    }
-    this.isOpen = false;
-  },
+  _refreshing: false,
 
   async refresh() {
     if (!App.api) {
@@ -61,6 +53,7 @@ const Health = {
         </div>`;
       return;
     }
+    this._refreshing = true;
     let data, mailHealth;
     try {
       [data, mailHealth] = await Promise.all([
@@ -68,41 +61,78 @@ const Health = {
         (App.api.mail_health ? App.api.mail_health() : Promise.resolve(null)),
       ]);
     } catch (e) {
-      document.getElementById('h-content').innerHTML =
-        `<div class="card p-6 text-danger">Erreur : ${e}</div>`;
+      this._refreshing = false;
+      console.warn('system_health:', e);
+      this._renderLoadError();
       return;
     }
+    this._refreshing = false;
     if (!data || !data.ok) {
-      document.getElementById('h-content').innerHTML =
-        `<div class="card p-6 text-danger">${data && data.error || 'Erreur inconnue'}</div>`;
+      console.warn('system_health:', data && data.error);
+      this._renderLoadError();
       return;
     }
+    const workers = data.workers || [];
+    // Compte dynamique dans le sous-titre (avant : « Tes 10 outils » en
+    // dur, alors que le serveur en a plus)
+    const countEl = document.getElementById('h-worker-count');
+    if (countEl) countEl.textContent = `Tes ${workers.length} robots autonomes`;
+    // Préserve les « Détail technique » ouverts à travers l'auto-refresh
+    const openDetails = new Set(
+      Array.from(document.querySelectorAll('#h-content details[open][data-w]'))
+        .map(d => d.dataset.w)
+    );
     document.getElementById('h-content').innerHTML =
       this._renderSummary(data.summary || {}) +
       this._renderMailSafety(mailHealth || {}) +
       this._renderDeliverability(data['delivrabilité'] || {}) +
       this._renderDnsCard() +
-      this._renderWorkers(data.workers || []);
+      this._renderWorkers(workers);
+    document.querySelectorAll('#h-content details[data-w]').forEach(d => {
+      if (openDetails.has(d.dataset.w)) d.open = true;
+    });
     this._bindDnsCard();
+  },
+
+  _renderLoadError() {
+    const host = document.getElementById('h-content');
+    if (!host) return;
+    host.innerHTML = `
+      <div class="card p-10 text-center">
+        <p class="text-text font-semibold mb-1">Impossible de charger l'état du système.</p>
+        <p class="text-text-muted text-sm mb-4">Vérifie ta connexion, puis réessaie — la page se met aussi à jour toute seule toutes les 15 s.</p>
+        <button class="btn btn-primary" onclick="Health.refresh()">Réessayer</button>
+      </div>`;
   },
 
   // ---- Tampons DNS (SPF / DKIM / DMARC / MX) ----
   // Vérification à la demande (pas à chaque refresh : c'est du DNS externe).
   _dnsResult: null,
+  _dnsChecking: false,   // une vérif tourne → l'auto-refresh ne touche à rien
 
   _renderDnsCard() {
     const r = this._dnsResult;
     let body;
-    if (!r) {
+    if (this._dnsChecking) {
+      body = `
+        <p class="text-xs text-text-muted mb-3">Vérification en cours…</p>
+        <button id="h-dns-check" class="btn btn-secondary text-xs" disabled>Vérification…</button>`;
+    } else if (!r) {
       body = `
         <p class="text-xs text-text-muted mb-3">
-          Les trois « tampons » qui prouvent aux boîtes mail (Gmail, Yahoo…)
+          Les « tampons » qui prouvent aux boîtes mail (Gmail, Yahoo…)
           que tes envois sont légitimes. Sans eux, direction spam.
         </p>
         <button id="h-dns-check" class="btn btn-secondary text-xs">Vérifier mon domaine d'envoi</button>`;
     } else if (!r.ok) {
+      // Le serveur renvoie parfois un message déjà en français et utile
+      // (ex. « Aucun domaine : configure d'abord… ») — on le garde.
+      // Le reste (exceptions brutes) devient un message générique.
+      const friendly = /^Aucun domaine/.test(r.error || '')
+        ? r.error
+        : 'Vérification impossible pour le moment. Réessaie dans un instant.';
       body = `
-        <div class="text-sm text-danger mb-3">${this._esc(r.error || 'Vérification impossible')}</div>
+        <div class="text-sm text-danger mb-3">${this._esc(friendly)}</div>
         <button id="h-dns-check" class="btn btn-secondary text-xs">Réessayer</button>`;
     } else {
       body = `
@@ -135,10 +165,14 @@ const Health = {
     btn.onclick = async () => {
       btn.disabled = true;
       btn.textContent = 'Vérification…';
+      this._dnsChecking = true; // l'auto-refresh saute son tour pendant ce temps
       try {
         this._dnsResult = await App.api.mail_dns_check({});
       } catch (e) {
+        console.warn('mail_dns_check:', e);
         this._dnsResult = { ok: false, error: String(e) };
+      } finally {
+        this._dnsChecking = false;
       }
       await this.refresh();
     };
@@ -154,10 +188,17 @@ const Health = {
     const unsub  = mh.unsubscribed_count || 0;
     const alerts = (mh.alerts || []).length;
     if (!review && !dup && !bounced && !unsub && !alerts) return '';
+    // action : la carte devient un vrai bouton (clavier + lecteur d'écran)
+    // avec un libellé « Voir » explicite.
     const blockCard = (label, value, tone, action) => `
-      <div class="stat-card ${tone ? 'accent-' + tone : ''}" ${action ? `style="cursor:pointer;" onclick="${action}"` : ''}>
+      <div class="stat-card ${tone ? 'accent-' + tone : ''}"
+           ${action ? `role="button" tabindex="0" style="cursor:pointer;"
+             aria-label="${label} : voir le détail"
+             onclick="${action}"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${action}}"` : ''}>
         <div class="label">${label}</div>
         <div class="value">${value}</div>
+        ${action ? `<div class="text-[11px] text-accent font-semibold mt-1">Voir →</div>` : ''}
       </div>`;
     return `
       <div class="mb-8">
@@ -167,7 +208,7 @@ const Health = {
                       review > 0 ? 'warning' : '',
                       review > 0 ? "App.show('drafts')" : '')}
           ${blockCard('Doublons évités (récents)', dup, dup > 0 ? '' : '')}
-          ${blockCard('Adresses mortes (bounced)', bounced,
+          ${blockCard('Adresses mortes', bounced,
                       bounced > 0 ? 'warning' : '')}
           ${blockCard('Désinscrits (STOP)', unsub, '')}
         </div>
@@ -188,10 +229,10 @@ const Health = {
     const allGood = (s.error || 0) === 0 && (s.warning || 0) === 0;
     const tone = allGood ? 'success' : ((s.error || 0) > 0 ? 'danger' : 'warning');
     const msg = allGood
-      ? `Tout va bien — ${total} outils tournent normalement.`
+      ? `Tout va bien — ${total} robots tournent normalement.`
       : ((s.error || 0) > 0
-          ? `${s.error} outil${s.error>1?'s':''} en erreur, à vérifier.`
-          : `${s.warning} outil${s.warning>1?'s':''} en avertissement (pas grave, on garde un œil).`);
+          ? `${s.error} robot${s.error>1?'s':''} en erreur, à vérifier.`
+          : `${s.warning} robot${s.warning>1?'s':''} en avertissement (pas grave, on garde un œil).`);
     return `
       <div class="card-hero p-8 mb-8" data-accent="${tone}">
         <div class="hero-kicker text-${tone === 'success' ? 'success' : tone === 'danger' ? 'danger' : 'warning'} mb-2">SANTÉ GLOBALE</div>
@@ -210,24 +251,27 @@ const Health = {
 
   _renderDeliverability(d) {
     const rate = d.reply_rate_7d || 0;
-    const rateColor = rate >= 5 ? 'success' : rate >= 1 ? '' : 'warning';
+    const sent7d = d.sent_7d || 0;
+    // 0 envoi sur 7 jours → pas de taux à juger : neutre, pas orange.
+    const rateColor = sent7d === 0 ? '' : (rate >= 5 ? 'success' : rate >= 1 ? '' : 'warning');
+    const rateValue = sent7d === 0 ? '—' : `${rate}%`;
     return `
       <div class="mb-8">
         <div class="section-label">Délivrabilité de tes mails</div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
           ${this._stat('Envoyés (24h)', d.sent_24h || 0)}
-          ${this._stat('Envoyés (7 jours)', d.sent_7d || 0)}
+          ${this._stat('Envoyés (7 jours)', sent7d)}
           ${this._stat('Réponses (7 jours)', d.replies_7d || 0,
             (d.replies_7d > 0) ? 'success' : '')}
-          ${this._stat('Taux de réponse 7j', `${rate}%`, rateColor)}
+          ${this._stat('Taux de réponse 7j', rateValue, rateColor)}
         </div>
         ${(!d.smtp_configured || !d.imap_configured) ? `
           <div class="card p-4 mt-4 border-l-4 border-l-warning">
             <div class="text-sm font-semibold mb-1">⚠ Configuration mail incomplète</div>
             <div class="text-xs text-text-muted">
-              ${!d.smtp_configured ? 'SMTP non configuré (envoi). ' : ''}
-              ${!d.imap_configured ? 'IMAP non configuré (réception). ' : ''}
-              Va dans <button class="text-accent underline" onclick="App.show('config')">Réglages</button>
+              ${!d.smtp_configured ? 'L’envoi de mails n’est pas configuré. ' : ''}
+              ${!d.imap_configured ? 'La lecture des réponses n’est pas configurée. ' : ''}
+              Va dans <button class="text-accent underline" onclick="App.show('config', {tab:'mails'})">Réglages</button>
               pour compléter ton compte mail.
             </div>
           </div>` : ''}
@@ -245,10 +289,63 @@ const Health = {
     `;
   },
 
+  // ---- Libellés français des robots (par identifiant serveur) ----
+  // Le serveur envoie des libellés avec du jargon (IMAP, drip, Polling…) :
+  // on les traduit ici. Identifiant inconnu → libellé serveur tel quel.
+  WORKER_LABELS_FR: {
+    'replies_poller':         'Lecture de la boîte mail',
+    'reply_responder':        'Réponses automatiques',
+    'drip_runner':            'Relances espacées',
+    'post_sale_runner':       'Suivi après-vente',
+    'lead_to_client':         'Bascule intéressé → projet client',
+    'multichannel_followup':  'Relances LinkedIn préparées',
+    'dormant_recycler':       'Recyclage des prospects dormants',
+    'stripe_poller':          'Surveillance des paiements',
+    'claude_proactive':       'Veille proactive de Claude',
+    'mission_runner':         'Chef de gare des prospections',
+    'autopilot_runner':       'Passage automatique de l’Auto-pilote',
+    'pixelpros.auto_builder': 'Construction automatique des sites payés',
+    'phare_scheduler':        'Le Phare — surveillance SEO',
+  },
+
+  // ---- Compteurs du dernier passage : clés techniques → français ----
+  COUNTER_LABELS_FR: {
+    sent: 'envoyés', auto_sent: 'envoyés auto', skipped: 'ignorés',
+    errors: 'erreurs', scanned: 'examinés', advanced: 'avancées',
+    converted: 'convertis', weak_signal: 'signal trop faible',
+    drafts_created: 'brouillons créés', drafts: 'brouillons',
+    drafted: 'brouillons préparés', candidates: 'candidats',
+    polled: 'paiements consultés', new_payments: 'nouveaux paiements',
+    projects_created: 'projets créés', matched: 'reconnus',
+    classified: 'classées', written: 'enregistrées',
+    accounts_scanned: 'comptes lus', actions: 'actions',
+    replies: 'réponses', new_replies: 'nouvelles réponses',
+    checked: 'vérifiés', processed: 'traités', built: 'construits',
+    stopped: 'arrêté', warnings: 'avertissements',
+  },
+
+  // Motifs de passage sauté (skipped_reason)
+  SKIP_REASONS_FR: {
+    server_active: 'une autre instance s’en occupe',
+    disabled: 'désactivé volontairement',
+  },
+
+  // Erreurs serveur connues → phrase simple ; le détail brut reste
+  // disponible dans le « Détail technique ».
+  _workerErrorFr(raw) {
+    const s = String(raw || '');
+    if (/supabase_unavailable/i.test(s)) return 'La base partagée était injoignable au dernier passage.';
+    if (/no_imap_account_configured/i.test(s)) return 'Aucun compte mail n’est configuré pour la lecture.';
+    if (/secret_key invalide/i.test(s)) return 'La clé du système de paiement est invalide.';
+    if (/clé IA .* manquante/i.test(s)) return 'Il manque une clé IA dans les réglages.';
+    if (/aucun tick github/i.test(s)) return 'Le Phare ne donne plus signe de vie depuis plusieurs heures.';
+    return 'Ce robot a rencontré un problème au dernier passage.';
+  },
+
   _renderWorkers(workers) {
     return `
       <div>
-        <div class="section-label">Outils autonomes (workers)</div>
+        <div class="section-label">Robots autonomes</div>
         <div class="space-y-3">
           ${workers.map(w => this._workerCard(w)).join('')}
         </div>
@@ -260,32 +357,55 @@ const Health = {
     const dot = w.health === 'healthy' ? 'bg-success'
               : w.health === 'warning' ? 'bg-warning'
               : 'bg-danger';
-    const status = w.running ? 'En marche' : 'À l\'arrêt';
+    const status = w.running ? 'En marche' : 'À l’arrêt';
     const lastRun = w.last_run_at
       ? this._humanTime(w.last_run_at)
       : 'Jamais lancé';
+    const label = this.WORKER_LABELS_FR[w.name] || w.label || w.name || '';
     const result = w.last_run_result || {};
+    // Compteurs : uniquement les valeurs simples (nombres / oui-non),
+    // traduites en français. Les objets imbriqués restent en console.
     const counters = Object.entries(result)
-      .filter(([k]) => !['error', 'errors'].includes(k))
-      .map(([k, v]) => `<span class="text-text-muted mr-3">${this._esc(k)}: <span class="font-semibold text-text">${this._esc(String(v))}</span></span>`)
+      .filter(([k, v]) => !['error', 'errors', 'skipped_reason', 'log_tail'].includes(k)
+                          && (typeof v === 'number' || typeof v === 'boolean'))
+      .map(([k, v]) => {
+        const lbl = this.COUNTER_LABELS_FR[k] || k.replace(/_/g, ' ');
+        const val = typeof v === 'boolean' ? (v ? 'oui' : 'non') : v;
+        return `<span class="text-text-muted mr-3">${this._esc(lbl)} : <span class="font-semibold text-text">${this._esc(String(val))}</span></span>`;
+      })
       .join('');
-    const errors = result.error
-      ? `<div class="text-xs text-danger mt-2 font-mono">${this._esc(result.error)}</div>`
+    const skipReason = result.skipped_reason
+      ? `<div class="text-[11px] text-text-muted mt-1">Passage sauté : ${this._esc(this.SKIP_REASONS_FR[result.skipped_reason] || result.skipped_reason)}.</div>`
+      : '';
+    // Erreurs : phrase simple en français + exception complète repliée.
+    const rawError = result.error || w.error || '';
+    const techDetail = (raw) => `
+      <details class="mt-1" data-w="${this._esc(w.name || label)}">
+        <summary class="text-[11px] text-text-muted cursor-pointer">Détail technique</summary>
+        <div class="text-[11px] text-text-muted font-mono mt-1 break-all">${this._esc(raw)}</div>
+      </details>`;
+    const errors = rawError
+      ? `<div class="text-xs text-danger mt-2">${this._esc(this._workerErrorFr(rawError))}</div>${techDetail(rawError)}`
       : (result.errors > 0
-        ? `<div class="text-xs text-warning mt-2">${result.errors} erreur(s) au dernier run</div>`
+        ? `<div class="text-xs text-warning mt-2">${result.errors} erreur${result.errors > 1 ? 's' : ''} au dernier passage</div>`
         : '');
+    // Robot en panne : on donne au moins une action (vérifier les réglages).
+    const fixLink = (w.health === 'error' || rawError)
+      ? `<button class="text-xs text-accent underline mt-2" onclick="App.show('config')">Vérifier les réglages</button>`
+      : '';
     return `
       <article class="card p-4 flex items-start gap-4">
         <div class="w-2.5 h-2.5 rounded-full ${dot} mt-1.5 shrink-0
                     ${w.running ? 'animate-pulse' : ''}"></div>
         <div class="flex-1">
           <div class="flex items-baseline justify-between mb-1">
-            <div class="font-semibold text-sm">${this._esc(w.label)}</div>
+            <div class="font-semibold text-sm">${this._esc(label)}</div>
             <div class="text-[11px] text-text-muted">${status} · ${lastRun}</div>
           </div>
           ${counters ? `<div class="text-xs">${counters}</div>` : ''}
+          ${skipReason}
           ${errors}
-          ${w.error ? `<div class="text-xs text-danger mt-2 font-mono">${this._esc(w.error)}</div>` : ''}
+          ${fixLink}
         </div>
       </article>
     `;
@@ -295,7 +415,7 @@ const Health = {
     try {
       const d = new Date(iso);
       const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
-      if (diffSec < 60)    return 'à l\'instant';
+      if (diffSec < 60)    return 'à l’instant';
       if (diffSec < 3600)  return `il y a ${Math.floor(diffSec / 60)} min`;
       if (diffSec < 86400) return `il y a ${Math.floor(diffSec / 3600)} h`;
       return `il y a ${Math.floor(diffSec / 86400)} j`;

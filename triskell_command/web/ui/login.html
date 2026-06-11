@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Connexion · Triskell Command</title>
 
+  <!-- Applique le thème choisi dans l'app (mémorisé) avant tout rendu : pas de flash blanc -->
+  <script>try{var t=localStorage.getItem('tc-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
+
   <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
   <link rel="stylesheet" href="styles/tokens.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -66,17 +69,17 @@
 
       <form id="login-form" class="space-y-4">
         <div>
-          <label class="block text-xs font-medium mb-1.5" style="color: hsl(var(--text-muted))">Utilisateur</label>
-          <select id="username" name="username" required class="field">
+          <label for="username" class="block text-xs font-medium mb-1.5" style="color: hsl(var(--text-muted))">Utilisateur</label>
+          <select id="username" name="username" required autocomplete="username" class="field">
             <option value="jordan">Jordan</option>
             <option value="thomas">Thomas</option>
           </select>
         </div>
         <div>
-          <label class="block text-xs font-medium mb-1.5" style="color: hsl(var(--text-muted))">Mot de passe</label>
+          <label for="password" class="block text-xs font-medium mb-1.5" style="color: hsl(var(--text-muted))">Mot de passe</label>
           <input id="password" name="password" type="password" required autocomplete="current-password" class="field" />
         </div>
-        <div id="error" class="text-sm text-red-600 hidden"></div>
+        <div id="error" role="alert" aria-live="assertive" class="text-sm text-red-600 hidden"></div>
         <button id="submit" type="submit" class="btn-primary">Se connecter</button>
       </form>
     </div>

@@ -26,7 +26,7 @@ const DailyQuote = {
     { t: "Sois le meilleur ou le moins cher. Jamais entre les deux.", a: "Jack Welch" },
     { t: "Soit tu construis ton rêve, soit quelqu'un te paiera pour construire le sien.", a: "Tony Gaskins" },
     { t: "L'excellence n'est pas un acte, c'est une habitude.", a: "Aristote" },
-    { t: "L'intérêt composé est la huitième merveille du monde.", a: "Albert Einstein" },
+    { t: "L'intérêt composé est la huitième merveille du monde.", a: "Anonyme" },
     { t: "Tu n'as pas besoin d'avoir raison. Tu as juste besoin de ne pas avoir tort.", a: "Howard Marks" },
     { t: "Penser à long terme est l'avantage compétitif le plus rare.", a: "Jeff Bezos" },
     { t: "Tombe amoureux du problème, pas de la solution.", a: "Uri Levine" },
@@ -55,7 +55,7 @@ const DailyQuote = {
     { t: "Mieux vaut un produit imparfait lancé qu'un produit parfait jamais sorti.", a: "Reid Hoffman" },
     { t: "Ce qui te distingue n'est pas ce que tu sais — c'est ce que tu en fais.", a: "Anonyme" },
     { t: "L'argent est un mauvais maître mais un excellent serviteur.", a: "Francis Bacon" },
-    { t: "Une stratégie sans exécution est une hallucination.", a: "Thomas Edison" },
+    { t: "Une stratégie sans exécution est une hallucination.", a: "Anonyme" },
     { t: "Préfère la lente progression à l'arrêt confortable.", a: "Anonyme" },
     { t: "Tu peux faire tout ce que tu veux. Pas tout en même temps.", a: "Oprah Winfrey" },
     { t: "Lance, mesure, apprends. Recommence.", a: "Eric Ries" },
@@ -116,7 +116,7 @@ const DailyQuote = {
       .daily-quote-author {
         display: block;
         font-style: normal;
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 700;
         letter-spacing: 2.5px;
         text-transform: uppercase;

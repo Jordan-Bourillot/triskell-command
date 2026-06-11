@@ -271,6 +271,10 @@ const Copilot = {
    *  Renvoie true si le flux a démarré (HTTP ok + body lisible). */
   async _streamInto(bubble, body, onEvent) {
     if (typeof window.fetch !== 'function' || typeof TextDecoder === 'undefined') return false;
+    // Mode démo : pas de flux direct — il contournerait l'interception et le
+    // copilote pourrait AGIR en réel pendant une démonstration. On retombe
+    // sur le secours « bloc » (copilot_send), que le mode démo bloque proprement.
+    if (typeof DemoMode !== 'undefined' && DemoMode.isOn && DemoMode.isOn()) return false;
     let res = null;
     try {
       res = await fetch('/api/copilot_stream', {
@@ -421,7 +425,11 @@ const Copilot = {
 
   async clearThread() {
     if (this._busy) return;
-    if (!window.confirm('Repartir sur une discussion vierge ? Le fil sera effacé (le carnet 📌, lui, est conservé).')) return;
+    const msg = 'Repartir sur une discussion vierge ? Le fil sera effacé (le carnet 📌, lui, est conservé).';
+    const okGo = (typeof Dialog !== 'undefined' && Dialog.confirm)
+      ? await Dialog.confirm(msg, { title: 'Nouvelle discussion', okLabel: 'Effacer le fil', danger: true })
+      : window.confirm(msg);
+    if (!okGo) return;
     try {
       if (typeof App !== 'undefined' && App.api && App.api.copilot_clear) {
         await App.api.copilot_clear({});

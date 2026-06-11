@@ -4,8 +4,11 @@
  * le focus. Standard adopté par Linear, Notion, GitHub, etc.
  *
  * Les raccourcis listés ici sont les VRAIS bindings actifs dans l'app
- * (vérifiés case par case en lisant les addEventListener('keydown',...)
- * du codebase). Si tu ajoutes un raccourci, complète aussi ce fichier.
+ * (vérifiés le 11/06/2026 : app.js pour Ctrl+Espace / Alt+T / Ctrl+B /
+ * Ctrl+Maj+M / Échap, global_search.js pour Ctrl+K, launcher.js pour le
+ * lanceur d'outils, thomas.js pour Ctrl+J, mails.js pour la fenêtre
+ * d'écriture). F11, F12 et Ctrl+T ont été supprimés (conflits
+ * navigateur). Si tu ajoutes un raccourci, complète aussi ce fichier.
  */
 
 const ShortcutsHelp = {
@@ -13,29 +16,37 @@ const ShortcutsHelp = {
     {
       group: 'Navigation',
       items: [
-        { keys: ['Ctrl', 'K'], mac: ['⌘', 'K'], desc: 'Recherche globale (vues, clients, mails, notes, …)' },
-        { keys: ['Ctrl', 'B'], mac: ['⌘', 'B'], desc: 'Brain — nouvelle note rapide' },
-        { keys: ['Ctrl', 'T'], mac: ['⌘', 'T'], desc: 'Cycler le thème (clair / intermédiaire / sombre)' },
+        { keys: ['Ctrl', 'K'], mac: ['⌘', 'K'], desc: 'Recherche globale (écrans, clients, mails, notes, …)' },
+        { keys: ['Ctrl', 'O'], mac: ['⌘', 'O'], desc: 'Lanceur d’outils Triskell (toutes les apps maison)' },
+        { keys: ['Alt', 'T'], mac: ['⌥', 'T'], desc: 'Changer de thème (clair / intermédiaire / sombre)' },
+      ],
+    },
+    {
+      group: 'Assistant & équipe',
+      items: [
+        { keys: ['Ctrl', 'Espace'], mac: ['⌃', 'Espace'], desc: 'Ouvrir le copilote (l’assistant qui répond et agit)' },
+        { keys: ['Ctrl', 'J'], mac: ['⌃', 'J'], desc: 'Ouvrir le chat avec Thomas' },
+        { keys: ['Ctrl', 'B'], mac: ['⌃', 'B'], desc: 'Nouvelle note rapide (Boîte à idées)' },
       ],
     },
     {
       group: 'Mails',
       items: [
-        { keys: ['Ctrl', 'Shift', 'M'], mac: ['⌘', '⇧', 'M'], desc: 'Composer un nouveau mail (depuis n\'importe quelle vue)' },
-        { keys: ['Ctrl', 'Entrée'], mac: ['⌘', '↵'], desc: 'Envoyer le mail (dans le composer)' },
-        { keys: ['Tab'], mac: ['Tab'], desc: 'Dans le champ destinataires : valider l\'adresse en pastille' },
-        { keys: ['Entrée'], mac: ['↵'], desc: 'Dans le champ destinataires : valider l\'adresse en pastille' },
+        { keys: ['Ctrl', 'Maj', 'M'], mac: ['⌘', '⇧', 'M'], desc: 'Nouveau mail (depuis n’importe quel écran)' },
+        { keys: ['Ctrl', 'Entrée'], mac: ['⌘', '↵'], desc: 'Envoyer le mail (dans la fenêtre d’écriture)' },
+        { keys: ['Entrée'], mac: ['↵'], desc: 'Dans le champ destinataires : valider l’adresse en pastille' },
+        { keys: ['Tab'], mac: ['Tab'], desc: 'Dans le champ destinataires : valider l’adresse en pastille' },
         { keys: ['Retour arrière'], mac: ['⌫'], desc: 'Dans le champ destinataires : retirer la dernière pastille' },
       ],
     },
     {
-      group: 'Modales',
+      group: 'Fermer',
       items: [
-        { keys: ['Échap'], mac: ['esc'], desc: 'Fermer la modale active (sauf composer mail — pour éviter de perdre du travail)' },
+        { keys: ['Échap'], mac: ['esc'], desc: 'Fermer la fenêtre ouverte, et le menu sur téléphone (sauf la fenêtre d’écriture de mail — pour ne pas perdre ton texte)' },
       ],
     },
     {
-      group: 'Cette palette',
+      group: 'Cette aide',
       items: [
         { keys: ['?'], mac: ['?'], desc: 'Ouvrir cette aide' },
       ],
@@ -56,20 +67,22 @@ const ShortcutsHelp = {
     ov.style.background = 'rgba(15,23,42,0.75)';
     ov.style.backdropFilter = 'blur(8px)';
     ov.innerHTML = `
-      <div class="bg-surface rounded-2xl shadow-hero w-full max-w-2xl border border-border animate-slide-up overflow-hidden flex flex-col max-h-[85vh]">
+      <div class="bg-surface rounded-2xl shadow-hero w-full max-w-2xl border border-border animate-slide-up overflow-hidden flex flex-col max-h-[85vh]"
+           role="dialog" aria-modal="true" aria-label="Raccourcis clavier">
         <div class="px-6 pt-5 pb-3 flex items-start justify-between border-b border-border bg-surface-elevated">
           <div>
-            <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">RACCOURCIS CLAVIER</div>
+            <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-0.5">RACCOURCIS CLAVIER</div>
             <h3 class="text-lg font-bold">Tout ce qui se fait au clavier</h3>
-            <p class="text-xs text-text-muted mt-1">Appuie sur <kbd class="px-1 py-0.5 rounded bg-bg border border-border text-[10px]">?</kbd> n'importe où dans l'app pour rouvrir cette aide.</p>
+            <p class="text-xs text-text-muted mt-1">Astuce : tape <kbd class="px-1 py-0.5 rounded bg-bg border border-border text-[11px]">?</kbd> n'importe où pour rouvrir cette aide.</p>
           </div>
-          <button id="sh-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
+          <button id="sh-close" aria-label="Fermer" title="Fermer (Échap)"
+                  class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
         </div>
 
         <div class="p-5 overflow-y-auto space-y-5">
           ${this.SHORTCUTS.map(g => `
             <div>
-              <div class="text-[10px] font-bold uppercase tracking-widest text-accent mb-2">${this._esc(g.group)}</div>
+              <div class="text-[11px] font-bold uppercase tracking-widest text-accent mb-2">${this._esc(g.group)}</div>
               <div class="card">
                 ${g.items.map((it, i) => `
                   <div class="flex items-center justify-between gap-4 px-4 py-3 ${i > 0 ? 'border-t border-border' : ''}">

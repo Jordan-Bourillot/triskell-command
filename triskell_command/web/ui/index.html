@@ -172,16 +172,21 @@
   </style>
 
   <script>
-    // Cache le splash après ~2.4 sec, dès que le DOM est prêt
+    // Cache le splash dès que le DOM est prêt.
+    // L'animation complète (~2.4 s) ne se joue qu'UNE fois par session :
+    // aux chargements suivants, le splash disparaît presque immédiatement
+    // (important sur une machine modeste + rechargements fréquents).
     (function() {
+      let seen = false;
+      try { seen = sessionStorage.getItem('tc-splash-seen') === '1'; } catch (e) {}
+      try { sessionStorage.setItem('tc-splash-seen', '1'); } catch (e) {}
       const hideSplash = () => {
         const s = document.getElementById('triskell-splash');
         if (!s) return;
         s.classList.add('is-fading');
-        setTimeout(() => s.remove(), 700);
+        setTimeout(() => s.remove(), seen ? 200 : 700);
       };
-      // Au moins 2.4s pour qu'on profite de l'animation, et après DOMContentLoaded
-      const minDelay = 2400;
+      const minDelay = seen ? 150 : 2400;
       const start = Date.now();
       const tryHide = () => {
         const elapsed = Date.now() - start;
@@ -493,17 +498,19 @@
   </div>
 
   <!-- ===================== FAB Thomas (chat 1-à-1) ===================== -->
-  <!-- Bouton flottant vert au-dessus du Claude FAB. Ouvre la modale de chat. -->
+  <!-- Bouton flottant vert en bas à droite. Ouvre la modale de chat.
+       Réactivé le 10/06/2026 : c'est lui qui porte la pastille de
+       messages non lus partout dans l'app (avant, aucune alerte hors Cockpit). -->
   <button id="thomas-fab"
-          class="fixed right-8 z-50 w-14 h-14 rounded-full
+          class="fixed right-6 z-50 w-14 h-14 rounded-full
                  flex items-center justify-center
                  text-white shadow-fab
                  transition-all duration-200
                  hover:scale-110 hover:shadow-hero
                  cursor-pointer
                  hidden"
-          style="bottom: 116px; background: linear-gradient(135deg, #10b981 0%, #059669 100%);"
-          title="Chat avec Thomas · F11">
+          style="bottom: calc(24px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(135deg, hsl(160 84% 39%) 0%, hsl(161 94% 30%) 100%);"
+          title="Chat avec Thomas · Ctrl+J">
     <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none"
          stroke="currentColor" stroke-width="1.8"
          stroke-linecap="round" stroke-linejoin="round">
@@ -657,15 +664,15 @@
           </svg>
         </button>
 
-        <input id="thomas-input" type="text"
+        <textarea id="thomas-input" rows="1"
                placeholder="Écris un message à Thomas…"
                autocomplete="off"
                class="flex-1 min-w-0 px-3 py-2 mx-1 rounded-lg bg-bg
                       border border-border
-                      text-sm text-text
+                      text-sm text-text resize-none
                       placeholder:text-text-muted
                       focus:border-accent focus:outline-none
-                      transition-colors"/>
+                      transition-colors"></textarea>
         <button id="thomas-send"
                 title="Envoyer (Entrée)"
                 aria-label="Envoyer"
@@ -729,8 +736,11 @@
   </div>
 
   <!-- ===================== Fenêtre d'appel (vocal / visio) ===================== -->
+  <!-- z-index 990/995 : un appel passe AU-DESSUS de toutes les fenêtres
+       de l'app (avant l'audit du 10/06/2026, l'appel entrant sonnait
+       SOUS certaines fenêtres et ses boutons étaient incliquables). -->
   <div id="call-overlay"
-       class="tri-call-overlay fixed inset-0 z-[90] hidden flex-col items-center justify-between"
+       class="tri-call-overlay fixed inset-0 z-[990] hidden flex-col items-center justify-between"
        style="height: 100dvh;">
     <!-- Vidéo de l'autre personne (visio) : remplit le fond. -->
     <video id="call-remote-video" class="tri-call-remote" autoplay playsinline></video>
@@ -772,7 +782,7 @@
 
   <!-- ===================== Appel entrant ===================== -->
   <div id="call-incoming"
-       class="tri-call-incoming fixed inset-0 z-[95] hidden flex-col items-center justify-center">
+       class="tri-call-incoming fixed inset-0 z-[995] hidden flex-col items-center justify-center">
     <div class="tri-call-incoming-card">
       <div id="call-incoming-avatar" class="tri-call-avatar tri-call-avatar-ring">?</div>
       <div id="call-incoming-name" class="tri-call-name">…</div>
@@ -798,6 +808,8 @@
   <template id="view-morning"></template>
 
   <!-- ===================== Scripts ===================== -->
+  <!-- toast.js en premier : il fournit Toast/Dialog à tous les écrans. -->
+  <script src="scripts/toast.js"></script>
   <script src="scripts/new_badge.js"></script>
   <script src="scripts/demo_mode.js"></script>
   <script src="scripts/health_check.js"></script>

@@ -396,7 +396,7 @@ def generate_message_from_templates(
         # gérer le fallback (généralement vers generate_message classique).
         return {"subject": "", "body": "", "body_html": "",
                 "template_key": "", "offer_name": "",
-                "offer_mail_account_id": ""}
+                "offer_mail_account_id": "", "html_is_custom": False}
     # Court-circuit : si l'appelant nous passe deja UN seul template, il a
     # deja fait son choix (round-robin pipeline par exemple). Inutile de
     # demander a l'IA de "choisir" parmi 1 option -> on saute l'appel IA
@@ -429,6 +429,10 @@ def generate_message_from_templates(
             "template_key":          template_key,
             "offer_name":            template_product or "",
             "offer_mail_account_id": "",
+            # True = le HTML vient du modele ecrit a la main (on n'y
+            # retouche plus) ; False = HTML auto-genere depuis le texte
+            # (l'appelant peut le regenerer apres ajout de la signature).
+            "html_is_custom":        bool(template_body_html),
         }
     prompt = TEMPLATE_PICK_PROMPT.format(
         raison_sociale=prospect.get("raison_sociale", "") or "(non précisé)",
@@ -483,6 +487,7 @@ def generate_message_from_templates(
         "template_key":          template_key or (chosen.get("key") or ""),
         "offer_name":            template_product or "",
         "offer_mail_account_id": "",
+        "html_is_custom":        bool(template_body_html),
     }
 
 
@@ -503,8 +508,11 @@ def _strip_unfilled_sentences(text: str) -> str:
     out = _re.sub(r"[A-Za-zÀ-ÿ']+\s+\.\s*", "", out)
     # Doubles/triples espaces -> un seul
     out = _re.sub(r"[ \t]{2,}", " ", out)
-    # Espace avant ponctuation : "  ." -> "."
-    out = _re.sub(r"\s+([,.;:!?])", r"\1", out)
+    # Espace avant point/virgule : "  ." -> "." — UNIQUEMENT ces deux-la.
+    # En typographie francaise, l'espace avant : ; ! ? est legitime ;
+    # l'enlever abimait les modeles ecrits a la main ("approche :" devenait
+    # "approche:").
+    out = _re.sub(r"\s+([,.])", r"\1", out)
     # Lignes vides multiples -> max une ligne vide
     out = _re.sub(r"\n{3,}", "\n\n", out)
     # Si une <p>...</p> ne contient plus que des espaces -> on la vire
@@ -621,6 +629,7 @@ def _fallback_first_template(template: dict, prospect: dict, sender_name: str,
         "template_key":          template.get("key") or "",
         "offer_name":            template_product or "",
         "offer_mail_account_id": "",
+        "html_is_custom":        bool(template_body_html),
     }
 
 

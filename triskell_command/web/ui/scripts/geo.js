@@ -13,15 +13,27 @@
 const GEO = {
   view: 'home',           // 'home' | 'site' | 'advanced'
   tab: 'audit',           // utilisé seulement en mode 'advanced'
-  _state: null,           // état tableau de bord (cache)
   _selectedSiteId: null,  // site ouvert (vue 'site')
   _busy: false,           // évite double-clic sur les boutons
+  _pubBusy: false,        // une seule publication à la fois
+  _internalNav: false,    // vrai quand on navigue à l'intérieur du module
+  _cyclePolling: false,   // suivi « Tout faire maintenant » déjà en cours
+  _apSitesCount: 0,       // nb de sites connus (pour redessiner la carte auto-pilote)
 
   // ════════════════════════════════════════════════════════════════════
   // ENTRY POINT — un parcours unique : Home → Site → Analyse en 1 clic
   // ════════════════════════════════════════════════════════════════════
   async render(container) {
     this._container = container;
+    // Arrivée par le menu (ou depuis un autre écran) : on repart toujours
+    // de l'accueil simple. Sans ce reset, la vue/l'onglet précédents
+    // restaient collés et rouvrir « Le GEO » tombait au milieu du module.
+    if (!this._internalNav && App.previousView !== 'geo') {
+      this.view = 'home';
+      this.tab = 'audit';
+      this._selectedSiteId = null;
+    }
+    this._internalNav = false;
     if (this.view === 'site')     return this._renderSimpleSite(container);
     if (this.view === 'advanced') return this._renderAdvanced(container);
     return this._renderSimpleHome(container);
@@ -30,7 +42,21 @@ const GEO = {
   _goto(view, opts = {}) {
     this.view = view;
     if (opts.siteId !== undefined) this._selectedSiteId = opts.siteId;
+    this._internalNav = true;
     this.render(this._container);
+    // Tient le Guide au courant (cette navigation ne passe pas par App.show)
+    try { if (window.Guide && Guide.onViewChange) Guide.onViewChange('geo'); } catch (e) { /* jamais bloquant */ }
+  },
+
+  // Redessine la vue réellement affichée (accueil simple, fiche site ou
+  // mode avancé). Indispensable après un ajout/une édition : avant, on
+  // appelait toujours _renderBody() qui n'existe qu'en mode avancé → en
+  // mode simple rien ne bougeait, et re-cliquer créait des doublons.
+  _refreshCurrentView() {
+    if (!this._container) return;
+    if (this.view === 'home') return this._renderSimpleHome(this._container);
+    if (this.view === 'site') return this._renderSimpleSite(this._container);
+    return this._renderBody();
   },
 
   // ════════════════════════════════════════════════════════════════════
@@ -50,21 +76,26 @@ const GEO = {
           <div class="geo-loading">Chargement…</div>
         </div>
         <footer class="mt-12 text-center">
-          <button id="geo-go-advanced" class="geo-back">⚙️ Outils avancés (audits manuels, générateur libre, réputation…)</button>
+          <button id="geo-go-advanced" class="geo-back">⚙️ Outils avancés (audits manuels, rédaction de contenus, réputation…)</button>
         </footer>
       </section>
     `;
     document.getElementById('geo-go-advanced').onclick = () => this._goto('advanced');
+    const loadFail = (title, detail) => {
+      document.getElementById('geo-home-content').innerHTML =
+        `<div class="geo-card geo-card--err"><h3>${this._esc(title)}</h3><p>${this._esc(detail)}</p>
+         <button class="btn btn-secondary mt-3" id="geo-home-retry">Réessayer</button></div>`;
+      document.getElementById('geo-home-retry').onclick = () => this._renderSimpleHome(container);
+    };
     let r;
     try { r = await App.api.geo_state({}); }
     catch (e) {
-      document.getElementById('geo-home-content').innerHTML =
-        `<div class="geo-card geo-card--err"><h3>Connexion impossible</h3><p>${this._esc(e && e.message || e)}</p></div>`;
+      console.warn('[GEO] chargement :', e);
+      loadFail('Connexion impossible', 'Vérifie ta connexion internet, puis réessaie.');
       return;
     }
     if (!r || !r.ok) {
-      document.getElementById('geo-home-content').innerHTML =
-        `<div class="geo-card geo-card--err"><h3>Pas pu charger</h3><p>${this._esc((r && r.error) || 'Erreur')}</p></div>`;
+      loadFail('Pas pu charger', (r && r.error) || 'Le serveur n’a pas répondu correctement. Réessaie dans un instant.');
       return;
     }
     // Charge auto-pilote en parallèle
@@ -74,9 +105,10 @@ const GEO = {
       if (ar && ar.ok) ap = ar.settings;
     } catch (e) { /* tolère */ }
     const sites = r.sites || [];
+    this._apSitesCount = sites.length;
     const providersInfo = r.providers_count > 0
       ? `<span class="geo-pill geo-pill--ok">${r.providers_count} IA branchée${r.providers_count > 1 ? 's' : ''} : ${r.providers.map(p => p.label).join(', ')}</span>`
-      : `<span class="geo-pill geo-pill--warn">Aucune IA configurée — <a href="#" data-go-config>va dans Réglages</a></span>`;
+      : `<span class="geo-pill geo-pill--warn">Aucune IA branchée — <a href="#" data-go-config>va dans Réglages</a></span>`;
     document.getElementById('geo-home-content').innerHTML = `
       <div class="geo-card">
         <div class="geo-row-between">
@@ -96,10 +128,15 @@ const GEO = {
       </div>
     `;
     document.getElementById('geo-add-site').onclick = () => this._openSiteDialog(null);
-    document.querySelectorAll('[data-geo-site]').forEach(card => {
+    // NB : les cartes sortent de _renderSiteCard → attribut data-site-id
+    // (l'ancien sélecteur [data-geo-site] ne matchait rien : clic mort).
+    document.querySelectorAll('#geo-home-content [data-site-id]').forEach(card => {
       card.onclick = (e) => {
         if (e.target.closest('[data-del-site]')) return;
-        this._goto('site', { siteId: card.dataset.geoSite });
+        this._goto('site', { siteId: card.dataset.siteId });
+      };
+      card.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); }
       };
     });
     document.querySelectorAll('[data-del-site]').forEach(b => {
@@ -107,15 +144,21 @@ const GEO = {
         e.stopPropagation();
         const sid = b.dataset.delSite;
         const s = sites.find(x => x.id === sid);
-        if (!confirm(`Supprimer ${s ? s.name : 'ce site'} ?`)) return;
-        const rr = await App.api.geo_site_remove({ id: sid });
-        if (rr && rr.ok) this._renderSimpleHome(container);
-        else alert((rr && rr.error) || 'Erreur');
+        const ok = await Dialog.confirm(
+          `Supprimer ${s ? s.name : 'ce site'} ? Les questions et l’historique seront effacés.`,
+          { title: 'Supprimer le site', danger: true, okLabel: 'Supprimer', cancelLabel: 'Annuler' }
+        );
+        if (!ok) return;
+        try {
+          const rr = await App.api.geo_site_remove({ id: sid });
+          if (rr && rr.ok) { Toast.success(`${s ? s.name : 'Le site'} a été supprimé.`); this._renderSimpleHome(container); }
+          else Toast.error((rr && rr.error) || 'Suppression impossible.');
+        } catch (e2) { Toast.friendlyError(e2, 'Suppression impossible.'); }
       };
     });
-    this._wireAutopilot();
+    this._wireAutopilot(ap);
     const cfg = container.querySelector('[data-go-config]');
-    if (cfg) cfg.onclick = (e) => { e.preventDefault(); App.show('config'); };
+    if (cfg) cfg.onclick = (e) => { e.preventDefault(); App.show('config', { tab: 'ai' }); };
   },
 
   // ════════════════════════════════════════════════════════════════════
@@ -166,12 +209,49 @@ const GEO = {
     document.getElementById('back-home').onclick = () => this._goto('home');
     document.getElementById('geo-edit-site').onclick = () => this._openSiteDialog(site);
     document.getElementById('geo-del-site').onclick = async () => {
-      if (!confirm(`Supprimer ${site.name} ?\n\nLes questions et l'historique seront effacés.`)) return;
-      const r = await App.api.geo_site_remove({ id: site.id });
-      if (r && r.ok) this._goto('home');
-      else alert((r && r.error) || 'Erreur');
+      const ok = await Dialog.confirm(
+        `Supprimer ${site.name} ? Les questions et l’historique seront effacés.`,
+        { title: 'Supprimer le site', danger: true, okLabel: 'Supprimer', cancelLabel: 'Annuler' }
+      );
+      if (!ok) return;
+      try {
+        const r = await App.api.geo_site_remove({ id: site.id });
+        if (r && r.ok) { Toast.success(`${site.name} a été supprimé.`); this._goto('home'); }
+        else Toast.error((r && r.error) || 'Suppression impossible.');
+      } catch (e) { Toast.friendlyError(e, 'Suppression impossible.'); }
     };
     document.getElementById('geo-run-full').onclick = () => this._runFullAnalysis(site);
+    // Résultats persistants : on réaffiche la dernière analyse enregistrée
+    // au lieu de tout perdre à chaque visite de la fiche.
+    this._loadLastAnalysis(site);
+  },
+
+  // Récupère la dernière analyse connue du site (audit IA + surveillance,
+  // historiques serveur geo_audit_ai_history / geo_surveillance_history)
+  // et l'affiche avec sa date.
+  async _loadLastAnalysis(site) {
+    const out = document.getElementById('geo-full-result');
+    if (!out) return;
+    out.innerHTML = `<div class="geo-loading">On regarde s’il y a déjà une analyse enregistrée…</div>`;
+    let audit = null, surv = null;
+    try {
+      const [ar, sr] = await Promise.all([
+        App.api.geo_audit_ai_history({ site_id: site.id }),
+        App.api.geo_surveillance_history({ site_id: site.id }),
+      ]);
+      if (ar && ar.ok && (ar.audits || []).length) audit = ar.audits[0];
+      if (sr && sr.ok && (sr.runs || []).length)   surv  = sr.runs[0];
+    } catch (e) { console.warn('[GEO] dernière analyse :', e); }
+    if (this._busy) return; // une analyse fraîche vient d'être lancée : on n'écrase pas
+    if (!audit && !surv) { out.innerHTML = ''; return; }
+    const lastTs = [audit && audit.ts, surv && surv.ts].filter(Boolean).sort().pop() || '';
+    const btn = document.getElementById('geo-run-full');
+    if (btn) btn.textContent = '🔍 Relancer l’analyse';
+    out.innerHTML = `
+      <p class="geo-card-sub mb-2">Dernière analyse : ${this._fmtDate(lastTs)} — clique le bouton ci-dessus pour la refaire.</p>
+      ${this._renderFullResults(site, audit, surv, {})}
+    `;
+    this._wireFullResults(out, site, audit, surv);
   },
 
   async _runFullAnalysis(site) {
@@ -183,13 +263,20 @@ const GEO = {
     btn.textContent = '⏳ Analyse en cours…';
     const stepEl = (txt) => out.innerHTML = `
       <div class="geo-card"><div class="geo-loading">${txt}</div></div>`;
-    let audit = null, surv = null, errMsg = '';
+    // Chaque étape garde SON erreur : un audit IA raté n'efface plus la
+    // surveillance (et inversement), et on affiche quand même ce qui a marché.
+    let audit = null, surv = null, auditErr = '', survErr = '';
     try {
       // Étape 1 : audit IA (lecture de la page + suggestions)
-      stepEl('🤖 L\'IA lit ta page (titre, contenu, structure)…');
-      const r1 = await App.api.geo_audit_ai({ site_id: site.id });
-      if (r1 && r1.ok) audit = r1.audit;
-      else errMsg = (r1 && r1.error) || 'Audit IA impossible';
+      stepEl('🤖 L’IA lit ta page (titre, contenu, structure)…');
+      try {
+        const r1 = await App.api.geo_audit_ai({ site_id: site.id });
+        if (r1 && r1.ok) audit = r1.audit;
+        else auditErr = (r1 && r1.error) || 'Audit IA impossible.';
+      } catch (e) {
+        console.warn('[GEO] audit IA :', e);
+        auditErr = 'La connexion a été interrompue pendant l’audit IA. Réessaie.';
+      }
       // Étape 2 : surveillance (uniquement si au moins une question)
       // On suggère des questions si vide
       stepEl('💬 On prépare les questions à poser aux IA…');
@@ -200,28 +287,26 @@ const GEO = {
         }
       } catch (e) { /* tolère */ }
       stepEl('👁 On demande à chaque IA si ton site est cité…');
-      const r2 = await App.api.geo_surveillance_run({ site_id: site.id });
-      if (r2 && r2.ok) surv = r2.run;
-    } catch (e) {
-      errMsg = (e && e.message || e) || 'Erreur réseau';
+      try {
+        const r2 = await App.api.geo_surveillance_run({ site_id: site.id });
+        if (r2 && r2.ok) surv = r2.run;
+        else survErr = (r2 && r2.error) || 'Surveillance impossible.';
+      } catch (e) {
+        console.warn('[GEO] surveillance :', e);
+        survErr = 'La connexion a été interrompue pendant la surveillance. Réessaie.';
+      }
     } finally {
       btn.disabled = false;
-      btn.textContent = '🔍 Relancer l\'analyse';
+      btn.textContent = '🔍 Relancer l’analyse';
       this._busy = false;
     }
-    out.innerHTML = this._renderFullResults(site, audit, surv, errMsg);
+    out.innerHTML = this._renderFullResults(site, audit, surv, { auditErr, survErr });
     this._wireFullResults(out, site, audit, surv);
   },
 
-  _renderFullResults(site, audit, surv, errMsg) {
+  _renderFullResults(site, audit, surv, errs) {
+    const { auditErr = '', survErr = '' } = errs || {};
     const parts = [];
-    if (errMsg && !audit && !surv) {
-      parts.push(`<div class="geo-card geo-card--err">
-        <h3>L'analyse a échoué</h3>
-        <p>${this._esc(errMsg)}</p>
-      </div>`);
-      return parts.join('');
-    }
     // Section 1 : présence dans les IA
     if (surv) {
       const cls = surv.score >= 60 ? 'ok' : surv.score >= 30 ? 'warn' : 'bad';
@@ -240,12 +325,20 @@ const GEO = {
             </div>
             <div class="geo-score-text">
               <div class="geo-score-verdict">${verdict}</div>
-              <div class="geo-score-meta">${surv.providers_count || (surv.providers || []).length} IA interrogées · ${(surv.results || []).length} mesures · <a href="#" data-show-details>voir le détail</a></div>
+              <div class="geo-score-meta">${(n => `${n} IA interrogée${n > 1 ? 's' : ''}`)(new Set((surv.results || []).map(x => x.provider).filter(Boolean)).size)} · ${(surv.results || []).length} mesures · <a href="#" data-show-details>voir le détail</a></div>
             </div>
           </div>
           <div id="geo-surv-details" hidden class="mt-4">
             ${this._renderRunBody(surv)}
           </div>
+        </section>
+      `);
+    } else if (survErr) {
+      parts.push(`
+        <section class="geo-card geo-card--err">
+          <div class="hero-kicker">PRÉSENCE DANS LES IA</div>
+          <h3 class="geo-card-title mt-1">La surveillance n'a pas pu se faire</h3>
+          <p>${this._esc(survErr)}</p>
         </section>
       `);
     }
@@ -283,6 +376,14 @@ const GEO = {
         <h3 class="geo-card-title">Aucune amélioration majeure</h3>
         <p class="geo-card-sub">L'IA n'a pas trouvé de point critique à corriger pour le moment. ${this._esc(audit.verdict || '')}</p>
       </div>`);
+    } else if (auditErr) {
+      parts.push(`
+        <section class="geo-card geo-card--err mt-5">
+          <div class="hero-kicker">AMÉLIORATIONS À APPLIQUER</div>
+          <h3 class="geo-card-title mt-1">L'audit IA n'a pas pu se faire</h3>
+          <p>${this._esc(auditErr)}</p>
+        </section>
+      `);
     }
     return parts.join('');
   },
@@ -298,13 +399,16 @@ const GEO = {
     };
     // Boutons Aperçu / Appliquer sur chaque finding
     if (audit) {
+      const pubBtns = Array.from(out.querySelectorAll('[data-publish-finding]'));
       out.querySelectorAll('[data-preview-finding]').forEach(b => {
         b.onclick = () => {
           const f = audit.findings.find(x => x.id === b.dataset.previewFinding);
-          if (f) this._openFindingPreview({ ...audit, site_id: site.id }, f);
+          if (!f) return;
+          const cardBtn = pubBtns.find(x => x.dataset.publishFinding === f.id) || null;
+          this._openFindingPreview({ ...audit, site_id: site.id }, f, cardBtn);
         };
       });
-      out.querySelectorAll('[data-publish-finding]').forEach(b => {
+      pubBtns.forEach(b => {
         b.onclick = () => {
           const f = audit.findings.find(x => x.id === b.dataset.publishFinding);
           if (f) this._publishFinding({ ...audit, site_id: site.id }, f, b);
@@ -327,12 +431,15 @@ const GEO = {
     `).join('') || '<div class="geo-empty">Pas de détail.</div>';
   },
 
-  _wireAutopilot() {
+  // Branche les contrôles de la carte auto-pilote (mode simple ET mode
+  // avancé : la carte est la même, le rafraîchissement suit la vue).
+  _wireAutopilot(ap) {
     const apEnabled = document.getElementById('geo-ap-enabled');
     const apFreq    = document.getElementById('geo-ap-freq');
     const apAuto    = document.getElementById('geo-ap-autogen');
     const apPub     = document.getElementById('geo-ap-autopub');
     const apRunNow  = document.getElementById('geo-ap-run-now');
+    const apRefresh = document.getElementById('geo-ap-refresh');
     const saveAp = async () => {
       const payload = {
         enabled:        !!apEnabled?.checked,
@@ -340,15 +447,34 @@ const GEO = {
         auto_generate:  !!apAuto?.checked,
         auto_publish:   !!apPub?.checked,
       };
+      // On vérifie vraiment la réponse du serveur : en cas d'échec, on
+      // redessine l'état réel (fini la case cochée pour rien).
       try {
         const rr = await App.api.geo_autopilot_settings_set(payload);
-        if (rr && rr.ok) this._renderSimpleHome(this._container);
-      } catch (e) { /* tolère */ }
+        if (rr && rr.ok) { this._refreshCurrentView(); return; }
+        Toast.error((rr && rr.error) || 'Réglages non enregistrés. Réessaie.');
+        this._refreshCurrentView();
+      } catch (e) {
+        Toast.friendlyError(e, 'Réglages non enregistrés. Réessaie.');
+        this._refreshCurrentView();
+      }
     };
     if (apEnabled) apEnabled.onchange = saveAp;
     if (apFreq)    apFreq.onchange    = saveAp;
     if (apAuto)    apAuto.onchange    = saveAp;
-    if (apPub)     apPub.onchange     = saveAp;
+    if (apPub) {
+      apPub.onchange = async () => {
+        if (apPub.checked) {
+          const ok = await Dialog.confirm(
+            'L’app publiera toute seule du contenu sur tes sites en ligne. Activer ?',
+            { title: 'Publication automatique', danger: true, okLabel: 'Activer', cancelLabel: 'Annuler' }
+          );
+          if (!ok) { apPub.checked = false; return; }
+        }
+        saveAp();
+      };
+    }
+    if (apRefresh) apRefresh.onclick = () => this._refreshCurrentView();
     if (apRunNow) {
       apRunNow.onclick = async () => {
         apRunNow.disabled = true;
@@ -356,20 +482,55 @@ const GEO = {
         try {
           const rr = await App.api.geo_autopilot_run_now({});
           if (rr && rr.ok) {
-            alert('Cycle lancé en arrière-plan. Reviens dans 5-10 min pour voir les résultats.');
-            this._renderSimpleHome(this._container);
+            Toast.success('Cycle lancé. L’app travaille en arrière-plan — compte 5 à 10 minutes, l’écran se met à jour tout seul.');
+            this._refreshCurrentView();
+            this._startCyclePolling();
           } else {
-            alert((rr && rr.error) || 'Erreur');
+            Toast.error((rr && rr.error) || 'Le cycle n’a pas pu démarrer.');
             apRunNow.disabled = false;
             apRunNow.textContent = '🚀 Tout faire maintenant';
           }
         } catch (e) {
-          alert('Erreur réseau : ' + (e && e.message || e));
+          Toast.friendlyError(e, 'Le cycle n’a pas pu démarrer.');
           apRunNow.disabled = false;
           apRunNow.textContent = '🚀 Tout faire maintenant';
         }
       };
     }
+    // Un cycle tourne déjà (lancé ici ou depuis un autre poste) → suivi auto
+    if (ap && ap.running) this._startCyclePolling();
+  },
+
+  // Tant qu'un cycle « Tout faire maintenant » tourne, on redessine la
+  // carte auto-pilote toutes les 20 s (mise à jour ciblée : le reste de
+  // l'écran n'est pas touché). S'arrête tout seul à la fin du cycle, si la
+  // carte quitte l'écran, ou au changement de vue (App.viewInterval).
+  _startCyclePolling() {
+    if (this._cyclePolling) return;
+    this._cyclePolling = true;
+    App.onViewCleanup(() => { this._cyclePolling = false; });
+    const timer = App.viewInterval(async () => {
+      if (!document.querySelector('.geo-ap-card')) {
+        clearInterval(timer); this._cyclePolling = false; return;
+      }
+      let ap = null;
+      try {
+        const ar = await App.api.geo_autopilot_settings({});
+        if (ar && ar.ok) ap = ar.settings;
+      } catch (e) { return; } // souci réseau : on retentera au prochain passage
+      if (!ap) return;
+      const cur = document.querySelector('.geo-ap-card');
+      if (!cur) { clearInterval(timer); this._cyclePolling = false; return; }
+      const tmp = document.createElement('div');
+      tmp.innerHTML = this._renderAutopilotCard(ap, this._apSitesCount);
+      cur.replaceWith(tmp.firstElementChild);
+      this._wireAutopilot(ap);
+      if (!ap.running) {
+        clearInterval(timer);
+        this._cyclePolling = false;
+        Toast.success('Cycle terminé. Les résultats sont à jour.');
+      }
+    }, 20000);
   },
 
   // ════════════════════════════════════════════════════════════════════
@@ -382,7 +543,7 @@ const GEO = {
           <button class="geo-back" id="geo-back-simple">← Retour au mode simple</button>
           <div class="hero-kicker mb-2 mt-2">LE GEO · MODE AVANCÉ</div>
           <h1 class="hero-title hero-title--md mb-2">Outils détaillés</h1>
-          <p class="hero-subtitle">Audits manuels, générateur libre, réputation, gestion fine des questions.</p>
+          <p class="hero-subtitle">Audits manuels, rédaction de contenus, réputation, gestion fine des questions.</p>
         </header>
         ${this._renderTabs()}
         <div id="geo-body" class="mt-6"></div>
@@ -436,8 +597,8 @@ const GEO = {
         <h2 class="geo-card-title">Analyser une page</h2>
         <p class="geo-card-sub">Deux analyses : la <strong>technique</strong> (présence des bons éléments) et l'<strong>IA</strong> (lecture qualitative + propositions de blocs prêts à publier).</p>
         <div class="geo-form">
-          <input id="geo-audit-url" type="url" placeholder="https://exemple.fr/ma-page"
-                 class="geo-input geo-input--big" autocomplete="off" />
+          <input id="geo-audit-url" type="url" placeholder="https://exemple.fr/ma-page (Entrée = audit IA)"
+                 title="La touche Entrée lance l’audit IA" class="geo-input geo-input--big" autocomplete="off" />
           <button id="geo-audit-go" class="btn btn-secondary geo-btn-big">📊 Analyse technique</button>
           <button id="geo-audit-ai-go" class="btn btn-primary geo-btn-big">🤖 Audit IA + propositions</button>
         </div>
@@ -493,7 +654,8 @@ const GEO = {
       out.innerHTML = this._renderAuditAiResult(r.audit);
       this._wireAuditAi(out, r.audit);
     } catch (e) {
-      msg.textContent = 'Erreur réseau : ' + (e && e.message || e);
+      console.warn('[GEO] audit IA :', e);
+      msg.textContent = 'Connexion impossible pendant l’audit. Réessaie dans un instant.';
       msg.className = 'geo-msg geo-msg--err';
     } finally {
       this._busy = false;
@@ -544,13 +706,16 @@ const GEO = {
   },
 
   _wireAuditAi(out, audit) {
+    const pubBtns = Array.from(out.querySelectorAll('[data-publish-finding]'));
     out.querySelectorAll('[data-preview-finding]').forEach(b => {
       b.onclick = () => {
         const f = audit.findings.find(x => x.id === b.dataset.previewFinding);
-        if (f) this._openFindingPreview(audit, f);
+        if (!f) return;
+        const cardBtn = pubBtns.find(x => x.dataset.publishFinding === f.id) || null;
+        this._openFindingPreview(audit, f, cardBtn);
       };
     });
-    out.querySelectorAll('[data-publish-finding]').forEach(b => {
+    pubBtns.forEach(b => {
       b.onclick = () => {
         const f = audit.findings.find(x => x.id === b.dataset.publishFinding);
         if (f) this._publishFinding(audit, f, b);
@@ -558,24 +723,40 @@ const GEO = {
     });
   },
 
-  _openFindingPreview(audit, finding) {
+  _openFindingPreview(audit, finding, cardBtn) {
     const overlay = document.createElement('div');
     overlay.className = 'geo-modal-overlay';
+    // Le bloc proposé par l'IA est affiché dans une iframe isolée
+    // (sandbox vide : ni scripts, ni accès à la page) : son HTML ne touche
+    // jamais le reste de l'app. Les couleurs fixes ci-dessous simulent la
+    // future page publique (toujours claire), comme .geo-preview-card.
+    const pageDoc = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><style>
+      body { font-family: -apple-system, system-ui, sans-serif; margin: 24px 28px;
+             background: #fff; color: #1e293b; line-height: 1.65; }
+      h1 { font-size: 28px; font-weight: 700; margin: 0 0 18px; color: #0f172a; }
+      h2 { font-size: 21px; font-weight: 700; margin: 22px 0 10px; color: #0f172a; }
+      h3 { font-size: 16px; font-weight: 700; margin: 18px 0 8px; color: #0f172a; }
+      p, li { font-size: 14.5px; } ul, ol { padding-left: 24px; margin: 8px 0; }
+      table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; }
+      th, td { padding: 8px 12px; border: 1px solid #e2e8f0; text-align: left; }
+      th { background: #f8fafc; font-weight: 700; }
+      section { margin: 16px 0; padding: 14px; background: #f8fafc; border-radius: 8px; }
+    </style></head><body><h1>${this._esc(finding.fix_title)}</h1>${finding.fix_html || ''}</body></html>`;
     overlay.innerHTML = `
       <div class="geo-modal geo-modal--xl">
         <h3 class="geo-modal-title">Aperçu du bloc à publier</h3>
         <p class="geo-modal-sub">Voilà à quoi va ressembler ce contenu une fois publié sur ton site.</p>
         <div class="geo-preview-card">
           <div class="geo-preview-label">PAGE QUI VA ÊTRE CRÉÉE</div>
-          <div class="geo-preview-content">
-            <h1>${this._esc(finding.fix_title)}</h1>
-            ${finding.fix_html}
-          </div>
+          <iframe sandbox="" title="Aperçu de la page proposée"
+                  style="display:block;width:100%;height:50vh;border:0"
+                  srcdoc="${this._esc(pageDoc)}"></iframe>
         </div>
         <details class="geo-advanced mt-3">
           <summary class="geo-details-sum">Voir le code HTML brut</summary>
           <pre class="geo-gen-raw">${this._esc(finding.fix_html)}</pre>
         </details>
+        <div id="geo-preview-msg" class="geo-msg"></div>
         <div class="geo-modal-actions">
           <button class="btn btn-secondary" id="geo-preview-close">Fermer</button>
           <button class="btn btn-primary" id="geo-preview-publish">📤 Publier maintenant</button>
@@ -583,50 +764,128 @@ const GEO = {
       </div>
     `;
     document.body.appendChild(overlay);
-    const close = () => overlay.remove();
-    overlay.onclick = (e) => { if (e.target === overlay) close(); };
-    document.getElementById('geo-preview-close').onclick = close;
-    document.getElementById('geo-preview-publish').onclick = () => {
-      close();
-      this._publishFinding(audit, finding, null);
+    const close = () => { document.removeEventListener('keydown', onKey); overlay.remove(); };
+    const onKey = (e) => {
+      // Échap ne ferme l'aperçu que s'il est la fenêtre du dessus
+      // (pas pendant une publication, ni sous la fenêtre de choix du site)
+      const all = document.querySelectorAll('.geo-modal-overlay');
+      if (e.key === 'Escape' && all[all.length - 1] === overlay
+          && !this._pubBusy && !document.getElementById('tc-dialog-overlay')) close();
+    };
+    document.addEventListener('keydown', onKey);
+    // Pendant une publication, l'aperçu reste ouvert (indicateur visible)
+    overlay.onclick = (e) => { if (e.target === overlay && !this._pubBusy) close(); };
+    const closeBtn = document.getElementById('geo-preview-close');
+    const pubBtn   = document.getElementById('geo-preview-publish');
+    closeBtn.onclick = () => { if (!this._pubBusy) close(); };
+    pubBtn.onclick = async () => {
+      if (this._pubBusy) return;
+      const msg = document.getElementById('geo-preview-msg');
+      pubBtn.disabled = true;
+      closeBtn.disabled = true;
+      pubBtn.textContent = '⏳ Publication en cours…';
+      msg.textContent = 'Publication en cours — on prépare la page et on l’envoie sur ton site…';
+      msg.className = 'geo-msg';
+      const ok = await this._publishFinding(audit, finding, cardBtn || null);
+      closeBtn.disabled = false;
+      if (ok) { close(); }
+      else {
+        msg.textContent = '';
+        pubBtn.disabled = false;
+        pubBtn.textContent = '📤 Publier maintenant';
+      }
     };
   },
 
+  // Publie un bloc proposé par l'IA. Verrou _pubBusy : une seule
+  // publication à la fois, impossible de re-cliquer pendant l'envoi.
+  // Renvoie true si la publication a réussi.
   async _publishFinding(audit, finding, btn) {
+    if (this._pubBusy) return false;
+    const prevLabel = btn ? btn.textContent : '';
+    if (btn) btn.disabled = true;
     if (!audit.site_id) {
-      // Pas de site lié à l'audit → on demande lequel
-      let sites = [];
-      try {
-        const r = await App.api.geo_sites({});
-        if (r && r.ok) sites = (r.sites || []).filter(s => s.repo);
-      } catch (e) { /* tolère */ }
-      if (sites.length === 0) {
-        alert('Aucun site avec dépôt GitHub configuré. Va dans Surveillance pour en ajouter un.');
-        return;
+      // Pas de site lié à l'audit → fenêtre de choix (plus de « tape le numéro »)
+      const sid = await this._pickPublishSite();
+      if (!sid) {
+        if (btn) { btn.disabled = false; btn.textContent = prevLabel; }
+        return false;
       }
-      // Choix simple via prompt
-      const choices = sites.map((s, i) => `${i + 1}. ${s.name} (${s.repo})`).join('\n');
-      const pick = prompt(`Sur quel site publier ?\n\n${choices}\n\nTape le numéro :`);
-      const idx = parseInt(pick, 10) - 1;
-      if (isNaN(idx) || idx < 0 || idx >= sites.length) return;
-      audit.site_id = sites[idx].id;
+      audit.site_id = sid;
     }
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Publication…'; }
+    if (this._pubBusy) { // une autre publication a démarré entre-temps
+      if (btn) { btn.disabled = false; btn.textContent = prevLabel; }
+      return false;
+    }
+    this._pubBusy = true;
+    if (btn) btn.textContent = '⏳ Publication en cours…';
     try {
       const r = await App.api.geo_publish_finding({
         audit_id: audit.id, finding_id: finding.id, site_id: audit.site_id,
       });
       if (!r || !r.ok) {
-        alert((r && r.error) || 'Erreur de publication');
-        if (btn) { btn.disabled = false; btn.textContent = '📤 Publier sur le site'; }
-        return;
+        Toast.error((r && r.error) || 'La publication a échoué.');
+        if (btn) { btn.disabled = false; btn.textContent = prevLabel; }
+        return false;
       }
-      if (btn) { btn.disabled = true; btn.textContent = '✓ Publié'; btn.classList.remove('btn-primary'); btn.classList.add('btn-secondary'); }
-      alert(`✓ Publié à l'adresse : ${r.url}\n\nLe site se met à jour dans 1-3 minutes.`);
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '✓ Publié';
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-secondary');
+      }
+      Toast.success(`Le site se met à jour dans 1 à 3 minutes : ${r.url}`, 'Publié !');
+      return true;
     } catch (e) {
-      alert('Erreur réseau : ' + (e && e.message || e));
-      if (btn) { btn.disabled = false; btn.textContent = '📤 Publier sur le site'; }
+      Toast.friendlyError(e, 'La publication a échoué. Réessaie dans un instant.');
+      if (btn) { btn.disabled = false; btn.textContent = prevLabel; }
+      return false;
+    } finally {
+      this._pubBusy = false;
     }
+  },
+
+  // Fenêtre de choix du site de publication (même présentation que la
+  // fenêtre « Publier sur un site » du générateur). Résout l'id du site
+  // choisi, ou null si on annule.
+  async _pickPublishSite() {
+    let sites = [];
+    try {
+      const r = await App.api.geo_sites({});
+      if (r && r.ok) sites = (r.sites || []).filter(s => s.repo);
+    } catch (e) { /* tolère */ }
+    if (sites.length === 0) {
+      Toast.warn('Aucun site branché à la publication automatique (réglage avancé). Ajoute d’abord un site (bouton « + Ajouter un site »), puis remplis sa section « Publication automatique ».');
+      return null;
+    }
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'geo-modal-overlay';
+      overlay.innerHTML = `
+        <div class="geo-modal">
+          <h3 class="geo-modal-title">Sur quel site publier ?</h3>
+          <p class="geo-modal-sub">La page sera créée sur le site choisi, qui se mettra à jour tout seul.</p>
+          <div class="geo-form-col">
+            <label class="geo-label">Site cible</label>
+            <select id="geo-pick-site" class="geo-input">
+              ${sites.map(s => `<option value="${this._esc(s.id)}">${this._esc(s.name)} — ${this._esc(s.repo)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="geo-modal-actions">
+            <button class="btn btn-secondary" id="geo-pick-cancel">Annuler</button>
+            <button class="btn btn-primary" id="geo-pick-ok">Choisir ce site</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      const done = (val) => { document.removeEventListener('keydown', onKey); overlay.remove(); resolve(val); };
+      const onKey = (e) => { if (e.key === 'Escape') done(null); };
+      document.addEventListener('keydown', onKey);
+      overlay.onclick = (e) => { if (e.target === overlay) done(null); };
+      document.getElementById('geo-pick-cancel').onclick = () => done(null);
+      document.getElementById('geo-pick-ok').onclick = () =>
+        done(document.getElementById('geo-pick-site').value || null);
+    });
   },
 
   async _runAudit(url) {
@@ -638,7 +897,7 @@ const GEO = {
     if (!url) { msg.textContent = 'Colle d\'abord une adresse de page.'; msg.className = 'geo-msg geo-msg--warn'; return; }
     this._busy = true;
     btn.disabled = true;
-    btn.textContent = 'Analyse en cours…';
+    btn.textContent = '⏳ Analyse en cours…';
     msg.textContent = 'On lit ta page et on calcule le score…';
     msg.className = 'geo-msg';
     out.innerHTML = '';
@@ -652,12 +911,13 @@ const GEO = {
       msg.textContent = '';
       out.innerHTML = this._renderAuditResult(r.audit);
     } catch (e) {
-      msg.textContent = 'Erreur réseau : ' + (e && e.message || e);
+      console.warn('[GEO] analyse technique :', e);
+      msg.textContent = 'Connexion impossible pendant l’analyse. Réessaie dans un instant.';
       msg.className = 'geo-msg geo-msg--err';
     } finally {
       this._busy = false;
       btn.disabled = false;
-      btn.textContent = 'Analyser';
+      btn.textContent = '📊 Analyse technique';
     }
   },
 
@@ -710,7 +970,6 @@ const GEO = {
     try { r = await App.api.geo_state({}); }
     catch (e) { body.innerHTML = this._errBox('Connexion serveur impossible.'); return; }
     if (!r || !r.ok) { body.innerHTML = this._errBox(r && r.error); return; }
-    this._state = r;
 
     // Si un site est ouvert, vue détail
     if (this._selectedSiteId) {
@@ -720,8 +979,8 @@ const GEO = {
     }
 
     const providersInfo = r.providers_count > 0
-      ? `<span class="geo-pill geo-pill--ok">${r.providers_count} IA configurée${r.providers_count > 1 ? 's' : ''} : ${r.providers.map(p => p.label).join(', ')}</span>`
-      : `<span class="geo-pill geo-pill--warn">Aucune IA configurée — <a href="#" data-go-config>va dans Réglages</a></span>`;
+      ? `<span class="geo-pill geo-pill--ok">${r.providers_count} IA branchée${r.providers_count > 1 ? 's' : ''} : ${r.providers.map(p => p.label).join(', ')}</span>`
+      : `<span class="geo-pill geo-pill--warn">Aucune IA branchée — <a href="#" data-go-config>va dans Réglages</a></span>`;
 
     // Charge les réglages auto-pilote en parallèle
     let ap = null;
@@ -731,6 +990,7 @@ const GEO = {
     } catch (e) { /* tolère */ }
 
     const sites = r.sites || [];
+    this._apSitesCount = sites.length;
     body.innerHTML = `
       <div class="geo-card">
         <div class="geo-row-between">
@@ -766,6 +1026,9 @@ const GEO = {
         this._selectedSiteId = card.dataset.siteId;
         this._renderBody();
       };
+      card.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); }
+      };
     });
     body.querySelectorAll('[data-del-site]').forEach(btn => {
       btn.onclick = async (e) => {
@@ -773,58 +1036,23 @@ const GEO = {
         const sid = btn.dataset.delSite;
         const s = sites.find(x => x.id === sid);
         if (!s) return;
-        if (!confirm(`Retirer ${s.name} de la surveillance ?\n\nL'historique sera supprimé.`)) return;
-        const rr = await App.api.geo_site_remove({ id: sid });
-        if (rr && rr.ok) this._renderBody();
-        else alert((rr && rr.error) || 'Erreur');
+        const ok = await Dialog.confirm(
+          `Retirer ${s.name} de la surveillance ? L’historique sera supprimé.`,
+          { title: 'Retirer le site', danger: true, okLabel: 'Retirer', cancelLabel: 'Annuler' }
+        );
+        if (!ok) return;
+        try {
+          const rr = await App.api.geo_site_remove({ id: sid });
+          if (rr && rr.ok) { Toast.success(`${s.name} a été retiré.`); this._renderBody(); }
+          else Toast.error((rr && rr.error) || 'Suppression impossible.');
+        } catch (e2) { Toast.friendlyError(e2, 'Suppression impossible.'); }
       };
     });
     const cfg = body.querySelector('[data-go-config]');
-    if (cfg) cfg.onclick = (e) => { e.preventDefault(); App.show('config'); };
+    if (cfg) cfg.onclick = (e) => { e.preventDefault(); App.show('config', { tab: 'ai' }); };
 
-    // -- Auto-pilote : handlers --
-    const apEnabled = document.getElementById('geo-ap-enabled');
-    const apFreq    = document.getElementById('geo-ap-freq');
-    const apAuto    = document.getElementById('geo-ap-autogen');
-    const apRunNow  = document.getElementById('geo-ap-run-now');
-    const apPub  = document.getElementById('geo-ap-autopub');
-    const saveAp = async () => {
-      const payload = {
-        enabled:        !!apEnabled?.checked,
-        frequency_days: parseInt(apFreq?.value || '14', 10),
-        auto_generate:  !!apAuto?.checked,
-        auto_publish:   !!apPub?.checked,
-      };
-      try {
-        const rr = await App.api.geo_autopilot_settings_set(payload);
-        if (rr && rr.ok) this._renderBody();
-      } catch (e) { /* tolère */ }
-    };
-    if (apEnabled) apEnabled.onchange = saveAp;
-    if (apFreq)    apFreq.onchange    = saveAp;
-    if (apAuto)    apAuto.onchange    = saveAp;
-    if (apPub)     apPub.onchange     = saveAp;
-    if (apRunNow) {
-      apRunNow.onclick = async () => {
-        apRunNow.disabled = true;
-        apRunNow.textContent = '⏳ Lancement…';
-        try {
-          const rr = await App.api.geo_autopilot_run_now({});
-          if (rr && rr.ok) {
-            alert('Cycle lancé en arrière-plan. Tu peux fermer cette page, le travail continue. Re-viens dans quelques minutes pour voir les résultats.');
-            this._renderBody();
-          } else {
-            alert((rr && rr.error) || 'Erreur');
-            apRunNow.disabled = false;
-            apRunNow.textContent = '🚀 Tout faire maintenant';
-          }
-        } catch (e) {
-          alert('Erreur réseau : ' + (e && e.message || e));
-          apRunNow.disabled = false;
-          apRunNow.textContent = '🚀 Tout faire maintenant';
-        }
-      };
-    }
+    // -- Auto-pilote : mêmes contrôles que le mode simple --
+    this._wireAutopilot(ap);
   },
 
   _renderAutopilotCard(ap, sitesCount) {
@@ -876,7 +1104,7 @@ const GEO = {
           </label>
           <label class="geo-ap-field geo-ap-check">
             <input type="checkbox" id="geo-ap-autopub" ${pub ? 'checked' : ''}/>
-            <span>Publier automatiquement sur les sites (GitHub configuré requis)</span>
+            <span>Publier automatiquement sur les sites (nécessite un site branché à la publication automatique — réglage avancé)</span>
           </label>
           <div class="geo-ap-field">
             <span class="geo-label">Dernier passage</span>
@@ -886,12 +1114,13 @@ const GEO = {
         ${summary ? `<div class="geo-ap-summary mt-3">${this._esc(summary)}</div>` : ''}
         <div class="geo-ap-bottom mt-4">
           <button id="geo-ap-run-now" class="btn btn-primary" ${sitesCount === 0 || running ? 'disabled' : ''}
-                  title="${sitesCount === 0 ? 'Ajoute un site d\'abord' : (running ? 'Cycle en cours' : 'Lance un cycle tout de suite')}">
+                  title="${sitesCount === 0 ? 'Ajoute un site d’abord' : (running ? 'Cycle en cours' : 'Lance un cycle tout de suite')}">
             ${running ? '⏳ Cycle en cours…' : '🚀 Tout faire maintenant'}
           </button>
+          ${running ? `<button id="geo-ap-refresh" class="btn btn-secondary" title="Mettre à jour l’état du cycle tout de suite">🔄 Actualiser</button>` : ''}
           <span class="geo-ap-hint">${running
-            ? 'L\'app travaille en arrière-plan. Tu peux fermer cette page, ça continue.'
-            : (enabled ? 'Tu peux aussi déclencher un cycle à la main si tu veux pas attendre.' : '')}</span>
+            ? 'L’app travaille en arrière-plan (l’écran se met à jour tout seul). Tu peux fermer cette page, ça continue.'
+            : (enabled ? 'Tu peux aussi déclencher un cycle à la main si tu ne veux pas attendre.' : '')}</span>
         </div>
       </div>
     `;
@@ -906,10 +1135,11 @@ const GEO = {
       ? 'Pas encore de surveillance lancée'
       : `Citée par ${score}% des IA · ${this._fmtDate(s.last_run_ts)}`;
     return `
-      <div class="geo-site-card" data-site-id="${s.id}">
+      <div class="geo-site-card" data-site-id="${s.id}" role="button" tabindex="0"
+           aria-label="Ouvrir ${this._esc(s.name)}">
         <div class="geo-site-head">
           <div class="geo-site-name">${this._esc(s.name)}</div>
-          <button class="geo-icon-btn" data-del-site="${s.id}" title="Retirer">✕</button>
+          <button class="geo-icon-btn" data-del-site="${s.id}" title="Retirer ce site" aria-label="Retirer ce site">✕</button>
         </div>
         <div class="geo-site-url">${this._esc(s.url)}</div>
         <div class="geo-site-meta">
@@ -962,7 +1192,7 @@ const GEO = {
           </div>
           <button id="geo-qsuggest" class="btn btn-secondary"
                   title="L'IA regarde ton site et propose les questions à surveiller">
-            ✨ Suggérer avec l'IA
+            ✨ Suggérer avec l’IA
           </button>
         </div>
         <div id="geo-qsuggest-msg" class="geo-msg"></div>
@@ -977,7 +1207,7 @@ const GEO = {
             : qs.map(q => `
               <div class="geo-question">
                 <span class="geo-q-text">${this._esc(q.text)}</span>
-                <button class="geo-icon-btn" data-del-q="${q.id}" title="Supprimer">✕</button>
+                <button class="geo-icon-btn" data-del-q="${q.id}" title="Supprimer cette question" aria-label="Supprimer cette question">✕</button>
               </div>
             `).join('')}
         </div>
@@ -999,14 +1229,21 @@ const GEO = {
     document.getElementById('geo-run-now').onclick = () => this._runSurveillance(site);
     document.getElementById('geo-edit-site').onclick = () => this._openSiteDialog(site);
     document.getElementById('geo-del-site').onclick = async () => {
-      if (!confirm(`Supprimer définitivement ${site.name} ?\n\nLes questions et l'historique seront effacés.`)) return;
-      const r = await App.api.geo_site_remove({ id: site.id });
-      if (r && r.ok) {
-        this._selectedSiteId = null;
-        this._renderBody();
-      } else {
-        alert((r && r.error) || 'Erreur');
-      }
+      const ok = await Dialog.confirm(
+        `Supprimer définitivement ${site.name} ? Les questions et l’historique seront effacés.`,
+        { title: 'Supprimer le site', danger: true, okLabel: 'Supprimer', cancelLabel: 'Annuler' }
+      );
+      if (!ok) return;
+      try {
+        const r = await App.api.geo_site_remove({ id: site.id });
+        if (r && r.ok) {
+          Toast.success(`${site.name} a été supprimé.`);
+          this._selectedSiteId = null;
+          this._renderBody();
+        } else {
+          Toast.error((r && r.error) || 'Suppression impossible.');
+        }
+      } catch (e) { Toast.friendlyError(e, 'Suppression impossible.'); }
     };
     const addBtn = document.getElementById('geo-qadd-btn');
     const addInp = document.getElementById('geo-qadd');
@@ -1014,10 +1251,15 @@ const GEO = {
       const t = (addInp.value || '').trim();
       if (!t) return;
       addBtn.disabled = true;
-      const r = await App.api.geo_question_add({ site_id: site.id, text: t });
-      addBtn.disabled = false;
-      if (r && r.ok) this._renderBody();
-      else alert((r && r.error) || 'Erreur');
+      try {
+        const r = await App.api.geo_question_add({ site_id: site.id, text: t });
+        if (r && r.ok) { this._renderBody(); return; }
+        Toast.error((r && r.error) || 'Question non ajoutée. Réessaie.');
+      } catch (e) {
+        Toast.friendlyError(e, 'Question non ajoutée. Réessaie.');
+      } finally {
+        addBtn.disabled = false;
+      }
     };
     addBtn.onclick = doAdd;
     addInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
@@ -1025,9 +1267,11 @@ const GEO = {
     if (suggestBtn) suggestBtn.onclick = () => this._suggestQuestions(site);
     body.querySelectorAll('[data-del-q]').forEach(b => {
       b.onclick = async () => {
-        const r = await App.api.geo_question_remove({ site_id: site.id, id: b.dataset.delQ });
-        if (r && r.ok) this._renderBody();
-        else alert((r && r.error) || 'Erreur');
+        try {
+          const r = await App.api.geo_question_remove({ site_id: site.id, id: b.dataset.delQ });
+          if (r && r.ok) this._renderBody();
+          else Toast.error((r && r.error) || 'Suppression impossible.');
+        } catch (e) { Toast.friendlyError(e, 'Suppression impossible.'); }
       };
     });
     // Expand/collapse de chaque run
@@ -1053,21 +1297,17 @@ const GEO = {
         if (msg) { msg.textContent = (r && r.error) || 'Erreur'; msg.className = 'geo-msg geo-msg--err'; }
         return;
       }
+      // Le re-render écrase la zone de message → on annonce en Toast,
+      // qui survit au rafraîchissement de la vue.
+      const skipTxt = r.skipped ? ` (${r.skipped} déjà présente${r.skipped > 1 ? 's' : ''} ignorée${r.skipped > 1 ? 's' : ''})` : '';
+      Toast.success(`${r.count} question${r.count > 1 ? 's' : ''} ajoutée${r.count > 1 ? 's' : ''} par ${r.provider}${skipTxt}.`);
       this._renderBody();
-      // Le re-render écrase la zone msg, on annonce dans une notif éphémère
-      setTimeout(() => {
-        const m2 = document.getElementById('geo-qsuggest-msg');
-        if (m2) {
-          const skipTxt = r.skipped ? ` (${r.skipped} déjà présente${r.skipped > 1 ? 's' : ''} ignorée${r.skipped > 1 ? 's' : ''})` : '';
-          m2.textContent = `✓ ${r.count} question${r.count > 1 ? 's' : ''} ajoutée${r.count > 1 ? 's' : ''} par ${r.provider}${skipTxt}.`;
-          m2.className = 'geo-msg geo-msg--ok';
-        }
-      }, 100);
     } catch (e) {
-      if (msg) { msg.textContent = 'Erreur réseau : ' + (e && e.message || e); msg.className = 'geo-msg geo-msg--err'; }
+      console.warn('[GEO] suggestions :', e);
+      if (msg) { msg.textContent = 'Connexion impossible pendant la suggestion. Réessaie.'; msg.className = 'geo-msg geo-msg--err'; }
     } finally {
       this._busy = false;
-      if (btn) { btn.disabled = false; btn.textContent = '✨ Suggérer avec l\'IA'; }
+      if (btn) { btn.disabled = false; btn.textContent = '✨ Suggérer avec l’IA'; }
     }
   },
 
@@ -1088,15 +1328,17 @@ const GEO = {
       } else {
         msg.textContent = `Surveillance terminée : ${r.run.cited}/${r.run.total} citations (${r.run.score}%).`;
         msg.className = 'geo-msg geo-msg--ok';
+        Toast.success(`Surveillance terminée : ${r.run.cited}/${r.run.total} citations (${r.run.score}%).`);
         this._renderBody(); // recharge la vue site
       }
     } catch (e) {
-      msg.textContent = 'Erreur réseau : ' + (e && e.message || e);
+      console.warn('[GEO] surveillance :', e);
+      msg.textContent = 'Connexion impossible pendant la surveillance. Réessaie dans un instant.';
       msg.className = 'geo-msg geo-msg--err';
     } finally {
       this._busy = false;
       btn.disabled = false;
-      btn.textContent = '🚀 Lancer la surveillance maintenant';
+      btn.textContent = '🚀 Lancer la surveillance';
     }
   },
 
@@ -1180,10 +1422,37 @@ const GEO = {
       </div>
     `;
     document.body.appendChild(overlay);
-    const close = () => overlay.remove();
-    overlay.onclick = (e) => { if (e.target === overlay) close(); };
-    document.getElementById('geo-newsite-cancel').onclick = close;
-    document.getElementById('geo-newsite-ok').onclick = async () => {
+    // Photo des champs pour la garde « fermer sans perdre la saisie »
+    const snapshot = () => JSON.stringify(['url', 'name', 'brand', 'repo', 'folder', 'branch', 'css', 'pretty']
+      .map(k => (document.getElementById('geo-newsite-' + k)?.value || '').trim()));
+    const initialSnap = snapshot();
+    let saving = false;
+    const close = () => { document.removeEventListener('keydown', onKey); overlay.remove(); };
+    const requestClose = async () => {
+      if (saving) return;
+      if (snapshot() !== initialSnap) {
+        const ok = await Dialog.confirm(
+          'Fermer sans enregistrer ? Ce que tu as saisi sera perdu.',
+          { title: isEdit ? 'Modification en cours' : 'Ajout en cours', danger: true, okLabel: 'Fermer', cancelLabel: 'Continuer la saisie' }
+        );
+        if (!ok) return;
+      }
+      close();
+    };
+    const onKey = (e) => {
+      if (document.getElementById('tc-dialog-overlay')) return; // une confirmation est ouverte
+      if (e.key === 'Escape') { e.preventDefault(); requestClose(); }
+      else if (e.key === 'Enter' && e.target && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'SUMMARY') {
+        e.preventDefault();
+        document.getElementById('geo-newsite-ok')?.click();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    overlay.onclick = (e) => { if (e.target === overlay) requestClose(); };
+    document.getElementById('geo-newsite-cancel').onclick = requestClose;
+    const okBtn = document.getElementById('geo-newsite-ok');
+    okBtn.onclick = async () => {
+      if (saving) return;
       const url = (document.getElementById('geo-newsite-url').value || '').trim();
       const name = (document.getElementById('geo-newsite-name').value || '').trim();
       const brand = (document.getElementById('geo-newsite-brand').value || '').trim();
@@ -1193,19 +1462,28 @@ const GEO = {
       const css_path = (document.getElementById('geo-newsite-css')?.value || '').trim();
       const pretty_url_base = (document.getElementById('geo-newsite-pretty')?.value || '').trim();
       const msg = document.getElementById('geo-newsite-msg');
-      if (!url) { msg.textContent = 'L\'adresse est obligatoire.'; msg.className = 'geo-msg geo-msg--warn'; return; }
+      if (!url) { msg.textContent = 'L’adresse est obligatoire.'; msg.className = 'geo-msg geo-msg--warn'; return; }
       msg.textContent = isEdit ? 'Enregistrement…' : 'Ajout…';
+      msg.className = 'geo-msg';
       const payload = { url, name, brand, repo, target_folder, branch, css_path, pretty_url_base };
+      saving = true;
+      okBtn.disabled = true;
       let r;
-      if (isEdit) {
-        r = await App.api.geo_site_update({ id: existing.id, ...payload });
-      } else {
-        r = await App.api.geo_site_add(payload);
+      try {
+        if (isEdit) r = await App.api.geo_site_update({ id: existing.id, ...payload });
+        else        r = await App.api.geo_site_add(payload);
+      } catch (e) {
+        console.warn('[GEO] enregistrement site :', e);
+        r = { ok: false, error: 'Connexion impossible. Vérifie ta connexion et réessaie.' };
       }
+      saving = false;
+      okBtn.disabled = false;
       if (r && r.ok) {
         close();
-        // En édition on garde le site ouvert (selectedSiteId reste valide)
-        this._renderBody();
+        Toast.success(isEdit ? 'Site mis à jour.' : 'Site ajouté.');
+        // Rafraîchit la vue réellement affichée (accueil simple, fiche site
+        // ou mode avancé) : le site apparaît/se met à jour immédiatement.
+        this._refreshCurrentView();
       } else {
         msg.textContent = (r && r.error) || 'Erreur';
         msg.className = 'geo-msg geo-msg--err';
@@ -1266,9 +1544,15 @@ const GEO = {
   async _loadGenHistory() {
     const box = document.getElementById('geo-gen-history');
     if (!box) return;
+    const loadFail = () => {
+      box.innerHTML = `<div class="geo-q-empty">Impossible de charger l’historique.
+        <button class="btn btn-secondary geo-btn-mini" id="geo-gen-history-retry">Réessayer</button></div>`;
+      const rb = document.getElementById('geo-gen-history-retry');
+      if (rb) rb.onclick = () => this._loadGenHistory();
+    };
     try {
       const r = await App.api.geo_generated_list({});
-      if (!r || !r.ok) { box.innerHTML = '<div class="geo-q-empty">Erreur.</div>'; return; }
+      if (!r || !r.ok) { loadFail(); return; }
       if (!r.items || r.items.length === 0) {
         box.innerHTML = '<div class="geo-q-empty">Aucun contenu généré pour l\'instant.</div>';
         return;
@@ -1306,13 +1590,22 @@ const GEO = {
       });
       box.querySelectorAll('[data-del-gen]').forEach(b => {
         b.onclick = async () => {
-          if (!confirm('Supprimer ce contenu généré ?')) return;
-          const rr = await App.api.geo_generated_remove({ id: b.dataset.delGen });
-          if (rr && rr.ok) this._loadGenHistory();
+          const it = r.items.find(x => x.id === b.dataset.delGen);
+          const ok = await Dialog.confirm(
+            `Supprimer « ${it ? it.topic : 'ce contenu'} » ? Le texte généré sera perdu.`,
+            { title: 'Supprimer ce contenu', danger: true, okLabel: 'Supprimer', cancelLabel: 'Annuler' }
+          );
+          if (!ok) return;
+          try {
+            const rr = await App.api.geo_generated_remove({ id: b.dataset.delGen });
+            if (rr && rr.ok) this._loadGenHistory();
+            else Toast.error((rr && rr.error) || 'Suppression impossible.');
+          } catch (e) { Toast.friendlyError(e, 'Suppression impossible.'); }
         };
       });
     } catch (e) {
-      box.innerHTML = '<div class="geo-q-empty">Erreur de chargement.</div>';
+      console.warn('[GEO] historique générateur :', e);
+      loadFail();
     }
   },
 
@@ -1341,7 +1634,8 @@ const GEO = {
       this._showGenerated(r.item);
       this._loadGenHistory();
     } catch (e) {
-      msg.textContent = 'Erreur réseau : ' + (e && e.message || e);
+      console.warn('[GEO] rédaction :', e);
+      msg.textContent = 'Connexion impossible pendant la rédaction. Réessaie dans un instant.';
       msg.className = 'geo-msg geo-msg--err';
     } finally {
       this._busy = false;
@@ -1358,7 +1652,7 @@ const GEO = {
       if (r && r.ok) sites = (r.sites || []).filter(s => s.repo);
     } catch (e) { /* tolère */ }
     if (sites.length === 0) {
-      alert('Aucun site avec un dépôt GitHub configuré. Modifie un site et remplis la section « Publication automatique sur le site (GitHub) ».');
+      Toast.warn('Aucun site branché à la publication automatique (réglage avancé). Modifie un site et remplis sa section « Publication automatique ».');
       return;
     }
     const overlay = document.createElement('div');
@@ -1383,36 +1677,55 @@ const GEO = {
       </div>
     `;
     document.body.appendChild(overlay);
-    const close = () => overlay.remove();
-    overlay.onclick = (e) => { if (e.target === overlay) close(); };
-    document.getElementById('geo-pub-cancel').onclick = close;
+    let published = false; // pour rafraîchir le badge « publié » à la fermeture
+    const close = () => {
+      document.removeEventListener('keydown', onKey);
+      overlay.remove();
+      if (published) this._loadGenHistory();
+    };
+    const onKey = (e) => { if (e.key === 'Escape' && !this._pubBusy) close(); };
+    document.addEventListener('keydown', onKey);
+    // Pendant la publication, la fenêtre reste ouverte (indicateur visible)
+    overlay.onclick = (e) => { if (e.target === overlay && !this._pubBusy) close(); };
+    const cancelBtn = document.getElementById('geo-pub-cancel');
+    cancelBtn.onclick = () => { if (!this._pubBusy) close(); };
     document.getElementById('geo-pub-ok').onclick = async () => {
+      if (this._pubBusy) return; // verrou : une seule publication à la fois
       const sid = document.getElementById('geo-pub-target').value;
       const msg = document.getElementById('geo-pub-msg');
       const btn = document.getElementById('geo-pub-ok');
+      this._pubBusy = true;
       btn.disabled = true;
+      cancelBtn.disabled = true;
       btn.textContent = '⏳ Publication en cours…';
-      msg.textContent = 'Clone du dépôt, écriture de la page, envoi sur GitHub…';
+      msg.textContent = 'On prépare la page et on l’envoie sur ton site…';
       msg.className = 'geo-msg';
       try {
         const r = await App.api.geo_publish_content({ content_id: item.id, site_id: sid });
         if (!r || !r.ok) {
+          Toast.error((r && r.error) || 'La publication a échoué.');
           msg.textContent = (r && r.error) || 'Erreur';
           msg.className = 'geo-msg geo-msg--err';
           btn.disabled = false;
           btn.textContent = '📤 Publier maintenant';
           return;
         }
+        published = true;
+        Toast.success(`Le site se met à jour dans 1 à 3 minutes : ${r.url}`, 'Publié !');
         msg.textContent = `✓ Publié à l'adresse : ${r.url}. Le site se met à jour dans 1-3 minutes.`;
         msg.className = 'geo-msg geo-msg--ok';
         btn.textContent = '✓ Fermer';
-        btn.onclick = () => { close(); this._loadGenHistory(); };
+        btn.onclick = () => close();
         btn.disabled = false;
       } catch (e) {
-        msg.textContent = 'Erreur réseau : ' + (e && e.message || e);
+        Toast.friendlyError(e, 'La publication a échoué. Réessaie dans un instant.');
+        msg.textContent = 'La publication a échoué. Réessaie dans un instant.';
         msg.className = 'geo-msg geo-msg--err';
         btn.disabled = false;
         btn.textContent = '📤 Publier maintenant';
+      } finally {
+        this._pubBusy = false;
+        cancelBtn.disabled = false;
       }
     };
   },
@@ -1445,7 +1758,7 @@ const GEO = {
           const b = document.getElementById('geo-copy');
           if (b) b.textContent = '📋 Copier';
         }, 1500);
-      } catch (e) { alert('Copie impossible.'); }
+      } catch (e) { Toast.error('Copie impossible.'); }
     };
   },
 
@@ -1480,9 +1793,16 @@ const GEO = {
   async _loadReputationHistory() {
     const box = document.getElementById('geo-rep-history');
     if (!box) return;
+    const loadFail = () => {
+      box.innerHTML = `<div class="geo-q-empty">Impossible de charger l’historique.
+        <button class="btn btn-secondary geo-btn-mini" id="geo-rep-history-retry">Réessayer</button></div>`;
+      const rb = document.getElementById('geo-rep-history-retry');
+      if (rb) rb.onclick = () => this._loadReputationHistory();
+    };
     try {
       const r = await App.api.geo_reputation_history({});
-      if (!r || !r.ok || !r.runs || r.runs.length === 0) {
+      if (!r || !r.ok) { loadFail(); return; }
+      if (!r.runs || r.runs.length === 0) {
         box.innerHTML = '<div class="geo-q-empty">Aucune vérification de réputation pour l\'instant.</div>';
         return;
       }
@@ -1508,7 +1828,8 @@ const GEO = {
         };
       });
     } catch (e) {
-      box.innerHTML = '<div class="geo-q-empty">Erreur de chargement.</div>';
+      console.warn('[GEO] historique réputation :', e);
+      loadFail();
     }
   },
 
@@ -1535,7 +1856,8 @@ const GEO = {
       this._showReputation(r.run);
       this._loadReputationHistory();
     } catch (e) {
-      msg.textContent = 'Erreur réseau : ' + (e && e.message || e);
+      console.warn('[GEO] réputation :', e);
+      msg.textContent = 'Connexion impossible pendant la vérification. Réessaie dans un instant.';
       msg.className = 'geo-msg geo-msg--err';
     } finally {
       this._busy = false;
@@ -1561,7 +1883,7 @@ const GEO = {
           <div class="geo-score-text">
             <div class="geo-score-verdict">${verdict}</div>
             <div class="geo-score-url">${this._esc(run.brand)}</div>
-            <div class="geo-score-meta">Vérifié le ${this._fmtDate(run.ts)} · ${run.known}/${run.total} IA t'ont reconnue · ${run.positive_hits} mots positifs / ${run.negative_hits} mots négatifs</div>
+            <div class="geo-score-meta">Vérifié le ${this._fmtDate(run.ts)} · ${run.known} réponse${run.known > 1 ? 's' : ''} utile${run.known > 1 ? 's' : ''} sur ${run.total} · ${run.positive_hits} mots positifs / ${run.negative_hits} mots négatifs</div>
           </div>
         </div>
         <div class="geo-rep-grid">
@@ -1571,8 +1893,8 @@ const GEO = {
                 <span class="geo-rep-prov">${this._esc(x.provider_label || x.provider)}</span>
                 <span class="geo-rep-tags">
                   ${x.known ? '<span class="geo-rep-tag geo-rep-tag--ok">connue</span>' : '<span class="geo-rep-tag geo-rep-tag--bad">inconnue</span>'}
-                  ${x.positive_hits ? `<span class="geo-rep-tag geo-rep-tag--ok">+${x.positive_hits}👍</span>` : ''}
-                  ${x.negative_hits ? `<span class="geo-rep-tag geo-rep-tag--bad">+${x.negative_hits}👎</span>` : ''}
+                  ${x.positive_hits ? `<span class="geo-rep-tag geo-rep-tag--ok">${x.positive_hits} avis positif${x.positive_hits > 1 ? 's' : ''}</span>` : ''}
+                  ${x.negative_hits ? `<span class="geo-rep-tag geo-rep-tag--bad">${x.negative_hits} avis négatif${x.negative_hits > 1 ? 's' : ''}</span>` : ''}
                 </span>
               </div>
               <div class="geo-rep-q">« ${this._esc(x.question)} »</div>

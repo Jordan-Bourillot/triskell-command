@@ -48,7 +48,19 @@ const TriCall = {
   // met en veille et coupe la communication).
   wakeLock: null,
 
-  CALL_TIMEOUT_MS: 35000,  // sans réponse au-delà → on abandonne
+  CALL_TIMEOUT_MS: 35000,     // sans réponse au-delà → on abandonne
+  CONNECT_TIMEOUT_MS: 18000,  // « Connexion… » qui n'aboutit pas → on raccroche
+
+  // --- chargement de la config (call_config) ---
+  configRetryHandle: null,
+  configRetryCount: 0,
+  CONFIG_RETRY_MS: 30000,     // config injoignable → on retente toutes les 30 s
+  CONFIG_RETRY_MAX: 10,       // … 10 essais maximum
+
+  // Verrou anti-chevauchement du poll + toast « appel entrant » persistant.
+  _polling: false,
+  _incomingToastEl: null,
+  _toastHostPrevZ: undefined,   // z-index d'origine de l'hôte des messages
 
   init() {
     // Boutons « appeler » dans l'en-tête du chat.
@@ -63,6 +75,24 @@ const TriCall = {
     this._bind('call-cam-btn', () => this.toggleCam());
     this._bind('call-accept-btn', () => this.acceptCall());
     this._bind('call-decline-btn', () => this.declineCall());
+
+    // Lecteurs d'écran : ces boutons n'ont qu'une icône, on pose un nom clair.
+    const ariaLabels = {
+      'call-hangup-btn':  'Raccrocher',
+      'call-mute-btn':    'Couper le micro',
+      'call-cam-btn':     'Couper la caméra',
+      'call-accept-btn':  'Accepter l’appel',
+      'call-decline-btn': 'Refuser l’appel',
+    };
+    for (const [id, label] of Object.entries(ariaLabels)) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.setAttribute('aria-label', label);
+      // Micro/caméra = boutons à 2 états (actif/coupé) → aria-pressed.
+      if (id === 'call-mute-btn' || id === 'call-cam-btn') {
+        el.setAttribute('aria-pressed', 'false');
+      }
+    }
 
     // Débloque le son (sonnerie) au tout premier geste de l'utilisateur :
     // les navigateurs interdisent de jouer un son sans interaction.
@@ -104,28 +134,61 @@ const TriCall = {
   },
 
   async _loadConfig() {
-    if (typeof App === 'undefined' || !App.api) return;
-    try {
-      const res = await App.api.call_config();
-      if (res && res.ok) {
-        if (Array.isArray(res.ice_servers) && res.ice_servers.length) {
-          this.iceServers = res.ice_servers;
+    // 3 issues possibles : 'ok' (binôme connu), 'no-peer' (le serveur répond
+    // mais personne à appeler — état normal, on n'insiste pas) et 'error'
+    // (serveur injoignable → on reprogramme un essai automatique).
+    let outcome = 'error';
+    if (typeof App !== 'undefined' && App.api) {
+      try {
+        const res = await App.api.call_config();
+        if (res && res.ok) {
+          if (Array.isArray(res.ice_servers) && res.ice_servers.length) {
+            this.iceServers = res.ice_servers;
+          }
+          this.peerId = res.peer_id || null;
+          this.peerName = res.peer_name || (this.peerId ? this.peerId : '…');
+          outcome = this.peerId ? 'ok' : 'no-peer';
         }
-        this.peerId = res.peer_id || null;
-        this.peerName = res.peer_name || (this.peerId ? this.peerId : '…');
-      }
-    } catch (e) { /* on retentera au prochain appel */ }
-    // Pas de binôme connu → boutons d'appel désactivés.
+      } catch (e) { /* serveur injoignable → nouvelle tentative plus bas */ }
+    }
+    // Pas de binôme connu → boutons d'appel désactivés, avec un title qui
+    // explique pourquoi (un bouton désactivé ne peut pas être cliqué).
     const usable = !!this.peerId;
+    let offTitle = 'Appel indisponible';
+    if (outcome === 'error') {
+      offTitle = this.configRetryCount >= this.CONFIG_RETRY_MAX
+        ? 'Appels indisponibles — recharge la page pour réessayer'
+        : 'Appels indisponibles — nouvel essai automatique dans 30 secondes';
+    }
     for (const id of ['thomas-call-audio', 'thomas-call-video']) {
       const b = document.getElementById(id);
-      if (b) {
-        b.disabled = !usable;
-        b.title = usable
-          ? (id.endsWith('video') ? `Appel vidéo avec ${this.peerName}` : `Appel vocal avec ${this.peerName}`)
-          : 'Appel indisponible';
-      }
+      if (!b) continue;
+      b.disabled = !usable;
+      b.title = usable
+        ? (id.endsWith('video') ? `Appel vidéo avec ${this.peerName}` : `Appel vocal avec ${this.peerName}`)
+        : offTitle;
+      b.setAttribute('aria-label', b.title);
     }
+    if (outcome === 'ok') {
+      // Config chargée : les boutons sont réactivés, on arrête de retenter.
+      this.configRetryCount = 0;
+      if (this.configRetryHandle) { clearTimeout(this.configRetryHandle); this.configRetryHandle = null; }
+    } else if (outcome === 'error') {
+      this._scheduleConfigRetry();
+    }
+    return usable;
+  },
+
+  // Config ratée au chargement → avant, les boutons d'appel restaient morts
+  // pour toute la session. Désormais on retente tout seul (30 s, 10 essais max).
+  _scheduleConfigRetry() {
+    if (this.configRetryHandle) return;                         // déjà programmé
+    if (this.configRetryCount >= this.CONFIG_RETRY_MAX) return; // on n'insiste plus
+    this.configRetryCount += 1;
+    this.configRetryHandle = setTimeout(() => {
+      this.configRetryHandle = null;
+      this._loadConfig();
+    }, this.CONFIG_RETRY_MS);
   },
 
   // ------------------------------------------------------------------
@@ -139,14 +202,20 @@ const TriCall = {
   },
 
   async _poll() {
+    if (this._polling) return;   // garde anti-chevauchement (réseau lent)
     if (typeof App === 'undefined' || !App.api) return;
-    let res;
+    this._polling = true;
     try {
-      res = await App.api.call_signal_poll();
-    } catch (e) { return; }
-    if (!res || !res.ok || !Array.isArray(res.signals)) return;
-    for (const sig of res.signals) {
-      try { await this._handleSignal(sig); } catch (e) { console.warn('call signal:', e); }
+      let res;
+      try {
+        res = await App.api.call_signal_poll();
+      } catch (e) { return; }
+      if (!res || !res.ok || !Array.isArray(res.signals)) return;
+      for (const sig of res.signals) {
+        try { await this._handleSignal(sig); } catch (e) { console.warn('call signal:', e); }
+      }
+    } finally {
+      this._polling = false;
     }
   },
 
@@ -156,7 +225,13 @@ const TriCall = {
       case 'answer':  return this._onAnswer(sig);
       case 'hangup':  return this._onRemoteEnd('hangup');
       case 'cancel':  return this._onRemoteEnd('cancel');
-      case 'decline': return this._onRemoteEnd('decline');
+      case 'decline': {
+        // Un refus peut porter une raison (ex. micro bloqué côté receveur) :
+        // on distingue pour ne pas afficher « Appel refusé » à tort.
+        let reason = '';
+        try { reason = (JSON.parse(sig.payload || '{}') || {}).reason || ''; } catch (e) {}
+        return this._onRemoteEnd(reason === 'media-error' ? 'media-error' : 'decline');
+      }
       case 'busy':    return this._onRemoteEnd('busy');
     }
   },
@@ -168,7 +243,7 @@ const TriCall = {
     if (this.state !== 'idle') return;
     await this._loadConfig();
     if (!this.peerId) {
-      this._toast('Appel indisponible pour le moment.');
+      this._toast('Appel indisponible pour le moment.', 'warn');
       return;
     }
     this.mode = mode === 'video' ? 'video' : 'audio';
@@ -197,7 +272,7 @@ const TriCall = {
       if (!ok) throw new Error('signal offer failed');
     } catch (e) {
       console.warn('startCall:', e);
-      this._toast('Impossible de lancer l’appel.');
+      this._toast('Impossible de lancer l’appel.', 'error');
       this._reset(true);
       return;
     }
@@ -207,11 +282,13 @@ const TriCall = {
     this._setStatus(`Appel ${this.mode === 'video' ? 'vidéo' : 'vocal'}…`);
     this._setSub('Ça sonne…');
     this._ringback();
-    // Pas de réponse au bout d'un moment → on abandonne proprement.
+    // Pas de réponse au bout d'un moment → on abandonne proprement,
+    // et on laisse une trace « appel manqué » dans le fil de discussion.
     this.callTimeoutHandle = setTimeout(() => {
       if (this.state === 'outgoing') {
         this._send('cancel');
         this._toast('Pas de réponse.');
+        this._logMissedCall();
         this._reset(true);
       }
     }, this.CALL_TIMEOUT_MS);
@@ -244,6 +321,9 @@ const TriCall = {
     this._acquireWakeLock();
     this._showIncoming();
     this._ring();
+    // La sonnerie peut être muette (navigateur sans interaction préalable) :
+    // on double d'un message persistant à l'écran.
+    this._showIncomingToast();
     // L'appelant abandonne après ~35 s ; on ferme la sonnerie un peu après
     // au cas où le « cancel » se perde.
     this.callTimeoutHandle = setTimeout(() => {
@@ -263,7 +343,9 @@ const TriCall = {
       stream = await this._getMedia(this.mode);
     } catch (e) {
       this._mediaError(e);
-      this._send('decline');
+      // Refus AVEC raison : l'appelant affichera « X n'a pas pu activer son
+      // micro » au lieu de croire à un refus volontaire.
+      this._send('decline', JSON.stringify({ reason: 'media-error' }));
       this._reset(false);
       return;
     }
@@ -279,7 +361,7 @@ const TriCall = {
       await this._send('answer', JSON.stringify(this.pc.localDescription));
     } catch (e) {
       console.warn('acceptCall:', e);
-      this._toast('La connexion a échoué.');
+      this._toast('La connexion a échoué.', 'error');
       this._reset(true);
       return;
     }
@@ -289,6 +371,9 @@ const TriCall = {
     this._setStatus('Connexion…');
     this._setSub('');
     this.pendingOffer = null;
+    // La liaison directe doit s'établir vite : au-delà, on raccroche
+    // proprement au lieu de laisser « Connexion… » à l'écran pour toujours.
+    this._armConnectTimeout();
   },
 
   declineCall() {
@@ -311,18 +396,50 @@ const TriCall = {
       this.state = 'connecting';
       this._setStatus('Connexion…');
       this._setSub('');
+      // L'autre a décroché : le minuteur « pas de réponse » laisse la place
+      // au minuteur d'établissement de la connexion.
+      this._armConnectTimeout();
     } catch (e) {
       console.warn('_onAnswer:', e);
       this._reset(true);
     }
   },
 
+  // L'échange a abouti mais la liaison directe ne s'établit pas (réseau
+  // restrictif, pare-feu…) : au-delà de ~18 s on raccroche proprement,
+  // avec le même message des deux côtés (voir _onRemoteEnd).
+  _armConnectTimeout() {
+    if (this.callTimeoutHandle) clearTimeout(this.callTimeoutHandle);
+    this.callTimeoutHandle = setTimeout(() => {
+      if (this.state === 'connecting') {
+        this._send('hangup');
+        this._toast('Connexion impossible — réessaie.', 'error');
+        this._reset(true);
+      }
+    }, this.CONNECT_TIMEOUT_MS);
+  },
+
   _onRemoteEnd(reason) {
     if (this.state === 'idle') return;
-    const msg = reason === 'decline' ? 'Appel refusé.'
-              : reason === 'busy'    ? `${this.peerName} est déjà en ligne.`
-              : 'Appel terminé.';
-    this._toast(msg);
+    let msg = 'Appel terminé.';
+    let type = 'info';
+    if (reason === 'decline') {
+      msg = 'Appel refusé.';
+    } else if (reason === 'media-error') {
+      msg = `${this.peerName} n’a pas pu activer son micro — appel annulé.`;
+      type = 'warn';
+    } else if (reason === 'busy') {
+      msg = `${this.peerName} est déjà en ligne.`;
+    } else if (reason === 'cancel' && this.state === 'incoming') {
+      // L'appelant a raccroché avant qu'on décroche → appel manqué.
+      msg = `Appel manqué de ${this.peerName}.`;
+    } else if (this.state === 'connecting') {
+      // « hangup » reçu pendant l'établissement = l'autre côté a constaté
+      // l'échec de connexion → même message des deux côtés.
+      msg = 'Connexion impossible — réessaie.';
+      type = 'error';
+    }
+    this._toast(msg, type);
     this._reset(false);
   },
 
@@ -331,7 +448,11 @@ const TriCall = {
   // ------------------------------------------------------------------
   hangup() {
     if (this.state === 'idle') return;
-    this._send(this.state === 'outgoing' ? 'cancel' : 'hangup');
+    const wasOutgoing = this.state === 'outgoing';
+    this._send(wasOutgoing ? 'cancel' : 'hangup');
+    // Appel annulé avant que l'autre décroche = appel manqué pour lui :
+    // on laisse une trace dans le fil de discussion.
+    if (wasOutgoing) this._logMissedCall();
     this._reset(true);
   },
 
@@ -345,6 +466,9 @@ const TriCall = {
     if (btn) {
       btn.classList.toggle('tri-call-off', !on);
       btn.title = on ? 'Couper le micro' : 'Réactiver le micro';
+      btn.setAttribute('aria-label', btn.title);
+      btn.setAttribute('aria-pressed', String(!on));   // pressé = micro coupé
+      this._setSlash(btn, !on);
     }
   },
 
@@ -358,9 +482,35 @@ const TriCall = {
     if (btn) {
       btn.classList.toggle('tri-call-off', !on);
       btn.title = on ? 'Couper la caméra' : 'Réactiver la caméra';
+      btn.setAttribute('aria-label', btn.title);
+      btn.setAttribute('aria-pressed', String(!on));   // pressé = caméra coupée
+      this._setSlash(btn, !on);
     }
     const local = document.getElementById('call-local-video');
     if (local) local.style.visibility = on ? 'visible' : 'hidden';
+  },
+
+  // Barre oblique dessinée PAR-DESSUS l'icône existante du bouton quand le
+  // micro / la caméra est coupé(e) : le simple changement de couleur ne se
+  // voyait pas assez. Purement décoratif → ne casse jamais l'appel.
+  _setSlash(btn, off) {
+    try {
+      const svg = btn.querySelector('svg');
+      if (!svg) return;
+      const line = svg.querySelector('.tri-call-slash');
+      if (off && !line) {
+        const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        l.setAttribute('class', 'tri-call-slash');
+        l.setAttribute('x1', '3');  l.setAttribute('y1', '3');
+        l.setAttribute('x2', '21'); l.setAttribute('y2', '21');
+        l.setAttribute('stroke', 'currentColor');
+        l.setAttribute('stroke-width', '2.4');
+        l.setAttribute('stroke-linecap', 'round');
+        svg.appendChild(l);
+      } else if (!off && line) {
+        line.remove();
+      }
+    } catch (e) { /* décoratif */ }
   },
 
   // ------------------------------------------------------------------
@@ -373,23 +523,31 @@ const TriCall = {
       (ev.streams && ev.streams[0] ? ev.streams[0].getTracks() : [ev.track])
         .forEach(t => {
           if (!this.remoteStream.getTracks().includes(t)) this.remoteStream.addTrack(t);
+          // Caméra distante coupée / rétablie → bascule image ⇄ avatar
+          // (sinon on reste sur la dernière image figée).
+          if (t.kind === 'video') {
+            t.onmute   = () => this._refreshVideoLayout();
+            t.onunmute = () => this._refreshVideoLayout();
+            t.onended  = () => this._refreshVideoLayout();
+          }
         });
       const v = document.getElementById('call-remote-video');
       if (v) {
         if (v.srcObject !== this.remoteStream) v.srcObject = this.remoteStream;
         v.play().catch(() => {});   // force la lecture (le son surtout)
       }
+      this._refreshVideoLayout();
     };
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
       if (st === 'connected') this._onConnected();
       else if (st === 'failed' || st === 'closed') {
-        if (this.state !== 'idle') { this._toast('Connexion perdue.'); this._reset(true); }
+        if (this.state !== 'idle') { this._toast('Connexion perdue.', 'error'); this._reset(true); }
       } else if (st === 'disconnected') {
         // Souvent transitoire — on laisse une chance de se rétablir.
         setTimeout(() => {
           if (this.pc === pc && pc.connectionState === 'disconnected') {
-            this._toast('Connexion perdue.'); this._reset(true);
+            this._toast('Connexion perdue.', 'error'); this._reset(true);
           }
         }, 6000);
       }
@@ -459,11 +617,13 @@ const TriCall = {
   _mediaError(e) {
     const name = e && e.name ? e.name : '';
     if (name === 'NotAllowedError' || name === 'SecurityError') {
-      this._toast('Micro/caméra refusés. Autorise-les dans le navigateur.');
+      this._toast(this.mode === 'video'
+        ? 'Ton micro et ta caméra sont bloqués — autorise-les dans le navigateur (icône à gauche de l’adresse).'
+        : 'Ton micro est bloqué — autorise-le dans le navigateur (icône à gauche de l’adresse).', 'error');
     } else if (name === 'NotFoundError') {
-      this._toast('Aucun micro ou caméra détecté.');
+      this._toast('Aucun micro ou caméra détecté.', 'error');
     } else {
-      this._toast('Impossible d’accéder au micro/caméra.');
+      this._toast('Impossible d’accéder au micro/caméra.', 'error');
     }
   },
 
@@ -487,11 +647,12 @@ const TriCall = {
   // ------------------------------------------------------------------
   // Remise à zéro complète.
   // ------------------------------------------------------------------
-  _reset(clearServer) {
+  async _reset(clearServer) {
     const id = this.callId;
     this._stopRing();
     this._stopRingback();
     this._stopTitleBlink();
+    this._hideIncomingToast();
     this._releaseWakeLock();
     if (this.durationHandle) { clearInterval(this.durationHandle); this.durationHandle = null; }
     if (this.callTimeoutHandle) { clearTimeout(this.callTimeoutHandle); this.callTimeoutHandle = null; }
@@ -500,20 +661,35 @@ const TriCall = {
     this.remoteStream = null;
     for (const vid of ['call-remote-video', 'call-local-video']) {
       const v = document.getElementById(vid);
-      if (v) { try { v.srcObject = null; } catch (e) {} }
+      if (v) { try { v.srcObject = null; v.style.opacity = ''; } catch (e) {} }
     }
     this._hideCall();
     this._hideIncoming();
+    // Boutons micro/caméra : retour à l'état « actif » (classe, barre
+    // oblique, libellés) pour le prochain appel.
     const muteBtn = document.getElementById('call-mute-btn');
-    if (muteBtn) muteBtn.classList.remove('tri-call-off');
+    if (muteBtn) {
+      muteBtn.classList.remove('tri-call-off');
+      muteBtn.title = 'Couper le micro';
+      muteBtn.setAttribute('aria-label', muteBtn.title);
+      muteBtn.setAttribute('aria-pressed', 'false');
+      this._setSlash(muteBtn, false);
+    }
     const camBtn = document.getElementById('call-cam-btn');
-    if (camBtn) camBtn.classList.remove('tri-call-off');
+    if (camBtn) {
+      camBtn.classList.remove('tri-call-off');
+      camBtn.title = 'Couper la caméra';
+      camBtn.setAttribute('aria-label', camBtn.title);
+      camBtn.setAttribute('aria-pressed', 'false');
+      this._setSlash(camBtn, false);
+    }
     this.pendingOffer = null;
     this.state = 'idle';
     this.callId = null;
     this._startPoll();
     if (clearServer && id && typeof App !== 'undefined' && App.api) {
-      try { App.api.call_clear({ call_id: id }); } catch (e) {}
+      try { await App.api.call_clear({ call_id: id }); }
+      catch (e) { /* nettoyage best-effort, jamais bloquant */ }
     }
   },
 
@@ -556,18 +732,95 @@ const TriCall = {
 
   _hideIncoming() {
     const m = document.getElementById('call-incoming');
-    if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
+    if (m) {
+      m.classList.add('hidden');
+      m.classList.remove('flex');
+      m.style.zIndex = '';   // annule l'éventuel « premier plan » du clic toast
+    }
     this._stopTitleBlink();
+    this._hideIncomingToast();
+  },
+
+  // La sonnerie peut être muette tant que l'utilisateur n'a jamais cliqué
+  // dans la page (règle des navigateurs) : en plus du titre d'onglet qui
+  // clignote, on affiche un message persistant. Un clic dessus remet la
+  // fenêtre d'appel au premier plan.
+  _showIncomingToast() {
+    this._hideIncomingToast();
+    try {
+      if (typeof Toast === 'undefined' || !Toast || typeof Toast.show !== 'function') return;
+      const el = Toast.show(`📞 Appel entrant de ${this.peerName} — clique pour répondre`, {
+        type: 'info',
+        title: 'Appels',
+        duration: this.CALL_TIMEOUT_MS + 4000,   // persiste tant que ça sonne
+      });
+      // Le temps de la sonnerie, les messages passent DEVANT les grandes
+      // fenêtres (Phare, accueil…) qui, sinon, cacheraient l'alerte —
+      // c'est précisément le cas où elle est utile. Remis en place après.
+      const host = document.getElementById('tc-toast-host');
+      if (host) {
+        this._toastHostPrevZ = host.style.zIndex || '';
+        host.style.zIndex = '10001';
+      }
+      if (el && el.addEventListener) {
+        el.style.cursor = 'pointer';
+        el.addEventListener('click', (ev) => {
+          // La croix garde son rôle « fermer » habituel.
+          if (ev.target && ev.target.closest && ev.target.closest('.tc-toast-close')) return;
+          if (this.state === 'incoming') {
+            this._showIncoming();
+            // « Au premier plan » pour de vrai : passe devant les autres
+            // fenêtres ouvertes (remis à zéro dans _hideIncoming).
+            const m = document.getElementById('call-incoming');
+            if (m) m.style.zIndex = '10000';
+          }
+          this._hideIncomingToast();
+        });
+      }
+      this._incomingToastEl = el;
+    } catch (e) { /* le toast ne doit jamais casser l'appel */ }
+  },
+
+  _hideIncomingToast() {
+    const el = this._incomingToastEl;
+    this._incomingToastEl = null;
+    if (el) {
+      try {
+        if (typeof Toast !== 'undefined' && Toast && typeof Toast._remove === 'function') Toast._remove(el);
+        else el.remove();
+      } catch (e) {}
+    }
+    // Rend aux messages leur étage habituel.
+    if (this._toastHostPrevZ !== undefined) {
+      try {
+        const host = document.getElementById('tc-toast-host');
+        if (host) host.style.zIndex = this._toastHostPrevZ;
+      } catch (e) {}
+      this._toastHostPrevZ = undefined;
+    }
+  },
+
+  // Y a-t-il une image distante réellement en train d'arriver ?
+  // (caméra coupée en face → la piste vidéo passe « muted »)
+  _remoteVideoAlive() {
+    if (!this.remoteStream) return false;
+    return this.remoteStream.getVideoTracks()
+      .some(t => t.readyState === 'live' && !t.muted);
   },
 
   // En visio on montre la vidéo et on cache l'avatar (et inversement).
+  // Si la caméra distante est coupée (ou que l'image n'arrive pas encore),
+  // on masque l'image figée et on remontre l'avatar — le son continue.
   _refreshVideoLayout() {
     const ov = document.getElementById('call-overlay');
     if (!ov) return;
-    const showVideo = this.mode === 'video';
-    ov.classList.toggle('tri-call-video-mode', showVideo);
+    const videoMode = this.mode === 'video';
+    ov.classList.toggle('tri-call-video-mode', videoMode);
+    const remoteAlive = this._remoteVideoAlive();
+    const remote = document.getElementById('call-remote-video');
+    if (remote) remote.style.opacity = (videoMode && !remoteAlive) ? '0' : '';
     const av = document.getElementById('call-avatar');
-    if (av) av.style.display = showVideo ? 'none' : '';
+    if (av) av.style.display = (videoMode && remoteAlive) ? 'none' : '';
     // La vidéo distante reste toujours dans le DOM (le son passe même en
     // vocal) ; c'est le CSS qui la rend visible ou non selon le mode.
   },
@@ -694,11 +947,35 @@ const TriCall = {
     return 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
   },
 
-  _toast(msg) {
-    // Réutilise le toast global de l'app s'il existe, sinon fallback discret.
+  // Laisse une trace « appel manqué » dans le fil de discussion, pour que
+  // l'autre voie qu'on a essayé de l'appeler (comme sur un téléphone).
+  _logMissedCall() {
     try {
-      if (typeof App !== 'undefined' && App.toast) return App.toast(msg);
-      if (typeof App !== 'undefined' && App.notify) return App.notify(msg);
+      if (typeof App === 'undefined' || !App.api) return;
+      const d = new Date();
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mn = String(d.getMinutes()).padStart(2, '0');
+      const label = this.mode === 'video' ? 'vidéo' : 'vocal';
+      const p = App.api.messages_send({ body: `📞 Appel manqué (${label}) — ${hh}:${mn}` });
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (e) { /* la trace est un bonus, jamais bloquante */ }
+  },
+
+  _toast(msg, type) {
+    // Branché en direct sur le système commun de messages (toast.js), avec
+    // le titre « Appels ». Avant : on cherchait App.toast/App.notify qui
+    // n'existaient pas encore → TOUS les retours partaient en console
+    // (refus, occupé, connexion perdue, micro refusé…). Plus jamais ça.
+    try {
+      if (typeof Toast !== 'undefined' && Toast && typeof Toast.show === 'function') {
+        Toast.show(msg, { type: type || 'info', title: 'Appels' });
+        return;
+      }
+      // Filet de secours si toast.js n'est pas chargé (alias posés par lui).
+      if (typeof App !== 'undefined' && typeof App.toast === 'function') {
+        App.toast(msg, { type: type || 'info', title: 'Appels' });
+        return;
+      }
     } catch (e) {}
     console.log('[appel]', msg);
   },

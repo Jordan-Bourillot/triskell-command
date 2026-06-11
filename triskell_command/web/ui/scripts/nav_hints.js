@@ -1,8 +1,9 @@
 // Petites bulles d'aide à côté de chaque onglet de la sidebar.
-// Un bouton "i" discret apparaît sur chaque .nav-item. Au clic, il ouvre
-// une bulle qui résume en deux ou trois phrases ce que contient l'onglet.
-// L'utilisateur peut éditer le texte de chaque bulle ; les modifs sont
-// stockées dans localStorage et survivent au rafraîchissement.
+// Un bouton "i" discret est posé PAR-DESSUS chaque .nav-item (en voisin
+// positionné — pas imbriqué dans le <button> du menu, ce serait du HTML
+// invalide). Au clic, il ouvre une bulle qui résume en deux ou trois
+// phrases ce que contient l'onglet. L'utilisateur peut éditer le texte de
+// chaque bulle ; les modifs sont stockées dans localStorage.
 (function () {
   'use strict';
 
@@ -12,9 +13,9 @@
   // les onglets via data-tab (inbound / sent / reply).
   const DEFAULT_HINTS = {
     morning: "Ton tableau de bord du jour. Tu y vois l’heure, la mission prioritaire, 4 grands chiffres clés sur 7 jours, les relances LinkedIn à faire et les alertes. Boutons rapides pour composer un mail, ouvrir Brain, appeler Claude ou lancer le mode Concentration.",
+    mails: "Rédiger un mail : le composeur s’ouvre directement. Tu écris (ou tu pars d’un modèle), tu choisis l’adresse d’envoi, les pièces jointes et la signature, puis tu envoies tout de suite ou tu programmes pour plus tard.",
     'mails:inbound': "Boîte de réception : tous les mails entrants captés par l’app. Pour l’instant ce sont surtout les réponses de prospects (le reste arrivera plus tard).",
     'mails:sent': "Tous les mails envoyés depuis l’app : prospection, suivi après-vente, bienvenue client, notifications internes. Filtrable par adresse expéditrice.",
-    'mails:reply': "Les réponses de prospects à tes mails de prospection, déjà rangées par l’IA (intéressé, pas maintenant, refus, désinscription, à trier). Tu réponds directement depuis la liste.",
     brain: "Boîte à idées partagée avec Thomas. Tu tapes une note, Claude la range automatiquement (catégorie, tags, rappel) et te re-pingue au bon moment dans l’app.",
     clients_master: "La liste de tes clients — uniquement les gens qui ont acheté au moins une fois chez Triskell. Chaque fiche montre son historique (factures, mails échangés, projets livrés).",
     autopilot: "Étape 2 — la machine qui ÉCRIT et ENVOIE les mails de prospection toute seule. Elle pioche UNIQUEMENT dans « Tous les prospects » (elle ne cherche jamais sur internet), utilise tes modèles de mails tels quels, fait relire par une 2e IA, et respecte un plafond par jour. Chaque maillon a son interrupteur Auto/Manuel.",
@@ -33,6 +34,7 @@
     revenue: "Tous tes encaissements regroupés (Stripe + AppSumo + paiements manuels). Tu vois le total du mois en cours comparé au mois précédent, les 7 et 30 derniers jours, le top clients du mois, la répartition par produit et par source, et les prévisions.",
     funnel: "Ton entonnoir de conversion étape par étape : prospects, mails envoyés, réponses, intéressés, gagnés. Filtrable par période (7/30/90 jours ou tout) et par type de prospect (créateurs ou B2B local). Tu vois où ça coince.",
     phare: "Suivi SEO de tes sites (internes et clients). Chaque carte montre la santé du site, les visites du mois, et les améliorations préparées par les robots qui attendent ton feu vert. Tu valides ou tu refuses en un clic.",
+    geo: "Le GEO travaille à ce que les IA (ChatGPT, Perplexity…) citent tes sites dans leurs réponses. Il pose des questions tests aux IA, surveille si tes sites ressortent, et prépare des contenus pour améliorer ça. Son auto-pilote s’allume depuis cet écran.",
     lagriffe: "Pipeline visuel des demandes de sites Lagriffe Studio, étape par étape jusqu’à la mise en ligne. Comprend une étape supplémentaire « À valider (final) » où tu donnes ton feu vert humain sur le site final avant l’envoi du mail au client.",
     rankus: "Pipeline visuel des demandes SEO RankUs Studio, étape par étape. Chaque demande montre son étage dans le pipeline et l’historique complet des actions menées.",
     wow: "Pipeline visuel des demandes Studio WoW, étape par étape. Chaque demande client montre son étage et l’historique pas à pas, de la prise de brief jusqu’à la mise en ligne.",
@@ -166,6 +168,7 @@
       <div class="nav-hint-arrow" aria-hidden="true"></div>
       <textarea class="nav-hint-textarea" rows="5" spellcheck="true"></textarea>
       <div class="nav-hint-actions">
+        <span class="nav-hint-kbdtip">Ctrl+Entrée pour enregistrer</span>
         <button type="button" class="nav-hint-action nav-hint-action--ghost" data-act="cancel">Annuler</button>
         <button type="button" class="nav-hint-action nav-hint-action--primary" data-act="save">Enregistrer</button>
       </div>
@@ -205,7 +208,9 @@
     closePopover();
     popoverEl = document.createElement('div');
     popoverEl.className = 'nav-hint-popover';
-    popoverEl.setAttribute('role', 'tooltip');
+    // role=dialog (pas tooltip) : la bulle contient des boutons d'action.
+    popoverEl.setAttribute('role', 'dialog');
+    popoverEl.setAttribute('aria-label', 'À quoi sert cet onglet ?');
     popoverEl.addEventListener('click', (e) => e.stopPropagation());
     document.body.appendChild(popoverEl);
     activeBtn = btn;
@@ -215,9 +220,13 @@
   }
 
   function makeHintButton(navBtn, key) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
+    // Un <span role="button"> et PAS un <button> : il vit en voisin de
+    // l'onglet (un bouton dans un bouton est du HTML invalide qui casse
+    // le focus clavier).
+    const btn = document.createElement('span');
     btn.className = 'nav-hint-btn';
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
     btn.setAttribute('aria-label', "À quoi sert cet onglet ?");
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('title', "À quoi sert cet onglet ?");
@@ -229,7 +238,7 @@
         <circle cx="12" cy="8" r="0.6" fill="currentColor"/>
       </svg>
     `;
-    btn.addEventListener('click', (e) => {
+    const toggle = (e) => {
       e.stopPropagation();
       e.preventDefault();
       if (activeBtn === btn) {
@@ -237,9 +246,47 @@
       } else {
         openPopover(btn, key);
       }
+    };
+    btn.addEventListener('click', toggle);
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') toggle(e);
     });
     btn.addEventListener('mousedown', (e) => e.stopPropagation());
     return btn;
+  }
+
+  // Styles propres au mode « voisin positionné » (main.css garde le reste).
+  function injectStyles() {
+    if (document.getElementById('nav-hints-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'nav-hints-styles';
+    s.textContent = `
+      .nav-hint-wrap { position: relative; }
+      /* On réserve la place du « i » à droite de l'onglet (24px + marge) */
+      .nav-hint-wrap > .nav-item { width: 100%; padding-right: 38px; }
+      .nav-hint-wrap > .nav-hint-btn {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        margin-left: 0;
+      }
+      /* Le survol de l'onglet révèle le « i » (l'ancienne règle
+         .nav-item:hover .nav-hint-btn ne matche plus un voisin). */
+      .nav-hint-wrap:hover > .nav-hint-btn { opacity: 0.9; }
+      .nav-hint-wrap > .nav-hint-btn:focus-visible {
+        opacity: 1;
+        outline: 2px solid hsl(var(--accent));
+        outline-offset: 1px;
+      }
+      .nav-hint-kbdtip {
+        margin-right: auto;
+        align-self: center;
+        font-size: 11px;
+        color: hsl(var(--text-muted));
+      }
+    `;
+    document.head.appendChild(s);
   }
 
   function attachAll() {
@@ -248,13 +295,16 @@
       if (nav.dataset.hintAttached === '1') return;
       const key = hintKey(nav);
       if (!DEFAULT_HINTS[key]) return;
+      if (!nav.parentNode) return;
       const btn = makeHintButton(nav, key);
-      const badge = nav.querySelector('.nav-item-badge');
-      if (badge) {
-        nav.insertBefore(btn, badge);
-      } else {
-        nav.appendChild(btn);
-      }
+      // L'onglet est enveloppé dans un conteneur relatif, et le « i » posé
+      // par-dessus en voisin absolu. (sidebar_collapse.js connaît
+      // .nav-hint-wrap et replie ces conteneurs avec leur section.)
+      const wrap = document.createElement('div');
+      wrap.className = 'nav-hint-wrap';
+      nav.parentNode.insertBefore(wrap, nav);
+      wrap.appendChild(nav);
+      wrap.appendChild(btn);
       nav.dataset.hintAttached = '1';
     });
   }
@@ -275,9 +325,23 @@
   window.addEventListener('scroll', () => { if (!editing) closePopover(); }, true);
 
   function init() {
+    injectStyles();
     attachAll();
-    setTimeout(attachAll, 300);
-    setTimeout(attachAll, 1200);
+    // Accrochage par OBSERVATION du menu (avant : deux rendez-vous fixes à
+    // 300 ms et 1,2 s — un onglet ajouté plus tard restait sans bulle).
+    // attachAll est idempotent (drapeau hintAttached), donc l'observateur
+    // peut le rappeler sans risque, y compris sur nos propres mutations.
+    const sidebar = document.getElementById('sidebar') || document.body;
+    let scheduled = false;
+    const mo = new MutationObserver(() => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        attachAll();
+      });
+    });
+    mo.observe(sidebar, { childList: true, subtree: true });
   }
 
   if (document.readyState === 'loading') {

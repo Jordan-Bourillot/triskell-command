@@ -11,8 +11,11 @@
 
 const Autopilot = {
   cfg: null,           // dernière config chargée
-  pollTimer: null,     // setInterval du log live
+  pollTimer: null,     // minuteur du suivi live (App.viewInterval)
   logSeen: 0,          // index dernière ligne lue
+  _pollBusy: false,    // anti-chevauchement : une requête de statut à la fois
+  _pollFails: 0,       // échecs de suivi d'affilée (on coupe le polling à 8)
+  _dirty: false,       // des réglages différés ont changé sans Enregistrer
 
   _LS_DRAFT: 'autopilot:draft',
   _LS_STAGE_MODES: 'autopilot:stage_modes',
@@ -24,7 +27,7 @@ const Autopilot = {
       n:      '1',
       title:  'Cherche',
       sources:'Fichier « Tous les prospects »',
-      desc:   "Pioche uniquement dans tes prospects existants. L'autopilote n'ajoute jamais de nouveaux prospects — utilise Chasseur, Éclaireur ou Obelisk pour ça.",
+      desc:   "Pioche uniquement dans tes prospects existants. L'autopilote n'ajoute jamais de nouveaux prospects — utilise Chasseur, Éclaireur ou Obélisk pour ça.",
       defaultMode: 'auto',
     },
     {
@@ -42,6 +45,10 @@ const Autopilot = {
       sources:'IA + bon modèle',
       desc:   "Choisit le bon modèle et adapte à chaque prospect.",
       defaultMode: 'auto',
+      modeHints: {
+        auto:   "L'IA rédige un mail pour chaque prospect retenu.",
+        manual: "Aucun mail ne sera généré : le passage s'arrêtera après le tri.",
+      },
     },
     {
       key:    'review',
@@ -50,6 +57,15 @@ const Autopilot = {
       sources:'2è IA · note sur 10',
       desc:   'Une 2è IA vérifie la qualité du mail.',
       defaultMode: 'manual',
+      // Interrupteur renommé : Auto = relecture IA ACTIVÉE, Manuel = COUPÉE.
+      // L'ancien « Auto / Manuel » laissait croire à une relecture humaine
+      // alors que « Manuel » coupe purement la relecture.
+      modeSwitchLabel: 'RELECTURE IA',
+      modeLabels: { auto: 'Activée', manual: 'Coupée' },
+      modeHints: {
+        auto:   "Chaque mail est relu par une 2è IA avant l'étape suivante.",
+        manual: 'Relecture coupée : les mails passent sans aucun contrôle.',
+      },
     },
     {
       key:    'send',
@@ -58,6 +74,10 @@ const Autopilot = {
       sources:'ou met en brouillon si doute',
       desc:   "Envoie pour de vrai, ou met en brouillon si l'IA hésite.",
       defaultMode: 'manual',
+      modeHints: {
+        auto:   'Les mails partent tout seuls, sans validation.',
+        manual: 'Chaque mail est mis en brouillon — rien ne part sans ton OK.',
+      },
     },
   ],
 
@@ -93,26 +113,51 @@ const Autopilot = {
     } catch (e) {}
   },
 
+  // Réapplique le brouillon local (champs modifiés mais jamais enregistrés).
+  // Renvoie true si un brouillon a été appliqué → le badge « modifications
+  // non enregistrées » doit s'allumer (sinon ces valeurs semblent actées).
   _applyDraft() {
     let draft = null;
     try { draft = JSON.parse(localStorage.getItem(this._LS_DRAFT) || 'null'); }
     catch (e) {}
-    if (!draft) return;
+    if (!draft) return false;
     Object.entries(draft).forEach(([k, v]) => {
       const el = document.querySelector(`#ap-form [data-key="${k}"]`);
       if (!el) return;
       if (el.type === 'checkbox') el.checked = !!v;
       else el.value = (v == null ? '' : String(v));
     });
+    return true;
   },
 
   _bindDraftPersist() {
     const root = document.getElementById('ap-form');
     if (!root) return;
-    const save = () => this._saveDraft();
+    const save = () => { this._saveDraft(); this._setDirty(true); };
     root.querySelectorAll('input, select, textarea').forEach(el => {
       el.addEventListener('input',  save);
       el.addEventListener('change', save);
+    });
+  },
+
+  // ------------------------------------------------------------------
+  // Badge « modifications non enregistrées » : allumé dès qu'un champ
+  // différé change (bandeau du haut, adresses expéditrices, formulaire
+  // avancé), éteint après un Enregistrer réussi.
+  _setDirty(on) {
+    this._dirty = !!on;
+    ['ap-dirty-badge', 'ap-dirty-badge-bottom'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('hidden', !this._dirty);
+    });
+  },
+
+  _bindControlPanelDirty() {
+    ['nightly_target', 'enabled', 'nightly_hour'].forEach(k => {
+      const el = document.querySelector(`[data-key="${k}"]`);
+      if (!el) return;
+      el.addEventListener('input',  () => this._setDirty(true));
+      el.addEventListener('change', () => this._setDirty(true));
     });
   },
 
@@ -162,21 +207,35 @@ const Autopilot = {
           </button>
         </div>
 
+        <!-- Bandeau d'erreur de lancement : bien visible en haut, en rouge.
+             Avant, l'échec de « Lancer maintenant » finissait enterré dans
+             le journal technique replié. -->
+        <div id="ap-run-error" role="alert"
+             class="hidden mb-4 px-4 py-3 rounded-xl border border-danger/40 bg-danger/10
+                    text-sm font-semibold text-danger-text"
+             style="text-wrap: pretty"></div>
+
         <!-- Tableau de commande : réglages + adresses + chaîne des 5 maillons -->
         <div id="ap-control-panel" class="mb-8"></div>
 
-          <!-- Boutons d'action : déplacés ICI (à la fin) après le paramétrage -->
-          <div class="flex flex-wrap gap-2 sm:gap-3 mb-8">
-            <button id="ap-run"  class="btn btn-primary">
+          <!-- Boutons d'action : déplacés ICI (à la fin) après le paramétrage.
+               Désactivés tant que la vraie config n'est pas chargée, pour ne
+               jamais réenregistrer des valeurs d'usine par accident. -->
+          <div class="flex flex-wrap items-center gap-2 sm:gap-3 mb-8">
+            <button id="ap-run"  class="btn btn-primary" disabled>
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               Lancer maintenant
             </button>
-            <button id="ap-stop" class="btn hidden"
-                    style="background: hsl(var(--danger)); color: white; border-color: transparent;">
+            <button id="ap-stop"
+                    class="btn hidden bg-danger/15 text-danger-text border-danger/40 hover:bg-danger/25">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
               Arrêter
             </button>
-            <button id="ap-save" class="btn btn-secondary">Enregistrer les réglages</button>
+            <button id="ap-save" class="btn btn-secondary" disabled>Enregistrer les réglages</button>
+            <span id="ap-dirty-badge" role="status"
+                  class="hidden text-xs font-semibold text-warning-text">
+              ● Modifications non enregistrées
+            </span>
           </div>
 
           <!-- Paramètres avancés : ancien formulaire, replié -->
@@ -195,6 +254,17 @@ const Autopilot = {
             </summary>
             <div class="px-5 pb-5 pt-2">
               <div id="ap-form" class="space-y-8"></div>
+              <!-- Double du bouton Enregistrer : évite de remonter tout en
+                   haut après avoir modifié le formulaire avancé. -->
+              <div class="mt-4 flex flex-wrap items-center gap-3">
+                <button id="ap-save-bottom" class="btn btn-secondary" disabled>
+                  Enregistrer les réglages
+                </button>
+                <span id="ap-dirty-badge-bottom" role="status"
+                      class="hidden text-xs font-semibold text-warning-text">
+                  ● Modifications non enregistrées
+                </span>
+              </div>
             </div>
           </details>
 
@@ -203,9 +273,9 @@ const Autopilot = {
             <summary class="cursor-pointer px-5 py-3 flex items-center justify-between gap-3
                             hover:bg-bg/40 rounded-2xl">
               <div>
-                <div class="font-semibold text-sm">Détails techniques du run</div>
+                <div class="font-semibold text-sm">Détails techniques du passage</div>
                 <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
-                  Journal brut avec timestamps — utile pour comprendre un bug.
+                  Journal brut avec l'heure de chaque action — utile pour comprendre un bug.
                 </div>
               </div>
               <svg class="w-5 h-5 text-text-muted transition-transform group-open:rotate-180"
@@ -218,9 +288,8 @@ const Autopilot = {
                                       text-text-secondary whitespace-pre-wrap
                                       bg-bg/40 rounded-xl p-3
                                       min-h-[120px] max-h-[420px] overflow-y-auto">
-                (en attente d'un run…)
+                (en attente d'un passage…)
               </div>
-              <div id="ap-stats" class="mt-4 hidden"></div>
             </div>
           </details>
       </section>
@@ -242,10 +311,15 @@ const Autopilot = {
     this._refreshPulse();
     // Combien de prospects dans la liste cible (étape 1 "Cherche")
     this._refreshTargetCount();
+    // Badge « modifications non enregistrées » sur les champs du bandeau
+    this._setDirty(false);
+    this._bindControlPanelDirty();
 
     document.getElementById('ap-save').onclick = () => this.save();
     document.getElementById('ap-run').onclick  = () => this.run();
     document.getElementById('ap-stop').onclick = () => this.stop();
+    const saveBottom = document.getElementById('ap-save-bottom');
+    if (saveBottom) saveBottom.onclick = () => this.save();
 
     // Bandeau "X brouillons à valider" : clic = ouvre la page Brouillons
     const draftsBtn = document.getElementById('ap-drafts-banner-open');
@@ -255,6 +329,8 @@ const Autopilot = {
 
     if (!App.api) {
       document.getElementById('ap-form').innerHTML = this._previewBanner();
+      // Boutons réactivés pour qu'un clic explique le mode aperçu (Toast)
+      this._enableActionButtons();
       return;
     }
 
@@ -263,13 +339,26 @@ const Autopilot = {
     try { r = await App.api.autopilot_get_config(); }
     catch (e) { r = { ok: false, error: String(e) }; }
     if (!r || !r.ok) {
+      console.error('[autopilot] chargement config :', (r && r.error) || 'réponse vide');
       document.getElementById('ap-form').innerHTML = `
-        <div class="card p-6 text-danger">
-          Impossible de charger la config : ${this._esc(r && r.error || 'erreur')}
+        <div class="card p-6">
+          <div class="font-semibold text-danger-text mb-1">
+            Impossible de charger les réglages de l'auto-pilote.
+          </div>
+          <div class="text-sm text-text-muted mb-3" style="text-wrap: pretty">
+            Les boutons restent désactivés pour ne pas écraser tes vrais
+            réglages avec des valeurs d'usine. Vérifie la connexion, puis réessaie.
+          </div>
+          <button class="btn btn-secondary" onclick="App.show('autopilot')">Réessayer</button>
         </div>`;
       return;
     }
     this.cfg = r.config || {};
+    // Le bandeau du haut a été rendu AVANT la config (valeurs d'usine) :
+    // on le repasse aux vraies valeurs maintenant qu'on les connaît.
+    this._applyConfigToControlPanel();
+    // La vraie config est là : Lancer / Enregistrer deviennent utilisables.
+    this._enableActionButtons();
 
     // Charge les signatures pour les afficher dans l'apercu sous le brief IA
     this.signatures = [];
@@ -279,7 +368,9 @@ const Autopilot = {
     } catch (e) {}
 
     this._renderForm();
-    this._applyDraft();
+    // Brouillon local (changements jamais enregistrés) : on le réaffiche
+    // ET on allume le badge, sinon il passe pour de la config actée.
+    if (this._applyDraft()) this._setDirty(true);
     this._bindDraftPersist();
     // Re-rend le pool d'adresses avec la config maintenant disponible
     // (si les comptes mail ont déjà été chargés en parallèle).
@@ -289,10 +380,36 @@ const Autopilot = {
     }
 
     // Le DOM du log vient d'être réinitialisé : on remet le compteur à 0
-    // pour re-récupérer l'historique complet du run en cours / dernier run.
+    // pour re-récupérer l'historique complet du passage en cours / dernier.
     this.logSeen = 0;
-    // Si un run est déjà en cours (rechargement de l'écran), reprend le log
+    // Si un passage tourne déjà côté serveur (rechargement de l'écran),
+    // reprend le suivi : bouton « Passage en cours… », Stop visible, log.
     this._refreshStatus(true);
+  },
+
+  // Patche les 3 champs du bandeau du haut avec la config fraîchement
+  // chargée (case « Passage automatique », nombre de prospects, heure).
+  // Le bandeau est rendu AVANT l'appel serveur : sans ce patch, il
+  // affichait des valeurs d'usine qu'Enregistrer pouvait réécrire —
+  // jusqu'à éteindre silencieusement le passage nocturne.
+  _applyConfigToControlPanel() {
+    const c = this.cfg || {};
+    const setField = (key, val) => {
+      const el = document.querySelector(`[data-key="${key}"]`);
+      if (!el) return;
+      if (el.type === 'checkbox') el.checked = !!val;
+      else el.value = String(val);
+    };
+    setField('nightly_target', c.nightly_target ?? 50);
+    setField('enabled',        !!c.enabled);
+    setField('nightly_hour',   c.nightly_hour ?? 3);
+  },
+
+  _enableActionButtons() {
+    ['ap-run', 'ap-save', 'ap-save-bottom'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.disabled = false;
+    });
   },
 
   // ------------------------------------------------------------------
@@ -313,11 +430,11 @@ const Autopilot = {
             </div>
             <div class="flex items-baseline gap-3">
               <input type="number" data-key="nightly_target"
-                     value="${nightlyTarget}" min="1" max="500"
+                     value="${nightlyTarget}" min="1" max="500" step="1"
                      class="w-24 px-3 py-2 rounded-lg bg-bg border border-border
                             focus:border-accent focus:outline-none text-xl font-bold text-center" />
               <span class="text-sm text-text-secondary" style="text-wrap: balance">
-                prospects / run
+                prospects par passage
               </span>
             </div>
           </label>
@@ -334,29 +451,35 @@ const Autopilot = {
             <div class="text-[11px] text-text-muted mt-1.5 leading-snug"
                  style="text-wrap: pretty">
               Les produits <b>actifs</b> de ton catalogue (juste en dessous). Pour
-              ajouter, retirer ou désactiver un produit, va dans <b>Catalogue</b>.
+              ajouter, retirer ou désactiver un produit,
+              <button type="button" class="text-accent underline hover:no-underline"
+                      onclick="App.show('catalogue')">ouvre le Catalogue</button>.
             </div>
           </div>
 
-          <label class="flex items-start gap-3 cursor-pointer md:pt-7">
-            <input type="checkbox" data-key="enabled" ${enabledNight ? 'checked' : ''}
-                   class="mt-1 w-5 h-5 accent-accent flex-shrink-0" />
+          <!-- La case à cocher a son propre label (les textes cliquables
+               cochent/décochent) ; le champ heure est SORTI du label pour
+               être éditable sans déclencher la case. -->
+          <div class="flex items-start gap-3 md:pt-7">
+            <input type="checkbox" id="ap-enabled-night" data-key="enabled"
+                   ${enabledNight ? 'checked' : ''}
+                   class="mt-1 w-5 h-5 accent-accent flex-shrink-0 cursor-pointer" />
             <div class="min-w-0">
               <div class="text-sm font-semibold flex items-center gap-2 flex-wrap"
                    style="text-wrap: balance">
-                <span>Pipeline auto à</span>
+                <label for="ap-enabled-night" class="cursor-pointer">Passage automatique à</label>
                 <input type="number" data-key="nightly_hour"
-                       value="${nightlyHour}" min="0" max="23"
-                       onclick="event.preventDefault(); event.stopPropagation();"
+                       value="${nightlyHour}" min="0" max="23" step="1"
+                       aria-label="Heure du passage automatique (0 à 23)"
                        class="w-20 px-3 py-1.5 rounded-md bg-bg border border-border
                               focus:border-accent focus:outline-none text-base font-bold text-center" />
-                <span>h (Paris)</span>
+                <label for="ap-enabled-night" class="cursor-pointer">h (Paris)</label>
               </div>
               <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
                 L'app bosse pendant que tu fais autre chose.
               </div>
             </div>
-          </label>
+          </div>
         </div>
       </div>
 
@@ -409,17 +532,17 @@ const Autopilot = {
         <span class="inline-block w-4 h-4 rounded-full border-2 border-accent/30
                      border-t-accent animate-spin flex-shrink-0"></span>
         <span id="ap-current-activity-text"
-              class="text-sm text-text flex-1"
+              class="text-sm text-text flex-1" aria-live="polite"
               style="text-wrap: pretty">…</span>
       </div>
 
-      <!-- Barre de progression globale du run.
-           Cachée hors run, apparaît dès que "Lancer maintenant" démarre.
+      <!-- Barre de progression globale du passage.
+           Cachée au repos, apparaît dès que "Lancer maintenant" démarre.
            Le pourcentage est calculé à partir de l'état des 5 maillons. -->
       <div id="ap-progress-wrap" class="hidden mb-4">
         <div class="flex items-baseline justify-between mb-1.5 gap-3 flex-wrap">
           <div class="text-xs font-bold uppercase tracking-widest text-text-muted">
-            Avancement de la run
+            Avancement du passage
           </div>
           <div class="text-xs text-text-muted">
             <span id="ap-progress-step" class="text-text font-semibold">—</span>
@@ -445,7 +568,7 @@ const Autopilot = {
            ou pas), donc Jordan veut la voir vraiment clairement. -->
       ${this._renderSendStage(this._STAGES[4])}
 
-      <!-- Résumé du dernier run / 24h -->
+      <!-- Résumé du dernier passage -->
       <div class="mt-4 text-center">
         <span id="ap-last-run-summary" class="text-xs text-text-muted"
               style="text-wrap: pretty">
@@ -453,7 +576,7 @@ const Autopilot = {
         </span>
       </div>
 
-      <!-- Récap final : apparait quand un run vient de finir -->
+      <!-- Récap final : apparait quand un passage vient de finir -->
       <div id="ap-recap" class="hidden mt-6"></div>
     `;
   },
@@ -512,30 +635,41 @@ const Autopilot = {
              l'utilisateur a vraiment un choix (Redige, Relit, Envoie).
              Cherche et Trie tournent toujours en automatique. -->
         ${(stage.key === 'search' || stage.key === 'sort') ? `
-          <div class="mt-4 pt-3 border-t border-border text-[10px]
+          <div class="mt-4 pt-3 border-t border-border text-[11px]
                       text-text-muted tracking-widest font-bold text-center">
             TOUJOURS AUTO
           </div>
         ` : `
           <div class="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-border">
-            <span class="text-[10px] font-bold tracking-widest text-text-muted">MODE</span>
-            <div class="flex gap-0.5 bg-bg rounded-lg p-0.5 border border-border">
+            <span class="text-[11px] font-bold tracking-widest text-text-muted">${this._esc(stage.modeSwitchLabel || 'MODE')}</span>
+            <div class="flex gap-0.5 bg-bg rounded-lg p-0.5 border border-border" role="group">
               <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
-                      data-mode="auto">Auto</button>
+                      data-mode="auto"
+                      data-label="${this._esc((stage.modeLabels && stage.modeLabels.auto) || 'Auto')}">${this._esc((stage.modeLabels && stage.modeLabels.auto) || 'Auto')}</button>
               <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
-                      data-mode="manual">Manuel</button>
+                      data-mode="manual"
+                      data-label="${this._esc((stage.modeLabels && stage.modeLabels.manual) || 'Manuel')}">${this._esc((stage.modeLabels && stage.modeLabels.manual) || 'Manuel')}</button>
             </div>
           </div>
+          <!-- Une ligne d'explication selon le mode choisi (mise à jour au clic) -->
+          <div class="ap-stage-mode-hint text-[11px] text-text-muted mt-2"
+               style="text-wrap: pretty"></div>
+          ${stage.key === 'review' ? `
+            <!-- Avertissement permanent : relecture coupée + envoi auto armé -->
+            <div class="ap-review-warning hidden mt-2 px-2.5 py-1.5 rounded-lg
+                        bg-warning/10 border border-warning/40 text-[11px]
+                        font-semibold text-warning-text" role="alert"
+                 style="text-wrap: pretty">
+              ⚠ Des mails peuvent partir sans aucune relecture
+            </div>` : ''}
         `}
 
-        <!-- Compteur 24h glissantes : ce qui s'est passe au total dans la
-             base sur 24h, TOUTES sources confondues (autopilote + outils
-             manuels Chasseur/Eclaireur/Obelisk/Convoi). Pas specifique a
-             la derniere run de l'autopilote. -->
+        <!-- Compteur du dernier passage : ce que CE maillon a traité lors
+             du dernier passage de l'auto-pilote (rempli par _refreshPulse). -->
         <div class="mt-2 text-center text-text-muted text-[11px]"
              style="text-wrap: pretty">
           <span class="ap-stage-counter font-mono text-text-secondary">—</span>
-          <span class="ap-stage-counter-label"> sur 24h</span>
+          <span class="ap-stage-counter-label"> au dernier passage</span>
         </div>
       </div>
     `;
@@ -544,8 +678,8 @@ const Autopilot = {
   // ------------------------------------------------------------------
   // Etape 5 "Envoie" : grand bloc pleine largeur avec compteurs detailles
   // (envoyes / total / restants), barre de progression dediee, temps
-  // estime restant, et le compteur 24h. Garde le data-stage="send" pour
-  // que _applyStageState() continue a piloter le bandeau / icone.
+  // estime restant, et le compteur du dernier passage. Garde le
+  // data-stage="send" pour que _applyStageState() pilote bandeau / icone.
   // ------------------------------------------------------------------
   _renderSendStage(stage) {
     const mode = this._getStageMode(stage);
@@ -580,39 +714,47 @@ const Autopilot = {
               <div class="text-xs text-text-muted mt-1 ap-stage-live-count hidden"></div>
             </div>
           </div>
-          <!-- Interrupteur Auto / Manuel -->
-          <div class="flex items-center gap-2 flex-shrink-0">
-            <span class="text-[10px] font-bold tracking-widest text-text-muted">MODE</span>
-            <div class="flex gap-0.5 bg-bg rounded-lg p-0.5 border border-border">
-              <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
-                      data-mode="auto">Auto</button>
-              <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
-                      data-mode="manual">Manuel</button>
+          <!-- Interrupteur Auto / Manuel : LA commande unique du mode
+               d'envoi (le réglage en double des Paramètres avancés a été
+               supprimé — il pouvait dire l'inverse de l'interrupteur). -->
+          <div class="flex flex-col items-end gap-1.5 flex-shrink-0">
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] font-bold tracking-widest text-text-muted">MODE</span>
+              <div class="flex gap-0.5 bg-bg rounded-lg p-0.5 border border-border" role="group">
+                <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
+                        data-mode="auto" data-label="Auto">Auto</button>
+                <button class="ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition"
+                        data-mode="manual" data-label="Manuel">Manuel</button>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Bloc compteurs detailles : visible pendant et apres un run.
+        <!-- Une ligne d'explication de l'effet du mode choisi -->
+        <div class="ap-stage-mode-hint text-xs text-text-secondary -mt-2 mb-1 sm:text-right"
+             style="text-wrap: pretty"></div>
+
+        <!-- Bloc compteurs detailles : visible pendant et apres un passage.
              Cache au repos (rien a montrer). -->
         <div id="ap-send-counters" class="hidden mt-4 pt-4 border-t border-border">
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
             <div class="text-center">
-              <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted">Envoyes</div>
+              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted">Envoyés</div>
               <div class="text-2xl sm:text-3xl font-bold text-success mt-1"
                    id="ap-send-count-sent">0</div>
             </div>
             <div class="text-center">
-              <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted">Brouillons</div>
+              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted">Brouillons</div>
               <div class="text-2xl sm:text-3xl font-bold text-warning mt-1"
                    id="ap-send-count-drafts">0</div>
             </div>
             <div class="text-center">
-              <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted">Restants</div>
+              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted">Restants</div>
               <div class="text-2xl sm:text-3xl font-bold text-accent mt-1"
                    id="ap-send-count-remaining">0</div>
             </div>
             <div class="text-center">
-              <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted"
+              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted"
                    id="ap-send-count-eta-label">Temps restant</div>
               <div class="text-2xl sm:text-3xl font-bold text-text mt-1"
                    id="ap-send-count-eta">—</div>
@@ -633,11 +775,11 @@ const Autopilot = {
           </div>
         </div>
 
-        <!-- Compteur 24h glissantes -->
+        <!-- Compteur du dernier passage -->
         <div class="mt-4 text-center text-text-muted text-xs"
              style="text-wrap: pretty">
           <span class="ap-stage-counter font-mono text-text-secondary">—</span>
-          <span class="ap-stage-counter-label"> sur 24h</span>
+          <span class="ap-stage-counter-label"> au dernier passage</span>
         </div>
       </div>
     `;
@@ -712,9 +854,9 @@ const Autopilot = {
   },
 
   // Formate une duree en secondes en chaine humaine ("2 min 30 s", "45 s").
-  // Sous 10 s on affiche "qq sec" pour eviter le faux "0 s" trompeur.
+  // Sous 10 s : "quelques secondes" pour eviter le faux "0 s" trompeur.
   _formatDuration(totalSec) {
-    if (totalSec < 10) return 'qq sec';
+    if (totalSec < 10) return 'quelques secondes';
     if (totalSec < 60) return `${Math.round(totalSec)} s`;
     const m = Math.floor(totalSec / 60);
     const s = Math.round(totalSec - m * 60);
@@ -760,29 +902,44 @@ const Autopilot = {
       bar.classList.add(barCls);
     }
 
-    // Petit indicateur à côté du titre (spinner / check / croix / horloge)
+    // Petit indicateur à côté du titre (spinner / check / croix / horloge).
+    // Chaque icône porte un aria-label : l'état n'est pas que de la couleur.
     const icon = el.querySelector('.ap-stage-state-icon');
     if (icon) {
+      let ariaLabel = '';
       if (state === 'running') {
         icon.innerHTML = `<span class="inline-block w-4 h-4 rounded-full
           border-2 border-accent/30 border-t-accent animate-spin"></span>`;
+        ariaLabel = 'Étape en cours';
       } else if (needsReview) {
         // Horloge orange : "à valider", pas "fini".
         icon.innerHTML = `<svg class="w-5 h-5 text-warning" fill="none"
           stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="10"/>
           <polyline points="12 6 12 12 16 14"/></svg>`;
+        ariaLabel = 'En attente de ta validation';
       } else if (state === 'done') {
         icon.innerHTML = `<svg class="w-5 h-5 text-success" fill="none"
           stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
           <polyline points="20 6 9 17 4 12"/></svg>`;
+        ariaLabel = 'Étape terminée';
       } else if (state === 'error') {
         icon.innerHTML = `<svg class="w-5 h-5 text-danger" fill="none"
           stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
           <line x1="6" y1="6" x2="18" y2="18"/>
           <line x1="6" y1="18" x2="18" y2="6"/></svg>`;
+        ariaLabel = 'Étape en erreur';
       } else {
         icon.innerHTML = '';
+      }
+      if (ariaLabel) {
+        icon.setAttribute('role', 'img');
+        icon.setAttribute('aria-label', ariaLabel);
+        icon.setAttribute('title', ariaLabel);
+      } else {
+        icon.removeAttribute('role');
+        icon.removeAttribute('aria-label');
+        icon.removeAttribute('title');
       }
     }
 
@@ -829,29 +986,58 @@ const Autopilot = {
   _bindStageToggles() {
     document.querySelectorAll('[data-stage]').forEach(stageEl => {
       const stageKey = stageEl.dataset.stage;
-      // 1) Applique le style initial (selon état sauvegardé)
       const stage = this._STAGES.find(s => s.key === stageKey);
-      const currentMode = stage ? this._getStageMode(stage) : 'auto';
-      this._styleStageButtons(stageEl, currentMode);
-      // 2) Branche les clicks
+      if (!stage) return;
+      // 1) Applique le style initial (selon état sauvegardé)
+      this._styleStageButtons(stageEl, this._getStageMode(stage));
+      // 2) Branche les clics : confirmation pour l'envoi auto, attente de
+      //    la réponse serveur, retour arrière visuel + message si échec.
       stageEl.querySelectorAll('.ap-stage-mode').forEach(btn => {
-        btn.onclick = () => {
+        btn.onclick = async () => {
           const mode = btn.dataset.mode;
+          const prev = this._getStageMode(stage);
+          if (mode === prev || stageEl.dataset.modeBusy === '1') return;
+
+          // Garde-fou envoi réel : passer « Envoie » en Auto, c'est armer
+          // des envois sans validation → confirmation explicite.
+          if (stageKey === 'send' && mode === 'auto') {
+            const okConfirm = await Dialog.confirm(
+              'Les mails partiront tout seuls, sans validation. Confirmer ?',
+              { title: 'Activer l’envoi automatique', danger: true,
+                okLabel: 'Oui, envoyer sans validation', cancelLabel: 'Annuler' });
+            if (!okConfirm) return;
+          }
+
+          stageEl.dataset.modeBusy = '1';
+          // UI optimiste, puis on attend la réponse du serveur.
           this._saveStageMode(stageKey, mode);
           this._styleStageButtons(stageEl, mode);
-          this._pushStageModeToAPI(stageKey, mode);
+          const saved = await this._pushStageModeToAPI(stageKey, mode);
+          if (!saved) {
+            // Échec serveur : retour arrière visuel (le message d'erreur
+            // est déjà affiché par _pushStageModeToAPI).
+            this._saveStageMode(stageKey, prev);
+            this._styleStageButtons(stageEl, prev);
+          } else if (stageKey === 'send') {
+            // L'interrupteur « Envoie » est LA commande du mode d'envoi :
+            // on aligne la config du moteur (auto ↔ validation), sinon
+            // l'UI peut dire « Auto » alors que tout part en brouillon.
+            await this._syncSendModeConfig(mode);
+          }
+          delete stageEl.dataset.modeBusy;
         };
       });
     });
+    this._updateReviewWarning();
   },
 
   // ------------------------------------------------------------------
   // Sync des modes Auto/Manuel avec le backend (etape 4).
   // Strategie : localStorage = cache instantane (UI fluide), backend =
-  // source de verite partagee entre appareils + utilisee par le runner
+  // source de verite partagee entre appareils + utilisee par le worker
   // nocturne. Au render : on affiche localStorage puis on fetch l'API en
-  // parallele et on met a jour le visuel si different. Au click : update
-  // local + UI immediat + fire-and-forget API.
+  // parallele et on met a jour le visuel si different. Au clic : UI
+  // optimiste, mais on ATTEND la reponse serveur (rollback si echec).
   async _syncStageModesFromAPI() {
     if (!App.api || !App.api.autopilot_get_stage_modes) return;
     let r;
@@ -867,14 +1053,39 @@ const Autopilot = {
       const stageEl = document.querySelector(`[data-stage="${key}"]`);
       if (stageEl) this._styleStageButtons(stageEl, mode);
     });
+    this._updateReviewWarning();
   },
 
-  _pushStageModeToAPI(stage, mode) {
-    if (!App.api || !App.api.autopilot_set_stage_mode) return;
-    // Fire-and-forget : on n'attend pas la reponse (UI deja a jour)
+  // Enregistre le mode d'un maillon côté serveur. Renvoie true/false :
+  // l'appelant fait le retour arrière visuel en cas d'échec.
+  async _pushStageModeToAPI(stage, mode) {
+    if (!App.api || !App.api.autopilot_set_stage_mode) return true; // aperçu : réglage local
     try {
-      App.api.autopilot_set_stage_mode({ stage, mode }).catch(() => {});
-    } catch (e) {}
+      const r = await App.api.autopilot_set_stage_mode({ stage, mode });
+      if (!r || !r.ok) throw new Error((r && r.error) || 'réglage refusé par le serveur');
+      return true;
+    } catch (e) {
+      Toast.friendlyError(e, 'Impossible de changer ce réglage — il a été remis comme avant.');
+      return false;
+    }
+  },
+
+  // L'interrupteur « Envoie » pilote AUSSI le mode du moteur d'envoi
+  // (champ `mode` de la config : 'auto' = envoi direct, 'validation' =
+  // brouillons). C'était l'origine du double réglage contradictoire.
+  async _syncSendModeConfig(stageMode) {
+    const wanted = (stageMode === 'auto') ? 'auto' : 'validation';
+    if (!this.cfg || !App.api || !App.api.autopilot_save_config) return;
+    if (this.cfg.mode === wanted) return;
+    const config = { ...this.cfg, mode: wanted };
+    try {
+      const r = await App.api.autopilot_save_config({ config });
+      if (!r || !r.ok) throw new Error((r && r.error) || 'sauvegarde refusée');
+      this.cfg = config;
+    } catch (e) {
+      Toast.friendlyError(e,
+        "Le mode d'envoi n'a pas pu être enregistré — clique « Enregistrer les réglages » pour réessayer.");
+    }
   },
 
   // ------------------------------------------------------------------
@@ -888,6 +1099,8 @@ const Autopilot = {
     if (!App.api || !App.api.catalog_get_full || !App.api.mail_templates_list) {
       wrap.innerHTML = `<div class="text-xs text-text-muted px-3 py-2">
         Liste des produits indisponible.</div>`;
+      const summary = document.getElementById('ap-products-summary');
+      if (summary) summary.textContent = 'Indisponible';
       return;
     }
     let cat, tpls;
@@ -897,11 +1110,19 @@ const Autopilot = {
         App.api.mail_templates_list(),
       ]);
     } catch (e) {
-      wrap.innerHTML = `<div class="text-xs text-danger px-3 py-2">
-        Erreur de chargement (${this._esc(String(e))}).</div>`;
+      console.error('[autopilot] chargement catalogue/modèles :', e);
+      this._renderProductsLoadError();
       return;
     }
-    const products = (cat && cat.ok && cat.products) ? cat.products : [];
+    // Erreur serveur ≠ catalogue vide : sans cette distinction, un échec
+    // de chargement s'affichait comme un faux « Aucun produit actif ».
+    if (!cat || !cat.ok || !tpls || !tpls.ok) {
+      console.error('[autopilot] catalogue/modèles refusés :',
+        (cat && cat.error) || '', (tpls && tpls.error) || '');
+      this._renderProductsLoadError();
+      return;
+    }
+    const products = cat.products || [];
     const activeProducts = products.filter(p => p && p.is_active !== false);
     const tplProducts = (tpls && tpls.ok && tpls.products) ? tpls.products : {};
 
@@ -925,6 +1146,35 @@ const Autopilot = {
     this._refreshProductsSummary();
   },
 
+  // État d'erreur de la carte « Produits & modèles » : message clair +
+  // bouton Réessayer, et le résumé du bandeau ne reste plus « Chargement… ».
+  _renderProductsLoadError() {
+    const wrap = document.getElementById('ap-products-list');
+    if (wrap) {
+      wrap.innerHTML = `
+        <div class="text-xs px-3 py-2 rounded-lg bg-danger/5 border border-danger/40"
+             style="text-wrap: pretty">
+          <span class="text-danger-text font-semibold">
+            Impossible de charger le catalogue et les modèles.
+          </span>
+          <button type="button" id="ap-products-retry"
+                  class="ml-2 text-accent underline hover:no-underline">Réessayer</button>
+        </div>`;
+      const retry = document.getElementById('ap-products-retry');
+      if (retry) retry.onclick = () => {
+        wrap.innerHTML = `<div class="text-xs text-text-muted px-3 py-2">Chargement…</div>`;
+        const summary = document.getElementById('ap-products-summary');
+        if (summary) summary.textContent = 'Chargement…';
+        this._loadActiveProductsAndTemplates();
+      };
+    }
+    const summary = document.getElementById('ap-products-summary');
+    if (summary) {
+      summary.innerHTML =
+        `<span class="text-danger-text font-semibold">Erreur de chargement</span>`;
+    }
+  },
+
   _renderProductsList() {
     const wrap = document.getElementById('ap-products-list');
     if (!wrap) return;
@@ -932,7 +1182,10 @@ const Autopilot = {
     if (items.length === 0) {
       wrap.innerHTML = `
         <div class="text-xs text-text-muted px-3 py-2 rounded-lg bg-bg border border-border">
-          Aucun produit actif dans le catalogue. Va dans Catalogue pour en activer.
+          Aucun produit actif dans le catalogue.
+          <button type="button" class="text-accent underline hover:no-underline"
+                  onclick="App.show('catalogue')">Ouvrir le Catalogue</button>
+          pour en activer un.
         </div>`;
       return;
     }
@@ -977,7 +1230,7 @@ const Autopilot = {
           <div class="flex-1 min-w-0">
             <div class="text-sm font-semibold flex items-center gap-2 flex-wrap">
               <span class="truncate">${label}</span>
-              ${aud ? `<span class="text-[10px] uppercase tracking-wider
+              ${aud ? `<span class="text-[11px] uppercase tracking-wider
                                     px-1.5 py-0.5 rounded bg-accent/10 text-accent">
                 ${aud}</span>` : ''}
             </div>
@@ -1010,8 +1263,8 @@ const Autopilot = {
               ${hasTpl
                 ? `<span class="ap-product-counter">${enabled}</span>
                    sur ${total} modèle(s) actif(s)
-                   ${warnNone ? ' — l’IA écrira en libre' : ''}`
-                : '<span>aucun modèle de prospection — l’IA écrira en libre</span>'}
+                   ${warnNone ? ' — l’IA écrira librement' : ''}`
+                : '<span>aucun modèle de prospection — l’IA écrira librement</span>'}
             </div>
           </div>
         </button>
@@ -1020,7 +1273,9 @@ const Autopilot = {
             <div class="text-xs text-text-muted px-3 py-2"
                  style="text-wrap: pretty">
               Ce produit n'a pas encore de modèle d'email de prospection.
-              Va dans <b>Modèles d'emails</b> pour en créer.
+              <button type="button" class="text-accent underline hover:no-underline"
+                      onclick="App.show('mail_templates')">Ouvrir Modèles d'emails</button>
+              pour en créer un.
             </div>`}
         </div>
       </div>`;
@@ -1056,13 +1311,16 @@ const Autopilot = {
       });
       if (!r || !r.ok) throw new Error((r && r.error) || 'erreur');
     } catch (e) {
-      // Rollback
+      // Retour arrière + message : avant, la case revenait en silence et
+      // on croyait le choix enregistré.
       if (prod) {
         const t = prod.templates.find(x => x.key === key);
         if (t) t.enabled = !enabled;
       }
       this._renderProductsList();
       this._refreshProductsSummary();
+      Toast.friendlyError(e,
+        "Impossible d'enregistrer ce choix de modèle — la case a été remise comme avant.");
     }
   },
 
@@ -1120,6 +1378,7 @@ const Autopilot = {
       const r = await App.api.mail_accounts_list();
       this.mailAccounts = (r && r.ok && Array.isArray(r.accounts)) ? r.accounts : [];
     } catch (e) {
+      console.warn('[autopilot] comptes mail :', e);
       this.mailAccounts = [];
     }
     this._renderSenderPool();
@@ -1133,8 +1392,10 @@ const Autopilot = {
     if (accounts.length === 0) {
       wrap.innerHTML = `
         <div class="text-xs text-text-muted px-3 py-2 rounded-lg bg-bg border border-border">
-          Aucun compte mail configuré. Va dans Réglages pour ajouter ton compte
-          principal, ou un compte secondaire.
+          Aucun compte mail configuré.
+          <button type="button" class="text-accent underline hover:no-underline"
+                  onclick="App.show('config', {tab:'mails'})">Ouvrir les Réglages</button>
+          pour ajouter ton compte principal, ou un compte secondaire.
         </div>`;
       return;
     }
@@ -1184,12 +1445,19 @@ const Autopilot = {
     }).join('');
     wrap.innerHTML = rows;
 
-    // Bind changes pour rafraîchir le résumé temps réel
+    // Bind changes : résumé temps réel + badge « non enregistré »
+    // (le pool n'est sauvegardé qu'au clic sur Enregistrer).
     wrap.querySelectorAll('.ap-sp-check').forEach(cb => {
-      cb.addEventListener('change', () => this._refreshSenderSummary());
+      cb.addEventListener('change', () => {
+        this._refreshSenderSummary();
+        this._setDirty(true);
+      });
     });
     wrap.querySelectorAll('.ap-sp-cap').forEach(inp => {
-      inp.addEventListener('input', () => this._refreshSenderSummary());
+      inp.addEventListener('input', () => {
+        this._refreshSenderSummary();
+        this._setDirty(true);
+      });
     });
   },
 
@@ -1270,25 +1538,25 @@ const Autopilot = {
 
 
   // ------------------------------------------------------------------
-  // Compteurs des 5 maillons : appelle autopilot_pulse et met a jour
-  // les spans .ap-stage-counter de chaque boite.
+  // Compteurs des 5 maillons : appelle autopilot_last_run_counts et met
+  // a jour les spans .ap-stage-counter de chaque boite.
   async _refreshPulse() {
     // Compteurs des 5 maillons = ce que l'autopilote a fait à son DERNIER
-    // run. Avant on affichait "X / 24h toutes sources" — chiffres faux et
-    // trompeurs sur la page Auto-pilote (incluaient Chasseur, Obélisk, etc.
-    // + bugs côté tri/rédige). Maintenant on lit l'état du dernier run en
-    // mémoire (autopilot_last_run_counts).
+    // passage. Avant on affichait "X / 24h toutes sources" — chiffres faux
+    // et trompeurs sur la page Auto-pilote (incluaient Chasseur, Obélisk,
+    // etc. + bugs côté tri/rédige). Maintenant on lit l'état du dernier
+    // passage en mémoire (autopilot_last_run_counts).
     if (!App.api || !App.api.autopilot_last_run_counts) return;
     let r;
     try { r = await App.api.autopilot_last_run_counts(); }
     catch (e) { return; }
     if (!r || !r.ok) return;
     const LABEL_LAST_RUN = {
-      search: ' trouvés au dernier run',
-      sort:   ' qualifiés au dernier run',
-      write:  ' brouillons rédigés au dernier run',
-      review: ' relus au dernier run',
-      send:   ' envoyés ou mis en brouillon au dernier run',
+      search: ' trouvés au dernier passage',
+      sort:   ' qualifiés au dernier passage',
+      write:  ' brouillons rédigés au dernier passage',
+      review: ' relus au dernier passage',
+      send:   ' envoyés ou mis en brouillon au dernier passage',
     };
     this._STAGES.forEach(stage => {
       const stageEl = document.querySelector(`[data-stage="${stage.key}"]`);
@@ -1313,8 +1581,8 @@ const Autopilot = {
         const s = r.search ?? 0;
         const w = r.write ?? 0;
         const e = r.send ?? 0;
-        const tag = r.running ? '(run en cours)' : '(terminé)';
-        sum.textContent = `Dernier run ${tag} : ${s} trouvés · ${w} rédigés · ${e} envoyés ou mis en brouillon.`;
+        const tag = r.running ? '(en cours)' : '(terminé)';
+        sum.textContent = `Dernier passage ${tag} : ${s} trouvés · ${w} rédigés · ${e} envoyés ou mis en brouillon.`;
       }
     }
   },
@@ -1334,11 +1602,13 @@ const Autopilot = {
     let r;
     try { r = await App.api.autopilot_target_count(); }
     catch (e) {
-      slot.innerHTML = `<span class="text-danger">Erreur compteur cible.</span>`;
+      console.error('[autopilot] compteur cible :', e);
+      slot.innerHTML = `<span class="text-danger-text">Impossible de charger la liste cible.</span>`;
       return;
     }
     if (!r || !r.ok) {
-      slot.innerHTML = `<span class="text-text-muted">Liste cible indisponible (${this._esc((r && r.error) || 'inconnu')}).</span>`;
+      console.error('[autopilot] compteur cible refusé :', (r && r.error) || 'réponse vide');
+      slot.innerHTML = `<span class="text-danger-text">Impossible de charger la liste cible.</span>`;
       return;
     }
     const total = r.eligible_total || 0;
@@ -1348,15 +1618,21 @@ const Autopilot = {
       slot.innerHTML = `
         <span class="text-warning font-semibold">Liste cible vide.</span>
         <span class="text-text-muted">
-          Aucun prospect avec mail dans le CRM. Utilise Le Chasseur ou Obélisk pour en trouver.
+          Aucun prospect avec mail dans « Tous les prospects ». Utilise
+          <button type="button" class="text-accent underline hover:no-underline"
+                  onclick="App.show('chasseur')">Le Chasseur</button>
+          ou
+          <button type="button" class="text-accent underline hover:no-underline"
+                  onclick="App.show('obelisk')">Obélisk</button>
+          pour en trouver.
         </span>`;
       return;
     }
     const capLine = (cap > 0 && cap < total)
       ? `<span class="text-text-muted"> · va en piocher </span>
          <span class="text-accent font-bold">${pickable.toLocaleString('fr-FR')}</span>
-         <span class="text-text-muted"> à ce run</span>`
-      : `<span class="text-text-muted"> · tout sera traité ce run</span>`;
+         <span class="text-text-muted"> à ce passage</span>`
+      : `<span class="text-text-muted"> · tout sera traité à ce passage</span>`;
     slot.innerHTML = `
       <span class="text-text font-bold">${total.toLocaleString('fr-FR')}</span>
       <span class="text-text-muted"> prospect(s) prêt(s) à recevoir un mail</span>
@@ -1453,35 +1729,56 @@ const Autopilot = {
     stageEl.querySelectorAll('.ap-stage-mode').forEach(b => {
       const bMode = b.dataset.mode;
       const isActive = bMode === mode;
-      let cls = 'ap-stage-mode px-2.5 py-1 text-[11px] font-semibold rounded-md transition ';
+      const label = b.dataset.label || (bMode === 'auto' ? 'Auto' : 'Manuel');
+      let cls = 'ap-stage-mode px-2.5 py-1 text-[11px] rounded-md transition ';
       if (isActive && bMode === 'auto') {
-        cls += 'bg-success text-white';
+        cls += 'bg-success/20 text-success-text font-bold';
       } else if (isActive && bMode === 'manual') {
-        cls += 'bg-warning/20 text-warning';
+        cls += 'bg-warning/25 text-warning-text font-bold';
       } else {
-        cls += 'text-text-muted hover:text-text';
+        cls += 'font-semibold text-text-muted hover:text-text';
       }
       b.className = cls;
+      // L'état actif ne repose pas que sur la couleur : ✓ + aria-pressed.
+      b.textContent = (isActive ? '✓ ' : '') + label;
+      b.setAttribute('aria-pressed', isActive ? 'true' : 'false');
     });
+    this._updateModeHint(stageEl, mode);
+    this._updateReviewWarning();
+  },
+
+  // Ligne d'explication sous l'interrupteur : dit en clair ce que le mode
+  // choisi va faire (ex. Rédige en Manuel = aucun mail généré).
+  _updateModeHint(stageEl, mode) {
+    const hintEl = stageEl.querySelector('.ap-stage-mode-hint');
+    if (!hintEl) return;
+    const stage = this._STAGES.find(s => s.key === stageEl.dataset.stage);
+    hintEl.textContent = (stage && stage.modeHints && stage.modeHints[mode]) || '';
+  },
+
+  // Avertissement permanent sur la carte « Relit » : si la relecture IA
+  // est coupée ALORS QUE l'envoi automatique est armé, des mails peuvent
+  // partir sans aucun contrôle. Visible tant que la combinaison persiste.
+  _updateReviewWarning() {
+    const warnEl = document.querySelector('[data-stage="review"] .ap-review-warning');
+    if (!warnEl) return;
+    const reviewStage = this._STAGES.find(s => s.key === 'review');
+    const sendStage   = this._STAGES.find(s => s.key === 'send');
+    const reviewOff = reviewStage && this._getStageMode(reviewStage) === 'manual';
+    const sendAuto  = sendStage && this._getStageMode(sendStage) === 'auto';
+    warnEl.classList.toggle('hidden', !(reviewOff && sendAuto));
   },
 
   // ------------------------------------------------------------------
+  // NB : le réglage « Mode d'envoi » a été retiré d'ici. L'interrupteur
+  // du maillon « Envoie » (tableau de commande) est la commande unique :
+  // il pilote le champ `mode` de la config (voir _gather/_syncSendModeConfig).
   _renderForm() {
     const c = this.cfg;
     document.getElementById('ap-form').innerHTML = `
-      ${this._section('Mode d\'envoi',
-        'AUTO : l\'IA envoie chaque mail sans demander. ' +
-        'VALIDATION : l\'app prépare un brouillon, tu valides chaque mail en 1 clic.',
-        `
-        ${this._select('Mode d\'envoi', 'mode', c.mode || 'validation', [
-          ['validation', 'Validation manuelle (recommandé pour démarrer)'],
-          ['auto',       'Auto (envoi sans demander)'],
-        ])}
-        `)}
-
-      ${this._section('Rédaction des mails par l\'IA',
-        'Pour chaque prospect, l\'IA reçoit son contexte (nom, ville, secteur, site web) ' +
-        'et tes instructions, puis rédige un mail unique. Pas de copier-coller.',
+      ${this._section("Rédaction des mails par l'IA",
+        "Pour chaque prospect, l'IA reçoit son contexte (nom, ville, secteur, site web) " +
+        "et tes instructions, puis rédige un mail unique. Pas de copier-coller.",
         `
         ${this._select('Service IA', 'ai_provider', c.ai_provider || 'anthropic', [
           ['anthropic', 'Anthropic Claude'],
@@ -1492,37 +1789,40 @@ const Autopilot = {
         ])}
         ${this._input('Modèle IA', 'ai_model', c.ai_model || 'claude-sonnet-4-5',
           'ex : claude-sonnet-4-5 (Claude — recommandé)')}
-        ${this._input('Règles d\'écriture à appliquer (numéros séparés par virgules)',
+        ${this._input("Règles d'écriture à appliquer (numéros séparés par virgules)",
           'ai_mega_prompts_csv', (c.ai_mega_prompts || ['01']).join(','),
           'ex : 01,06,13')}
         <div class="text-xs text-text-muted -mt-2 mb-3" style="text-wrap: pretty">
           Liste numérotée des règles de style que l'IA doit suivre (ton, structure,
           longueur, ce qu'il faut éviter). La règle 01 est la base universelle.
-          Pour voir la liste complète des règles, va dans Réglages → Règles d'écriture.
+          Pour voir la liste complète des règles,
+          <button type="button" class="text-accent underline hover:no-underline"
+                  onclick="App.show('config', {tab:'ai'})">ouvre les Réglages</button>
+          (section Règles d'écriture).
         </div>
-        ${this._textarea('Mes instructions à l\'IA', 'ai_template_brief',
+        ${this._textarea("Mes instructions à l'IA", 'ai_template_brief',
           c.ai_template_brief || '', 6)}
         ${this._signaturePreview()}
         ${this._input('Mon prénom (pour la signature)', 'sender_mon_prenom',
           c.sender_mon_prenom || '')}
         `)}
 
-      ${this._section('Règles d\'envoi de tout l\'auto-pilote',
-        'Plafonds et fenêtre horaire qui s\'appliquent à toute la chaîne ' +
-        '(recherche, rédaction, envoi). Ces réglages sont globaux : ils valent ' +
-        'pour chaque run, peu importe l\'heure ou le produit poussé.',
+      ${this._section("Règles d'envoi de tout l'auto-pilote",
+        "Plafonds et fenêtre horaire qui s'appliquent à toute la chaîne " +
+        "(recherche, rédaction, envoi). Ces réglages sont globaux : ils valent " +
+        "pour chaque passage, peu importe l'heure ou le produit poussé.",
         `
-        ${this._input('Plafond total d\'envois sur 24h',
-          'daily_cap', String(c.daily_cap ?? 40))}
+        ${this._inputNumber("Plafond total d'envois sur 24h",
+          'daily_cap', String(c.daily_cap ?? 40), 1, 1000)}
         <div class="text-xs text-text-muted -mt-2 mb-3" style="text-wrap: pretty">
           Limite de sécurité globale. Si tu mets 40, l'auto-pilote n'enverra
           jamais plus de 40 mails dans une fenêtre de 24h, même si « Cherche-moi
-          X / run » (en haut) demande plus, et même si la somme des plafonds
+          X par passage » (en haut) demande plus, et même si la somme des plafonds
           de tes adresses expéditrices (plus haut) dépasse ce chiffre. <b>C'est
           le plafond qui gagne sur tous les autres.</b>
         </div>
-        ${this._input('Espacement entre 2 envois (en secondes)',
-          'send_delay_seconds', String(c.send_delay_seconds ?? 0))}
+        ${this._inputNumber('Espacement entre 2 envois (en secondes)',
+          'send_delay_seconds', String(c.send_delay_seconds ?? 0), 0, 3600)}
         <div class="text-xs text-text-muted -mt-2 mb-3" style="text-wrap: pretty">
           0 = pas d'attente (les mails partent à la chaîne). Mettre 30 à 60
           secondes pour étaler la cadence et protéger la réputation de tes
@@ -1530,10 +1830,10 @@ const Autopilot = {
           de la page Brouillons.
         </div>
         <div class="grid grid-cols-2 gap-3">
-          ${this._input('Heure de début (0-23)', 'send_hour_start',
-            String(c.send_hour_start ?? 8))}
-          ${this._input('Heure de fin (1-24)', 'send_hour_end',
-            String(c.send_hour_end ?? 19))}
+          ${this._inputNumber('Heure de début (0-23)', 'send_hour_start',
+            String(c.send_hour_start ?? 8), 0, 23)}
+          ${this._inputNumber('Heure de fin (1-24)', 'send_hour_end',
+            String(c.send_hour_end ?? 19), 1, 24)}
         </div>
         <div class="text-xs text-text-muted mt-2" style="text-wrap: pretty">
           Par défaut : 8h-19h. Hors plage, les mails sont mis en brouillon —
@@ -1558,10 +1858,14 @@ const Autopilot = {
       const x = parseInt(v(k), 10);
       return Number.isFinite(x) ? x : d;
     };
+    // Le mode d'envoi est dérivé de l'interrupteur du maillon « Envoie »
+    // (commande unique) : Auto → envoi direct, Manuel → brouillons.
+    const sendStage = this._STAGES.find(s => s.key === 'send');
+    const sendAuto = sendStage && this._getStageMode(sendStage) === 'auto';
     return {
       ...(this.cfg || {}),
       enabled: !!v('enabled'),
-      mode:    v('mode') || 'validation',
+      mode:    sendAuto ? 'auto' : 'validation',
       ai_provider:        v('ai_provider') || 'anthropic',
       ai_model:           v('ai_model') || 'claude-sonnet-4-5',
       ai_mega_prompts:    v('ai_mega_prompts_csv').split(',').map(s => s.trim()).filter(Boolean),
@@ -1573,40 +1877,135 @@ const Autopilot = {
       // Auto-pilote v2 etape 8 : plage horaire d'envoi (heure Paris)
       send_hour_start:    numI('send_hour_start', 8),
       send_hour_end:      numI('send_hour_end',   19),
-      // Auto-pilote v2 : heure de declenchement du run nocturne
+      // Auto-pilote v2 : heure de declenchement du passage nocturne
       nightly_hour:       numI('nightly_hour', 3),
       // Pool d'adresses expeditrices avec cap individuel / 24h
       autopilot_sender_pool: this._gatherSenderPool(),
     };
   },
 
+  // Bornes des champs numériques. Un champ hors limites = refus VISIBLE
+  // (Toast + focus), plus de remplacement silencieux par la valeur d'usine.
+  _NUM_RULES: [
+    { key: 'nightly_target',     label: 'Prospects par passage',           min: 1, max: 500 },
+    { key: 'nightly_hour',       label: 'Heure du passage automatique',    min: 0, max: 23 },
+    { key: 'daily_cap',          label: "Plafond total d'envois sur 24h",  min: 1, max: 1000 },
+    { key: 'send_delay_seconds', label: 'Espacement entre 2 envois',       min: 0, max: 3600 },
+    { key: 'send_hour_start',    label: "Heure de début d'envoi",          min: 0, max: 23 },
+    { key: 'send_hour_end',      label: "Heure de fin d'envoi",            min: 1, max: 24 },
+  ],
+
+  _validateNumericFields() {
+    const problems = [];
+    let firstBad = null;
+    this._NUM_RULES.forEach(rule => {
+      const el = document.querySelector(`[data-key="${rule.key}"]`);
+      if (!el) return;
+      const raw = String(el.value || '').trim();
+      const n = Number(raw);
+      const bad = raw === '' || !Number.isInteger(n) || n < rule.min || n > rule.max;
+      el.classList.toggle('border-danger', bad);
+      if (bad) {
+        problems.push(`« ${rule.label} » doit être un nombre entier entre ${rule.min} et ${rule.max}.`);
+        if (!firstBad) firstBad = el;
+      }
+    });
+    if (problems.length) {
+      const extra = problems.length > 1
+        ? ` (+ ${problems.length - 1} autre(s) champ(s) à corriger)` : '';
+      Toast.error(problems[0] + extra, 'Réglage invalide');
+      if (firstBad) { try { firstBad.focus(); } catch (e) {} }
+      return false;
+    }
+    return true;
+  },
+
   async save() {
-    if (!App.api) return;
+    if (!App.api) {
+      Toast.info('Mode aperçu : les réglages ne peuvent pas être enregistrés ici.');
+      return;
+    }
+    if (!this.cfg) return; // config jamais chargée : on n'écrase rien
+    if (!this._validateNumericFields()) return;
     const config = this._gather();
-    const btn = document.getElementById('ap-save');
-    btn.disabled = true; btn.textContent = 'Enregistrement…';
+
+    // Garde-fou envoi réel : enregistrer la case « Passage automatique »
+    // cochée AVEC l'envoi en Auto, c'est armer des envois sans validation.
+    const willAuto = !!config.enabled && config.mode === 'auto';
+    const wasAuto  = !!(this.cfg && this.cfg.enabled && this.cfg.mode === 'auto');
+    if (willAuto && !wasAuto) {
+      const okConfirm = await Dialog.confirm(
+        'Les mails partiront tout seuls, sans validation. Confirmer ?',
+        { title: 'Activer l’envoi automatique', danger: true,
+          okLabel: 'Oui, envoyer sans validation', cancelLabel: 'Annuler' });
+      if (!okConfirm) return; // Annuler = rien n'est enregistré
+    }
+
+    const btns = ['ap-save', 'ap-save-bottom']
+      .map(id => document.getElementById(id)).filter(Boolean);
+    btns.forEach(b => { b.disabled = true; b.textContent = 'Enregistrement…'; });
+    let okSave = false;
     try {
       const r = await App.api.autopilot_save_config({ config });
-      if (r && r.ok) {
+      okSave = !!(r && r.ok);
+      if (okSave) {
         this.cfg = config;
         try { localStorage.removeItem(this._LS_DRAFT); } catch (e) {}
+        this._setDirty(false);
+        Toast.success('Réglages enregistrés.');
+      } else {
+        Toast.friendlyError(new Error((r && r.error) || 'enregistrement refusé'),
+          'Impossible d’enregistrer les réglages.');
       }
-      btn.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
-    } catch (e) { btn.textContent = 'Erreur'; }
-    setTimeout(() => { btn.disabled = false; btn.textContent = 'Enregistrer'; }, 1600);
+    } catch (e) {
+      Toast.friendlyError(e, 'Impossible d’enregistrer les réglages.');
+    }
+    btns.forEach(b => {
+      b.disabled = false;
+      b.textContent = okSave ? 'Enregistré ✓' : 'Enregistrer les réglages';
+    });
+    if (okSave) {
+      // Restaure le libellé COMPLET (avant : il devenait juste « Enregistrer »)
+      App.viewTimeout(() => btns.forEach(b => {
+        b.textContent = 'Enregistrer les réglages';
+      }), 1600);
+    }
   },
 
   async run() {
-    if (!App.api) return;
+    if (!App.api) {
+      Toast.info('Mode aperçu : impossible de lancer un passage ici.');
+      return;
+    }
+    if (!this.cfg) return; // config jamais chargée : on ne lance rien
+    if (!this._validateNumericFields()) return;
+
+    // Confirmation AVANT de lancer : elle précise que les réglages affichés
+    // sont aussi enregistrés (le lancement sauve toute la config), et elle
+    // devient un garde-fou danger quand l'envoi est en Auto.
+    const sendStage = this._STAGES.find(s => s.key === 'send');
+    const sendAuto = sendStage && this._getStageMode(sendStage) === 'auto';
+    const okConfirm = await Dialog.confirm(
+      sendAuto
+        ? 'Les mails partiront tout seuls, sans validation. ' +
+          'Les réglages affichés seront aussi enregistrés. Confirmer ?'
+        : 'Lancer un passage maintenant ? Les réglages affichés seront aussi ' +
+          'enregistrés. Rien ne partira sans ta validation.',
+      sendAuto
+        ? { title: 'Lancer avec envoi automatique', danger: true,
+            okLabel: 'Oui, lancer et envoyer', cancelLabel: 'Annuler' }
+        : { title: 'Lancer un passage', okLabel: 'Lancer', cancelLabel: 'Annuler' });
+    if (!okConfirm) return;
+
+    this._hideRunError();
     const config = this._gather();
     const btn = document.getElementById('ap-run');
     btn.disabled = true;
-    btn.innerHTML = `<span class="inline-block w-4 h-4 mr-2 rounded-full border-2 border-white/40 border-t-white animate-spin"></span>En cours…`;
-    // Affiche le bouton "Arrêter" pendant le run
+    btn.innerHTML = `<span class="inline-block w-4 h-4 mr-2 rounded-full border-2 border-current border-t-transparent animate-spin"></span>Passage en cours…`;
+    // Affiche le bouton "Arrêter" pendant le passage
     const stopBtn = document.getElementById('ap-stop');
     if (stopBtn) { stopBtn.classList.remove('hidden'); stopBtn.disabled = false; }
     document.getElementById('ap-log').textContent = '';
-    document.getElementById('ap-stats').classList.add('hidden');
     // Reset visu temps reel : 5 boites en idle, recap cache, activite vide
     this._resetStagesUI();
     const recap = document.getElementById('ap-recap');
@@ -1628,28 +2027,82 @@ const Autopilot = {
     try {
       const r = await App.api.autopilot_run({ config });
       if (!r || !r.ok) {
-        this._appendLog((r && r.error) || 'Lancement impossible.');
-        this._stopRun();
+        this._failRunStart((r && r.error) || '');
         return;
       }
+      // Le lancement a aussi enregistré la config envoyée.
+      this.cfg = config;
+      try { localStorage.removeItem(this._LS_DRAFT); } catch (e) {}
+      this._setDirty(false);
       this._startPolling();
     } catch (e) {
-      this._appendLog('Erreur : ' + String(e));
-      this._stopRun();
+      console.error('[autopilot] lancement :', e);
+      this._failRunStart(String((e && e.message) || e || ''));
     }
+  },
+
+  // Échec de « Lancer maintenant » : bandeau d'erreur bien visible en haut
+  // + barre « Démarrage… 0% » masquée. Avant : l'erreur finissait enterrée
+  // dans le journal technique replié et la barre restait à 0 % pour la vie.
+  _failRunStart(rawError) {
+    const raw = String(rawError || '');
+    let msg = 'Le lancement a échoué. Réessaie dans un instant.';
+    if (/d[ée]j[àa] en cours|already/i.test(raw)) {
+      msg = 'Le passage automatique est déjà en cours — attends la fin avant d’en relancer un.';
+    } else if (/attends la fin|nocturne/i.test(raw)) {
+      msg = 'Le passage nocturne est en cours — attends la fin avant d’en relancer un.';
+    }
+    if (raw) {
+      this._appendLog('✗ ' + raw);
+      console.error('[autopilot] lancement refusé :', raw);
+    }
+    this._showRunError(msg);
+    const wrap = document.getElementById('ap-progress-wrap');
+    if (wrap) wrap.classList.add('hidden');
+    this._stopRun();
+  },
+
+  _showRunError(message) {
+    const box = document.getElementById('ap-run-error');
+    if (!box) return;
+    box.textContent = '⚠ ' + message;
+    box.classList.remove('hidden');
+    try { box.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+  },
+
+  _hideRunError() {
+    const box = document.getElementById('ap-run-error');
+    if (box) { box.classList.add('hidden'); box.textContent = ''; }
   },
 
   _startPolling() {
     if (this.pollTimer) clearInterval(this.pollTimer);
-    this.pollTimer = setInterval(() => this._refreshStatus(false), 1500);
+    this._pollFails = 0;
+    // Minuteur lié à la vue : nettoyé automatiquement au changement d'écran.
+    this.pollTimer = App.viewInterval(() => this._refreshStatus(false), 1500);
   },
 
   async _refreshStatus(silent) {
     if (!App.api) return;
+    if (this._pollBusy) return; // anti-chevauchement : une requête à la fois
+    this._pollBusy = true;
     let r;
     try { r = await App.api.autopilot_status({ since: this.logSeen }); }
-    catch (e) { return; }
-    if (!r || !r.ok) return;
+    catch (e) { r = null; }
+    finally { this._pollBusy = false; }
+    if (!r || !r.ok) {
+      // Serveur muet : au bout de ~12 s d'échecs d'affilée, on coupe le
+      // polling et on prévient, au lieu de mouliner en silence pour toujours.
+      this._pollFails = (this._pollFails || 0) + 1;
+      if (this.pollTimer && this._pollFails >= 8) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
+        this._showRunError('Connexion au serveur perdue pendant le passage — recharge l’écran pour reprendre le suivi.');
+        this._stopRun();
+      }
+      return;
+    }
+    this._pollFails = 0;
 
     if (r.log && r.log.length) {
       r.log.forEach(line => this._appendLog(line));
@@ -1677,10 +2130,11 @@ const Autopilot = {
     }
 
     if (r.running) {
-      // run en cours, on continue à poller
+      // Passage en cours (lancé ici OU repris au chargement de l'écran) :
+      // on continue à suivre.
       if (!this.pollTimer) this._startPolling();
       // Le bouton Stop doit être visible (cas du rechargement de la page
-      // pendant un run lancé précédemment)
+      // pendant un passage lancé précédemment)
       const stopBtn = document.getElementById('ap-stop');
       if (stopBtn && stopBtn.classList.contains('hidden')) {
         stopBtn.classList.remove('hidden');
@@ -1688,14 +2142,14 @@ const Autopilot = {
       const runBtn = document.getElementById('ap-run');
       if (runBtn && !runBtn.disabled) {
         runBtn.disabled = true;
-        runBtn.innerHTML = `<span class="inline-block w-4 h-4 mr-2 rounded-full border-2 border-white/40 border-t-white animate-spin"></span>En cours…`;
+        runBtn.innerHTML = `<span class="inline-block w-4 h-4 mr-2 rounded-full border-2 border-current border-t-transparent animate-spin"></span>Passage en cours…`;
       }
-      // Rafraîchit les compteurs du bas (dernier run) pendant le tick :
-      // ça donne un effet "compteurs qui montent" pendant la run.
+      // Rafraîchit les compteurs du bas (dernier passage) pendant le tick :
+      // ça donne un effet "compteurs qui montent" pendant le passage.
       this._refreshPulse();
       return;
     }
-    // run terminé
+    // Passage terminé : on coupe le polling.
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
@@ -1704,8 +2158,8 @@ const Autopilot = {
     // Récap final : remplace l'ancien bloc stats par une vue plus riche
     if (r.stats) this._renderRecap(r.stats, r.touched_prospects || [], r.error || '', r.stages || {});
     if (r.error) this._appendLog('✗ ' + r.error);
-    // Run terminé : mets à jour la pastille de l'onglet Brouillons
-    // + fige les compteurs du bas sur les chiffres finaux du run.
+    // Passage terminé : mets à jour la pastille de l'onglet Brouillons
+    // + fige les compteurs du bas sur les chiffres finaux.
     this._refreshDraftsCount();
     this._refreshPulse();
   },
@@ -1727,18 +2181,20 @@ const Autopilot = {
     }
   },
 
-  // Bouton Arrêter : demande au backend de stopper le run en cours.
+  // Bouton Arrêter : demande au backend de stopper le passage en cours.
   async stop() {
     if (!App.api) return;
     const stopBtn = document.getElementById('ap-stop');
     if (stopBtn) {
       stopBtn.disabled = true;
-      stopBtn.innerHTML = `<span class="inline-block w-4 h-4 mr-2 rounded-full border-2 border-white/40 border-t-white animate-spin"></span>Arrêt…`;
+      stopBtn.innerHTML = `<span class="inline-block w-4 h-4 mr-2 rounded-full border-2 border-current border-t-transparent animate-spin"></span>Arrêt…`;
     }
     try {
       const r = await App.api.autopilot_stop();
       if (!r || !r.ok) {
         this._appendLog((r && r.error) || 'Arrêt impossible.');
+        Toast.friendlyError(new Error((r && r.error) || 'arrêt refusé'),
+          'Impossible d’arrêter le passage.');
         if (stopBtn) { stopBtn.disabled = false; stopBtn.innerHTML = `
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
           Arrêter`; }
@@ -1746,6 +2202,7 @@ const Autopilot = {
       // Sinon : le polling détectera running=false et appellera _stopRun()
     } catch (e) {
       this._appendLog('Erreur d’arrêt : ' + String(e));
+      Toast.friendlyError(e, 'Impossible d’arrêter le passage.');
       if (stopBtn) { stopBtn.disabled = false; }
     }
   },
@@ -1753,7 +2210,12 @@ const Autopilot = {
   _appendLog(line) {
     const box = document.getElementById('ap-log');
     if (!box) return;
-    if (box.textContent === '(en attente d\'un run…)') box.textContent = '';
+    // Efface le texte d'attente (comparaison sur le texte épuré : le HTML
+    // ajoute des espaces/retours à la ligne autour).
+    if (box.textContent.trim() === '(en attente d’un passage…)'
+        || box.textContent.trim() === "(en attente d'un passage…)") {
+      box.textContent = '';
+    }
     box.textContent += line + '\n';
     box.scrollTop = box.scrollHeight;
   },
@@ -1789,13 +2251,21 @@ const Autopilot = {
     const nothingHappened = sent === 0 && pending === 0 && targeted === 0
       && enriched === 0;
 
+    // Pastille d'humeur du récap : rouge si le passage a planté, orange si
+    // des erreurs ponctuelles, verte seulement quand tout s'est bien passé.
+    const hasFatal  = !!errorTop;
+    const hasErrors = hasFatal || errors.length > 0;
+    const toneCls = hasFatal  ? 'bg-danger/15 text-danger'
+                  : hasErrors ? 'bg-warning/15 text-warning'
+                  : 'bg-success/15 text-success';
+
     wrap.classList.remove('hidden');
     wrap.innerHTML = `
       <div class="card p-5">
         <div class="flex items-center gap-3 mb-4">
-          <div class="w-10 h-10 rounded-full bg-success/15 text-success flex items-center
+          <div class="w-10 h-10 rounded-full ${toneCls} flex items-center
                       justify-center flex-shrink-0">
-            ${errors.length || errorTop ? `
+            ${hasErrors ? `
               <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/>
                 <line x1="12" y1="16" x2="12" y2="16"/>
@@ -1807,9 +2277,11 @@ const Autopilot = {
           <div>
             <div class="font-bold text-lg" style="text-wrap: balance">Voici ce qui s'est passé</div>
             <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
-              ${nothingHappened
-                ? 'Rien à faire cette fois — la base est à jour ou les interrupteurs étaient en manuel.'
-                : 'Récap du run qui vient de finir.'}
+              ${hasErrors
+                ? 'Le passage a rencontré des erreurs — le détail est en bas de ce récap.'
+                : nothingHappened
+                  ? 'Rien à faire cette fois — la base est à jour ou les interrupteurs étaient en manuel.'
+                  : 'Récap du passage qui vient de finir.'}
             </div>
           </div>
         </div>
@@ -1916,6 +2388,20 @@ const Autopilot = {
     `;
   },
 
+  // Champ numérique avec bornes (validées aussi par _validateNumericFields
+  // avant Enregistrer / Lancer : refus visible si hors limites).
+  _inputNumber(label, key, value, min, max) {
+    return `
+      <label class="block">
+        <div class="text-xs font-medium text-text-secondary mb-1.5">${this._esc(label)}</div>
+        <input type="number" data-key="${key}" value="${this._esc(value)}"
+               min="${min}" max="${max}" step="1"
+               class="w-full px-3 py-2 rounded-lg bg-bg border border-border
+                      focus:border-accent focus:outline-none text-sm" />
+      </label>
+    `;
+  },
+
   _textarea(label, key, value, rows = 4) {
     return `
       <label class="block">
@@ -1954,10 +2440,12 @@ const Autopilot = {
           <div class="text-xs font-medium text-text-secondary mb-1">
             Signature ajoutée automatiquement à la fin du mail
           </div>
-          <div class="text-xs text-text-muted">
-            Aucune signature configurée. Va dans Réglages → Signatures pour en
-            créer une — elle sera collée derrière « Cordialement, {prénom} »
-            à chaque envoi.
+          <div class="text-xs text-text-muted" style="text-wrap: pretty">
+            Aucune signature configurée.
+            <button type="button" class="text-accent underline hover:no-underline"
+                    onclick="App.show('config', {tab:'mails'})">Ouvrir les Réglages</button>
+            (section Signatures) pour en créer une — elle sera collée derrière
+            « Cordialement, {prénom} » à chaque envoi.
           </div>
         </div>
       `;
@@ -1972,7 +2460,7 @@ const Autopilot = {
         <div class="rounded-md bg-bg/60 border border-border px-3 py-2">
           <div class="flex items-center justify-between mb-1">
             <div class="text-xs font-semibold text-text">${name}</div>
-            <div class="text-[10px] text-text-muted">${accs}</div>
+            <div class="text-[11px] text-text-muted">${accs}</div>
           </div>
           <pre class="text-xs text-text-secondary whitespace-pre-wrap font-mono leading-relaxed m-0">${text}</pre>
         </div>
@@ -1991,27 +2479,14 @@ const Autopilot = {
     `;
   },
 
-  _toggle(label, key, value, hint = '') {
-    return `
-      <label class="flex items-start gap-3 cursor-pointer">
-        <input type="checkbox" data-key="${key}" ${value ? 'checked' : ''}
-               class="mt-0.5 w-4 h-4 accent-accent" />
-        <div>
-          <div class="text-sm font-medium">${this._esc(label)}</div>
-          ${hint ? `<div class="text-xs text-text-muted mt-0.5">${this._esc(hint)}</div>` : ''}
-        </div>
-      </label>
-    `;
-  },
-
   _previewBanner() {
     return `
       <div class="card p-8 text-center">
         <div class="text-3xl mb-3">⚙️</div>
         <h2 class="text-xl font-semibold mb-2">Mode aperçu</h2>
-        <p class="text-text-secondary max-w-md mx-auto">
-          Lance Triskell Command via <code class="text-xs px-1.5 py-0.5 rounded bg-bg">py run_web.py</code>
-          pour piloter l'auto-pilote.
+        <p class="text-text-secondary max-w-md mx-auto" style="text-wrap: pretty">
+          Cet aperçu montre l'écran sans connexion au serveur. Ouvre
+          l'application complète pour piloter l'auto-pilote.
         </p>
       </div>
     `;

@@ -768,7 +768,7 @@ class Api:
             res = (sb.table("prospect_drafts")
                     .select("id, subject, body, kind, provider, model, "
                             "created_at, "
-                            "prospects:prospect_id(name, legal_name, "
+                            "prospects:prospect_id(id, name, legal_name, "
                             "emails, emails_meta, city, sources, platform_url)")
                     .eq("status", "pending")
                     .order("created_at", desc=True)
@@ -790,6 +790,8 @@ class Api:
                     "source": "prospect",
                     "id": r.get("id") or "",
                     "key": r.get("id") or "",   # compat ancien front
+                    # Id du prospect lié (fiche dans « Tous les prospects »)
+                    "prospect_id": p.get("id") or "",
                     "name": (p.get("name")
                               or p.get("legal_name") or "(sans nom)"),
                     "email": chosen_email,
@@ -843,6 +845,10 @@ class Api:
                     "source": "convoy",
                     "id": r.get("id") or "",
                     "key": r.get("id") or "",   # compat ancien front
+                    # Best-effort : le snapshot Convoi (import fichier) n'a
+                    # en général PAS d'id de fiche prospect → chaîne vide.
+                    "prospect_id": (p.get("id")
+                                    or p.get("prospect_id") or ""),
                     "name": (p.get("name") or p.get("legal_name")
                               or "(sans nom)"),
                     "email": convoy_email,
@@ -1021,13 +1027,17 @@ class Api:
         try:
             try:
                 res = (sb.table("prospect_drafts")
-                        .select("id, subject, body, body_html, prospect_id, "
-                                "prospects:prospect_id(id, name, emails)")
+                        .select("id, subject, body, body_html, kind, "
+                                "created_at, prospect_id, "
+                                "prospects:prospect_id(id, name, emails, "
+                                "status)")
                         .eq("id", draft_id).limit(1).execute())
             except Exception:
                 res = (sb.table("prospect_drafts")
-                        .select("id, subject, body, prospect_id, "
-                                "prospects:prospect_id(id, name, emails)")
+                        .select("id, subject, body, kind, created_at, "
+                                "prospect_id, "
+                                "prospects:prospect_id(id, name, emails, "
+                                "status)")
                         .eq("id", draft_id).limit(1).execute())
         except Exception as exc:
             return {"ok": False, "error": f"lecture draft KO : {exc}"}
@@ -1045,6 +1055,43 @@ class Api:
         to = ((prospect.get("emails") or [""])[0] or "").strip()
         if not to:
             return {"ok": False, "error": "pas d'email sur le prospect"}
+
+        # 1bis) la situation a pu changer depuis la création du brouillon
+        # (désinscription, rebond, refus, devenu client, contacté par un
+        # autre canal...). On rejoue la décision MAINTENANT, juste avant
+        # l'envoi — pas seulement à la création du brouillon.
+        from ..integrations import prospect_status as PS
+        _last_send_ts = ""
+        try:
+            _rec = PS.has_recent_send(client,
+                                       prospect_id=prospect.get("id") or "",
+                                       email=to, forever=True,
+                                       check_clients=True)
+            if _rec.get("recent") and _rec.get("last_kind") == "client":
+                return {"ok": False, "blocked": "client",
+                        "error": "cette adresse est déjà dans ta base "
+                                 "clients — rien envoyé"}
+            _last_send_ts = _rec.get("last_ts") or ""
+        except Exception as exc:
+            logger.debug("approve draft: has_recent_send KO: %s", exc)
+        _check = PS.draft_approval_check(
+            status=prospect.get("status") or "",
+            draft_kind=d.get("kind") or "",
+            last_send_ts=_last_send_ts,
+            draft_created_ts=(d.get("created_at") or "")[:19],
+        )
+        if not _check.get("ok"):
+            return {"ok": False, "blocked": "status",
+                    "error": f"{_check.get('reason')} — rien envoyé"}
+
+        # 1ter) règle absolue anti-placeholder : une variable non remplie
+        # ({x}, {{x}}, %x%) dans le sujet ou le corps = le mail ne part pas.
+        _safe = PS.mail_is_safe_to_send(subject, final_body)
+        if not _safe.get("ok"):
+            return {"ok": False, "blocked": "unrendered",
+                    "error": ("variable non remplie dans le mail ("
+                              + ", ".join(_safe.get("unrendered") or [])
+                              + ") — rien envoyé, corrige le brouillon")}
 
         # 2) résout la config SMTP avant de toucher au statut
         smtp_cfg = shared_secrets.resolve_smtp_for_send(
@@ -1102,7 +1149,11 @@ class Api:
                 "subject": subject[:200],
                 "body": final_body[:5000],
                 "message_id": msg_id,
-                "extra": {"from_draft_id": draft_id,
+                # "to" est indispensable : le filet anti-doublon par adresse
+                # (has_recent_send via extra->>to) ne voit pas les envois
+                # qui ne le portent pas.
+                "extra": {"to": to,
+                          "from_draft_id": draft_id,
                           "approved_from_sas": True},
                 "created_by": client.user_id,
             })).execute()
@@ -3641,8 +3692,29 @@ class Api:
                 except Exception:
                     logger.exception("bug_report capture")
 
+            # Notification push (best-effort, jamais bloquant) — même
+            # mécanisme que le chien de garde / le formulaire de contact.
+            alerted = False
+            try:
+                from .push import send_push
+                msg = (str(p.get("message") or "").strip() or full.strip())
+                preview = (msg[:120] + "…") if len(msg) > 120 else msg
+                res = send_push(
+                    "🐛 Nouveau rapport de bug", preview,
+                    user_id="jordan", priority="normal",
+                    tag="bug-report", tag_group="system", url="/",
+                    extra_data={"type": "bug_report",
+                                "filename": path.name},
+                ) or {}
+                alerted = int(res.get("sent") or 0) > 0
+            except Exception as exc:
+                logger.debug("bug_report push KO : %s", exc)
+
             # TODO V2 : envoyer un mail à contact@triskell-studio.fr
-            return {"ok": True, "filename": path.name, "screenshot": screenshot_filename}
+            return {"ok": True, "filename": path.name,
+                    "screenshot": screenshot_filename,
+                    "message": ("Rapport enregistré et alerte envoyée."
+                                if alerted else "Rapport enregistré.")}
         except Exception as exc:
             logger.exception("bug_report")
             return {"ok": False, "error": str(exc)}
@@ -3688,6 +3760,7 @@ class Api:
         Payload :
           - kind : 'sent' | 'reply' | 'all'
           - limit : nombre max (défaut 50)
+          - offset : décalage après tri, avant limit (défaut 0 — pagination)
           - account_id : filtre sur extra.account_id (depuis phase 2 multi-comptes)
         """
         p = payload or {}
@@ -3695,6 +3768,9 @@ class Api:
         account_id = (p.get("account_id") or "").strip()
         try: limit = int(p.get("limit") or 50)
         except (TypeError, ValueError): limit = 50
+        try: offset = int(p.get("offset") or 0)
+        except (TypeError, ValueError): offset = 0
+        if offset < 0: offset = 0
         try:
             client = self._supabase()
             if not client:
@@ -3707,6 +3783,10 @@ class Api:
             q = (sb.table("email_history")
                  .select("id,kind,ts,subject,body,prospect_id,message_id,extra")
                  .order("ts", desc=True).limit(limit))
+            if offset:
+                # Pagination : appliquée après le tri, avant le limit
+                # (offset=0 ou absent → requête identique à avant).
+                q = q.offset(offset)
             if kind == "sent":
                 q = q.eq("kind", "email_sent")
             elif kind == "reply":
@@ -6313,7 +6393,7 @@ class Api:
             log = self._autopilot_state["log"]
             new_lines = log[since:]
             import copy
-            return {
+            out = {
                 "ok": True,
                 "running":     bool(self._autopilot_state["running"]),
                 "started_at":  self._autopilot_state["started_at"],
@@ -6328,6 +6408,16 @@ class Api:
                 "touched_prospects": list(self._autopilot_state["touched_prospects"]),
                 "stop_requested":    bool(self._autopilot_state.get("stop_requested")),
             }
+        # Passage lancé par le robot de fond (run nocturne) : le state
+        # local ne le voit pas — on lit le verrou global du runner
+        # (lecture seule, non bloquante — même logique qu'autopilot_stop).
+        try:
+            from triskell_command.integrations import autopilot_runner as _apr
+            out["worker_running"] = bool(
+                _apr.is_pipeline_running() and not out["running"])
+        except Exception:
+            out["worker_running"] = False
+        return out
 
     def autopilot_stop(self, payload: dict | None = None) -> dict:
         """Demande l'arrêt du run en cours. Le pipeline lèvera _AutopilotStopped
@@ -8786,6 +8876,7 @@ class Api:
         Renvoie :
           {ok, prospects_total, prospects_new, drafts_pending,
            replies_unhandled, missions: [..3 max actives/récentes..],
+           recent_done: [..3 max terminées/abandonnées < 2 h..],
            autopilot_enabled, autopilot_send_mode,
            workers: {healthy, warning, error}}
         """
@@ -8798,7 +8889,8 @@ class Api:
             "ok": True,
             "prospects_total": None, "prospects_new": None,
             "drafts_pending": None, "replies_unhandled": None,
-            "missions": [], "autopilot_enabled": False,
+            "missions": [], "recent_done": [],
+            "autopilot_enabled": False,
             "autopilot_send_mode": "manual",
             "workers": {"healthy": 0, "warning": 0, "error": 0},
         }
@@ -8860,6 +8952,47 @@ class Api:
                      "autopilot": m.get("autopilot") or {}}
                     for m in (active or lst[:1])[:3]
                 ]
+                # Missions terminées/abandonnées dans les 2 dernières
+                # heures → le Guide peut confirmer « ✓ Chasse terminée —
+                # X versés » même si l'écran n'était pas ouvert au moment
+                # de la fin. Défensif : en cas de pépin → liste vide.
+                try:
+                    from datetime import (datetime as _dt,
+                                          timedelta as _td,
+                                          timezone as _tz)
+                    cutoff = _dt.now(_tz.utc) - _td(hours=2)
+                    done: list[tuple[str, dict]] = []
+                    for m in lst:
+                        if m.get("status") in _mi.ACTIVE_STATUSES:
+                            continue
+                        ts_raw = (m.get("updated_at")
+                                  or m.get("created_at") or "")
+                        try:
+                            ts = _dt.fromisoformat(ts_raw)
+                            if ts.tzinfo is None:
+                                ts = ts.replace(tzinfo=_tz.utc)
+                        except Exception:
+                            continue
+                        if ts < cutoff:
+                            continue
+                        counts = m.get("counts") or {}
+                        try:
+                            pushed = (int(counts.get("pushed"))
+                                      if counts.get("pushed") is not None
+                                      else None)
+                        except (TypeError, ValueError):
+                            pushed = None
+                        done.append((ts_raw, {
+                            "id": m.get("id"), "label": m.get("label"),
+                            "source": m.get("source"),
+                            "status": m.get("status"),
+                            "pushed": pushed,
+                            "ended_at": ts_raw,
+                        }))
+                    done.sort(key=lambda t: t[0], reverse=True)
+                    out["recent_done"] = [d for _, d in done[:3]]
+                except Exception:
+                    out["recent_done"] = []
             except Exception:
                 pass
 

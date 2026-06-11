@@ -6,8 +6,10 @@
  *   2. On lance une chasse en arrière-plan (`chasseur_start_hunt`).
  *   3. On poll l'état du job (`chasseur_get_hunt`) toutes les 2s : progression,
  *      stats, lignes de log.
- *   4. Quand c'est terminé, l'utilisateur peut exporter en CSV importable
- *      directement dans Le Convoi.
+ *   4. Quand c'est terminé, « Envoyer à l'Auto-pilote » verse les prospects
+ *      dans la base commune « Tous les prospects » (l'Auto-pilote les prendra
+ *      à son prochain passage). Un CSV, fabriqué CÔTÉ NAVIGATEUR, reste
+ *      téléchargeable pour Le Convoi.
  */
 
 const Chasseur = {
@@ -57,7 +59,8 @@ const Chasseur = {
       if (el) el.checked = !!f.onlyEmail;
     }
     if (f.mode) {
-      document.getElementById('ch-mode').value = f.mode;
+      const modeEl = document.getElementById('ch-mode');
+      if (modeEl) modeEl.value = f.mode;
       document.querySelectorAll('[data-mode]').forEach(b => {
         b.classList.toggle('ch-mode-active', b.dataset.mode === f.mode);
       });
@@ -112,8 +115,9 @@ const Chasseur = {
           <p class="hero-subtitle">
             Choisis un secteur, une zone, un volume. Le Chasseur interroge la
             base officielle des entreprises (data.gouv), retrouve leur site,
-            extrait les mails publiés sur leur page contact. Tu récupères
-            ensuite un fichier prêt à glisser dans <b>Le Convoi</b>.
+            extrait les mails publiés sur leur page contact. À la fin, le bouton
+            <b>« Envoyer à l’Auto-pilote »</b> verse la récolte dans la base
+            commune <b>« Tous les prospects »</b>, prête pour l’envoi.
           </p>
         </header>
 
@@ -131,12 +135,12 @@ const Chasseur = {
                     <button type="button" data-mode="poor_sites"
                             class="ch-mode-btn ch-mode-active text-xs font-semibold py-2 px-2 rounded-lg border transition-all text-left leading-tight">
                       <div class="font-bold mb-0.5">🎯 Sites pourris</div>
-                      <div class="text-[10px] opacity-80">Cibles refonte</div>
+                      <div class="text-[11px] opacity-80">Cibles refonte</div>
                     </button>
                     <button type="button" data-mode="all"
                             class="ch-mode-btn text-xs font-semibold py-2 px-2 rounded-lg border transition-all text-left leading-tight">
                       <div class="font-bold mb-0.5">📬 Large</div>
-                      <div class="text-[10px] opacity-80">Tout site avec mail</div>
+                      <div class="text-[11px] opacity-80">Tout site avec mail</div>
                     </button>
                   </div>
                   <input type="hidden" id="ch-mode" value="poor_sites" />
@@ -181,7 +185,7 @@ const Chasseur = {
                   Lancer la chasse
                 </button>
                 <p class="text-[11px] text-text-muted leading-snug">
-                  Comptes ~1 à 3 min par tranche de 50 prospects. Tu peux
+                  Compte ~1 à 3 min par tranche de 50 prospects. Tu peux
                   fermer cette fenêtre, ça tourne en fond.
                 </p>
               </form>
@@ -192,7 +196,9 @@ const Chasseur = {
                 <div class="text-[11px] font-bold tracking-widest text-text-muted">
                   CHASSES PASSÉES
                 </div>
-                <button id="ch-refresh-list" class="text-xs text-accent hover:underline">↻</button>
+                <button id="ch-refresh-list" class="text-xs text-accent hover:underline"
+                        title="Rafraîchir la liste des chasses"
+                        aria-label="Rafraîchir la liste des chasses">↻</button>
               </div>
               <div id="ch-hunts-list" class="space-y-1.5 max-h-[420px] overflow-y-auto"></div>
             </div>
@@ -213,7 +219,10 @@ const Chasseur = {
       e.preventDefault();
       this._launchHunt();
     };
-    document.getElementById('ch-refresh-list').onclick = () => this._loadHunts();
+    document.getElementById('ch-refresh-list').onclick = async () => {
+      const ok = await this._loadHunts();
+      if (!ok) this._toast('Impossible de rafraîchir la liste. Réessaie dans un instant.', 'danger');
+    };
 
     // Bind les 2 boutons de mode (large / sites pourris)
     document.querySelectorAll('[data-mode]').forEach(btn => {
@@ -335,7 +344,7 @@ const Chasseur = {
         .ch-step-pending .ch-step-label { color: hsl(var(--text-muted)); }
         .ch-step-active .ch-step-label { color: hsl(var(--accent)); }
         .ch-step-sub {
-          font-size: 9.5px;
+          font-size: 11px;
           color: hsl(var(--text-muted));
           line-height: 1.2;
           margin-top: 2px;
@@ -426,9 +435,10 @@ const Chasseur = {
 
   async _loadHunts() {
     const r = await this._api('list_hunts', {limit: 30});
-    if (!r || !r.ok) return;
+    if (!r || !r.ok) return false;
     this.state.hunts = r.hunts || [];
     this._renderHuntsList();
+    return true;
   },
 
   _renderHuntsList() {
@@ -455,16 +465,16 @@ const Chasseur = {
               <div class="text-xs font-semibold truncate flex-1">${this._esc(h.label || 'Sans titre')}</div>
               ${statusBadge}
             </div>
-            <div class="text-[10px] text-text-muted">
+            <div class="text-[11px] text-text-muted">
               ${retenus} retenus · ${withMail} avec mail
             </div>
           </button>
           <button data-del-hunt-id="${h.id}"
                   title="Supprimer cette chasse"
+                  aria-label="Supprimer cette chasse"
                   class="ch-hunt-del absolute top-1.5 right-1.5 w-6 h-6 rounded-md
                          flex items-center justify-center text-text-muted
-                         hover:bg-danger/15 hover:text-danger transition-all
-                         opacity-0 group-hover:opacity-100 focus:opacity-100">
+                         hover:bg-danger/15 hover:text-danger transition-all">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
               <polyline points="3 6 5 6 21 6"/>
               <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
@@ -488,12 +498,25 @@ const Chasseur = {
 
   async _deleteHuntById(huntId) {
     if (!huntId) return;
-    if (!confirm('Supprimer définitivement cette chasse ?')) return;
+    // Détecte si la chasse tourne encore (liste ou détail ouvert)
+    const inList = this.state.hunts.find(h => h.id === huntId);
+    const inDetail = this.state.currentHunt && this.state.currentHunt.id === huntId
+      ? this.state.currentHunt : null;
+    const isRunning = !!((inList && inList.running) || (inDetail && inDetail.running));
+    const ok = await Dialog.confirm(
+      isRunning
+        ? 'Cette chasse tourne encore — la supprimer arrêtera tout. Supprimer quand même ?'
+        : 'Supprimer définitivement cette chasse ?',
+      {title: 'Supprimer la chasse', okLabel: 'Supprimer', danger: true}
+    );
+    if (!ok) return;
     const r = await this._api('delete_hunt', {hunt_id: huntId});
     if (!r || !r.ok) {
-      this._toast('Suppression échouée', 'danger');
+      if (r && r.error) console.warn('chasseur.delete_hunt', r.error);
+      this._toast('Suppression échouée. Réessaie dans un instant.', 'danger');
       return;
     }
+    this._toast('Chasse supprimée.', 'success');
     if (this.state.currentId === huntId) {
       this.state.currentId = null;
       this.state.currentHunt = null;
@@ -514,15 +537,15 @@ const Chasseur = {
 
   _statusBadge(status, running) {
     const map = {
-      'pending':   {label: 'En file', color: 'bg-text-muted/15 text-text-muted'},
-      'searching': {label: 'Cherche', color: 'bg-warning/15 text-warning'},
-      'enriching': {label: 'Mails',   color: 'bg-accent/15 text-accent'},
-      'done':      {label: 'Fini',    color: 'bg-success/15 text-success'},
-      'error':     {label: 'Erreur',  color: 'bg-danger/15 text-danger'},
+      'pending':   {label: 'En file',              color: 'bg-text-muted/15 text-text-muted'},
+      'searching': {label: 'Recherche',            color: 'bg-warning/15 text-warning-text'},
+      'enriching': {label: 'Recherche des emails', color: 'bg-accent/15 text-accent'},
+      'done':      {label: 'Terminée',             color: 'bg-success/15 text-success-text'},
+      'error':     {label: 'Erreur',               color: 'bg-danger/15 text-danger-text'},
     };
-    const i = map[status] || {label: status || '?', color: 'bg-text-muted/15 text-text-muted'};
+    const i = map[status] || {label: 'Statut inconnu', color: 'bg-text-muted/15 text-text-muted'};
     const pulse = running ? 'animate-pulse' : '';
-    return `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded ${i.color} ${pulse}">${i.label}</span>`;
+    return `<span class="text-[11px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap ${i.color} ${pulse}">${i.label}</span>`;
   },
 
   async _launchHunt() {
@@ -532,11 +555,12 @@ const Chasseur = {
     const cp = document.getElementById('ch-cp').value.trim();
     const target = parseInt(document.getElementById('ch-target').value, 10) || 200;
     const withEmailOnly = document.getElementById('ch-only-email').checked;
-    const mode = document.getElementById('ch-mode').value || 'all';
+    // Même défaut que le bouton actif au chargement (« Sites pourris »)
+    const mode = document.getElementById('ch-mode')?.value || 'poor_sites';
 
     const sector = customSector || presetId;
     if (!sector && !dept && !cp) {
-      this._toast('Choisis au moins un secteur ou une zone.', 'danger');
+      this._toast('Choisis au moins un secteur ou une zone.', 'warn');
       return;
     }
 
@@ -544,11 +568,17 @@ const Chasseur = {
     if (dept) zone.departement = dept;
     if (cp) zone.code_postal = cp;
 
+    // Anti double-clic : bouton gelé le temps de l'appel
+    const submitBtn = document.querySelector('#ch-form button[type="submit"]');
+    const submitHtml = submitBtn ? submitBtn.innerHTML : '';
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Lancement…'; }
     const r = await this._api('start_hunt', {
       sector, zone, target, with_email_only: withEmailOnly, mode,
     });
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = submitHtml; }
     if (!r || !r.ok) {
-      this._toast((r && r.error) || 'Erreur au lancement de la chasse', 'danger');
+      if (r && r.error) console.warn('chasseur.start_hunt', r.error);
+      this._toast((r && r.error) || 'Erreur au lancement de la chasse. Réessaie dans un instant.', 'danger');
       return;
     }
     this._toast('Chasse lancée. Ça tourne en fond.', 'success');
@@ -560,13 +590,32 @@ const Chasseur = {
     this.state.currentId = huntId;
     try { localStorage.setItem(this._LS_CURRENT, huntId || ''); } catch (e) {}
     this._renderHuntsList();
+    // Indicateur de chargement immédiat (sauf si cette chasse est déjà affichée)
+    if (!this.state.currentHunt || this.state.currentHunt.id !== huntId) {
+      this.state.currentHunt = null;
+      const wrap = document.getElementById('ch-detail');
+      if (wrap) {
+        wrap.innerHTML = `
+          <div class="card p-10 text-center text-text-muted">
+            <div class="text-3xl mb-3 animate-pulse">⏳</div>
+            <div class="text-base">Chargement de la chasse…</div>
+          </div>
+        `;
+      }
+    }
+    this._pollFails = 0;
     await this._refreshDetail();
-    this._startPolling();
+    // Inutile de continuer à interroger une chasse déjà finie
+    const h = this.state.currentHunt;
+    const finished = h && !h.running && (h.status === 'done' || h.status === 'error');
+    if (!finished) this._startPolling();
   },
 
   _startPolling() {
     this._stopPolling();
-    this.state.pollTimer = setInterval(() => {
+    this._pollFails = 0;
+    // Minuteur lié à la vue : nettoyé automatiquement quand on change d'écran
+    this.state.pollTimer = App.viewInterval(() => {
       this._refreshDetail();
     }, 2000);
   },
@@ -580,8 +629,29 @@ const Chasseur = {
 
   async _refreshDetail() {
     if (!this.state.currentId) return;
-    const r = await this._api('get_hunt', {hunt_id: this.state.currentId});
-    if (!r || !r.ok) return;
+    if (this._refreshBusy) return;   // pas de requêtes empilées si le serveur traîne
+    this._refreshBusy = true;
+    const huntId = this.state.currentId;
+    const r = await this._api('get_hunt', {hunt_id: huntId});
+    this._refreshBusy = false;
+    // L'utilisateur a ouvert une autre chasse pendant la requête → on jette
+    if (huntId !== this.state.currentId) return;
+    if (!r || !r.ok) {
+      // 3 échecs d'affilée (chasse supprimée, serveur injoignable…) → on
+      // arrête de tourner en boucle et on explique.
+      this._pollFails = (this._pollFails || 0) + 1;
+      if (this._pollFails >= 3) {
+        this._stopPolling();
+        this._toast(
+          'Impossible de suivre cette chasse (elle a peut-être été supprimée). ' +
+          'Le suivi est arrêté — rouvre-la depuis la liste pour réessayer.',
+          'warn'
+        );
+        if (!this.state.currentHunt) this._renderDetailError();
+      }
+      return;
+    }
+    this._pollFails = 0;
     this.state.currentHunt = r.hunt;
     this._renderDetail();
     // Si la chasse est terminée, on stoppe le poll
@@ -590,6 +660,22 @@ const Chasseur = {
       // Mise à jour de la liste pour refléter le statut final
       await this._loadHunts();
     }
+  },
+
+  // Carte d'erreur quand le détail n'a jamais pu se charger
+  _renderDetailError() {
+    const wrap = document.getElementById('ch-detail');
+    if (!wrap) return;
+    const huntId = this.state.currentId;
+    wrap.innerHTML = `
+      <div class="card p-10 text-center text-text-muted">
+        <div class="text-3xl mb-3">⚠️</div>
+        <div class="text-base mb-4">Impossible de charger cette chasse. Elle a peut-être été supprimée.</div>
+        <button id="ch-retry-open" class="btn btn-secondary">Réessayer</button>
+      </div>
+    `;
+    const btn = document.getElementById('ch-retry-open');
+    if (btn) btn.onclick = () => this._openHunt(huntId);
   },
 
   _renderDetail() {
@@ -611,6 +697,12 @@ const Chasseur = {
 
     const prospects = h.prospects || [];
 
+    // Le détail est re-rendu toutes les 2s pendant la chasse : on préserve
+    // ce que l'utilisateur regarde (journal ouvert, position dans le tableau).
+    const logOpen = !!document.getElementById('ch-log-details')?.open;
+    const tableScroll = document.getElementById('ch-table-scroll')?.scrollTop || 0;
+    const pushedAt = this._pushedAt(h.id);
+
     wrap.innerHTML = `
       <div class="card p-5 mb-4">
         <div class="flex items-start justify-between gap-3 mb-3">
@@ -618,14 +710,19 @@ const Chasseur = {
             <div class="text-xs text-text-muted mb-1">${this._fmtDate(h.created_at)}</div>
             <h2 class="text-lg font-bold truncate">${this._esc(h.label)}</h2>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap justify-end">
             ${this._statusBadge(h.status, isRunning)}
+            ${pushedAt ? `
+              <span class="text-[11px] font-semibold text-success-text whitespace-nowrap"
+                    title="Ces prospects sont déjà dans la base commune « Tous les prospects »${pushedAt.when ? ` (versés le ${pushedAt.when})` : ''}. Re-cliquer ne crée pas de doublon : les fiches identiques fusionnent.">
+                ✓ Déjà envoyé à l’Auto-pilote
+              </span>` : ''}
             ${isDone && withMail > 0 ? `
-              <button id="ch-push" class="btn btn-primary" title="Envoie tous les prospects à l'Auto-Pilote : il s'occupera d'enrichir + rédiger + envoyer la nuit.">
+              <button id="ch-push" class="btn btn-primary" title="Verse les prospects avec mail dans la base commune « Tous les prospects » : l’Auto-pilote les prendra au prochain passage pour rédiger et envoyer.">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12l14-7-3 14-4-6-7-1z"/></svg>
-                Envoyer à l'Auto-Pilote
+                Envoyer à l'Auto-pilote
               </button>
-              <button id="ch-export" class="btn btn-secondary" title="Télécharge un CSV à glisser dans Le Convoi.">
+              <button id="ch-export" class="btn btn-secondary" title="Télécharge un fichier CSV (à glisser dans Le Convoi, par exemple).">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 CSV
               </button>` : ''}
@@ -634,7 +731,7 @@ const Chasseur = {
         </div>
 
         ${h.error ? `
-          <div class="rounded-lg bg-danger/10 border border-danger/30 text-danger
+          <div class="rounded-lg bg-danger/10 border border-danger/30 text-danger-text
                       text-sm p-3 mb-3">⚠️ ${this._esc(h.error)}</div>` : ''}
 
         <!-- Étapes de l'analyse -->
@@ -680,7 +777,7 @@ const Chasseur = {
                   les mails sont déjà dédoublonnés</span>
             ${isRunning ? `<span class="text-accent animate-pulse">Chasse en cours…</span>` : ''}
           </div>
-          <div class="overflow-x-auto max-h-[480px] overflow-y-auto">
+          <div id="ch-table-scroll" class="overflow-x-auto max-h-[480px] overflow-y-auto">
             <table class="w-full text-sm">
               <thead class="bg-bg sticky top-0">
                 <tr class="text-left text-[11px] uppercase tracking-wide text-text-muted">
@@ -715,7 +812,7 @@ const Chasseur = {
                       <td class="px-3 py-2 text-[11px]"
                           title="${this._esc(reasons.join(' · '))}">
                         <span class="inline-block px-2 py-0.5 rounded
-                                     bg-warning/10 text-warning font-semibold">${this._esc(reasonsLabel)}</span>
+                                     bg-warning/10 text-warning-text font-semibold">${this._esc(reasonsLabel)}</span>
                       </td>` : ''}
                   </tr>
                 `;}).join('')}
@@ -730,13 +827,17 @@ const Chasseur = {
       ` : '')}
 
       ${h.log_tail && h.log_tail.length ? `
-        <details class="mt-4 text-xs text-text-muted">
+        <details id="ch-log-details" class="mt-4 text-xs text-text-muted" ${logOpen ? 'open' : ''}>
           <summary class="cursor-pointer hover:text-text-secondary">Journal de la chasse</summary>
-          <pre class="mt-2 p-3 bg-bg rounded-lg overflow-x-auto text-[10.5px]
+          <pre class="mt-2 p-3 bg-bg rounded-lg overflow-x-auto text-[11px]
                       whitespace-pre-wrap leading-relaxed">${this._esc(h.log_tail.join('\n'))}</pre>
         </details>
       ` : ''}
     `;
+
+    // Restaure la position de lecture dans le tableau après le re-render
+    const tableEl = document.getElementById('ch-table-scroll');
+    if (tableEl && tableScroll) tableEl.scrollTop = tableScroll;
 
     const exportBtn = document.getElementById('ch-export');
     if (exportBtn) exportBtn.onclick = () => this._exportCsv();
@@ -747,10 +848,12 @@ const Chasseur = {
   },
 
   _statCell(label, value, tone) {
-    const color = tone === 'success' ? 'text-success' : 'text-text';
+    const color = tone === 'success' ? 'text-success-text'
+      : tone === 'warning' ? 'text-warning-text'
+      : 'text-text';
     return `
       <div class="rounded-lg bg-bg p-2.5">
-        <div class="text-[10px] uppercase tracking-wide text-text-muted">${label}</div>
+        <div class="text-[11px] uppercase tracking-wide text-text-muted">${label}</div>
         <div class="text-lg font-bold ${color}">${value}</div>
       </div>
     `;
@@ -777,7 +880,7 @@ const Chasseur = {
     const steps = [
       {label: 'Recherche entreprises', sub: 'Base data.gouv'},
       {label: 'Analyse des sites', sub: mode === 'poor_sites' ? 'Mails + qualité' : 'Mails publics'},
-      {label: 'Terminé', sub: isDone ? 'Prêt à exporter' : 'En attente'},
+      {label: 'Terminé', sub: isDone ? 'Prospects prêts à envoyer' : 'En attente'},
     ];
 
     return `
@@ -836,14 +939,14 @@ const Chasseur = {
     const h = this.state.currentHunt;
     const withMail = (h?.stats?.avec_mail) || 0;
     if (!withMail) {
-      this._toast('Aucun prospect avec mail à envoyer.', 'danger');
+      this._toast('Aucun prospect avec mail à envoyer.', 'warn');
       return;
     }
-    const ok = confirm(
-      `Envoyer ${withMail} prospect${withMail > 1 ? 's' : ''} à l'Auto-Pilote ?\n\n` +
-      `L'Auto-Pilote viendra les ramasser la nuit pour rédiger et envoyer ` +
-      `les mails automatiquement. Tu pourras suivre l'avancée dans l'onglet ` +
-      `Auto-Pilote.`
+    const ok = await Dialog.confirm(
+      `Envoyer ${withMail} prospect${withMail > 1 ? 's' : ''} dans la base commune ` +
+      `« Tous les prospects » ? L’Auto-pilote les prendra au prochain passage pour ` +
+      `rédiger et envoyer les mails. Les fiches identiques fusionnent, pas de doublon.`,
+      {title: 'Envoyer à l’Auto-pilote', okLabel: 'Envoyer', cancelLabel: 'Annuler'}
     );
     if (!ok) return;
     const btn = document.getElementById('ch-push');
@@ -851,35 +954,134 @@ const Chasseur = {
     const r = await this._api('push_to_autopilot', {hunt_id: this.state.currentId});
     if (btn) btn.disabled = false;
     if (!r || !r.ok) {
-      this._toast((r && r.error) || 'Envoi impossible', 'danger');
+      if (r && r.error) console.warn('chasseur.push_to_autopilot', r.error);
+      this._toast((r && r.error) || 'Envoi impossible. Réessaie dans un instant.', 'danger');
       // Redraw pour réafficher le bouton normal
       this._renderDetail();
       return;
     }
+    // Mémorise le versement pour afficher « ✓ Déjà envoyé » sur cette chasse
+    this._markPushed(this.state.currentId);
     const where = r.backend === 'remote'
-      ? "la base partagée (Auto-Pilote nocturne)"
-      : "la base locale";
+      ? 'la base commune « Tous les prospects »'
+      : 'la base locale (mode hors-ligne)';
+    const pushed = r.pushed || 0;
+    const q = r.quality || null;
+    const dropped = q ? Math.max(0, (q.total || 0) - (q.kept || 0)) : 0;
     this._toast(
-      `${r.pushed} prospects envoyés vers ${where} — ` +
-      `${r.created} nouveaux, ${r.merged} fusionnés.`,
+      `${pushed} prospect${pushed > 1 ? 's' : ''} envoyé${pushed > 1 ? 's' : ''} vers ${where} — ` +
+      `${r.created || 0} ${(r.created || 0) > 1 ? 'nouveaux' : 'nouveau'}, ` +
+      `${r.merged || 0} fusionné${(r.merged || 0) > 1 ? 's' : ''}` +
+      (dropped ? ` (${dropped} fiche${dropped > 1 ? 's' : ''} écartée${dropped > 1 ? 's' : ''} par le contrôle qualité)` : '') +
+      `.`,
       'success'
     );
     this._renderDetail();
   },
 
-  async _exportCsv() {
-    if (!this.state.currentId) return;
-    const r = await this._api('export_csv', {hunt_id: this.state.currentId});
-    if (!r || !r.ok) {
-      this._toast((r && r.error) || 'Export impossible', 'danger');
+  // ---- Mémoire front « cette chasse a déjà été versée » ----
+  _LS_PUSHED: 'chasseur:pushed',
+
+  _pushedMap() {
+    try { return JSON.parse(localStorage.getItem(this._LS_PUSHED) || '{}') || {}; }
+    catch (e) { return {}; }
+  },
+
+  // Renvoie null si jamais versée, sinon {when: 'date lisible' | ''}
+  _pushedAt(huntId) {
+    if (!huntId) return null;
+    const iso = this._pushedMap()[huntId];
+    if (!iso) return null;
+    return {when: this._fmtDate(iso)};
+  },
+
+  _markPushed(huntId) {
+    if (!huntId) return;
+    try {
+      const map = this._pushedMap();
+      map[huntId] = new Date().toISOString();
+      // On borne la mémoire aux 60 versements les plus récents
+      const ids = Object.keys(map);
+      if (ids.length > 60) {
+        ids.sort((a, b) => String(map[a]).localeCompare(String(map[b])));
+        ids.slice(0, ids.length - 60).forEach(k => { delete map[k]; });
+      }
+      localStorage.setItem(this._LS_PUSHED, JSON.stringify(map));
+    } catch (e) {}
+  },
+
+  /**
+   * Export CSV fabriqué CÔTÉ NAVIGATEUR à partir des prospects déjà chargés :
+   * le fichier arrive directement dans les Téléchargements. (Avant, il était
+   * écrit sur le serveur et restait irrécupérable depuis le site.)
+   * Format : séparateur point-virgule + BOM UTF-8 → s'ouvre proprement dans Excel.
+   */
+  _exportCsv() {
+    const h = this.state.currentHunt;
+    const prospects = (h && h.prospects) || [];
+    if (!prospects.length) {
+      this._toast('Aucun prospect à exporter pour cette chasse.', 'warn');
       return;
     }
-    this._toast(`CSV exporté — ${r.rows} lignes. Fichier : ${r.path}`, 'success');
-    // Tente d'ouvrir le dossier d'export en local (desktop seulement)
-    if (App.api && App.api.open_url) {
-      try { await App.api.open_url({url: 'file:///' + r.path.replace(/\\/g, '/')}); }
-      catch (e) {}
-    }
+
+    const hasPhone = prospects.some(p => String(p.telephone || '').trim());
+    const headers = ['Entreprise', 'Email'];
+    if (hasPhone) headers.push('Téléphone');
+    headers.push('Ville', 'Site', 'État du site');
+
+    // Une valeur qui contient ; " ou un saut de ligne est mise entre guillemets
+    const cell = (v) => {
+      const s = String(v == null ? '' : v);
+      return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+
+    const lines = [headers.map(cell).join(';')];
+    prospects.forEach(p => {
+      const reasons = p.site_quality_reasons || [];
+      const etatSite = reasons.length
+        ? reasons.join(' · ')
+        : (p.site_quality === 'ok' ? 'site correct' : (p.site_quality || ''));
+      const row = [p.nom || '', p.email || ''];
+      if (hasPhone) row.push(p.telephone || '');
+      row.push(p.ville || '', p.site_web || '', etatSite);
+      lines.push(row.map(cell).join(';'));
+    });
+
+    // Nom de fichier : chasse-<secteur>-<date>
+    const sectorRaw = (h.filters && h.filters.sector_input) || h.label || 'prospects';
+    const d0 = new Date(h.created_at || Date.now());
+    const d = isNaN(d0.getTime()) ? new Date() : d0;
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const fname = `chasse-${this._slugify(sectorRaw)}-${dateStr}.csv`;
+
+    // BOM UTF-8 en tête pour qu'Excel reconnaisse les accents
+    const bom = String.fromCharCode(0xFEFF);
+    const blob = new Blob([bom + lines.join('\r\n')], {type: 'text/csv;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+    const n = prospects.length;
+    this._toast(`CSV téléchargé — ${n} ligne${n > 1 ? 's' : ''}. Fichier : ${fname}`, 'success');
+  },
+
+  // « Boulangerie — 35 » → « boulangerie-35 » (pour les noms de fichiers)
+  _slugify(s) {
+    // NFD sépare les accents (é → e + accent), puis on retire les accents
+    // (plage Unicode 0x0300-0x036F) avant de ne garder que lettres/chiffres.
+    const accents = new RegExp('[' + String.fromCharCode(0x0300) + '-' + String.fromCharCode(0x036F) + ']', 'g');
+    return String(s || '')
+      .normalize('NFD').replace(accents, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'prospects';
   },
 
   async _deleteHunt() {
@@ -914,11 +1116,15 @@ const Chasseur = {
   },
 
   _toast(msg, tone) {
-    // Réutilise le toast global si dispo, sinon fallback alert
+    // Relais vers le système commun de petits messages (Toast global).
+    // Tons acceptés ici : 'success' | 'danger' (→ erreur) | 'warn' | 'info'.
+    const type = tone === 'danger' ? 'error'
+      : (tone === 'success' || tone === 'warn' || tone === 'info') ? tone
+      : 'info';
     if (typeof Toast !== 'undefined' && Toast.show) {
-      Toast.show(msg, tone || 'info');
+      Toast.show(msg, {type});
     } else {
-      console.log('[Chasseur]', tone, msg);
+      console.log('[Chasseur]', type, msg);
     }
   },
 };

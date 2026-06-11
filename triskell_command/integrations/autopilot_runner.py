@@ -313,9 +313,12 @@ def run_pipeline_with_ui_modes(cfg, progress):
             "Interrupteur Envoie=Manuel : mode pipeline force a "
             "'validation' (drafts au lieu d'envoi direct)."
         )
-    # Relit=manual -> on desactive la 2e IA de relecture
+    # Relit=manual -> on desactive la 2e IA de relecture. Sentinelle -1 :
+    # le pipeline traite 0/absent comme "vieille config" et restaure le
+    # defaut 7 (filet anti-config-corrompue) -- avec 0, l'interrupteur
+    # etait donc annule en silence et la relecture tournait quand meme.
     if stage_modes["review"] == "manual":
-        cfg.autopilot_review_min_score = 0
+        cfg.autopilot_review_min_score = -1
         progress("Interrupteur Relit=Manuel : 2e IA de relecture desactivee.")
 
     progress(

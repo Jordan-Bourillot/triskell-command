@@ -11,8 +11,29 @@
  */
 
 const UserBadge = {
+  // Version de l'avatar mémorisée par utilisateur : on ne casse le cache
+  // navigateur QU'après un vrai upload (sinon l'image est re-téléchargée
+  // à chaque rafraîchissement du badge).
+  AVATAR_VERSION_PREFIX: 'tc-avatar-version:',
+
   init() {
     this.refresh();
+  },
+
+  _avatarVersion(userId) {
+    try { return localStorage.getItem(this.AVATAR_VERSION_PREFIX + userId) || ''; }
+    catch (e) { return ''; }
+  },
+
+  _bumpAvatarVersion(userId) {
+    try { localStorage.setItem(this.AVATAR_VERSION_PREFIX + userId, String(Date.now())); }
+    catch (e) {}
+  },
+
+  _avatarUrl(userId) {
+    if (!userId) return '';
+    const v = this._avatarVersion(userId);
+    return `/api/avatar/${encodeURIComponent(userId)}${v ? `?v=${v}` : ''}`;
   },
 
   async _fetchUserId() {
@@ -43,8 +64,7 @@ const UserBadge = {
     const userId = await this._fetchUserId();
     const initials = this._initials(fullName);
     const color = this._colorFor(fullName);
-    const cacheBust = Date.now();
-    const avatarUrl = userId ? `/api/avatar/${encodeURIComponent(userId)}?v=${cacheBust}` : '';
+    const avatarUrl = this._avatarUrl(userId);
 
     slot.innerHTML = `
       <button id="user-badge-row" type="button"
@@ -52,7 +72,7 @@ const UserBadge = {
               title="Mon profil personnel · clique pour modifier ton nom, ta photo, etc.">
         <span id="user-badge-avatar"
               class="relative w-7 h-7 rounded-full flex items-center justify-center
-                     text-[10px] font-bold text-white shrink-0 overflow-hidden"
+                     text-[11px] font-bold text-white shrink-0 overflow-hidden"
               style="background: ${color};">
           <span id="user-badge-initials" class="${avatarUrl ? 'hidden' : ''}">${this._esc(initials)}</span>
           ${avatarUrl ? `<img id="user-badge-img" src="${avatarUrl}" alt=""
@@ -64,14 +84,12 @@ const UserBadge = {
           <path d="M9 18l6-6-6-6"/>
         </svg>
       </button>
-      <input type="file" id="user-badge-file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden"/>
     `;
 
     // Clic sur tout le bandeau (photo + prénom + chevron) ouvre la modale Profil
     document.getElementById('user-badge-row').onclick = () => this._openProfileModal({
       fullName, firstName, email, userId, avatarUrl, color, initials,
     });
-    document.getElementById('user-badge-file').onchange = (e) => this._handleUpload(e);
 
     // Pastille "NEW" : clic sur le bandeau = nouvelle modale Profil (vs Réglages avant)
     if (window.NewBadge) {
@@ -88,22 +106,21 @@ const UserBadge = {
     const overlay = document.createElement('div');
     overlay.id = 'profile-modal-overlay';
     overlay.className = 'fixed inset-0 z-[220] flex items-center justify-center p-4 sm:p-6';
-    overlay.style.background = 'rgba(15,23,42,0.7)';
+    overlay.style.background = 'hsl(var(--bg) / 0.7)';
     overlay.style.backdropFilter = 'blur(8px)';
 
-    const cacheBust = Date.now();
-    const liveAvatarUrl = userId ? `/api/avatar/${encodeURIComponent(userId)}?v=${cacheBust}` : '';
+    const liveAvatarUrl = this._avatarUrl(userId);
 
     overlay.innerHTML = `
       <div class="bg-surface rounded-2xl shadow-hero w-full max-w-md border border-border animate-slide-up flex flex-col max-h-[88vh] overflow-hidden">
         <!-- Header -->
         <div class="px-6 pt-5 pb-4 flex items-start justify-between border-b border-border bg-surface-elevated">
           <div>
-            <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">MON PROFIL</div>
+            <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-0.5">MON PROFIL</div>
             <h3 class="text-lg font-bold">Profil personnel</h3>
-            <p class="text-xs text-text-muted mt-0.5">Ton nom et ta photo, visibles dans Triskell Command.<br>Pour les comptes mail / SMTP / clés API, utilise <span class="font-semibold text-text">Réglages</span> en bas de la sidebar.</p>
+            <p class="text-xs text-text-muted mt-0.5">Ton nom et ta photo, visibles dans Triskell Command.<br>Pour les comptes mail et les clés, utilise <span class="font-semibold text-text">Réglages</span> en bas du menu.</p>
           </div>
-          <button id="profile-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg transition-colors text-xl leading-none shrink-0">×</button>
+          <button id="profile-close" title="Fermer" aria-label="Fermer" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg transition-colors text-xl leading-none shrink-0">×</button>
         </div>
 
         <!-- Form -->
@@ -124,12 +141,12 @@ const UserBadge = {
                   <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
                   <circle cx="12" cy="13" r="4"/>
                 </svg>
-                <span class="text-[10px] font-semibold">Changer</span>
+                <span class="text-[11px] font-semibold">Changer</span>
               </span>
             </button>
             <div class="flex-1 min-w-0">
               <div class="text-sm font-semibold text-text">Photo de profil</div>
-              <div class="text-xs text-text-muted mt-0.5">PNG / JPG / WebP, 4 Mo max</div>
+              <div class="text-xs text-text-muted mt-0.5">PNG / JPG / WebP / GIF, 4 Mo max</div>
               <button id="profile-avatar-trigger" type="button"
                       class="mt-2 text-xs text-accent font-semibold hover:underline">
                 Choisir une image…
@@ -145,7 +162,7 @@ const UserBadge = {
             <input id="profile-fullname" type="text" value="${this._esc(fullName)}"
                    placeholder="Jordan Bourillot"
                    class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
-            <div class="text-[10px] text-text-muted mt-1">Ton prénom (premier mot) apparaît en bas de la sidebar.</div>
+            <div class="text-[11px] text-text-muted mt-1">Ton prénom (premier mot) apparaît en bas du menu.</div>
           </div>
 
           <!-- Email -->
@@ -154,7 +171,7 @@ const UserBadge = {
             <input id="profile-email" type="email" value="${this._esc(email)}"
                    placeholder="contact@triskell-studio.fr"
                    class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
-            <div class="text-[10px] text-text-muted mt-1">Sert d'expéditeur par défaut pour tes mails.</div>
+            <div class="text-[11px] text-text-muted mt-1">Sert d'expéditeur par défaut pour tes mails.</div>
           </div>
 
           <div id="profile-status" class="text-xs text-text-muted min-h-[1.25rem]"></div>
@@ -174,29 +191,23 @@ const UserBadge = {
     `;
     document.body.appendChild(overlay);
 
-    const close = () => overlay.remove();
+    // Fermeture : le listener Échap est retiré dans close(), donc pour
+    // TOUTES les fermetures (croix, Annuler, clic à côté, Échap, save).
+    const escListener = (e) => { if (e.key === 'Escape') close(); };
+    const close = () => {
+      document.removeEventListener('keydown', escListener);
+      overlay.remove();
+    };
     overlay.querySelector('#profile-close').onclick = close;
     overlay.querySelector('#profile-cancel').onclick = close;
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    const escListener = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escListener); } };
     document.addEventListener('keydown', escListener);
 
     // Photo : déclencheurs
     const fileInput = overlay.querySelector('#profile-avatar-file');
     overlay.querySelector('#profile-avatar-btn').onclick = () => fileInput.click();
     overlay.querySelector('#profile-avatar-trigger').onclick = () => fileInput.click();
-    fileInput.onchange = async (e) => {
-      const status = overlay.querySelector('#profile-status');
-      status.textContent = 'Upload de la photo…';
-      status.className = 'text-xs text-text-muted min-h-[1.25rem]';
-      const ok = await this._handleUploadInModal(e, overlay);
-      if (ok) {
-        status.textContent = '✓ Photo mise à jour';
-        status.className = 'text-xs text-success min-h-[1.25rem]';
-      } else {
-        status.textContent = '';
-      }
-    };
+    fileInput.onchange = (e) => this._handleUploadInModal(e, overlay);
 
     // Enregistrer (nom + email)
     overlay.querySelector('#profile-save').onclick = async () => {
@@ -235,24 +246,44 @@ const UserBadge = {
           this.refresh();
           setTimeout(close, 800);
         } else {
-          status.textContent = `✗ ${(r && r.error) || 'Erreur inconnue'}`;
+          status.textContent = '✗ Impossible d’enregistrer le profil. Réessaie dans un instant.';
           status.className = 'text-xs text-danger min-h-[1.25rem]';
+          console.warn('[UserBadge] me_update a échoué :', r && r.error);
           saveBtn.disabled = false;
           saveBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Enregistrer';
         }
       } catch (e) {
-        status.textContent = `✗ ${e.message || e}`;
+        status.textContent = '✗ Impossible d’enregistrer le profil.';
         status.className = 'text-xs text-danger min-h-[1.25rem]';
+        if (window.Toast) Toast.friendlyError(e, 'Impossible d’enregistrer le profil.');
         saveBtn.disabled = false;
         saveBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Enregistrer';
       }
     };
   },
 
-  /** Upload photo depuis la modale Profil. Renvoie true si succès. */
+  /** Upload photo depuis la modale Profil. Tout le retour utilisateur
+   *  passe par #profile-status (stylé) + Toast.friendlyError — pas d'alert. */
   async _handleUploadInModal(event, overlay) {
     const file = event.target.files && event.target.files[0];
-    if (!file) return false;
+    // Permet de re-choisir le même fichier après un échec
+    event.target.value = '';
+    if (!file) return;
+
+    const status = overlay.querySelector('#profile-status');
+    const setStatus = (text, tone) => {
+      if (!status) return;
+      status.textContent = text;
+      status.className = `text-xs ${tone === 'error' ? 'text-danger' : tone === 'ok' ? 'text-success' : 'text-text-muted'} min-h-[1.25rem]`;
+    };
+
+    // Vérification côté client AVANT l'envoi : 4 Mo max (même règle que le serveur)
+    if (file.size > 4 * 1024 * 1024) {
+      setStatus('✗ Photo trop lourde : 4 Mo maximum.', 'error');
+      return;
+    }
+
+    setStatus('Envoi de la photo…');
     const fd = new FormData();
     fd.append('file', file);
     try {
@@ -263,13 +294,15 @@ const UserBadge = {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.ok) {
-        alert(j.error || 'Échec de l\'upload de la photo.');
-        return false;
+        setStatus('✗ La photo n’a pas pu être enregistrée.', 'error');
+        if (window.Toast) Toast.friendlyError(j.error || r.status, 'La photo n’a pas pu être enregistrée.');
+        return;
       }
-      // Recharge la preview dans la modale + le badge sidebar
+      // Nouvelle version d'avatar → on casse le cache navigateur (une seule fois)
       const userId = await this._fetchUserId();
       if (userId) {
-        const newUrl = `/api/avatar/${encodeURIComponent(userId)}?v=${Date.now()}`;
+        this._bumpAvatarVersion(userId);
+        const newUrl = this._avatarUrl(userId);
         const img = overlay.querySelector('#profile-img');
         const initials = overlay.querySelector('#profile-initials');
         if (img) {
@@ -288,34 +321,11 @@ const UserBadge = {
           btn.appendChild(newImg);
         }
       }
-      this.refresh();
-      return true;
-    } catch (e) {
-      alert('Erreur réseau : ' + (e.message || e));
-      return false;
-    }
-  },
-
-  async _handleUpload(event) {
-    const file = event.target.files && event.target.files[0];
-    if (!file) return;
-    const fd = new FormData();
-    fd.append('file', file);
-    try {
-      const r = await fetch('/api/avatar', {
-        method: 'POST',
-        body: fd,
-        credentials: 'same-origin',
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.ok) {
-        alert(j.error || 'Échec de l\'upload de la photo.');
-        return;
-      }
-      // Recharge le badge pour afficher la nouvelle photo
+      setStatus('✓ Photo mise à jour', 'ok');
       this.refresh();
     } catch (e) {
-      alert('Erreur réseau : ' + (e.message || e));
+      setStatus('✗ La photo n’a pas pu être envoyée.', 'error');
+      if (window.Toast) Toast.friendlyError(e, 'La photo n’a pas pu être envoyée.');
     }
   },
 

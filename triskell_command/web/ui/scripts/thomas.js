@@ -27,11 +27,22 @@ const Thomas = {
   claudeUserId: 'claude',
   claudeColor: '#a855f7',
   claudeName: 'Allo Claude',
+  otherName: 'Thomas',        // prénom du binôme (rechargé au bootstrap)
   cachedMessages: [],
   cachedById: {},             // {id → msg} pour résoudre les "répondre à"
   pendingAttachment: null,    // {url, name, type, size} entre upload et envoi
   pendingReplyTo: null,       // message auquel on est en train de répondre
   pendingEdit: null,          // message que l'on est en train de modifier
+  // Rendu incrémental : index id → nœud de bulle déjà affiché.
+  _rowIndex: null,            // Map(id → element), reconstruite si rendu forcé
+  _renderedForUser: undefined, // myUserId utilisé au dernier rendu (si ça change → tout re-rendre)
+  _msgLimit: 100,             // fenêtre de messages chargés (100 → 300 → 600)
+  _maxMsgLimit: 600,
+  _tickBusy: false,           // verrou anti-chevauchement du poll
+  _pollFails: 0,              // échecs consécutifs du poll (3 → « Connexion perdue »)
+  _lastDeliveredCount: 0,     // dernier nombre de non-lus déjà marqués « distribués »
+  _retryFn: null,             // action à rejouer depuis le bandeau « Réessayer »
+  _pendingVoiceFile: null,    // vocal dont l'upload a échoué (gardé jusqu'à succès/abandon)
   // Enregistrement d'un message vocal (API MediaRecorder du navigateur)
   mediaRecorder: null,
   recordChunks: [],
@@ -51,8 +62,23 @@ const Thomas = {
     const sendBtn = document.getElementById('thomas-send');
 
     if (!dlg) return;
-    // Le FAB est désormais masqué globalement (le bouton "Chat" du Cockpit
-    // est l'entrée standard) mais on garde le bind si l'élément existe.
+    // Accessibilité : la modale se déclare comme une vraie boîte de dialogue
+    // et la liste des messages annonce les nouveautés aux lecteurs d'écran.
+    dlg.setAttribute('role', 'dialog');
+    dlg.setAttribute('aria-modal', 'true');
+    dlg.setAttribute('aria-label', 'Chat avec Thomas');
+    const msgList = document.getElementById('thomas-messages');
+    if (msgList) {
+      msgList.setAttribute('aria-live', 'polite');
+      // Délégation : un seul écouteur pour tous les boutons des bulles
+      // (répondre, réagir, modifier, supprimer, citations, images).
+      // Indispensable avec le rendu incrémental : les bulles ajoutées
+      // après coup sont couvertes sans re-binder quoi que ce soit.
+      msgList.addEventListener('click', (e) => this._onMessagesClick(e));
+    }
+    // Le FAB (bouton flottant) est l'entrée standard du chat : il porte la
+    // pastille de non-lus sur tous les écrans. bootstrap() l'affiche dès
+    // que le profil du binôme est chargé.
     if (fab) fab.addEventListener('click', () => this.openDialog());
     closeBtn.addEventListener('click', () => this.closeDialog());
 
@@ -61,7 +87,8 @@ const Thomas = {
       if (e.target === dlg) this.closeDialog();
     });
 
-    // Envoyer message
+    // Envoyer message. Le champ est un <textarea> : Entrée = envoyer,
+    // Maj+Entrée = nouvelle ligne, et il grandit avec le texte (5 lignes max).
     sendBtn.addEventListener('click', () => this.send());
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -69,7 +96,10 @@ const Thomas = {
         this.send();
       }
     });
-    input.addEventListener('input', () => this.notifyTyping());
+    input.addEventListener('input', () => {
+      this._autoGrowInput();
+      this.notifyTyping();
+    });
 
     // Coller (Ctrl+V) : si le presse-papier contient une image, on la
     // traite comme une pièce jointe et on annule le paste texte. Sinon
@@ -87,18 +117,21 @@ const Thomas = {
         return;  // texte ou autre : comportement par défaut du textarea
       }
       e.preventDefault();
-      // Renomme les images collées (qui s'appellent souvent "image.png" par
-      // défaut) avec un timestamp pour éviter les conflits si on en colle
-      // plusieurs à la suite.
+      // Une seule pièce jointe à la fois : si plusieurs images sont collées
+      // d'un coup, on garde la PREMIÈRE et on le dit clairement (avant, les
+      // uploads simultanés s'écrasaient en silence).
+      if (imageFiles.length > 1 && window.Toast) {
+        Toast.info('Une image à la fois — seule la première a été gardée.');
+      }
+      // Renomme l'image collée (souvent "image.png" par défaut) avec un
+      // timestamp pour éviter les conflits.
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      imageFiles.forEach((f, idx) => {
-        const ext = (f.type.split('/')[1] || 'png').split('+')[0];
-        const suffix = imageFiles.length > 1 ? `_${idx + 1}` : '';
-        const renamed = new File([f], `pasted_${stamp}${suffix}.${ext}`, {
-          type: f.type, lastModified: Date.now(),
-        });
-        this._uploadAttachment(renamed);
+      const f = imageFiles[0];
+      const ext = (f.type.split('/')[1] || 'png').split('+')[0];
+      const renamed = new File([f], `pasted_${stamp}.${ext}`, {
+        type: f.type, lastModified: Date.now(),
       });
+      this._uploadAttachment(renamed);
     });
 
     // Pièce jointe : trombone ouvre le picker de fichier
@@ -147,23 +180,30 @@ const Thomas = {
     // Bouton "retour" du téléphone (ou geste de retour PWA) : ferme le chat
     // au lieu de quitter l'application. À l'ouverture on pushe une entrée
     // d'historique, à la fermeture on la pop (ou popstate la consomme).
+    // Si un sélecteur (GIF, couleurs, émojis…) est ouvert, le retour ferme
+    // LE SÉLECTEUR seulement — le chat reste ouvert.
     window.addEventListener('popstate', () => {
-      if (this.open) this._teardown();
+      if (!this.open) return;
+      if (this._closeTopPicker()) {
+        try { history.pushState({ thomasOpen: true }, ''); } catch (e) {}
+        return;
+      }
+      this._teardown();
     });
 
-    // F11 pour ouvrir le chat
+    // Ctrl+J pour ouvrir le chat (raccourci officiel — F11 était en conflit
+    // avec le plein écran du navigateur).
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'F11') {
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey
+          && e.key.toLowerCase() === 'j') {
         e.preventDefault();
         this.openDialog();
       }
       if (e.key === 'Escape') {
-        // Lightbox ouvert : on ferme la lightbox d'abord
-        const lb = document.getElementById('thomas-lightbox');
-        if (lb && !lb.classList.contains('hidden')) {
-          this._closeLightbox();
-          return;
-        }
+        // Un sélecteur est ouvert (lightbox, GIF, palette couleurs,
+        // émojis…) : Échap LE ferme et s'arrête là — le chat ne se
+        // fermera qu'à l'Échap suivant.
+        if (this._closeTopPicker()) return;
         // Enregistrement vocal en cours : Échap l'annule (sans fermer le chat).
         if (this.isRecording) {
           this._cancelRecording();
@@ -232,13 +272,23 @@ const Thomas = {
       }
       if (other.color) this.otherColor = other.color;
       const name = other.display_name || 'Thomas';
+      this.otherName = name;
       document.getElementById('thomas-dialog-name').textContent = name;
       document.getElementById('thomas-dialog-avatar').textContent =
         (name[0] || 'T').toUpperCase();
+      // Les textes figés du HTML disent « Thomas » : on injecte le VRAI
+      // prénom du binôme — sur le poste de Thomas, on doit lire
+      // « Jordan écrit… » et « Écris un message à Jordan… ».
+      const typingEl = document.getElementById('thomas-typing');
+      if (typingEl) typingEl.textContent = `${name} écrit…`;
+      const inputEl = document.getElementById('thomas-input');
+      if (inputEl) inputEl.placeholder = `Écris un message à ${name}…`;
+      // FAB réactivé : c'est lui qui porte la pastille de non-lus partout.
       const fab = document.getElementById('thomas-fab');
       if (fab) {
         fab.classList.remove('hidden');
-        fab.title = `Chat avec ${name} · F11`;
+        fab.title = `Chat avec ${name} · Ctrl+J`;
+        fab.setAttribute('aria-label', `Ouvrir le chat avec ${name} (Ctrl+J)`);
       }
     } catch (e) {
       console.warn('Thomas bootstrap:', e);
@@ -256,18 +306,32 @@ const Thomas = {
   },
 
   async tick() {
-    if (this.open) {
-      await this.refreshMessages();
-      await this.refreshPeerTyping();
-    } else {
-      const unread = await this.pollUnread();
-      // App ouverte mais chat fermé : si j'ai reçu des messages, je préviens
-      // l'expéditeur qu'ils sont arrivés sur mon poste → statut « distribué ».
-      // (Un message non distribué est forcément non lu, donc inutile d'appeler
-      // si je n'ai aucun non-lu.)
-      if (unread > 0) {
-        try { await App.api.messages_mark_delivered(); } catch (e) {}
+    // Verrou anti-chevauchement : si le tour précédent n'a pas fini
+    // (réseau lent), on ne lance pas un 2e appel par-dessus.
+    if (this._tickBusy) return;
+    this._tickBusy = true;
+    try {
+      if (this.open) {
+        await this.refreshMessages();
+        await this.refreshPeerTyping();
+      } else {
+        const unread = await this.pollUnread();
+        // App ouverte mais chat fermé : si j'ai reçu des messages, je préviens
+        // l'expéditeur qu'ils sont arrivés sur mon poste → statut « distribué ».
+        // On n'appelle que si le nombre de non-lus a bougé depuis le dernier
+        // marquage (avant : un appel toutes les 5 s en boucle tant qu'un
+        // message restait non lu).
+        if (unread > 0 && unread !== this._lastDeliveredCount) {
+          try {
+            await App.api.messages_mark_delivered();
+            this._lastDeliveredCount = unread;
+          } catch (e) { /* on retentera au prochain tour */ }
+        } else if (unread === 0) {
+          this._lastDeliveredCount = 0;
+        }
       }
+    } finally {
+      this._tickBusy = false;
     }
   },
 
@@ -282,8 +346,8 @@ const Thomas = {
   },
 
   updateBadge(n) {
-    // Met à jour les deux pastilles : l'ancienne du FAB (désormais caché)
-    // et la nouvelle du bouton "Chat" intégré dans la barre du Cockpit.
+    // Met à jour les deux pastilles : celle du FAB (visible partout)
+    // et celle du bouton "Chat" intégré dans la barre du Cockpit.
     const targets = [
       document.getElementById('thomas-fab-badge'),
       document.getElementById('m-chat-thomas-badge'),
@@ -313,9 +377,16 @@ const Thomas = {
       }
     } catch (e) {}
     await this.refreshMessages();
+    // À l'ouverture, on se place toujours sur les derniers messages.
+    const list = document.getElementById('thomas-messages');
+    if (list) list.scrollTop = list.scrollHeight;
     try { await App.api.messages_mark_read(); } catch(e){}
     this.updateBadge(0);
-    document.getElementById('thomas-input').focus();
+    const input = document.getElementById('thomas-input');
+    if (input) {
+      input.focus();
+      this._autoGrowInput();
+    }
     this.startPolling();
   },
 
@@ -354,20 +425,21 @@ const Thomas = {
   async refreshMessages() {
     if (typeof App === 'undefined' || !App.api) return;
     try {
-      const res = await App.api.messages_list({ limit: 100 });
-      const msgs = (res && res.ok ? res.messages : []) || [];
-      // Optim : on évite de re-render si rien n'a changé (même nb de
-      // messages, mêmes IDs, mêmes réactions, mêmes éditions). Sinon
-      // le 1er affichage resterait vide quand cache + msgs sont vides
-      // au boot, donc on re-rend toujours au moins une fois.
-      const el = document.getElementById('thomas-messages');
-      const sigA = this._messagesSignature(this.cachedMessages);
-      const sigB = this._messagesSignature(msgs);
-      const alreadyRendered = el && el.innerHTML.trim().length > 0;
-      if (sigA !== sigB || !alreadyRendered) {
-        this.cachedMessages = msgs;
-        this.renderMessages(msgs);
+      const res = await App.api.messages_list({ limit: this._msgLimit });
+      // Réponse en erreur (serveur indisponible…) : on NE vide PAS la
+      // conversation affichée — on compte l'échec pour l'indicateur de
+      // connexion et on retentera au prochain tour.
+      if (!res || !res.ok) {
+        this._notePollFailure();
+        return;
       }
+      this._notePollSuccess();
+      const msgs = res.messages || [];
+      this.cachedMessages = msgs;
+      // Le rendu est INCRÉMENTAL : renderMessages ne touche qu'aux bulles
+      // nouvelles / modifiées / disparues — pas besoin de comparer une
+      // signature globale avant d'appeler.
+      this.renderMessages(msgs);
       // Chat ouvert : tout message reçu encore non lu passe « lu »
       // immédiatement — sinon, en laissant le chat ouvert, l'expéditeur
       // verrait « distribué » alors qu'on a le message sous les yeux.
@@ -379,33 +451,274 @@ const Thomas = {
           this.updateBadge(0);
         }
       }
-    } catch (e) { /* silencieux */ }
-  },
-
-  /** Signature légère utilisée pour détecter qu'un message a bougé
-   *  (nouveau, édité, supprimé, ou réactions changées) — sans hasher
-   *  tout le body. */
-  _messagesSignature(arr) {
-    if (!arr || !arr.length) return '0';
-    const parts = [String(arr.length)];
-    for (const m of arr) {
-      parts.push(`${m.id}:${(m.reactions || []).length}:${m.edited_at || ''}:${m.deleted_at || ''}:${m.read_at || ''}:${m.delivered_at || ''}`);
+    } catch (e) {
+      this._notePollFailure();
     }
-    return parts.join('|');
   },
 
-  renderMessages(msgs) {
+  /** 3 échecs consécutifs du poll → « Connexion perdue — reconnexion… »
+   *  sous le nom ; dès que ça repasse → retour à « Chat 1-à-1 ». */
+  _notePollFailure() {
+    this._pollFails += 1;
+    if (this._pollFails === 3) this._setPresence(false);
+  },
+
+  _notePollSuccess() {
+    if (this._pollFails >= 3) this._setPresence(true);
+    this._pollFails = 0;
+  },
+
+  _setPresence(okOnline) {
+    const el = document.getElementById('thomas-dialog-status');
+    if (!el) return;
+    el.textContent = okOnline ? 'Chat 1-à-1' : 'Connexion perdue — reconnexion…';
+    el.classList.toggle('text-warning-text', !okOnline);
+    el.classList.toggle('text-text-muted', okOnline);
+  },
+
+  /** Rendu INCRÉMENTAL de la conversation : on ne touche qu'aux bulles
+   *  nouvelles (ajout), modifiées (remplacement du nœud concerné) ou
+   *  sorties de la fenêtre (retrait). Avantages : la position de lecture
+   *  n'est plus écrasée toutes les 1,5 s, et un message vocal en cours de
+   *  lecture n'est jamais recréé (le remplacement est différé). */
+  renderMessages(msgs, force = false) {
     const el = document.getElementById('thomas-messages');
     if (!el) return;
 
     // Index par id : sert à résoudre `reply_to_id` lors du rendu et à
     // retrouver l'original quand on clique sur une citation.
     this.cachedById = {};
+    const valid = [];
     for (const m of msgs) {
-      if (m && m.id) this.cachedById[m.id] = m;
+      if (m && m.id) {
+        this.cachedById[m.id] = m;
+        valid.push(m);
+      }
     }
 
-    const html = msgs.map(m => {
+    // Changement d'identité (1er envoi) ou rendu forcé (couleur de bulles
+    // modifiée) : l'alignement / les fonds changent partout → page blanche.
+    if (force || this._renderedForUser !== this.myUserId || !this._rowIndex) {
+      el.innerHTML = '';
+      this._rowIndex = new Map();
+      this._renderedForUser = this.myUserId;
+    }
+
+    // Bouton « voir les messages plus anciens » : géré AVANT la mesure du
+    // scroll, car il modifie la hauteur du contenu.
+    this._ensureOlderButton(el, valid.length);
+
+    // Liste vide → petit mot d'accueil, et rien d'autre à faire.
+    let emptyEl = el.querySelector(':scope > [data-empty]');
+    if (!valid.length) {
+      for (const [, row] of this._rowIndex) row.remove();
+      this._rowIndex.clear();
+      if (!emptyEl) {
+        emptyEl = document.createElement('div');
+        emptyEl.setAttribute('data-empty', '1');
+        emptyEl.className = 'text-center text-text-muted text-xs py-8';
+        emptyEl.textContent = 'Aucun message pour l’instant. Envoie le premier ! 👋';
+        el.appendChild(emptyEl);
+      }
+      return;
+    }
+    if (emptyEl) emptyEl.remove();
+
+    // Position de lecture : le scroll ne sera forcé en bas QUE si
+    // l'utilisateur y était déjà (tolérance 80 px).
+    const firstRender = this._rowIndex.size === 0;
+    const wasNearBottom =
+      (el.scrollHeight - el.scrollTop - el.clientHeight) < 80;
+    const prevScrollHeight = el.scrollHeight;
+    const prevScrollTop = el.scrollTop;
+    let prepended = false;
+
+    // 1) Retire les bulles dont le message est sorti de la fenêtre chargée.
+    const wantedIds = new Set(valid.map(m => String(m.id)));
+    for (const [id, row] of this._rowIndex) {
+      if (!wantedIds.has(id)) {
+        row.remove();
+        this._rowIndex.delete(id);
+      }
+    }
+
+    // 2) Parcours chronologique : ajout des nouveaux, remplacement ciblé
+    //    des modifiés (réaction, édition, suppression, statut lu…).
+    let cursor = null;  // dernière bulle traitée (pour insérer dans l'ordre)
+    for (const m of valid) {
+      const id = String(m.id);
+      const sig = this._messageRowSignature(m);
+      const row = this._rowIndex.get(id) || null;
+      if (row && row.getAttribute('data-sig') === sig) {
+        cursor = row;
+        continue;  // rien n'a bougé → on ne touche pas au nœud
+      }
+      if (row) {
+        // Message modifié. Si un audio est EN LECTURE dans cette bulle, on
+        // diffère le remplacement (sinon on couperait le vocal en plein
+        // milieu) — la signature inchangée fera retenter plus tard.
+        const audio = row.querySelector('audio');
+        if (audio && !audio.paused && !audio.ended) {
+          cursor = row;
+          continue;
+        }
+        const fresh = this._buildMessageRow(m, sig);
+        row.replaceWith(fresh);
+        this._rowIndex.set(id, fresh);
+        cursor = fresh;
+      } else {
+        const fresh = this._buildMessageRow(m, sig);
+        if (cursor) {
+          cursor.after(fresh);
+        } else {
+          // Tout début de liste : juste après le bouton « plus anciens »
+          // s'il existe, sinon en tête.
+          const olderWrap = el.querySelector(':scope > .thomas-older-wrap');
+          el.insertBefore(fresh, olderWrap ? olderWrap.nextSibling : el.firstChild);
+          if (!firstRender) prepended = true;
+        }
+        this._rowIndex.set(id, fresh);
+        cursor = fresh;
+      }
+    }
+
+    // 3) Scroll : en bas au premier affichage ou si on y était déjà ; si
+    //    des messages plus anciens ont été ajoutés EN HAUT, on conserve la
+    //    position de lecture (compensation de la hauteur ajoutée).
+    if (firstRender || wasNearBottom) {
+      el.scrollTop = el.scrollHeight;
+    } else if (prepended) {
+      el.scrollTop = prevScrollTop + (el.scrollHeight - prevScrollHeight);
+    }
+  },
+
+  /** Tout ce qui change l'APPARENCE d'une bulle doit entrer dans cette
+   *  signature : si elle bouge, le nœud est reconstruit ; sinon il est
+   *  laissé intact (c'est la clé du rendu incrémental). */
+  _messageRowSignature(m) {
+    const reactions = (m.reactions || [])
+      .map(r => `${(r && r.user_id) || ''}${(r && r.emoji) || ''}`)
+      .sort().join(',');
+    // Une citation dépend aussi du message PARENT (supprimé / édité depuis ?).
+    let parentSig = '';
+    if (m.reply_to_id) {
+      const p = this.cachedById[m.reply_to_id];
+      parentSig = p ? `${p.deleted_at || ''}~${p.edited_at || ''}` : 'absent';
+    }
+    return [
+      m.edited_at || '', m.deleted_at || '', m.read_at || '',
+      m.delivered_at || '', reactions, parentSig,
+    ].join('|');
+  },
+
+  /** Affiche (ou retire) le bouton « ⤒ Voir les messages plus anciens » en
+   *  tête de liste. L'API ne sait renvoyer que les N derniers messages
+   *  (pas de vraie pagination côté serveur) : on élargit donc la fenêtre
+   *  par paliers 100 → 300 → 600. */
+  _ensureOlderButton(el, msgsCount) {
+    const canLoadMore = msgsCount >= this._msgLimit
+      && this._msgLimit < this._maxMsgLimit;
+    const wrap = el.querySelector(':scope > .thomas-older-wrap');
+    if (!canLoadMore) {
+      if (wrap) wrap.remove();
+      return;
+    }
+    if (wrap) return;
+    const fresh = document.createElement('div');
+    fresh.className = 'thomas-older-wrap text-center pb-1';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'text-[11px] px-3 py-1.5 rounded-lg border border-border '
+      + 'text-text-muted hover:text-text hover:bg-surface transition-colors';
+    btn.textContent = '⤒ Voir les messages plus anciens';
+    btn.addEventListener('click', () => this._loadOlderMessages(btn));
+    fresh.appendChild(btn);
+    el.insertBefore(fresh, el.firstChild);
+  },
+
+  async _loadOlderMessages(btn) {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Chargement…';
+    }
+    this._msgLimit = this._msgLimit >= 300 ? this._maxMsgLimit : 300;
+    await this.refreshMessages();
+    // Recrée le bouton dans un état propre (ou le retire s'il n'y a
+    // plus rien à charger).
+    const el = document.getElementById('thomas-messages');
+    if (el) {
+      const wrap = el.querySelector(':scope > .thomas-older-wrap');
+      if (wrap) wrap.remove();
+      this._ensureOlderButton(el, (this.cachedMessages || []).length);
+    }
+  },
+
+  /** Délégation des clics dans la liste des messages (un seul écouteur,
+   *  posé une fois dans init — compatible avec le rendu incrémental). */
+  _onMessagesClick(e) {
+    const replyBtn = e.target.closest('.thomas-reply-btn');
+    if (replyBtn) {
+      e.stopPropagation();
+      const msg = this.cachedById[replyBtn.getAttribute('data-reply-id')];
+      if (msg) this._setReplyTo(msg);
+      return;
+    }
+    const editBtn = e.target.closest('.thomas-edit-btn');
+    if (editBtn) {
+      e.stopPropagation();
+      const msg = this.cachedById[editBtn.getAttribute('data-edit-id')];
+      if (msg) this._setEditMode(msg);
+      return;
+    }
+    const reactBtn = e.target.closest('.thomas-react-btn');
+    if (reactBtn) {
+      e.stopPropagation();
+      const id = reactBtn.getAttribute('data-react-id');
+      if (id) this._openReactionPicker(id, reactBtn);
+      return;
+    }
+    const deleteBtn = e.target.closest('.thomas-delete-btn');
+    if (deleteBtn) {
+      e.stopPropagation();
+      const id = deleteBtn.getAttribute('data-delete-id');
+      if (id) this._deleteMessage(id);
+      return;
+    }
+    const chip = e.target.closest('.thomas-reaction-chip');
+    if (chip) {
+      e.stopPropagation();
+      const id = chip.getAttribute('data-msg-id');
+      const emoji = chip.getAttribute('data-emoji');
+      if (id && emoji) this._toggleReaction(id, emoji);
+      return;
+    }
+    const quote = e.target.closest('[data-quote-target]');
+    if (quote) {
+      e.stopPropagation();
+      this._scrollToMessage(quote.getAttribute('data-quote-target'));
+      return;
+    }
+    const img = e.target.closest('[data-lightbox]');
+    if (img) {
+      this._openLightbox(img.getAttribute('data-lightbox'),
+                         img.getAttribute('alt') || '');
+    }
+  },
+
+  /** Construit le nœud DOM d'une bulle (ligne complète de la liste). */
+  _buildMessageRow(m, sig) {
+    const row = document.createElement('div');
+    const align = this._isFromMe(m) ? 'justify-end' : 'justify-start';
+    row.className = `flex ${align} items-start thomas-msg-row`;
+    row.setAttribute('data-mid', String(m.id));
+    row.setAttribute('data-sig', sig);
+    row.innerHTML = this._renderMessageHtml(m);
+    return row;
+  },
+
+  /** HTML intérieur d'une bulle (sans la ligne d'alignement). */
+  _renderMessageHtml(m) {
+    {
       const isFromMe = this._isFromMe(m);
       const isFromClaude = m.sender_id === this.claudeUserId;
       const isDeleted = !!m.deleted_at;
@@ -536,80 +849,12 @@ const Thomas = {
           ${reactionsHtml}
         </div>`;
 
-      return `<div class="flex ${align} items-start thomas-msg-row">${bubble}</div>`;
-    }).join('');
-
-    el.innerHTML = html || `
-      <div class="text-center text-text-muted text-xs py-8">
-        Aucun message pour l'instant. Envoie le premier ! 👋
-      </div>`;
-
-    // Bind les clics sur les images de pièces jointes → ouvre la lightbox
-    el.querySelectorAll('[data-lightbox]').forEach(img => {
-      img.addEventListener('click', () => {
-        this._openLightbox(img.getAttribute('data-lightbox'),
-                          img.getAttribute('alt') || '');
-      });
-    });
-
-    // Bind les boutons "Répondre" de chaque bulle
-    el.querySelectorAll('.thomas-reply-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-reply-id');
-        const msg = this.cachedById[id];
-        if (msg) this._setReplyTo(msg);
-      });
-    });
-
-    // Bind les boutons "Modifier" sur mes messages
-    el.querySelectorAll('.thomas-edit-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-edit-id');
-        const msg = this.cachedById[id];
-        if (msg) this._setEditMode(msg);
-      });
-    });
-
-    // Bind les boutons "Réagir" (smiley) → ouvre le picker emoji
-    el.querySelectorAll('.thomas-react-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-react-id');
-        if (id) this._openReactionPicker(id, btn);
-      });
-    });
-
-    // Bind les pastilles de réactions sous chaque bulle → toggle
-    el.querySelectorAll('.thomas-reaction-chip').forEach(chip => {
-      chip.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = chip.getAttribute('data-msg-id');
-        const emoji = chip.getAttribute('data-emoji');
-        if (id && emoji) this._toggleReaction(id, emoji);
-      });
-    });
-
-    // Bind les boutons "Supprimer" (corbeille) sur mes messages
-    el.querySelectorAll('.thomas-delete-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-delete-id');
-        if (id) this._deleteMessage(id);
-      });
-    });
-
-    // Bind les citations cliquables → scroll vers l'original
-    el.querySelectorAll('[data-quote-target]').forEach(quote => {
-      quote.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this._scrollToMessage(quote.getAttribute('data-quote-target'));
-      });
-    });
-
-    // Scroll en bas
-    el.scrollTop = el.scrollHeight;
+      // Le nœud-ligne (alignement gauche/droite) est créé par
+      // _buildMessageRow ; ici on ne renvoie que l'intérieur. Les clics
+      // (répondre, réagir, modifier, supprimer, citation, photo) sont
+      // gérés par UN écouteur délégué : _onMessagesClick.
+      return bubble;
+    }
   },
 
   /** Rendu de la citation affichée en haut d'une bulle qui est une réponse. */

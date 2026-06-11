@@ -13,42 +13,86 @@
 // "cockpit" pour que le CSS coupe le halo générique.
 const VIEW_COLOR_MAP = {
   morning: 'cockpit',
-  mails: 'sky',
-  brain: 'indigo',
-  clients: 'violet',
-  clients_master: 'violet',
-  autopilot: 'purple',
-  convoy: 'purple',
-  drafts: 'purple',
-  replies: 'purple',
-  prospects_crm: 'fuchsia',
-  obelisk: 'fuchsia',
+  // PROSPECTION — fuchsia (comme le titre de section)
   prospection: 'fuchsia',
+  prospects_crm: 'fuchsia',
+  drafts: 'fuchsia',
+  replies: 'fuchsia',
+  autopilot: 'fuchsia',
+  convoy: 'fuchsia',
+  obelisk: 'fuchsia',
   chasseur: 'fuchsia',
   chasseur_createurs: 'fuchsia',
   prospecteur_google: 'fuchsia',
   argus: 'fuchsia',
   eclaireur: 'fuchsia',
-  eliks: 'pink',
-  revenue: 'rose',
-  funnel: 'rose',
-  phare: 'orange',
-  geo: 'red',
-  lagriffe: 'amber',
-  rankus: 'amber',
-  wow: 'amber',
+  prospect_timeline: 'fuchsia',
+  // MAILS — sky
+  mails: 'sky',
+  mail_templates: 'sky',
+  // CLIENTS & CHIFFRES — violet
+  clients: 'violet',
+  clients_master: 'violet',
+  revenue: 'violet',
+  funnel: 'violet',
+  'pixelpros-affiliates': 'violet',
+  // SITES & SEO — amber
   pixelpros: 'amber',
-  'pixelpros-affiliates': 'yellow',
+  wow: 'amber',
+  rankus: 'amber',
+  lagriffe: 'amber',
+  phare: 'amber',
+  geo: 'amber',
+  delivery: 'amber',
+  // ATELIER — lime
   catalogue: 'lime',
-  mail_templates: 'green',
+  brain: 'lime',
+  eliks: 'lime',
+  // SYSTÈME — emerald
   health: 'emerald',
 };
+
+// Toutes les vues que le routeur sait afficher. Sert aux liens ?view=…
+// (raccourcis d'icône installée, clic sur une notification), et de liste
+// blanche pour les navigations dictées par l'assistant.
+const KNOWN_VIEWS = [
+  'morning', 'replies', 'mails', 'brain', 'drafts', 'funnel', 'revenue',
+  'clients', 'eliks', 'clients_master', 'phare', 'geo', 'wow', 'rankus',
+  'lagriffe', 'pixelpros', 'pixelpros-affiliates', 'mail_templates',
+  'obelisk', 'prospects_crm', 'catalogue', 'config', 'tutorial',
+  'autopilot', 'convoy', 'prospection', 'chasseur', 'chasseur_createurs',
+  'prospecteur_google', 'argus', 'eclaireur', 'delivery', 'health',
+  'abtest', 'prospect_timeline',
+];
 
 const App = {
   api: null,
   currentView: 'morning',
   previousView: null,   // vue precedente, sert au bouton "Retour" des sous-pages
   currentUser: {},   // {first_name, full_name, email} — rempli au boot
+  KNOWN_VIEWS,
+
+  // ---- Cycle de vie des vues ----
+  // Avant l'audit du 10/06/2026, les minuteurs lancés par une vue (polling,
+  // repositionnements…) survivaient à la navigation et tournaient pour
+  // toujours. Les vues enregistrent maintenant leur ménage ici : App.show()
+  // exécute tout ce qui est en attente avant d'afficher la vue suivante.
+  _viewCleanups: [],
+  onViewCleanup(fn) {
+    if (typeof fn === 'function') this._viewCleanups.push(fn);
+  },
+  // setInterval/setTimeout liés à la vue courante : nettoyés automatiquement
+  // dès qu'on change d'écran (ou qu'on ré-affiche le même).
+  viewInterval(fn, ms) {
+    const id = setInterval(fn, ms);
+    this.onViewCleanup(() => clearInterval(id));
+    return id;
+  },
+  viewTimeout(fn, ms) {
+    const id = setTimeout(fn, ms);
+    this.onViewCleanup(() => clearTimeout(id));
+    return id;
+  },
 
   // ---- Wait for API to be ready ----
   // Stratégie :
@@ -106,8 +150,7 @@ const App = {
       }
       return {
         ok: false,
-        error: 'Cette action est disponible uniquement en mode desktop local. ' +
-               'Lance Triskell Command sur ton PC pour ouvrir cette app.',
+        error: 'Cet outil ne propose pas encore de lien à ouvrir depuis le site.',
       };
     }
     return null; // pas un fallback → laisse passer l'appel HTTP normal
@@ -269,9 +312,20 @@ const App = {
     // Bouton "Écosystème" déplacé dans la quickbar de la Cockpit (morning.js).
 
     // Raccourcis clavier
+    // (Remaniés le 10/06/2026 : F12 ouvrait AUSSI le panneau développeur du
+    //  navigateur, et Ctrl+T est réservé par le navigateur — il ne nous
+    //  arrivait jamais. Plus aucun raccourci en conflit.)
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'F12') { e.preventDefault(); Claude.open(); }
-      if (e.ctrlKey && e.key === 't') { e.preventDefault(); this.cycleTheme(); }
+      // Ctrl+Espace → Allô Claude
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'Space') {
+        e.preventDefault();
+        if (typeof Claude !== 'undefined') Claude.open();
+      }
+      // Alt+T → changer de thème
+      if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        this.cycleTheme();
+      }
       // Ctrl+B → ouvre direct la modale Brain "Nouvelle note"
       if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
         // N'interfère pas avec Ctrl+B des éditeurs (textarea/input en focus)
@@ -299,8 +353,15 @@ const App = {
       Push.init().then(() => this._renderPushButton()).catch(() => {});
     }
 
-    // Lance la 1re vue
-    this.show('morning');
+    // Lance la 1re vue. Honore ?view=… (raccourcis de l'icône installée
+    // sur téléphone, clic sur une notification) — avant le 10/06/2026 ce
+    // paramètre était ignoré et tous ces raccourcis ouvraient le Cockpit.
+    let initialView = 'morning';
+    try {
+      const wanted = new URLSearchParams(window.location.search).get('view');
+      if (wanted && KNOWN_VIEWS.includes(wanted)) initialView = wanted;
+    } catch (e) { /* on retombe sur le Cockpit */ }
+    this.show(initialView);
 
     // Polling claude attention (la veille proactive)
     setInterval(() => Claude.checkPending(), 60_000);
@@ -421,12 +482,24 @@ const App = {
     // Pas de unset overflow-hidden : le body est déjà overflow-hidden globalement
   },
 
+  // Applique un thème partout où il compte : attribut HTML, mémoire du
+  // navigateur (pour la page de connexion et l'anti-flash au chargement),
+  // et couleur de la barre système du téléphone (meta theme-color).
+  _applyTheme(mode) {
+    const m = ['light', 'mid', 'dark'].includes(mode) ? mode : 'mid';
+    document.documentElement.setAttribute('data-theme', m);
+    try { localStorage.setItem('tc-theme', m); } catch (e) {}
+    const metaColors = { light: '#F8FAFC', mid: '#2A2E3C', dark: '#070A12' };
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', metaColors[m]);
+  },
+
   async applyThemeFromSettings() {
     let mode = 'mid';
     if (this.api) {
       try { mode = await this.api.get_theme_mode(); } catch (e) {}
     }
-    document.documentElement.setAttribute('data-theme', mode);
+    this._applyTheme(mode);
   },
 
   async cycleTheme() {
@@ -434,13 +507,16 @@ const App = {
     try {
       const r = await this.api.cycle_theme();
       if (r && r.ok) {
-        document.documentElement.setAttribute('data-theme', r.mode);
+        this._applyTheme(r.mode);
       }
     } catch (e) { console.warn(e); }
   },
 
   // ---- Routing entre vues ----
   show(viewId, params) {
+    // Démonte proprement la vue qu'on quitte (minuteurs, écouteurs…).
+    const cleanups = this._viewCleanups.splice(0);
+    cleanups.forEach(fn => { try { fn(); } catch (e) { /* jamais bloquant */ } });
     // Memorise la vue precedente (sauf si on re-rentre dans la meme vue),
     // pour permettre aux sous-pages d'afficher un bouton "Retour".
     if (this.currentView && this.currentView !== viewId) {
@@ -500,7 +576,7 @@ const App = {
       case 'obelisk':   return Obelisk.render(target);
       case 'prospects_crm': return Obelisk.renderCreatorsView(target);
       case 'catalogue': return Catalogue.render(target);
-      case 'config':    return Config.render(target);
+      case 'config':    return Config.render(target, params);
       case 'tutorial':  return Tutorial.render(target);
       case 'autopilot': return Autopilot.render(target);
       case 'convoy':    return Convoy.render(target);
@@ -561,13 +637,11 @@ const App = {
 
         <div class="card-hero p-12 text-center" data-accent="accent">
           <div class="text-6xl mb-5 opacity-80">${info.icon}</div>
-          <div class="hero-kicker text-accent mb-3">EN COURS DE MIGRATION</div>
-          <h2 class="font-sans text-2xl font-bold mb-3 leading-snug">Cet écran est encore servi par l'ancienne version.</h2>
+          <div class="hero-kicker text-accent mb-3">PAS ENCORE DISPONIBLE</div>
+          <h2 class="font-sans text-2xl font-bold mb-3 leading-snug">Cet écran n'existe pas encore sur le site.</h2>
           <p class="text-text-secondary mb-6 max-w-lg mx-auto">
-            Cette vue est entièrement fonctionnelle dans la version desktop classique
-            (CustomTkinter). Sa version web Apple-clear arrive en Phase 3.
-            En attendant, ouvre <code class="text-xs px-1.5 py-0.5 rounded bg-bg">python run.py</code>
-            pour utiliser cet écran.
+            Rien n'est perdu : la fonction arrive dans une prochaine mise à jour.
+            En attendant, tout le reste de l'app fonctionne normalement.
           </p>
           <button class="btn btn-secondary" onclick="App.show('morning')">← Retour au Cockpit</button>
         </div>

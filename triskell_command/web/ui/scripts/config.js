@@ -1,7 +1,15 @@
 /* Vue Réglages — apparence, IA, mail, connexion base partagée */
 
 const Config = {
-  async render(container) {
+  // Onglet demandé par le routeur (App.show('config', { tab: 'mails' })) :
+  // prioritaire sur le dernier onglet mémorisé, consommé au premier affichage.
+  _pendingTab: null,
+  // Vrai si le chargement initial des réglages a échoué : l'auto-enregistrement
+  // est alors suspendu pour ne pas écraser les vrais réglages avec du vide.
+  _loadFailed: false,
+
+  async render(container, params) {
+    this._pendingTab = (params && params.tab) || null;
     container.innerHTML = `
       <section class="animate-slide-up">
         <div class="mb-10">
@@ -19,6 +27,11 @@ const Config = {
       </section>
     `;
     await this.refresh();
+    // Arrivée par lien direct sur un onglet : on remonte en haut de page
+    if (params && params.tab) {
+      const main = document.getElementById('main');
+      if (main) main.scrollTo({ top: 0 });
+    }
   },
 
   async refresh() {
@@ -28,8 +41,15 @@ const Config = {
     let phantomCfg = null;
     let trackerCfg = null;
     let authStatus = null;
+    this._loadFailed = false;
     if (App.api) {
-      try { s = await App.api.get_settings(); } catch (e) {}
+      try { s = await App.api.get_settings(); }
+      catch (e) {
+        // Échec de chargement : champs vides → l'auto-enregistrement au blur
+        // pourrait écraser les vrais réglages. On le coupe et on l'affiche.
+        this._loadFailed = true;
+        console.warn('get_settings a échoué :', e);
+      }
       try { authStatus = await App.api.auth_status(); } catch (e) {}
       try {
         const r = await App.api.lead_to_client_get_config();
@@ -61,36 +81,66 @@ const Config = {
       { key: 'system',       label: 'Système',        html: this._renderBackups() + this._renderDemoMode() + this._renderTutorial() },
     ];
 
-    // Préférence de dernier onglet sélectionné, sinon le premier
-    let activeKey = localStorage.getItem('cfg-active-tab') || groups[0].key;
+    // Onglet à ouvrir : 1) celui demandé par le routeur (deep-link),
+    // 2) le dernier sélectionné, 3) le premier.
+    let activeKey = null;
+    if (this._pendingTab && groups.find(g => g.key === this._pendingTab)) {
+      activeKey = this._pendingTab;
+      try { localStorage.setItem('cfg-active-tab', activeKey); } catch (e) {}
+    }
+    this._pendingTab = null; // consommé — les refresh internes gardent l'onglet
+    if (!activeKey) activeKey = localStorage.getItem('cfg-active-tab') || groups[0].key;
     if (!groups.find(g => g.key === activeKey)) activeKey = groups[0].key;
 
     const tabsHTML = groups.map(g =>
-      `<button type="button" data-cfg-tab="${g.key}" class="cfg-tab${g.key === activeKey ? ' active' : ''}">${g.label}</button>`
+      `<button type="button" role="tab" aria-selected="${g.key === activeKey ? 'true' : 'false'}" data-cfg-tab="${g.key}" class="cfg-tab${g.key === activeKey ? ' active' : ''}">${g.label}</button>`
     ).join('');
 
     const panelsHTML = groups.map(g =>
       `<div data-cfg-panel="${g.key}" class="space-y-12${g.key === activeKey ? '' : ' hidden'}">${g.html}</div>`
     ).join('');
 
+    // Bandeau d'erreur si les réglages n'ont pas pu être chargés
+    const errorBanner = this._loadFailed ? `
+      <div class="card p-4 mb-6 flex items-center justify-between gap-3"
+           style="border-color: hsl(var(--danger) / 0.4); background: hsl(var(--danger) / 0.08);">
+        <div>
+          <div class="text-sm font-semibold text-danger-text mb-0.5">Impossible de charger tes réglages</div>
+          <div class="text-xs text-text-muted">Pour ne pas écraser tes vrais réglages avec des champs vides,
+          l'enregistrement automatique est suspendu sur cette page.</div>
+        </div>
+        <button id="cfg-retry-load" class="btn btn-secondary shrink-0">Réessayer</button>
+      </div>` : '';
+
     slot.innerHTML = `
-      <nav class="cfg-tabs">${tabsHTML}</nav>
+      ${errorBanner}
+      <nav class="cfg-tabs" role="tablist" aria-label="Sections des réglages">${tabsHTML}</nav>
       <div class="cfg-panels">${panelsHTML}</div>
     `;
+
+    const retryBtn = document.getElementById('cfg-retry-load');
+    if (retryBtn) retryBtn.onclick = () => this.refresh();
 
     // Toggle d'onglet
     slot.querySelectorAll('[data-cfg-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
         const k = btn.dataset.cfgTab;
         localStorage.setItem('cfg-active-tab', k);
-        slot.querySelectorAll('[data-cfg-tab]').forEach(b => b.classList.toggle('active', b.dataset.cfgTab === k));
+        slot.querySelectorAll('[data-cfg-tab]').forEach(b => {
+          const on = b.dataset.cfgTab === k;
+          b.classList.toggle('active', on);
+          b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
         slot.querySelectorAll('[data-cfg-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.cfgPanel !== k));
-        // Scroll en haut du contenu Réglages
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        // Scroll en haut du contenu Réglages (#main est le conteneur qui défile,
+        // window.scrollTo ne faisait rien)
+        const main = document.getElementById('main');
+        if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
       });
     });
 
     this._bind();
+    this._bindPrimaryTest();
     this._bindAuth();
     this._bindMailAccounts();
     this._bindSignature();
@@ -107,19 +157,20 @@ const Config = {
       <section>
         <div class="section-label">Sauvegardes automatiques</div>
         <p class="text-sm text-text-muted mb-4">
-          L'app sauvegarde toutes les semaines tes données critiques
-          (modèles d'emails, signatures, comptes mail, notes Brain, projets
-          clients, mails programmés) dans un fichier local — au cas où la
-          base partagée tomberait ou si tu fais une bourde. Les 12 derniers
-          backups sont conservés (~3 mois d'historique).
+          Chaque semaine, l'app met de côté <b>sur le serveur Triskell</b> une copie
+          de tes éléments importants : modèles de mails, signatures, comptes mail,
+          notes de la Boîte à idées, projets clients, mails programmés et prospects.
+          Les 12 dernières sauvegardes sont gardées (~3 mois d'historique).
+          C'est un filet de secours en cas de pépin sur la base partagée ou de
+          mauvaise manipulation — pour restaurer quelque chose, demande à Claude.
         </p>
         <div class="card p-6 space-y-4">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <div class="text-sm font-semibold">Backups disponibles</div>
-              <div class="text-xs text-text-muted">Stockés dans <code>~/.triskell-command/backups/</code></div>
+              <div class="text-sm font-semibold">Sauvegardes disponibles</div>
+              <div class="text-xs text-text-muted">Conservées sur le serveur Triskell.</div>
             </div>
-            <button id="cfg-backup-now" class="btn btn-secondary text-sm">Faire un backup maintenant</button>
+            <button id="cfg-backup-now" class="btn btn-secondary text-sm">Faire une sauvegarde maintenant</button>
           </div>
           <div id="cfg-backup-list" class="text-xs">
             <div class="text-text-muted italic">Chargement…</div>
@@ -136,22 +187,24 @@ const Config = {
 
     const reload = async () => {
       if (!App.api) {
-        list.innerHTML = '<div class="text-text-muted italic">API indisponible.</div>';
+        list.innerHTML = '<div class="text-text-muted italic">Connexion au serveur indisponible.</div>';
         return;
       }
       try {
         const r = await App.api.backup_list();
-        if (!r || !r.ok || !r.backups || r.backups.length === 0) {
-          list.innerHTML = '<div class="text-text-muted italic">Aucun backup encore. Le premier sera fait dans 7 jours, ou tu peux le forcer maintenant.</div>';
+        if (!r || !r.ok) throw new Error((r && r.error) || 'liste indisponible');
+        if (!r.backups || r.backups.length === 0) {
+          list.innerHTML = '<div class="text-text-muted italic">Aucune sauvegarde encore. La première sera faite dans 7 jours, ou tu peux la lancer maintenant.</div>';
           return;
         }
         list.innerHTML = `
           <table class="w-full">
             <thead>
-              <tr class="text-text-muted text-[10px] uppercase tracking-widest">
-                <th class="text-left py-2 font-semibold">Fichier</th>
+              <tr class="text-text-muted text-[11px] uppercase tracking-widest">
+                <th class="text-left py-2 font-semibold">Sauvegarde</th>
                 <th class="text-left py-2 font-semibold">Date</th>
                 <th class="text-right py-2 font-semibold">Taille</th>
+                <th class="text-right py-2 font-semibold"></th>
               </tr>
             </thead>
             <tbody>
@@ -160,37 +213,102 @@ const Config = {
                   <td class="py-2 font-mono text-text">${this._esc(b.filename)}</td>
                   <td class="py-2 text-text-muted">${(b.ts || '').slice(0, 16).replace('T', ' ')}</td>
                   <td class="py-2 text-right text-text-muted">${Math.round(b.size_bytes / 1024)} Ko</td>
+                  <td class="py-2 text-right">
+                    <button data-backup-preview="${this._esc(b.filename)}"
+                            class="text-[11px] text-accent hover:underline">Voir le contenu</button>
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
         `;
+        list.querySelectorAll('[data-backup-preview]').forEach(pb => {
+          pb.onclick = () => this._openBackupPreview(pb.dataset.backupPreview);
+        });
       } catch (e) {
-        list.innerHTML = `<div class="text-danger">Erreur : ${e.message || e}</div>`;
+        console.warn('backup_list :', e);
+        list.innerHTML = '<div class="text-danger">Impossible de charger la liste des sauvegardes. <button id="cfg-backup-reload" class="underline">Réessayer</button></div>';
+        const rb = document.getElementById('cfg-backup-reload');
+        if (rb) rb.onclick = reload;
       }
     };
 
     btn.onclick = async () => {
       if (!App.api) return;
       btn.disabled = true;
-      btn.textContent = 'Backup en cours…';
+      btn.textContent = 'Sauvegarde en cours…';
       try {
         const r = await App.api.backup_run_now();
         if (r && r.ok) {
-          btn.textContent = '✓ Backup créé';
-          setTimeout(() => { btn.textContent = 'Faire un backup maintenant'; btn.disabled = false; }, 1500);
+          btn.textContent = '✓ Sauvegarde créée';
+          setTimeout(() => { btn.textContent = 'Faire une sauvegarde maintenant'; btn.disabled = false; }, 1500);
           reload();
         } else {
           btn.textContent = '✗ Échec';
-          setTimeout(() => { btn.textContent = 'Faire un backup maintenant'; btn.disabled = false; }, 2500);
+          Toast.error((r && r.error) || 'La sauvegarde a échoué — réessaie dans un instant.');
+          setTimeout(() => { btn.textContent = 'Faire une sauvegarde maintenant'; btn.disabled = false; }, 2500);
         }
       } catch (e) {
-        btn.textContent = `✗ ${e.message || e}`;
-        setTimeout(() => { btn.textContent = 'Faire un backup maintenant'; btn.disabled = false; }, 3000);
+        btn.textContent = '✗ Échec';
+        Toast.friendlyError(e, 'La sauvegarde a échoué — réessaie dans un instant.');
+        setTimeout(() => { btn.textContent = 'Faire une sauvegarde maintenant'; btn.disabled = false; }, 3000);
       }
     };
 
     reload();
+  },
+
+  /** Modale « Voir le contenu » d'une sauvegarde (résumé renvoyé par le serveur). */
+  async _openBackupPreview(filename) {
+    if (!App.api || !filename) return;
+    let r = null;
+    try { r = await App.api.backup_preview({ filename }); }
+    catch (e) { Toast.friendlyError(e, 'Impossible d’ouvrir cette sauvegarde.'); return; }
+    if (!r || !r.ok || !r.summary) {
+      Toast.error((r && r.error) || 'Impossible d’ouvrir cette sauvegarde.');
+      return;
+    }
+    const sm = r.summary;
+    const when = (sm.ts || '').slice(0, 16).replace('T', ' à ');
+    const line = (label, val) => `
+      <div class="flex items-center justify-between py-1.5 border-b border-border last:border-0">
+        <span class="text-text-secondary">${label}</span>
+        <span class="font-semibold">${val}</span>
+      </div>`;
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[220] flex items-center justify-center p-4';
+    overlay.style.background = 'rgba(15,23,42,0.6)';
+    overlay.style.backdropFilter = 'blur(6px)';
+    overlay.innerHTML = `
+      <div class="bg-surface rounded-2xl shadow-hero w-full max-w-md border border-border animate-slide-up overflow-hidden">
+        <div class="px-6 pt-5 pb-3 border-b border-border flex items-start justify-between gap-3">
+          <div>
+            <div class="hero-kicker mb-1">SAUVEGARDE</div>
+            <h3 class="text-base font-bold">${when ? `Faite le ${this._esc(when)}` : 'Contenu'}</h3>
+          </div>
+          <button id="bkp-close" title="Fermer" aria-label="Fermer"
+                  class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
+        </div>
+        <div class="px-6 py-4 text-sm">
+          ${line('Modèles de mails', sm.templates_count ?? 0)}
+          ${line('Signatures', sm.signatures_count ?? 0)}
+          ${line('Comptes mail', sm.accounts_count ?? 0)}
+          ${line('Notes de la Boîte à idées', sm.brain_notes_count ?? 0)}
+          ${line('Mails programmés', sm.scheduled_mails_count ?? 0)}
+          ${line('Réglages de l’app', sm.has_settings ? '✓ inclus' : '—')}
+          ${line('Prénoms affichés', sm.has_display_names ? '✓ inclus' : '—')}
+          <p class="text-[11px] text-text-muted mt-3 mb-0">
+            Pour restaurer un de ces éléments, demande à Claude en précisant la date de la sauvegarde.
+          </p>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const close = () => { document.removeEventListener('keydown', esc); overlay.remove(); };
+    const esc = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', esc);
+    overlay.querySelector('#bkp-close').onclick = close;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   },
 
   _renderDemoMode() {
@@ -208,7 +326,7 @@ const Config = {
           ${isOn ? `
             <div class="flex items-start gap-4">
               <div class="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0"
-                   style="background: linear-gradient(135deg, #ef4444, #f97316);">
+                   style="background: linear-gradient(135deg, hsl(var(--danger)), hsl(var(--warning)));">
                 <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
                   <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                 </svg>
@@ -238,7 +356,7 @@ const Config = {
                 </div>
                 <button id="demo-mode-on"
                         class="btn btn-primary"
-                        style="background: linear-gradient(135deg, #ef4444, #f97316); border: none;">
+                        style="background: linear-gradient(135deg, hsl(var(--danger)), hsl(var(--warning))); border: none;">
                   Activer le mode démo
                 </button>
                 <div class="text-[11px] text-text-muted mt-2">L'app se recharge automatiquement après activation.</div>
@@ -253,11 +371,16 @@ const Config = {
   _bindDemoMode() {
     const onBtn  = document.getElementById('demo-mode-on');
     const offBtn = document.getElementById('demo-mode-off');
+    // Si le module n’a pas pu être chargé, on l’explique au lieu de rester muet
+    const moduleMissing = () =>
+      Toast.error('Le mode démo n’a pas pu être chargé. Recharge la page (Ctrl+R) puis réessaie.');
     if (onBtn) onBtn.onclick = () => {
-      if (typeof DemoMode !== 'undefined') DemoMode.setOn(true);
+      if (typeof DemoMode !== 'undefined' && DemoMode.setOn) DemoMode.setOn(true);
+      else moduleMissing();
     };
     if (offBtn) offBtn.onclick = () => {
-      if (typeof DemoMode !== 'undefined') DemoMode.setOn(false);
+      if (typeof DemoMode !== 'undefined' && DemoMode.setOn) DemoMode.setOn(false);
+      else moduleMissing();
     };
   },
 
@@ -268,7 +391,7 @@ const Config = {
     if (connected) {
       return `
         <section>
-          <div class="section-label">Connexion Supabase</div>
+          <div class="section-label">Connexion à la base partagée</div>
           <p class="text-sm text-text-muted mb-4">
             Ta session vers la base partagée Triskell. Indispensable pour le Cockpit,
             Brouillons, Réponses, Projets clients, etc.
@@ -279,7 +402,7 @@ const Config = {
                           flex items-center justify-center font-bold text-lg">✓</div>
               <div>
                 <div class="text-sm font-semibold">Connecté</div>
-                <div class="text-xs text-text-muted">${this._escape(displayName) || 'Compte Supabase actif'}</div>
+                <div class="text-xs text-text-muted">${this._escape(displayName) || 'Compte connecté'}</div>
               </div>
             </div>
             <button id="cfg-auth-signout" class="btn btn-secondary">Se déconnecter</button>
@@ -288,22 +411,22 @@ const Config = {
       `;
     }
     const reasonMsg = reason === 'supabase_not_configured'
-      ? "Supabase n'est pas configuré (manque url/anon_key dans settings.json)."
+      ? "La connexion à la base n’est pas configurée sur le serveur — demande à Claude."
       : "Aucune session active. Connecte-toi pour activer les pages qui en ont besoin.";
     return `
       <section>
-        <div class="section-label">Connexion Supabase</div>
+        <div class="section-label">Connexion à la base partagée</div>
         <p class="text-sm text-text-muted mb-4">${reasonMsg}</p>
         <div class="card p-5 space-y-3">
           <div>
-            <label class="block text-xs font-medium text-text-secondary mb-1.5">Email</label>
+            <label for="cfg-auth-email" class="block text-xs font-medium text-text-secondary mb-1.5">Email</label>
             <input type="email" id="cfg-auth-email"
                    placeholder="jordan@triskell-studio.fr"
                    class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border
                           focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
           </div>
           <div>
-            <label class="block text-xs font-medium text-text-secondary mb-1.5">Mot de passe</label>
+            <label for="cfg-auth-password" class="block text-xs font-medium text-text-secondary mb-1.5">Mot de passe</label>
             <input type="password" id="cfg-auth-password"
                    placeholder="••••••••"
                    class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border
@@ -320,32 +443,62 @@ const Config = {
 
   _bindAuth() {
     const signinBtn = document.getElementById('cfg-auth-signin');
-    if (signinBtn) signinBtn.onclick = async () => {
-      const email = document.getElementById('cfg-auth-email').value.trim();
-      const password = document.getElementById('cfg-auth-password').value;
+    const emailEl = document.getElementById('cfg-auth-email');
+    const pwdEl = document.getElementById('cfg-auth-password');
+
+    const doSignIn = async () => {
+      if (!App.api || !signinBtn) return;
+      const email = emailEl ? emailEl.value.trim() : '';
+      const password = pwdEl ? pwdEl.value : '';
       const status = document.getElementById('cfg-auth-status');
+      if (!status) return;
       if (!email || !password) {
         status.textContent = 'Email et mot de passe requis.';
         status.className = 'text-xs text-danger';
         return;
       }
+      signinBtn.disabled = true;
       status.textContent = 'Connexion…';
       status.className = 'text-xs text-text-muted';
-      const r = await App.api.auth_sign_in({ email, password });
-      if (r && r.ok) {
-        status.textContent = 'Connecté. Rechargement…';
-        status.className = 'text-xs text-success';
-        setTimeout(() => this.refresh(), 600);
-      } else {
-        status.textContent = `Échec : ${(r && r.error) || 'inconnu'}`;
+      try {
+        const r = await App.api.auth_sign_in({ email, password });
+        if (r && r.ok) {
+          status.textContent = 'Connecté. Rechargement…';
+          status.className = 'text-xs text-success';
+          setTimeout(() => this.refresh(), 600);
+          return;
+        }
+        const raw = (r && r.error) || '';
+        console.warn('auth_sign_in :', raw);
+        status.textContent = /invalid|credential|password|grant/i.test(raw)
+          ? '✗ Email ou mot de passe incorrect.'
+          : '✗ Connexion impossible — réessaie dans un instant.';
         status.className = 'text-xs text-danger';
+      } catch (e) {
+        // Plus de « Connexion… » figé : on vide le statut et on explique
+        status.textContent = '';
+        status.className = 'text-xs text-text-muted';
+        Toast.friendlyError(e, 'Connexion impossible — vérifie ta connexion internet et réessaie.');
+      } finally {
+        if (signinBtn) signinBtn.disabled = false;
       }
     };
 
+    if (signinBtn) signinBtn.onclick = doSignIn;
+    // Entrée dans le mot de passe (ou l’email) = se connecter
+    [emailEl, pwdEl].forEach(el => {
+      if (!el) return;
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignIn(); });
+    });
+
     const signoutBtn = document.getElementById('cfg-auth-signout');
     if (signoutBtn) signoutBtn.onclick = async () => {
-      if (!confirm('Se déconnecter de Supabase ?\n\nLes pages Cockpit, Brouillons, Réponses, etc. ne fonctionneront plus tant que tu ne te reconnectes pas.')) return;
-      await App.api.auth_sign_out();
+      const ok = await Dialog.confirm(
+        'Les pages Cockpit, Brouillons, Réponses, etc. ne fonctionneront plus tant que tu ne te reconnectes pas.',
+        { title: 'Se déconnecter ?', okLabel: 'Se déconnecter', danger: true });
+      if (!ok) return;
+      try { await App.api.auth_sign_out(); }
+      catch (e) { Toast.friendlyError(e, 'La déconnexion a échoué — réessaie.'); return; }
       this.refresh();
     };
   },
@@ -386,13 +539,25 @@ const Config = {
   async _refreshSignaturesList() {
     const listEl = document.getElementById('cfg-sig-list');
     if (!listEl || !App.api) return;
-    let signatures = [], accounts = [];
+    let signatures = [], accounts = [], loadError = false;
     try {
       const sr = await App.api.signatures_list();
       if (sr && sr.ok) signatures = sr.signatures || [];
+      else loadError = true;
       const ar = await App.api.mail_accounts_list();
       if (ar && ar.ok) accounts = ar.accounts || [];
-    } catch (e) {}
+    } catch (e) {
+      console.warn('signatures_list :', e);
+      loadError = true;
+    }
+    if (loadError) {
+      // Erreur de chargement ≠ liste vide : on le dit et on propose de réessayer
+      listEl.innerHTML = `<div class="text-sm text-danger">Impossible de charger tes signatures.
+        <button id="cfg-sig-retry" class="underline">Réessayer</button></div>`;
+      const rb = document.getElementById('cfg-sig-retry');
+      if (rb) rb.onclick = () => this._refreshSignaturesList();
+      return;
+    }
     if (!signatures.length) {
       listEl.innerHTML = `<div class="text-sm text-text-muted">Aucune signature configurée.</div>`;
       return;
@@ -404,8 +569,8 @@ const Config = {
     listEl.innerHTML = signatures.map(s => {
       const accIds = s.account_ids || [];
       const accBadges = accIds.length
-        ? accIds.map(id => `<span class="text-[10px] px-2 py-0.5 rounded-full bg-accent/12 text-accent font-semibold">${this._escape(accLabel(id))}</span>`).join(' ')
-        : `<span class="text-[10px] px-2 py-0.5 rounded-full bg-text-muted/10 text-text-muted">Toutes les adresses</span>`;
+        ? accIds.map(id => `<span class="text-[11px] px-2 py-0.5 rounded-full bg-accent/12 text-accent font-semibold">${this._escape(accLabel(id))}</span>`).join(' ')
+        : `<span class="text-[11px] px-2 py-0.5 rounded-full bg-text-muted/10 text-text-muted">Toutes les adresses</span>`;
       return `
         <div class="card p-4">
           <div class="flex items-start justify-between gap-3 mb-2">
@@ -433,10 +598,15 @@ const Config = {
       b.onclick = async () => {
         const id = b.dataset.sigRm;
         const sig = signatures.find(x => x.id === id);
-        if (!confirm(`Supprimer la signature "${sig && sig.name}" ?`)) return;
-        const r = await App.api.signature_remove({ id });
-        if (r && r.ok) this._refreshSignaturesList();
-        else alert('Échec : ' + ((r && r.error) || 'inconnu'));
+        const name = (sig && sig.name) || 'sans nom';
+        const ok = await Dialog.confirm(`Supprimer la signature « ${name} » ?`,
+          { title: 'Supprimer cette signature', okLabel: 'Supprimer', danger: true });
+        if (!ok) return;
+        try {
+          const r = await App.api.signature_remove({ id });
+          if (r && r.ok) { Toast.success('Signature supprimée.'); this._refreshSignaturesList(); }
+          else Toast.error('La suppression a échoué : ' + ((r && r.error) || 'erreur inconnue'));
+        } catch (e) { Toast.friendlyError(e, 'La suppression a échoué.'); }
       };
     });
   },
@@ -461,7 +631,7 @@ const Config = {
             <div class="hero-kicker mb-0.5">${existing ? 'MODIFIER' : 'NOUVELLE'}</div>
             <h3 class="text-base font-bold">Signature mail</h3>
           </div>
-          <button id="se-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none">×</button>
+          <button id="se-close" title="Fermer" aria-label="Fermer" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none">×</button>
         </div>
 
         <div class="flex-1 overflow-y-auto px-6 py-5 space-y-4">
@@ -474,7 +644,7 @@ const Config = {
 
           <!-- Comptes attribués -->
           <div>
-            <label class="block text-[11px] font-medium text-text-secondary mb-1">Adresses à laquelle cette signature est attribuée</label>
+            <label class="block text-[11px] font-medium text-text-secondary mb-1">Adresses auxquelles cette signature est attribuée</label>
             <div class="text-[11px] text-text-muted mb-2">Si rien n'est coché, cette signature est disponible pour <b>toutes</b> les adresses (utile pour une signature par défaut).</div>
             <div class="flex flex-wrap gap-2">
               ${accounts.map(a => `
@@ -501,12 +671,12 @@ const Config = {
             <div id="se-html-zone" class="hidden">
               <div class="grid grid-cols-1 md:grid-cols-2 gap-3" style="min-height: 240px;">
                 <div class="flex flex-col">
-                  <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">Code HTML</div>
+                  <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-1">Code HTML</div>
                   <textarea id="se-body-html" rows="10" placeholder='<p>Cordialement,<br><strong>Jordan</strong></p>'
                             class="flex-1 px-3 py-2 text-xs rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-mono leading-relaxed resize-y" style="min-height: 200px;">${this._escape(existing?.body_html || '')}</textarea>
                 </div>
                 <div class="flex flex-col">
-                  <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">Aperçu (rendu mail)</div>
+                  <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-1">Aperçu (rendu mail)</div>
                   <iframe id="se-preview" sandbox="allow-same-origin"
                           class="flex-1 w-full rounded-lg border border-border bg-white" style="min-height: 200px;"></iframe>
                 </div>
@@ -525,9 +695,21 @@ const Config = {
     `;
     document.body.appendChild(overlay);
     const close = () => overlay.remove();
-    overlay.querySelector('#se-close').onclick = close;
-    overlay.querySelector('#se-cancel').onclick = close;
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    // Garde anti-perte de saisie : un clic à côté ou sur × / Annuler avec des
+    // modifications en cours demande confirmation avant de tout jeter.
+    let dirty = false;
+    const requestClose = async () => {
+      if (dirty) {
+        const ok = await Dialog.confirm(
+          'Cette signature a des modifications non enregistrées. Fermer quand même ?',
+          { title: 'Modifications non enregistrées', okLabel: 'Fermer sans enregistrer', danger: true });
+        if (!ok) return;
+      }
+      close();
+    };
+    overlay.querySelector('#se-close').onclick = requestClose;
+    overlay.querySelector('#se-cancel').onclick = requestClose;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) requestClose(); });
 
     const textTa = overlay.querySelector('#se-body-text');
     const htmlTa = overlay.querySelector('#se-body-html');
@@ -566,6 +748,13 @@ const Config = {
       timer = setTimeout(() => this._renderSigPreview(iframe, htmlTa.value), 200);
     });
 
+    // Suivi des modifications (pour la garde anti-perte de saisie)
+    const markDirty = () => { dirty = true; };
+    overlay.querySelector('#se-name').addEventListener('input', markDirty);
+    textTa.addEventListener('input', markDirty);
+    htmlTa.addEventListener('input', markDirty);
+    overlay.querySelectorAll('.se-acc').forEach(c => c.addEventListener('change', markDirty));
+
     overlay.querySelector('#se-save').onclick = async () => {
       const status = overlay.querySelector('#se-status');
       const name = overlay.querySelector('#se-name').value.trim();
@@ -583,15 +772,22 @@ const Config = {
         body_html: htmlTa.value,
         account_ids,
       };
-      status.textContent = 'Sauvegarde…';
+      status.textContent = 'Enregistrement…';
       status.className = 'text-xs text-text-muted';
-      const r = await App.api.signature_save({ signature: sigData });
-      if (r && r.ok) {
-        status.textContent = '✓ Sauvegardé.';
-        status.className = 'text-xs text-success';
-        setTimeout(() => { close(); this._refreshSignaturesList(); }, 600);
-      } else {
-        status.textContent = `✗ ${(r && r.error) || 'Erreur'}`;
+      try {
+        const r = await App.api.signature_save({ signature: sigData });
+        if (r && r.ok) {
+          status.textContent = '✓ Enregistré.';
+          status.className = 'text-xs text-success';
+          dirty = false;
+          setTimeout(() => { close(); this._refreshSignaturesList(); }, 600);
+        } else {
+          status.textContent = `✗ Enregistrement impossible : ${(r && r.error) || 'erreur inconnue'}`;
+          status.className = 'text-xs text-danger';
+        }
+      } catch (e) {
+        console.warn('signature_save :', e);
+        status.textContent = '✗ Enregistrement impossible — vérifie ta connexion et réessaie.';
         status.className = 'text-xs text-danger';
       }
     };
@@ -636,9 +832,13 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
     }
     let r;
     try { r = await App.api.mail_accounts_list(); }
-    catch (e) { r = null; }
+    catch (e) { console.warn('mail_accounts_list :', e); r = null; }
     if (!r || !r.ok) {
-      listEl.innerHTML = `<div class="text-xs text-danger">Erreur : ${(r && r.error) || 'inconnu'}</div>`;
+      if (r && r.error) console.warn('mail_accounts_list :', r.error);
+      listEl.innerHTML = `<div class="text-xs text-danger">Impossible de charger les adresses.
+        <button id="cfg-mail-accounts-retry" class="underline">Réessayer</button></div>`;
+      const rb = document.getElementById('cfg-mail-accounts-retry');
+      if (rb) rb.onclick = () => this._bindMailAccounts();
       return;
     }
     const accounts = r.accounts || [];
@@ -647,29 +847,51 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
     } else {
       listEl.innerHTML = accounts.map(a => this._mailAccountRow(a)).join('');
     }
-    // Bind suppression
+    // Bind suppression — on affiche l’adresse mail, pas l’identifiant interne
     listEl.querySelectorAll('[data-mail-remove]').forEach(btn => {
       btn.onclick = async () => {
         const aid = btn.dataset.mailRemove;
-        if (!confirm(`Supprimer l'adresse "${aid}" ?\n\nLa boîte ne sera plus consultée et tu ne pourras plus envoyer depuis cette adresse.`)) return;
-        const resp = await App.api.mail_account_remove({ id: aid });
-        if (resp && resp.ok) this._bindMailAccounts();
-        else alert(`Échec : ${resp && resp.error || 'inconnu'}`);
+        const acc = accounts.find(x => x.id === aid);
+        const mail = (acc && (acc.from_email || acc.label)) || aid;
+        const ok = await Dialog.confirm(
+          `Supprimer l’adresse « ${mail} » ? La boîte ne sera plus consultée et tu ne pourras plus envoyer depuis cette adresse.`,
+          { title: 'Supprimer cette adresse', okLabel: 'Supprimer', danger: true });
+        if (!ok) return;
+        try {
+          const resp = await App.api.mail_account_remove({ id: aid });
+          if (resp && resp.ok) { Toast.success('Adresse supprimée.'); this._bindMailAccounts(); }
+          else Toast.error('La suppression a échoué : ' + ((resp && resp.error) || 'erreur inconnue'));
+        } catch (e) { Toast.friendlyError(e, 'La suppression a échoué.'); }
       };
     });
-    // Bind test connexion
+    // Bind modification — rouvre le formulaire pré-rempli
+    listEl.querySelectorAll('[data-mail-edit]').forEach(btn => {
+      btn.onclick = () => {
+        const acc = accounts.find(x => x.id === btn.dataset.mailEdit);
+        if (acc) this._openMailAccountForm(acc);
+      };
+    });
+    // Bind test connexion (résultat traduit en français)
     listEl.querySelectorAll('[data-mail-test]').forEach(btn => {
       btn.onclick = async () => {
         const aid = btn.dataset.mailTest;
         const status = document.getElementById(`mail-test-${aid}`);
+        if (!status) return;
+        btn.disabled = true;
         status.textContent = 'Test en cours…';
-        const resp = await App.api.mail_account_test({ id: aid });
-        if (resp && resp.ok) {
-          status.textContent = `✓ SMTP + IMAP OK`;
-          status.className = 'text-xs text-success';
-        } else {
-          status.textContent = `✗ ${(resp && resp.error) || 'échec'}`;
+        // Reset de la couleur (sinon le rouge d’un échec précédent reste)
+        status.className = 'text-xs text-text-muted';
+        try {
+          const resp = await App.api.mail_account_test({ id: aid });
+          const m = this._mailTestMessage(resp);
+          status.textContent = m.text;
+          status.className = `text-xs ${m.ok ? 'text-success' : 'text-danger'}`;
+        } catch (e) {
+          console.warn('mail_account_test :', e);
+          status.textContent = '✗ Le test n’a pas pu être lancé — vérifie ta connexion et réessaie.';
           status.className = 'text-xs text-danger';
+        } finally {
+          btn.disabled = false;
         }
       };
     });
@@ -687,17 +909,18 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
               <div class="text-sm font-bold truncate">${this._escape(a.label)}</div>
-              ${primary ? '<span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-accent/15 text-accent">Principal</span>' : ''}
-              ${!pwdOk ? '<span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-warning/15 text-warning">Mot de passe manquant</span>' : ''}
+              ${primary ? '<span class="text-[11px] font-bold uppercase px-1.5 py-0.5 rounded bg-accent/15 text-accent">Principal</span>' : ''}
+              ${!pwdOk ? '<span class="text-[11px] font-bold uppercase px-1.5 py-0.5 rounded bg-warning/15 text-warning">Mot de passe manquant</span>' : ''}
             </div>
             <div class="text-xs text-text-muted truncate">${this._escape(a.from_email)}</div>
             <div class="text-[11px] text-text-muted mt-1">
-              SMTP ${this._escape(a.smtp_host)}:${a.smtp_port} · IMAP ${this._escape(a.imap_host)}:${a.imap_port}
+              Envoi ${this._escape(a.smtp_host)}:${a.smtp_port} · Réception ${this._escape(a.imap_host)}:${a.imap_port}
             </div>
             <div id="mail-test-${this._escape(a.id)}" class="text-xs text-text-muted mt-2"></div>
           </div>
           <div class="flex flex-col gap-1.5">
             <button data-mail-test="${this._escape(a.id)}" class="btn btn-secondary text-xs px-3 py-1">Tester</button>
+            ${primary ? '' : `<button data-mail-edit="${this._escape(a.id)}" class="btn btn-secondary text-xs px-3 py-1">Modifier</button>`}
             ${primary ? '' : `<button data-mail-remove="${this._escape(a.id)}" class="btn btn-secondary text-xs px-3 py-1 text-danger">Supprimer</button>`}
           </div>
         </div>
@@ -717,34 +940,40 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
           <h3 class="text-lg font-bold">Adresse mail secondaire</h3>
         </div>
         <div class="px-6 py-5 space-y-3 max-h-[70vh] overflow-y-auto">
-          ${this._mailField('id',           'Identifiant interne (ex: lagriffe)', existing?.id || '', 'text', existing != null)}
-          ${this._mailField('label',        'Nom affiché',                        existing?.label || '')}
+          ${this._mailField('label',        'Nom affiché dans l’app',             existing?.label || '')}
           ${this._mailField('from_email',   'Adresse mail (envoi & réception)',   existing?.from_email || '', 'email')}
-          ${this._mailField('from_name',    'Signature expéditeur (ex: Lagriffe Studio)', existing?.from_name || '')}
+          ${this._mailField('from_name',    'Nom d’expéditeur (ex : Lagriffe Studio)', existing?.from_name || '')}
           <div class="grid grid-cols-2 gap-3">
-            ${this._mailField('smtp_host',  'SMTP host',  existing?.smtp_host || 'smtp.ionos.fr')}
-            ${this._mailField('smtp_port',  'SMTP port',  existing?.smtp_port || 587, 'number')}
+            ${this._mailField('smtp_host',  'Serveur d’envoi (SMTP)',  existing?.smtp_host || 'smtp.ionos.fr')}
+            ${this._mailField('smtp_port',  'Port SMTP',  existing?.smtp_port || 587, 'number')}
           </div>
-          ${this._mailField('smtp_user',    'SMTP user (souvent = adresse mail)',  existing?.smtp_user || existing?.from_email || '')}
-          ${this._mailField('smtp_password', existing && existing._has_smtp_pwd ? "SMTP mot de passe (laisser vide pour conserver l'actuel)" : 'SMTP mot de passe', '', 'password')}
+          ${this._mailField('smtp_user',    'Identifiant SMTP (souvent l’adresse mail)',  existing?.smtp_user || existing?.from_email || '')}
+          ${this._mailField('smtp_password', existing && existing._has_smtp_pwd ? 'Mot de passe SMTP (laisser vide pour garder l’actuel)' : 'Mot de passe SMTP', '', 'password')}
           <div class="grid grid-cols-2 gap-3">
-            ${this._mailField('imap_host',  'IMAP host',  existing?.imap_host || 'imap.ionos.fr')}
-            ${this._mailField('imap_port',  'IMAP port',  existing?.imap_port || 993, 'number')}
+            ${this._mailField('imap_host',  'Serveur de réception (IMAP)',  existing?.imap_host || 'imap.ionos.fr')}
+            ${this._mailField('imap_port',  'Port IMAP',  existing?.imap_port || 993, 'number')}
           </div>
-          ${this._mailField('imap_user',    'IMAP user (souvent = adresse mail)',  existing?.imap_user || existing?.from_email || '')}
-          ${this._mailField('imap_password', existing && existing._has_imap_pwd ? "IMAP mot de passe (laisser vide pour conserver l'actuel)" : 'IMAP mot de passe', '', 'password')}
+          ${this._mailField('imap_user',    'Identifiant IMAP (souvent l’adresse mail)',  existing?.imap_user || existing?.from_email || '')}
+          ${this._mailField('imap_password', existing && existing._has_imap_pwd ? 'Mot de passe IMAP (laisser vide pour garder l’actuel)' : 'Mot de passe IMAP', '', 'password')}
+          <input type="hidden" data-mail-field="id" value="${this._escape(existing?.id || '')}"/>
           <div id="mail-form-status" class="text-xs text-text-muted"></div>
         </div>
-        <div class="px-6 py-4 border-t border-border flex justify-end gap-2">
-          <button id="mail-form-cancel" class="btn btn-secondary">Annuler</button>
-          <button id="mail-form-save"   class="btn btn-primary">Enregistrer</button>
+        <div class="px-6 py-4 border-t border-border flex items-center justify-between gap-2 flex-wrap">
+          <button id="mail-form-test" class="btn btn-secondary">Tester avant d’enregistrer</button>
+          <div class="flex gap-2">
+            <button id="mail-form-cancel" class="btn btn-secondary">Annuler</button>
+            <button id="mail-form-save"   class="btn btn-primary">Enregistrer</button>
+          </div>
         </div>
       </div>
     `;
     document.body.appendChild(overlay);
     const close = () => overlay.remove();
     document.getElementById('mail-form-cancel').onclick = close;
-    document.getElementById('mail-form-save').onclick = async () => {
+
+    // Rassemble les champs du formulaire en un compte. L’identifiant interne
+    // n’est plus demandé : il est dérivé automatiquement de l’adresse mail.
+    const gatherAcc = () => {
       const acc = {};
       ['id','label','from_email','from_name','smtp_host','smtp_user','smtp_password',
        'imap_host','imap_user','imap_password'].forEach(k => {
@@ -753,36 +982,103 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
       });
       acc.smtp_port = parseInt(overlay.querySelector('[data-mail-field="smtp_port"]').value, 10) || 587;
       acc.imap_port = parseInt(overlay.querySelector('[data-mail-field="imap_port"]').value, 10) || 993;
+      if (!acc.id) acc.id = this._slugFromEmail(acc.from_email);
+      return acc;
+    };
+
+    // Tester avant d'enregistrer — vrai test SMTP+IMAP sur les valeurs saisies.
+    const testBtn = document.getElementById('mail-form-test');
+    if (testBtn) testBtn.onclick = async () => {
+      if (!App.api) return;
+      const status = document.getElementById('mail-form-status');
+      if (!status) return;
+      const acc = gatherAcc();
+      if (!acc.from_email || !acc.from_email.includes('@')) {
+        status.textContent = 'Renseigne d’abord l’adresse mail.';
+        status.className = 'text-xs text-danger';
+        return;
+      }
+      // Les mots de passe déjà enregistrés ne redescendent jamais dans le
+      // navigateur : si un champ mot de passe est laissé vide en modification,
+      // le test porte sur la version déjà enregistrée du compte.
+      const keepsPwd = existing && (
+        (!acc.smtp_password && existing._has_smtp_pwd) ||
+        (!acc.imap_password && existing._has_imap_pwd));
+      testBtn.disabled = true;
+      const oldTxt = testBtn.textContent;
+      testBtn.textContent = 'Test en cours…';
+      status.textContent = keepsPwd
+        ? 'Test en cours (avec les réglages déjà enregistrés, mots de passe non ressaisis)…'
+        : 'Test en cours…';
+      status.className = 'text-xs text-text-muted';
+      try {
+        const r = await App.api.mail_account_test(keepsPwd ? { id: existing.id } : { account: acc });
+        const m = this._mailTestMessage(r);
+        status.textContent = m.text;
+        status.className = `text-xs ${m.ok ? 'text-success' : 'text-danger'}`;
+      } catch (e) {
+        console.warn('mail_account_test (formulaire) :', e);
+        status.textContent = '✗ Le test n’a pas pu être lancé — vérifie ta connexion et réessaie.';
+        status.className = 'text-xs text-danger';
+      } finally {
+        testBtn.disabled = false;
+        testBtn.textContent = oldTxt;
+      }
+    };
+
+    const saveBtn = document.getElementById('mail-form-save');
+    saveBtn.onclick = async () => {
+      const acc = gatherAcc();
       const status = document.getElementById('mail-form-status');
       // Validation basique
-      if (!acc.id || !/^[a-z0-9_-]+$/.test(acc.id)) {
-        status.textContent = 'Identifiant invalide (lettres minuscules, chiffres, - et _).';
-        status.className = 'text-xs text-danger'; return;
-      }
       if (!acc.from_email || !acc.from_email.includes('@')) {
         status.textContent = 'Adresse mail invalide.';
         status.className = 'text-xs text-danger'; return;
       }
+      if (!acc.id || !/^[a-z0-9_-]+$/.test(acc.id)) {
+        status.textContent = 'Adresse mail invalide (impossible d’en déduire un identifiant).';
+        status.className = 'text-xs text-danger'; return;
+      }
+      saveBtn.disabled = true;
       status.textContent = 'Enregistrement…';
       status.className = 'text-xs text-text-muted';
-      const r = await App.api.mail_account_save({ account: acc });
-      if (r && r.ok) {
-        status.textContent = 'Enregistré.';
-        status.className = 'text-xs text-success';
-        setTimeout(() => { close(); this._bindMailAccounts(); }, 400);
-      } else {
-        status.textContent = `Échec : ${(r && r.error) || 'inconnu'}`;
+      try {
+        const r = await App.api.mail_account_save({ account: acc });
+        if (r && r.ok) {
+          status.textContent = '✓ Enregistré.';
+          status.className = 'text-xs text-success';
+          setTimeout(() => { close(); this._bindMailAccounts(); }, 400);
+        } else {
+          status.textContent = `Enregistrement impossible : ${(r && r.error) || 'erreur inconnue'}`;
+          status.className = 'text-xs text-danger';
+          saveBtn.disabled = false;
+        }
+      } catch (e) {
+        console.warn('mail_account_save :', e);
+        status.textContent = 'Enregistrement impossible — vérifie ta connexion et réessaie.';
         status.className = 'text-xs text-danger';
+        saveBtn.disabled = false;
       }
     };
   },
 
+  /** Identifiant interne dérivé de l’adresse mail :
+   *  minuscules, sans accents, tout le reste remplacé par des tirets. */
+  _slugFromEmail(email) {
+    return String(email || '')
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  },
+
   _mailField(name, label, value, type = 'text', readonly = false) {
     const safeVal = String(value ?? '').replace(/"/g, '&quot;');
+    const fid = `cfg-mf-${name}`;
     return `
       <div>
-        <label class="block text-xs font-medium text-text-secondary mb-1">${this._escape(label)}</label>
-        <input data-mail-field="${name}" type="${type}" value="${safeVal}" ${readonly ? 'readonly' : ''}
+        <label for="${fid}" class="block text-xs font-medium text-text-secondary mb-1">${this._escape(label)}</label>
+        <input id="${fid}" data-mail-field="${name}" type="${type}" value="${safeVal}" ${readonly ? 'readonly' : ''}
                class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent ${readonly ? 'opacity-60' : ''}"/>
       </div>
     `;
@@ -791,24 +1087,24 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
   _renderAppearance(s) {
     const cur = s ? s.appearance_mode : 'mid';
     const modes = [
-      { key: 'light', label: 'Claire',        desc: 'Surfaces blanches, ambiance Apple-light.' },
-      { key: 'mid',   label: 'Intermédiaire', desc: 'Graphite chaud, sweet spot reposant.' },
-      { key: 'dark',  label: 'Sombre',        desc: 'Cockpit nuit, pour la concentration.' },
+      { key: 'light', label: 'Claire',        desc: 'Surfaces blanches, lumineux et épuré.' },
+      { key: 'mid',   label: 'Intermédiaire', desc: 'Graphite chaud, équilibré et reposant.' },
+      { key: 'dark',  label: 'Sombre',        desc: 'Ambiance nuit, pour la concentration.' },
     ];
     return `
       <section>
         <div class="section-label">Apparence</div>
         <p class="text-sm text-text-muted mb-4">
-          Trois ambiances. Tu peux aussi cycler avec Ctrl+T.
+          Trois ambiances. Tu peux aussi en changer à tout moment avec Alt+T.
         </p>
-        <div class="grid grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           ${modes.map(m => {
             const active = m.key === cur;
             return `
               <button data-theme-mode="${m.key}"
                       class="card p-5 text-left transition-all hover:translate-y-[-1px]"
                       style="${active ? 'border-color: hsl(var(--accent)); border-width: 2px; background: hsl(var(--accent) / 0.06);' : ''}">
-                <div class="text-[10px] font-bold tracking-widest mb-1
+                <div class="text-[11px] font-bold tracking-widest mb-1
                             ${active ? 'text-accent' : 'text-text-muted'}">
                   ${m.label.toUpperCase()}
                 </div>
@@ -849,7 +1145,7 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
       <section>
         <div class="section-label">Services IA</div>
         <p class="text-sm text-text-muted mb-4">
-          Tes clés sont stockées localement et jamais envoyées hors de l'app.
+          Tes clés sont enregistrées dans ta base privée Triskell (partagée avec Thomas), jamais ailleurs.
           Bouton « Tester » pour vérifier que la clé fonctionne réellement.
         </p>
         <div class="card p-6 space-y-5">
@@ -859,7 +1155,7 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
               <div data-ai-row="${p.id}">
                 <label class="block text-sm font-semibold mb-1">
                   ${this._esc(p.label)}
-                  ${p.recommended ? '<span class="ml-2 text-[10px] bg-success/15 text-success px-2 py-0.5 rounded-full font-bold">RECOMMANDÉ</span>' : ''}
+                  ${p.recommended ? '<span class="ml-2 text-[11px] bg-success/15 text-success px-2 py-0.5 rounded-full font-bold">RECOMMANDÉ</span>' : ''}
                 </label>
                 <div class="flex gap-2 items-stretch">
                   <input type="password"
@@ -939,7 +1235,7 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
         const msg = document.querySelector(`[data-ai-msg="${pid}"]`);
         const v = (input?.value || '').trim();
         if (!v) {
-          msg.textContent = '✗ Colle une clé d\'abord.';
+          msg.textContent = '✗ Colle une clé d’abord.';
           msg.className = 'text-xs mt-1.5 min-h-[18px] text-danger';
           return;
         }
@@ -953,16 +1249,22 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
             path: ['ai', 'api_keys', pid], value: v,
           });
           if (r && r.ok !== false) {
-            msg.textContent = '✓ Clé enregistrée. Pense à tester avec le bouton « Tester ».';
+            // Le rappel « Tester » n'a de sens que si la ligne a ce bouton
+            const hasTest = !!document.querySelector(`[data-ai-test="${pid}"]`);
+            msg.textContent = hasTest
+              ? '✓ Clé enregistrée. Pense à tester avec le bouton « Tester ».'
+              : '✓ Clé enregistrée.';
             msg.className = 'text-xs mt-1.5 min-h-[18px] text-success';
             input.value = '';
             input.placeholder = '(clé enregistrée — tape pour remplacer)';
           } else {
-            msg.textContent = '✗ ' + ((r && r.error) || 'Erreur');
+            console.warn('save_setting (clé IA) :', r && r.error);
+            msg.textContent = '✗ Enregistrement impossible : ' + ((r && r.error) || 'erreur inconnue');
             msg.className = 'text-xs mt-1.5 min-h-[18px] text-danger';
           }
         } catch (e) {
-          msg.textContent = '✗ ' + (e && e.message || e);
+          console.warn('save_setting (clé IA) :', e);
+          msg.textContent = '✗ Enregistrement impossible — vérifie ta connexion et réessaie.';
           msg.className = 'text-xs mt-1.5 min-h-[18px] text-danger';
         } finally {
           btn.disabled = false;
@@ -981,20 +1283,21 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
         btn.disabled = true;
         const oldTxt = btn.textContent;
         btn.textContent = '⏳';
-        msg.textContent = 'Test en cours (l\'IA doit répondre)…';
+        msg.textContent = 'Test en cours (l’IA doit répondre)…';
         msg.className = 'text-xs mt-1.5 min-h-[18px] text-text-muted';
         try {
           const r = await App.api.test_ai_key({ provider: pid, key: v });
           if (r && r.ok) {
             msg.textContent = '✓ ' + (r.message || 'Clé valide.') +
-              (r.sample ? ' Réponse de l\'IA : « ' + r.sample + ' »' : '');
+              (r.sample ? ' Réponse de l’IA : « ' + r.sample + ' »' : '');
             msg.className = 'text-xs mt-1.5 min-h-[18px] text-success';
           } else {
             msg.textContent = '✗ ' + ((r && r.error) || 'Clé invalide ou IA injoignable.');
             msg.className = 'text-xs mt-1.5 min-h-[18px] text-danger';
           }
         } catch (e) {
-          msg.textContent = '✗ Erreur réseau : ' + (e && e.message || e);
+          console.warn('test_ai_key :', e);
+          msg.textContent = '✗ Le test n’a pas pu être lancé — vérifie ta connexion et réessaie.';
           msg.className = 'text-xs mt-1.5 min-h-[18px] text-danger';
         } finally {
           btn.disabled = false;
@@ -1008,16 +1311,17 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
     const o = (s && s.outreach) || {};
     return `
       <section>
-        <div class="section-label">Compte mail (envoi & réception)</div>
+        <div class="section-label">Compte mail principal (envoi & réception)</div>
         <p class="text-sm text-text-muted mb-4">
           Identifiants de ton fournisseur (Gmail, IONOS, OVH…). Mot de passe
-          d'application requis si Gmail.
+          d’application requis si Gmail. Chaque champ s’enregistre tout seul
+          quand tu en sors.
         </p>
         <div class="card p-6 space-y-4">
           ${this._field('Adresse mail (envoi)', 'outreach.from_email', o.from_email, 'email')}
           ${this._field('Nom affiché', 'outreach.from_name', o.from_name)}
           <div class="grid grid-cols-2 gap-4">
-            ${this._field('Serveur d\'envoi (SMTP)', 'outreach.smtp_host', o.smtp_host, 'text', 'smtp.ionos.fr')}
+            ${this._field('Serveur d’envoi (SMTP)', 'outreach.smtp_host', o.smtp_host, 'text', 'smtp.ionos.fr')}
             ${this._field('Port SMTP', 'outreach.smtp_port', o.smtp_port, 'number', '587')}
           </div>
           ${this._field('Identifiant SMTP', 'outreach.smtp_user', o.smtp_user)}
@@ -1029,12 +1333,93 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
           ${this._field('Identifiant IMAP', 'outreach.imap_user', o.imap_user)}
           ${this._field('Mot de passe IMAP', 'outreach.imap_password', '', 'password', 'tape pour modifier')}
           <div class="grid grid-cols-2 gap-4">
-            ${this._field('Plafond quotidien', 'outreach.daily_cap', o.daily_cap, 'number', '40')}
+            ${this._field('Plafond quotidien (mails/jour)', 'outreach.daily_cap', o.daily_cap, 'number', '40')}
             ${this._field('Délai relance (jours)', 'outreach.follow_up_days', o.follow_up_days, 'number', '5')}
+          </div>
+          <div class="pt-2 flex items-center gap-3 flex-wrap">
+            <button type="button" id="cfg-primary-test" class="btn btn-secondary">Tester l’envoi et la réception</button>
+            <span id="cfg-primary-test-status" role="status" class="text-xs text-text-muted"></span>
           </div>
         </div>
       </section>
     `;
+  },
+
+  /** Bouton « Tester l’envoi et la réception » du compte mail principal.
+   *  Défensif : si la section n’est pas dans le DOM, on ne branche rien. */
+  _bindPrimaryTest() {
+    const btn = document.getElementById('cfg-primary-test');
+    const status = document.getElementById('cfg-primary-test-status');
+    if (!btn || !status) return;
+    btn.onclick = async () => {
+      if (!App.api) return;
+      btn.disabled = true;
+      const oldTxt = btn.textContent;
+      btn.textContent = 'Test en cours…';
+      status.textContent = 'Connexion à ta boîte mail…';
+      // Reset de la couleur (sinon le rouge d’un échec précédent reste)
+      status.className = 'text-xs text-text-muted';
+      try {
+        const r = await App.api.mail_account_test({ id: 'primary' });
+        const m = this._mailTestMessage(r);
+        status.textContent = m.text;
+        status.className = `text-xs ${m.ok ? 'text-success' : 'text-danger'}`;
+      } catch (e) {
+        console.warn('mail_account_test (principal) :', e);
+        status.textContent = '✗ Le test n’a pas pu être lancé — vérifie ta connexion et réessaie.';
+        status.className = 'text-xs text-danger';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = oldTxt;
+      }
+    };
+  },
+
+  /** Transforme le résultat de mail_account_test ({ok, smtp, imap, error})
+   *  en message français lisible. Le détail technique part en console. */
+  _mailTestMessage(r) {
+    if (r && r.ok) return { ok: true, text: '✓ Envoi et réception fonctionnent' };
+    if (!r) return { ok: false, text: '✗ Pas de réponse du serveur — réessaie dans un instant.' };
+    const raw = String(r.error || '');
+    console.warn('Test compte mail — détail :', raw);
+    if (/compte introuvable/i.test(raw)) {
+      return { ok: false, text: '✗ Compte introuvable — enregistre d’abord les réglages du compte.' };
+    }
+    const sub = (tag) => {
+      const m = raw.match(new RegExp(tag + ':\\s*([^·]+)', 'i'));
+      return this._frenchMailError(m ? m[1] : raw);
+    };
+    if (r.smtp === true && r.imap === false) {
+      return { ok: false, text: `✗ L’envoi fonctionne, mais pas la réception : ${sub('IMAP')}.` };
+    }
+    if (r.smtp === false && r.imap === true) {
+      return { ok: false, text: `✗ La réception fonctionne, mais pas l’envoi : ${sub('SMTP')}.` };
+    }
+    if (r.smtp === false && r.imap === false) {
+      return { ok: false, text: `✗ Envoi : ${sub('SMTP')} · Réception : ${sub('IMAP')}.` };
+    }
+    return { ok: false, text: `✗ ${this._frenchMailError(raw)}.` };
+  },
+
+  /** Traduit une erreur technique SMTP/IMAP en français simple. */
+  _frenchMailError(raw) {
+    const s = String(raw || '');
+    if (/535|authent|auth.{0,12}(fail|error|denied)|login.{0,12}(fail|denied|invalid)|invalid credential|password|credentials/i.test(s)) {
+      return 'identifiant ou mot de passe refusé';
+    }
+    if (/getaddrinfo|name or service|nodename|11001|gaierror|no address|not known|introuvable/i.test(s)) {
+      return 'serveur introuvable (vérifie le nom du serveur)';
+    }
+    if (/timed?\s?out|timeout/i.test(s)) {
+      return 'le serveur ne répond pas (délai dépassé)';
+    }
+    if (/refused|10061/i.test(s)) {
+      return 'connexion refusée (vérifie le port)';
+    }
+    if (/ssl|tls|certificate/i.test(s)) {
+      return 'problème de connexion sécurisée (vérifie le port et le serveur)';
+    }
+    return 'erreur de connexion (détail technique en console)';
   },
 
   _renderStripe(cfg) {
@@ -1047,7 +1432,7 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
       .map(([stripeId, prodKey], i) => `
         <div class="grid grid-cols-12 gap-2 items-center" data-map-row="${i}">
           <input type="text" data-map-stripe="${i}" value="${this._esc(stripeId)}"
-                 placeholder="prod_xxx ou price_xxx"
+                 placeholder="Identifiant Stripe (prod_… ou price_…)"
                  class="col-span-5 px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
           <input type="text" data-map-key="${i}" value="${this._esc(prodKey)}"
                  placeholder="pack-electricien-pro"
@@ -1055,7 +1440,7 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
           <input type="text" data-map-name="${i}" value="${this._esc(mapping[stripeId + '_name'] || '')}"
                  placeholder="Nom affiché"
                  class="col-span-2 px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
-          <button class="col-span-1 text-text-muted hover:text-danger text-lg leading-none" data-map-del="${i}" title="Supprimer">×</button>
+          <button class="col-span-1 text-text-muted hover:text-danger text-lg leading-none" data-map-del="${i}" title="Supprimer cette ligne" aria-label="Supprimer cette ligne">×</button>
         </div>
       `).join('');
 
@@ -1072,8 +1457,8 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
             <input type="checkbox" data-stripe-key="enabled" ${c.enabled?'checked':''}
                    class="mt-0.5 w-4 h-4 accent-accent" />
             <div>
-              <div class="text-sm font-medium">Activer le polling Stripe</div>
-              <div class="text-xs text-text-muted">Vérifie les nouveaux paiements toutes les 5 minutes (configurable).</div>
+              <div class="text-sm font-medium">Vérifier les paiements automatiquement</div>
+              <div class="text-xs text-text-muted">L’app consulte Stripe toutes les 5 minutes (réglable) pour repérer les nouveaux paiements.</div>
             </div>
           </label>
 
@@ -1082,7 +1467,7 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
               Clé secrète Stripe ${c._has_key ? '<span class="text-success">(✓ enregistrée)</span>' : ''}
             </label>
             <input type="password" data-stripe-key="secret_key"
-                   placeholder="${c._has_key ? '(clé enregistrée — tape pour remplacer)' : 'sk_live_… ou sk_test_…'}"
+                   placeholder="${c._has_key ? '(clé enregistrée — tape pour remplacer)' : 'Colle ici ta clé secrète Stripe'}"
                    class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none font-mono" />
             <div class="text-[11px] text-text-muted mt-1">
               Trouvable dans Stripe Dashboard → Développeurs → Clés API. Stockée chiffrée dans la base partagée.
@@ -1104,7 +1489,7 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
             </div>
             <div class="text-xs text-text-muted mb-3">
               Pour chaque produit Stripe, dis quel kit de livraison Triskell utiliser.
-              Le « product_id » Stripe se trouve dans Stripe Dashboard → Produits.
+              L’identifiant du produit (il commence par prod_ ou price_) se trouve dans Stripe → Produits.
             </div>
             <div id="stripe-mapping" class="space-y-2">
               ${mappingRows || '<div class="text-text-muted text-xs py-2">Aucun mapping. Sans mapping, tous les paiements utilisent le kit générique.</div>'}
@@ -1124,9 +1509,9 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
             </div>
           </div>
 
-          <div class="flex gap-3 pt-2">
+          <div class="flex gap-3 pt-2 flex-wrap">
             <button class="btn btn-primary" id="stripe-save">Enregistrer</button>
-            <button class="btn btn-secondary" id="stripe-test">Tester maintenant</button>
+            <button class="btn btn-secondary" id="stripe-test">Enregistrer et lancer un vrai passage</button>
             <span id="stripe-feedback" class="text-xs text-text-muted self-center"></span>
           </div>
         </div>
@@ -1176,27 +1561,47 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
       save.disabled = true; save.textContent = 'Enregistrement…';
       try {
         const r = await App.api.stripe_save_config({ config: gather() });
-        save.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
-      } catch (e) { save.textContent = 'Erreur'; }
+        if (r && r.ok) save.textContent = 'Enregistré ✓';
+        else {
+          save.textContent = 'Échec';
+          Toast.error('Enregistrement impossible : ' + ((r && r.error) || 'erreur inconnue'));
+        }
+      } catch (e) {
+        save.textContent = 'Échec';
+        Toast.friendlyError(e, 'Enregistrement impossible — réessaie dans un instant.');
+      }
       setTimeout(() => { save.disabled = false; save.textContent = 'Enregistrer'; }, 1600);
     };
 
     test.onclick = async () => {
       if (!App.api) return;
-      test.disabled = true; test.textContent = 'Test en cours…';
+      const sure = await Dialog.confirm(
+        'Ce n’est pas un essai à blanc : de vrais projets clients peuvent être créés. Continuer ?',
+        { title: 'Lancer un vrai passage Stripe', okLabel: 'Lancer', danger: true });
+      if (!sure) return;
+      test.disabled = true; test.textContent = 'Passage en cours…';
       fb.textContent = '';
       try {
         await App.api.stripe_save_config({ config: gather() });
         const r = await App.api.stripe_run_now();
         if (r && r.ok && r.result) {
           const c = r.result;
-          fb.textContent = `Polled: ${c.polled}, nouveaux: ${c.new_payments}, projets créés: ${c.projects_created}, erreurs: ${c.errors}` +
-                            (c.error ? ` — ${c.error}` : '');
+          const msg = `${c.polled || 0} paiements consultés, ${c.new_payments || 0} nouveaux, ${c.projects_created || 0} projets créés` +
+                      (c.errors ? `, ${c.errors} erreurs` : '');
+          fb.textContent = msg;
+          if (c.error) console.warn('stripe_run_now :', c.error);
+          if (c.errors || c.error) Toast.warn(msg + ' — une erreur est survenue (détail en console).');
+          else Toast.success(msg);
         } else {
-          fb.textContent = 'Erreur : ' + ((r && r.error) || 'inconnu');
+          console.warn('stripe_run_now :', r && r.error);
+          fb.textContent = 'Le passage a échoué.';
+          Toast.error('Le passage a échoué : ' + ((r && r.error) || 'erreur inconnue'));
         }
-      } catch (e) { fb.textContent = 'Erreur : ' + e; }
-      test.disabled = false; test.textContent = 'Tester maintenant';
+      } catch (e) {
+        fb.textContent = '';
+        Toast.friendlyError(e, 'Le passage a échoué — réessaie dans un instant.');
+      }
+      test.disabled = false; test.textContent = 'Enregistrer et lancer un vrai passage';
     };
 
     if (addMap) addMap.onclick = () => {
@@ -1206,13 +1611,13 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
       row.className = 'grid grid-cols-12 gap-2 items-center';
       row.dataset.mapRow = idx;
       row.innerHTML = `
-        <input type="text" data-map-stripe="${idx}" placeholder="prod_xxx ou price_xxx"
+        <input type="text" data-map-stripe="${idx}" placeholder="Identifiant Stripe (prod_… ou price_…)"
                class="col-span-5 px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
         <input type="text" data-map-key="${idx}" placeholder="pack-electricien-pro"
                class="col-span-4 px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
         <input type="text" data-map-name="${idx}" placeholder="Nom affiché"
                class="col-span-2 px-2 py-1.5 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
-        <button class="col-span-1 text-text-muted hover:text-danger text-lg leading-none" data-map-del="${idx}">×</button>
+        <button class="col-span-1 text-text-muted hover:text-danger text-lg leading-none" data-map-del="${idx}" title="Supprimer cette ligne" aria-label="Supprimer cette ligne">×</button>
       `;
       // Si placeholder text "Aucun mapping..." : on le supprime
       const placeholder = wrap.querySelector('div.text-text-muted');
@@ -1363,13 +1768,20 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
       save.disabled = true; save.textContent = 'Enregistrement…';
       try {
         const r = await App.api.phantombuster_save_config({ config: gather() });
-        save.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
-      } catch (e) { save.textContent = 'Erreur'; }
+        if (r && r.ok) save.textContent = 'Enregistré ✓';
+        else {
+          save.textContent = 'Échec';
+          Toast.error('Enregistrement impossible : ' + ((r && r.error) || 'erreur inconnue'));
+        }
+      } catch (e) {
+        save.textContent = 'Échec';
+        Toast.friendlyError(e, 'Enregistrement impossible — réessaie dans un instant.');
+      }
       setTimeout(() => { save.disabled = false; save.textContent = 'Enregistrer'; }, 1600);
     };
     test.onclick = async () => {
       if (!App.api) return;
-      test.disabled = true; test.textContent = '…';
+      test.disabled = true; test.textContent = 'Vérification…';
       fb.textContent = '';
       try {
         await App.api.phantombuster_save_config({ config: gather() });
@@ -1377,9 +1789,14 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
         if (r && r.ok) {
           fb.innerHTML = `<span class="text-success">✓ Connecté — ${r.agents_count || 0} Phantom(s) trouvé(s)</span>`;
         } else {
-          fb.innerHTML = `<span class="text-danger">✗ ${this._esc(r && r.error || 'erreur')}</span>`;
+          console.warn('phantombuster_test :', r && r.error);
+          fb.innerHTML = `<span class="text-danger">✗ Connexion impossible (clé refusée ou service injoignable — détail en console)</span>`;
         }
-      } catch (e) { fb.textContent = 'Erreur : ' + e; }
+      } catch (e) {
+        console.warn('phantombuster_test :', e);
+        fb.textContent = '';
+        Toast.friendlyError(e, 'La vérification a échoué — réessaie dans un instant.');
+      }
       test.disabled = false; test.textContent = 'Vérifier la connexion';
     };
   },
@@ -1388,32 +1805,32 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
     const c = cfg || { enabled: false, pixel_endpoint: '' };
     return `
       <section>
-        <div class="section-label">Tracking d'ouvertures de mail</div>
+        <div class="section-label">Suivi des ouvertures de mail</div>
         <p class="text-sm text-text-muted mb-4">
-          Ajoute un pixel transparent 1×1 dans tes mails pour mesurer les
-          ouvertures. Demande de déployer une mini-fonction Netlify gratuite
-          (cf. <code>netlify_functions/README.md</code>, ~5 min).
+          Glisse une image invisible dans tes mails pour savoir s’ils sont
+          ouverts. Nécessite un petit compteur gratuit hébergé en ligne —
+          demande à Claude de l’installer (~5 min).
         </p>
         <div class="card p-6 space-y-4">
           <label class="flex items-start gap-3 cursor-pointer">
             <input type="checkbox" data-trk-key="enabled" ${c.enabled?'checked':''}
                    class="mt-0.5 w-4 h-4 accent-accent" />
             <div>
-              <div class="text-sm font-medium">Activer le tracking d'ouvertures</div>
+              <div class="text-sm font-medium">Activer le suivi des ouvertures</div>
               <div class="text-xs text-text-muted">
-                Tous les mails sortants incluront un pixel invisible. RGPD-friendly (pas d'IP/UA logués).
+                Tous les mails sortants incluront l’image invisible. Respecte la vie
+                privée : aucune adresse ni aucun appareil enregistrés.
               </div>
             </div>
           </label>
 
           <div>
-            <label class="block text-xs font-medium text-text-secondary mb-1.5">URL de la Netlify Function</label>
+            <label class="block text-xs font-medium text-text-secondary mb-1.5">Adresse du compteur d’ouvertures</label>
             <input type="text" data-trk-key="pixel_endpoint" value="${this._esc(c.pixel_endpoint || '')}"
-                   placeholder="https://triskell-track.netlify.app/.netlify/functions/track-pixel"
+                   placeholder="https://…"
                    class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none font-mono" />
             <div class="text-[11px] text-text-muted mt-1">
-              Suis <code class="bg-bg px-1 rounded">netlify_functions/README.md</code> à la racine du projet
-              pour déployer en 5 minutes (gratuit).
+              L’adresse commence par https:// — c’est Claude qui te la donne à l’installation.
             </div>
           </div>
 
@@ -1432,15 +1849,27 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
     if (!save) return;
     save.onclick = async () => {
       if (!App.api) return;
-      save.disabled = true; save.textContent = 'Enregistrement…';
       const cfg = {
         enabled: !!document.querySelector('[data-trk-key="enabled"]').checked,
         pixel_endpoint: document.querySelector('[data-trk-key="pixel_endpoint"]').value.trim(),
       };
+      // Validation simple avant d'enregistrer : l'adresse doit être en https://
+      if (cfg.pixel_endpoint && !cfg.pixel_endpoint.startsWith('https://')) {
+        Toast.error('L’adresse du compteur doit commencer par https://');
+        return;
+      }
+      save.disabled = true; save.textContent = 'Enregistrement…';
       try {
         const r = await App.api.tracker_save_config({ config: cfg });
-        save.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
-      } catch (e) { save.textContent = 'Erreur'; }
+        if (r && r.ok) save.textContent = 'Enregistré ✓';
+        else {
+          save.textContent = 'Échec';
+          Toast.error('Enregistrement impossible : ' + ((r && r.error) || 'erreur inconnue'));
+        }
+      } catch (e) {
+        save.textContent = 'Échec';
+        Toast.friendlyError(e, 'Enregistrement impossible — réessaie dans un instant.');
+      }
       setTimeout(() => { save.disabled = false; save.textContent = 'Enregistrer'; }, 1600);
     };
     // Charge les stats si dispo
@@ -1480,7 +1909,7 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
             <label class="block text-xs font-medium text-text-secondary mb-1.5">Quand basculer ?</label>
             <select data-l2c-key="mode"
                     class="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none">
-              ${opt('strong', 'Seulement si signal d\'achat fort (prix, devis, "j\'achète"…) — recommandé', c.mode)}
+              ${opt('strong', 'Seulement si signal d’achat fort (prix, devis, « j’achète »…) — recommandé', c.mode)}
               ${opt('all',    'Tous les prospects classés intéressés (à toi de filtrer après)', c.mode)}
               ${opt('off',    'Jamais (bascule manuelle uniquement)', c.mode)}
             </select>
@@ -1508,15 +1937,18 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
             <label class="block text-xs font-medium text-text-secondary mb-1.5">Seuil de confiance minimal</label>
             <input type="number" min="0" max="1" step="0.05"
                    data-l2c-key="min_confidence" value="${c.min_confidence ?? 0.6}"
+                   data-initial="${c.min_confidence ?? 0.6}"
                    class="w-32 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-accent focus:outline-none" />
             <div class="text-[11px] text-text-muted mt-1">
-              Entre 0 et 1. Les classifications IA en dessous sont ignorées (par défaut 0.6).
+              C’est le niveau de certitude exigé de l’IA, entre 0 et 1 :
+              0.7 = elle doit être sûre à 70 % (prudent), 0.5 = sûre à 50 % (plus souple).
+              En dessous du seuil, pas de bascule automatique. Par défaut : 0.6.
             </div>
           </div>
 
-          <div class="flex gap-3 pt-2">
+          <div class="flex gap-3 pt-2 flex-wrap">
             <button class="btn btn-primary" id="l2c-save">Enregistrer</button>
-            <button class="btn btn-secondary" id="l2c-run">Tester maintenant</button>
+            <button class="btn btn-secondary" id="l2c-run">Enregistrer et lancer un vrai passage</button>
             <span id="l2c-feedback" class="text-xs text-text-muted self-center"></span>
           </div>
         </div>
@@ -1529,20 +1961,47 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
     const run  = document.getElementById('l2c-run');
     const fb   = document.getElementById('l2c-feedback');
     if (!save) return;
+
+    // La case « Activer » et l'option « Jamais » disent la même chose :
+    // on les garde synchronisées pour éviter un réglage contradictoire.
+    const enabledEl = document.querySelector('[data-l2c-key="enabled"]');
+    const modeEl    = document.querySelector('[data-l2c-key="mode"]');
+    if (enabledEl && modeEl) {
+      enabledEl.addEventListener('change', () => {
+        if (!enabledEl.checked) modeEl.value = 'off';
+        else if (modeEl.value === 'off') modeEl.value = 'strong';
+      });
+      modeEl.addEventListener('change', () => {
+        enabledEl.checked = modeEl.value !== 'off';
+      });
+    }
+
     const gather = () => {
       const v = (k) => {
         const el = document.querySelector(`[data-l2c-key="${k}"]`);
         if (!el) return undefined;
         if (el.type === 'checkbox') return !!el.checked;
-        if (el.type === 'number')   return parseFloat(el.value) || 0;
         return el.value;
       };
+      // Seuil de confiance : borné entre 0 et 1 ; champ vide = on garde
+      // la valeur déjà enregistrée (surtout pas 0, qui basculerait tout).
+      let minConf;
+      const mcEl = document.querySelector('[data-l2c-key="min_confidence"]');
+      if (mcEl) {
+        const parsed = parseFloat(mcEl.value);
+        if ((mcEl.value || '').trim() === '' || isNaN(parsed)) {
+          minConf = parseFloat(mcEl.dataset.initial);
+          if (isNaN(minConf)) minConf = 0.6;
+        } else {
+          minConf = Math.min(1, Math.max(0, parsed));
+        }
+      }
       return {
         enabled: v('enabled'),
         mode:    v('mode'),
         default_product_key:  v('default_product_key'),
         default_product_name: v('default_product_name'),
-        min_confidence:       v('min_confidence'),
+        min_confidence:       minConf,
       };
     };
     save.onclick = async () => {
@@ -1550,26 +2009,47 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
       save.disabled = true; save.textContent = 'Enregistrement…';
       try {
         const r = await App.api.lead_to_client_save_config({ config: gather() });
-        save.textContent = (r && r.ok) ? 'Enregistré ✓' : 'Erreur';
-      } catch (e) { save.textContent = 'Erreur'; }
+        if (r && r.ok) save.textContent = 'Enregistré ✓';
+        else {
+          save.textContent = 'Échec';
+          Toast.error('Enregistrement impossible : ' + ((r && r.error) || 'erreur inconnue'));
+        }
+      } catch (e) {
+        save.textContent = 'Échec';
+        Toast.friendlyError(e, 'Enregistrement impossible — réessaie dans un instant.');
+      }
       setTimeout(() => { save.disabled = false; save.textContent = 'Enregistrer'; }, 1600);
     };
     run.onclick = async () => {
       if (!App.api) return;
-      run.disabled = true; run.textContent = 'Test en cours…';
+      const sure = await Dialog.confirm(
+        'Ce n’est pas un essai à blanc : de vrais projets clients peuvent être créés. Continuer ?',
+        { title: 'Lancer un vrai passage', okLabel: 'Lancer', danger: true });
+      if (!sure) return;
+      run.disabled = true; run.textContent = 'Passage en cours…';
       fb.textContent = '';
       try {
-        // Sauve la config avant test pour utiliser les nouveaux réglages
+        // Sauve la config avant le passage pour utiliser les nouveaux réglages
         await App.api.lead_to_client_save_config({ config: gather() });
         const r = await App.api.lead_to_client_run_now();
         if (r && r.ok && r.result) {
           const c = r.result;
-          fb.textContent = `Scan : ${c.scanned}, basculés : ${c.converted}, signal faible : ${c.weak_signal}, sautés : ${c.skipped}, erreurs : ${c.errors}`;
+          const msg = `${c.scanned || 0} réponses examinées, ${c.converted || 0} projets clients créés, ` +
+                      `${c.weak_signal || 0} signaux trop faibles, ${c.skipped || 0} ignorées` +
+                      (c.errors ? `, ${c.errors} erreurs` : '');
+          fb.textContent = msg;
+          if (c.errors) Toast.warn(msg);
+          else Toast.success(msg);
         } else {
-          fb.textContent = 'Erreur : ' + ((r && r.error) || 'inconnu');
+          console.warn('lead_to_client_run_now :', r && r.error);
+          fb.textContent = 'Le passage a échoué.';
+          Toast.error('Le passage a échoué : ' + ((r && r.error) || 'erreur inconnue'));
         }
-      } catch (e) { fb.textContent = 'Erreur : ' + e; }
-      run.disabled = false; run.textContent = 'Tester maintenant';
+      } catch (e) {
+        fb.textContent = '';
+        Toast.friendlyError(e, 'Le passage a échoué — réessaie dans un instant.');
+      }
+      run.disabled = false; run.textContent = 'Enregistrer et lancer un vrai passage';
     };
   },
 
@@ -1627,7 +2107,7 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
         <div class="card p-6 flex items-center justify-between">
           <div>
             <div class="font-semibold mb-1">Revoir le tuto Triskell Command</div>
-            <div class="text-sm text-text-muted">12 étapes pour découvrir tout le pipeline d'automatisation.</div>
+            <div class="text-sm text-text-muted">Une visite pas à pas pour redécouvrir tout ce que l’app sait faire.</div>
           </div>
           <button class="btn btn-secondary" onclick="App.show('tutorial')">Lancer la visite</button>
         </div>
@@ -1637,10 +2117,11 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
 
   _field(label, savePath, value, type = 'text', placeholder = '') {
     const masked = (type === 'password' && value && value.startsWith('•'));
+    const fid = 'cfg-f-' + String(savePath).replace(/[^a-zA-Z0-9_-]+/g, '-');
     return `
       <div>
-        <label class="block text-sm font-semibold mb-1">${this._esc(label)}</label>
-        <input type="${type}"
+        <label for="${fid}" class="block text-sm font-semibold mb-1">${this._esc(label)}</label>
+        <input id="${fid}" type="${type}"
                data-save-path="${savePath}"
                value="${masked ? '' : this._esc(value || '')}"
                placeholder="${this._esc(placeholder || (masked ? '••••••••' : ''))}"
@@ -1650,16 +2131,37 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
     `;
   },
 
+  /** Petit « ✓ enregistré » éphémère sous un champ après un auto-enregistrement. */
+  _flashSaved(input) {
+    const holder = input && input.parentElement;
+    if (!holder) return;
+    let tick = holder.querySelector('.cfg-saved-tick');
+    if (!tick) {
+      tick = document.createElement('div');
+      tick.className = 'cfg-saved-tick text-[11px] text-success mt-1';
+      holder.appendChild(tick);
+    }
+    tick.textContent = '✓ enregistré';
+    clearTimeout(tick._t);
+    tick._t = setTimeout(() => tick.remove(), 1600);
+  },
+
   _bind() {
     // Boutons thème
     document.querySelectorAll('[data-theme-mode]').forEach(btn => {
       btn.onclick = async () => {
         if (!App.api) return;
         const mode = btn.dataset.themeMode;
-        const r = await App.api.set_theme_mode(mode);
-        if (r && r.ok) {
-          document.documentElement.setAttribute('data-theme', r.mode);
-          await this.refresh();
+        try {
+          const r = await App.api.set_theme_mode(mode);
+          if (r && r.ok) {
+            document.documentElement.setAttribute('data-theme', r.mode);
+            await this.refresh();
+          } else {
+            Toast.error('Le changement de thème a échoué — réessaie.');
+          }
+        } catch (e) {
+          Toast.friendlyError(e, 'Le changement de thème a échoué — réessaie.');
         }
       };
     });
@@ -1670,6 +2172,10 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
       if (input.hasAttribute('data-ai-key-input')) return;
       input.addEventListener('blur', async () => {
         if (!App.api) return;
+        // Chargement raté = auto-enregistrement suspendu (comme promis par
+        // le bandeau) : on n'écrit rien tant que les vrais réglages n'ont
+        // pas pu être relus, pour ne pas les écraser avec du vide.
+        if (this._loadFailed) return;
         const v = input.value;
         if (v === '' && input.type === 'password') return;  // ne pas écraser un mot de passe avec vide
         const path = input.dataset.savePath.split('.');
@@ -1677,8 +2183,17 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
         if (input.type === 'number') {
           value = v === '' ? null : parseInt(v, 10);
         }
-        try { await App.api.save_setting({ path, value }); }
-        catch (e) { console.warn('save_setting:', e); }
+        try {
+          const r = await App.api.save_setting({ path, value });
+          if (r && r.ok === false) {
+            console.warn('save_setting :', r.error);
+            Toast.error('Ce réglage n’a pas pu être enregistré — réessaie.');
+            return;
+          }
+          this._flashSaved(input);
+        } catch (e) {
+          Toast.friendlyError(e, 'Ce réglage n’a pas pu être enregistré — réessaie.');
+        }
       });
     });
 

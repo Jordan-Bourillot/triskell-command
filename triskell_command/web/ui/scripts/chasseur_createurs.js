@@ -14,10 +14,12 @@ const ChasseurCreateurs = {
     currentId: null,
     currentHunt: null,
     pollTimer: null,
+    pollFails: 0,
   },
 
   _LS_FORM: 'chasseurc:form',
   _LS_CURRENT: 'chasseurc:currentId',
+  _LS_PUSHED: 'chasseurc:pushed',
 
   _saveForm() {
     try {
@@ -28,7 +30,8 @@ const ChasseurCreateurs = {
         min:      document.getElementById('cc-min')?.value || '10000',
         max:      document.getElementById('cc-max')?.value || '1000000',
         num:      document.getElementById('cc-num')?.value || '50',
-        apikey:   document.getElementById('cc-apikey')?.value || '',
+        // Note : la clé API et le mot de passe Instagram ne sont volontairement
+        // PAS mémorisés dans le navigateur (données sensibles en clair).
         iglogin:  document.getElementById('cc-iglogin')?.value || '',
       };
       localStorage.setItem(this._LS_FORM, JSON.stringify(f));
@@ -50,9 +53,46 @@ const ChasseurCreateurs = {
     set('cc-min', f.min);
     set('cc-max', f.max);
     set('cc-num', f.num);
-    set('cc-apikey', f.apikey);
     set('cc-iglogin', f.iglogin);
     this._togglePlatformFields();
+  },
+
+  // ---- Mémoire « déjà versé » (côté navigateur) ----
+
+  _pushedMap() {
+    try { return JSON.parse(localStorage.getItem(this._LS_PUSHED) || '{}') || {}; }
+    catch (e) { return {}; }
+  },
+
+  _pushedInfo(huntId) {
+    return this._pushedMap()[huntId] || null;
+  },
+
+  _markPushed(huntId, quality) {
+    try {
+      const m = this._pushedMap();
+      m[huntId] = { at: new Date().toISOString(), quality: quality || '' };
+      localStorage.setItem(this._LS_PUSHED, JSON.stringify(m));
+    } catch (e) {}
+  },
+
+  /* Transforme le rapport qualité du serveur en phrase française. */
+  _qualityToText(q) {
+    if (!q || !q.total) return '';
+    const labels = {
+      no_email: 'sans email',
+      bad_email: 'email invalide/fabriqué',
+      placeholder_name: 'nom fantôme (test/démo…)',
+      duplicate_in_batch: 'doublon dans la fournée',
+    };
+    const dropped = q.dropped || {};
+    const parts = [];
+    Object.keys(dropped).forEach(k => {
+      if (dropped[k]) parts.push(`${dropped[k]} ${labels[k] || k}`);
+    });
+    let txt = `🛡️ ${q.kept}/${q.total} fiches gardées`;
+    if (parts.length) txt += ` — écartées : ${parts.join(', ')}`;
+    return txt;
   },
 
   _bindFormPersist() {
@@ -103,8 +143,8 @@ const ChasseurCreateurs = {
           </h1>
           <p class="hero-subtitle">
             Choisis une plateforme, une niche, une fourchette d'abonnés. L'app
-            parcourt les chaînes, suit les liens de bio (linktree, beacons…),
-            et extrait les adresses mail publiques. Tu récupères un CSV prêt
+            parcourt les chaînes, suit les liens affichés dans leur bio,
+            et extrait les adresses mail publiques. Tu récupères un fichier prêt
             à exploiter.
           </p>
         </header>
@@ -118,7 +158,7 @@ const ChasseurCreateurs = {
               </div>
               <form id="cc-form" class="space-y-3">
                 <div>
-                  <label class="block text-xs font-semibold mb-1">Plateforme</label>
+                  <label for="cc-platform" class="block text-xs font-semibold mb-1">Plateforme</label>
                   <select id="cc-platform" class="w-full input">
                     <option value="youtube">📹 YouTube (recommandé)</option>
                     <option value="instagram">📷 Instagram</option>
@@ -127,13 +167,13 @@ const ChasseurCreateurs = {
                 </div>
 
                 <div>
-                  <label class="block text-xs font-semibold mb-1">Niche / mots-clés</label>
+                  <label for="cc-niche" class="block text-xs font-semibold mb-1">Niche / mots-clés</label>
                   <input id="cc-niche" type="text" class="w-full input"
                          placeholder="ex : cuisine, gaming, fitness…" />
                 </div>
 
                 <div>
-                  <label class="block text-xs font-semibold mb-1">Pays / Langue</label>
+                  <label for="cc-pays" class="block text-xs font-semibold mb-1">Pays / Langue</label>
                   <select id="cc-pays" class="w-full input">
                     <option value="FR" selected>🇫🇷 France</option>
                     <option value="BE">🇧🇪 Belgique</option>
@@ -152,17 +192,17 @@ const ChasseurCreateurs = {
 
                 <div class="grid grid-cols-2 gap-2">
                   <div>
-                    <label class="block text-xs font-semibold mb-1">Abonnés min</label>
+                    <label for="cc-min" class="block text-xs font-semibold mb-1">Abonnés min</label>
                     <input id="cc-min" type="number" min="0" class="w-full input" value="10000" />
                   </div>
                   <div>
-                    <label class="block text-xs font-semibold mb-1">Abonnés max</label>
+                    <label for="cc-max" class="block text-xs font-semibold mb-1">Abonnés max</label>
                     <input id="cc-max" type="number" min="0" class="w-full input" value="1000000" />
                   </div>
                 </div>
 
                 <div>
-                  <label class="block text-xs font-semibold mb-1">Combien de résultats</label>
+                  <label for="cc-num" class="block text-xs font-semibold mb-1">Combien de résultats</label>
                   <select id="cc-num" class="w-full input">
                     <option value="20">20</option>
                     <option value="50" selected>50</option>
@@ -173,41 +213,41 @@ const ChasseurCreateurs = {
 
                 <!-- Champs spécifiques YouTube -->
                 <div id="cc-yt-fields">
-                  <label class="block text-xs font-semibold mb-1">
+                  <label for="cc-apikey" class="block text-xs font-semibold mb-1">
                     Clé API YouTube
                     <span class="text-text-muted font-normal">(facultative)</span>
                   </label>
                   <input id="cc-apikey" type="text" class="w-full input"
-                         placeholder="Laisse vide pour utiliser la clé par défaut" />
-                  <p class="text-[10.5px] text-text-muted mt-1 leading-snug">
+                         placeholder="Laisse vide pour utiliser la clé enregistrée dans Réglages" />
+                  <p class="text-[11px] text-text-muted mt-1 leading-snug">
                     Si tu as ta propre clé Google Cloud, colle-la ici. Sinon
-                    on utilise la clé partagée (quota limité partagé entre tous).
+                    on utilise la clé enregistrée dans Réglages → IA &amp; clés.
                   </p>
                 </div>
 
                 <!-- Champs spécifiques Instagram -->
                 <div id="cc-ig-fields" class="hidden space-y-2">
                   <div>
-                    <label class="block text-xs font-semibold mb-1">Login Instagram</label>
+                    <label for="cc-iglogin" class="block text-xs font-semibold mb-1">Login Instagram</label>
                     <input id="cc-iglogin" type="text" class="w-full input"
                            placeholder="ton@compte" autocomplete="off" />
                   </div>
                   <div>
-                    <label class="block text-xs font-semibold mb-1">Mot de passe</label>
+                    <label for="cc-igpwd" class="block text-xs font-semibold mb-1">Mot de passe</label>
                     <input id="cc-igpwd" type="password" class="w-full input"
                            placeholder="••••••••" autocomplete="new-password" />
                   </div>
-                  <p class="text-[10.5px] text-text-muted leading-snug">
-                    ⚠️ Instagram bloque souvent les comptes utilisés pour
-                    scraper. Utilise un compte secondaire dédié.
+                  <p class="text-[11px] text-text-muted leading-snug">
+                    ⚠️ Instagram bloque souvent les comptes utilisés pour ce
+                    genre de collecte. Utilise un compte secondaire dédié.
                   </p>
                 </div>
 
                 <!-- Disclaimer Facebook -->
-                <div id="cc-fb-info" class="hidden text-[10.5px] text-warning bg-warning/10
+                <div id="cc-fb-info" class="hidden text-[11px] text-warning-text bg-warning/10
                                               border border-warning/30 rounded-lg p-2 leading-snug">
-                  ⚠️ Facebook bloque presque tout scraping non authentifié.
-                  Les résultats peuvent être limités ou vides.
+                  ⚠️ Facebook bloque presque toute collecte automatique sans
+                  connexion. Les résultats peuvent être limités ou vides.
                 </div>
 
                 <button type="submit" class="btn btn-primary w-full">
@@ -226,7 +266,9 @@ const ChasseurCreateurs = {
                 <div class="text-[11px] font-bold tracking-widest text-text-muted">
                   CHASSES PASSÉES
                 </div>
-                <button id="cc-refresh-list" class="text-xs text-accent hover:underline">↻</button>
+                <button id="cc-refresh-list" class="text-xs text-accent hover:underline"
+                        title="Rafraîchir la liste des chasses"
+                        aria-label="Rafraîchir la liste des chasses">↻</button>
               </div>
               <div id="cc-hunts-list" class="space-y-1.5 max-h-[420px] overflow-y-auto"></div>
             </div>
@@ -252,7 +294,10 @@ const ChasseurCreateurs = {
       this._togglePlatformFields();
       this._saveForm();
     };
-    document.getElementById('cc-refresh-list').onclick = () => this._loadHunts();
+    document.getElementById('cc-refresh-list').onclick = async () => {
+      const ok = await this._loadHunts();
+      if (!ok) Toast.error('Impossible de recharger la liste des chasses. Réessaie dans un instant.');
+    };
 
     // Styles spécifiques (réutilise les patterns de chasseur.js)
     if (!document.getElementById('cc-styles')) {
@@ -275,9 +320,14 @@ const ChasseurCreateurs = {
         }
         #cc-form select {
           appearance: none;
-          background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+          /* Flèche dessinée en currentColor : suit la couleur du texte,
+             lisible dans les 3 thèmes (pas de gris codé en dur). */
+          background-image:
+            linear-gradient(45deg, transparent 50%, currentColor 50%),
+            linear-gradient(135deg, currentColor 50%, transparent 50%);
+          background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%;
+          background-size: 5px 5px, 5px 5px;
           background-repeat: no-repeat;
-          background-position: right 10px center;
           padding-right: 32px;
         }
         #cc-form .input:focus,
@@ -322,9 +372,10 @@ const ChasseurCreateurs = {
 
   async _loadHunts() {
     const r = await this._api('list_hunts', {limit: 30});
-    if (!r || !r.ok) return;
+    if (!r || !r.ok) return false;
     this.state.hunts = r.hunts || [];
     this._renderHuntsList();
+    return true;
   },
 
   _renderHuntsList() {
@@ -340,6 +391,7 @@ const ChasseurCreateurs = {
       const retenus = stats.retenus ?? 0;
       const withMail = stats.avec_mail ?? 0;
       const statusBadge = this._statusBadge(h.status, h.running);
+      const pushed = this._pushedInfo(h.id);
       return `
         <div class="cc-hunt-row group relative rounded-lg border transition-all
                     ${isActive
@@ -351,8 +403,8 @@ const ChasseurCreateurs = {
               <div class="text-xs font-semibold truncate flex-1">${this._esc(h.label || 'Sans titre')}</div>
               ${statusBadge}
             </div>
-            <div class="text-[10px] text-text-muted">
-              ${retenus} retenus · ${withMail} avec mail
+            <div class="text-[11px] text-text-muted">
+              ${retenus} retenus · ${withMail} avec mail${pushed ? ' · <span class="text-success-text font-semibold">✓ versé</span>' : ''}
             </div>
           </button>
           <button data-del-hunt-id="${h.id}"
@@ -384,12 +436,22 @@ const ChasseurCreateurs = {
 
   async _deleteHuntById(huntId) {
     if (!huntId) return;
-    if (!confirm('Supprimer définitivement cette chasse ?')) return;
+    const hunt = this.state.hunts.find(x => x.id === huntId)
+      || (this.state.currentId === huntId ? this.state.currentHunt : null);
+    const isRunning = !!(hunt && hunt.running);
+    const ok = await Dialog.confirm(
+      isRunning
+        ? 'Cette chasse est EN COURS. La supprimer va l’arrêter et perdre les résultats déjà trouvés. Continuer ?'
+        : 'Supprimer définitivement cette chasse et ses résultats ?',
+      { title: 'Supprimer la chasse', okLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true }
+    );
+    if (!ok) return;
     const r = await this._api('delete_hunt', {hunt_id: huntId});
     if (!r || !r.ok) {
-      this._toast('Suppression échouée', 'danger');
+      this._toast((r && r.error) || 'Suppression impossible. Réessaie dans un instant.', 'danger');
       return;
     }
+    this._toast('Chasse supprimée.', 'success');
     if (this.state.currentId === huntId) {
       this.state.currentId = null;
       this.state.currentHunt = null;
@@ -408,17 +470,22 @@ const ChasseurCreateurs = {
     await this._loadHunts();
   },
 
-  _statusBadge(status, running) {
+  _statusBadge(status, running, errMsg) {
     const map = {
       'pending':   {label: 'En file',  color: 'bg-text-muted/15 text-text-muted'},
-      'searching': {label: 'Cherche',  color: 'bg-warning/15 text-warning'},
-      'enriching': {label: 'Mails',    color: 'bg-accent/15 text-accent'},
-      'done':      {label: 'Fini',     color: 'bg-success/15 text-success'},
-      'error':     {label: 'Erreur',   color: 'bg-danger/15 text-danger'},
+      'searching': {label: 'Cherche',  color: 'bg-warning/15 text-warning-text'},
+      'enriching': {label: 'Mails',    color: 'bg-accent/15 text-accent-text'},
+      'done':      {label: 'Fini',     color: 'bg-success/15 text-success-text'},
+      'error':     {label: 'Erreur',   color: 'bg-danger/15 text-danger-text'},
     };
-    const i = map[status] || {label: status || '?', color: 'bg-text-muted/15 text-text-muted'};
+    let i = map[status] || {label: status || '?', color: 'bg-text-muted/15 text-text-muted'};
+    // Une chasse stoppée par un redémarrage serveur n'est pas une « erreur » :
+    // on l'affiche « Interrompue » (les résultats déjà trouvés restent exploitables).
+    if (status === 'error' && /interrompue/i.test(String(errMsg || ''))) {
+      i = {label: 'Interrompue', color: 'bg-warning/15 text-warning-text'};
+    }
     const pulse = running ? 'animate-pulse' : '';
-    return `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded ${i.color} ${pulse}">${i.label}</span>`;
+    return `<span class="text-[11px] font-bold px-1.5 py-0.5 rounded ${i.color} ${pulse}">${i.label}</span>`;
   },
 
   async _launchHunt() {
@@ -455,9 +522,23 @@ const ChasseurCreateurs = {
       payload.instagram_password = pw;
     }
 
+    // Anti double-clic : un double lancement = double consommation de quota API.
+    const launchBtn = document.querySelector('#cc-form button[type="submit"]');
+    const prevHtml = launchBtn ? launchBtn.innerHTML : '';
+    if (launchBtn) {
+      launchBtn.disabled = true;
+      launchBtn.innerHTML = '⏳ Lancement…';
+    }
     const r = await this._api('start_hunt', payload);
+    if (launchBtn) {
+      launchBtn.disabled = false;
+      launchBtn.innerHTML = prevHtml;
+    }
     if (!r || !r.ok) {
-      this._toast((r && r.error) || 'Erreur au lancement.', 'danger');
+      // Le serveur explique son refus en français (ex : clé YouTube manquante
+      // dans Réglages) — on lui laisse la parole.
+      if (r && r.error) this._toast(r.error, 'danger');
+      else Toast.friendlyError(null, 'Lancement impossible : le serveur ne répond pas. Réessaie dans un instant.');
       return;
     }
     this._toast('Chasse lancée. Ça tourne en fond.', 'success');
@@ -475,7 +556,9 @@ const ChasseurCreateurs = {
 
   _startPolling() {
     this._stopPolling();
-    this.state.pollTimer = setInterval(() => this._refreshDetail(), 2000);
+    this.state.pollFails = 0;
+    // App.viewInterval : nettoyé automatiquement quand on quitte la vue.
+    this.state.pollTimer = App.viewInterval(() => this._refreshDetail(), 2000);
   },
 
   _stopPolling() {
@@ -488,7 +571,16 @@ const ChasseurCreateurs = {
   async _refreshDetail() {
     if (!this.state.currentId) return;
     const r = await this._api('get_hunt', {hunt_id: this.state.currentId});
-    if (!r || !r.ok) return;
+    if (!r || !r.ok) {
+      // 3 échecs d'affilée → on arrête de marteler le serveur et on explique.
+      this.state.pollFails = (this.state.pollFails || 0) + 1;
+      if (this.state.pollFails >= 3 && this.state.pollTimer) {
+        this._stopPolling();
+        Toast.warn('Le suivi en direct est suspendu : le serveur ne répond plus. Rouvre la chasse (ou clique ↻) pour réessayer.');
+      }
+      return;
+    }
+    this.state.pollFails = 0;
     this.state.currentHunt = r.hunt;
     this._renderDetail();
     if (!r.hunt.running && (r.hunt.status === 'done' || r.hunt.status === 'error')) {
@@ -502,6 +594,16 @@ const ChasseurCreateurs = {
     if (!wrap) return;
     const h = this.state.currentHunt;
     if (!h) return;
+
+    // Le re-render arrive toutes les 2 s pendant la chasse : on mémorise ce
+    // que l'utilisateur regarde (position du tableau, journal ouvert) pour
+    // le restaurer après, sinon tout saute à chaque rafraîchissement.
+    const prevScroller = wrap.querySelector('.cc-table-scroll');
+    const prevScrollTop = prevScroller ? prevScroller.scrollTop : null;
+    const prevScrollLeft = prevScroller ? prevScroller.scrollLeft : 0;
+    const prevJournal = wrap.querySelector('#cc-journal');
+    const journalWasOpen = prevJournal ? prevJournal.open : false;
+
     const stats = h.stats || {};
     const candidats = stats.candidats ?? 0;
     const traites = stats.traites ?? 0;
@@ -510,8 +612,12 @@ const ChasseurCreateurs = {
     const isRunning = h.running;
     const isDone = h.status === 'done';
     const creators = h.creators || [];
+    // Chasse interrompue (statut erreur) : si des résultats existent, ils
+    // restent exploitables → exports et versement disponibles.
+    const hasResults = !isRunning && creators.length > 0;
     const platform = (h.filters && h.filters.platform) || 'youtube';
     const platformIcon = { youtube: '📹', instagram: '📷', facebook: '📘' }[platform] || '🎯';
+    const pushed = this._pushedInfo(h.id);
 
     wrap.innerHTML = `
       <div class="card p-5 mb-4">
@@ -520,9 +626,9 @@ const ChasseurCreateurs = {
             <div class="text-xs text-text-muted mb-1">${this._fmtDate(h.created_at)}</div>
             <h2 class="text-lg font-bold truncate">${platformIcon} ${this._esc(h.label)}</h2>
           </div>
-          <div class="flex items-center gap-2">
-            ${this._statusBadge(h.status, isRunning)}
-            ${isDone && creators.length > 0 ? `
+          <div class="flex items-center gap-2 flex-wrap justify-end">
+            ${this._statusBadge(h.status, isRunning, h.error)}
+            ${hasResults ? `
               ${withMail > 0 ? `
               <button id="cc-push" class="btn btn-primary"
                       title="Ajouter les créateurs avec mail à la base Tous les prospects (même base qu'Obélisk et l'Auto-pilote)">
@@ -541,8 +647,13 @@ const ChasseurCreateurs = {
           </div>
         </div>
 
+        ${pushed ? `
+          <div class="text-[11px] text-success-text font-semibold mb-2 text-right">
+            ✓ Déjà versé dans « Tous les prospects »${pushed.at ? ` (${this._fmtDate(pushed.at)})` : ''}${pushed.quality ? ` — ${this._esc(pushed.quality)}` : ''}
+          </div>` : ''}
+
         ${h.error ? `
-          <div class="rounded-lg bg-danger/10 border border-danger/30 text-danger
+          <div class="rounded-lg bg-danger/10 border border-danger/30 text-danger-text
                       text-sm p-3 mb-3">⚠️ ${this._esc(h.error)}</div>` : ''}
 
         <!-- Barre de progression -->
@@ -577,7 +688,7 @@ const ChasseurCreateurs = {
             <span>${creators.length} créateur${creators.length > 1 ? 's' : ''}</span>
             ${isRunning ? `<span class="text-accent animate-pulse">Chasse en cours…</span>` : ''}
           </div>
-          <div class="overflow-x-auto max-h-[520px] overflow-y-auto">
+          <div class="cc-table-scroll overflow-x-auto max-h-[520px] overflow-y-auto">
             <table class="w-full text-sm">
               <thead class="bg-bg sticky top-0">
                 <tr class="text-left text-[11px] uppercase tracking-wide text-text-muted">
@@ -599,7 +710,7 @@ const ChasseurCreateurs = {
                     </td>
                     <td class="px-3 py-2 ${c.email ? '' : 'text-text-muted italic'}">
                       ${c.email ? `<a href="mailto:${this._esc(c.email)}" class="hover:text-accent hover:underline">${this._esc(c.email)}</a>` : '—'}
-                      ${(c.emails_extra && c.emails_extra.length) ? `<div class="text-[10px] text-text-muted mt-0.5">+ ${c.emails_extra.length} autre${c.emails_extra.length > 1 ? 's' : ''}</div>` : ''}
+                      ${(c.emails_extra && c.emails_extra.length) ? `<div class="text-[11px] text-text-muted mt-0.5">+ ${c.emails_extra.length} autre${c.emails_extra.length > 1 ? 's' : ''}</div>` : ''}
                     </td>
                     <td class="px-3 py-2 text-[11px] text-text-muted">
                       ${(c.external_links && c.external_links.length) ? c.external_links.slice(0, 2).map(l =>
@@ -612,20 +723,34 @@ const ChasseurCreateurs = {
             </table>
           </div>
         </div>
-      ` : (isRunning ? `
+      ` : ((isRunning || h.status === 'pending') ? `
         <div class="card p-10 text-center text-text-muted">
           <div class="text-base">${this._esc(h.log_tail?.[h.log_tail.length - 1] || 'Chasse en cours…')}</div>
         </div>
-      ` : '')}
+      ` : `
+        <div class="card p-10 text-center text-text-muted">
+          <div class="text-3xl mb-2 opacity-70">🪹</div>
+          <div class="text-base">Rien trouvé. Essaie une autre niche, élargis la fourchette d'abonnés ou change de pays.</div>
+        </div>
+      `)}
 
       ${h.log_tail && h.log_tail.length ? `
-        <details class="mt-4 text-xs text-text-muted">
+        <details id="cc-journal" class="mt-4 text-xs text-text-muted">
           <summary class="cursor-pointer hover:text-text-secondary">Journal de la chasse</summary>
-          <pre class="mt-2 p-3 bg-bg rounded-lg overflow-x-auto text-[10.5px]
+          <pre class="mt-2 p-3 bg-bg rounded-lg overflow-x-auto text-[11px]
                       whitespace-pre-wrap leading-relaxed">${this._esc(h.log_tail.join('\n'))}</pre>
         </details>
       ` : ''}
     `;
+
+    // Restaure ce que l'utilisateur regardait avant le re-render.
+    const scroller = wrap.querySelector('.cc-table-scroll');
+    if (scroller && prevScrollTop != null) {
+      scroller.scrollTop = prevScrollTop;
+      scroller.scrollLeft = prevScrollLeft;
+    }
+    const journal = wrap.querySelector('#cc-journal');
+    if (journal && journalWasOpen) journal.open = true;
 
     const exportBtn = document.getElementById('cc-export');
     if (exportBtn) exportBtn.onclick = () => this._exportCsv();
@@ -645,12 +770,11 @@ const ChasseurCreateurs = {
       this._toast('Aucun créateur avec mail à ajouter.', 'danger');
       return;
     }
-    const ok = confirm(
-      `Ajouter ${withMail} créateur${withMail > 1 ? 's' : ''} à la base ` +
-      `de prospects ?\n\n` +
-      `Ils apparaîtront dans "Tous les prospects" (même base qu'Obélisk). ` +
-      `Les doublons sont fusionnés automatiquement, et l'Auto-pilote ` +
-      `pourra leur écrire.`
+    const ok = await Dialog.confirm(
+      `Ajouter ${withMail} créateur${withMail > 1 ? 's' : ''} à « Tous les prospects » ` +
+      `(même base qu'Obélisk) ? Les doublons sont fusionnés automatiquement, ` +
+      `et l'Auto-pilote pourra leur écrire.`,
+      { title: 'Ajouter à mes prospects', okLabel: 'Ajouter', cancelLabel: 'Annuler' }
     );
     if (!ok) return;
     const btn = document.getElementById('cc-push');
@@ -658,24 +782,29 @@ const ChasseurCreateurs = {
     const r = await this._api('push_to_prospects', {hunt_id: this.state.currentId});
     if (btn) btn.disabled = false;
     if (!r || !r.ok) {
-      this._toast((r && r.error) || 'Ajout impossible', 'danger');
+      this._toast((r && r.error) || 'Ajout impossible. Réessaie dans un instant.', 'danger');
       this._renderDetail();
       return;
     }
+    // Rapport du contrôle qualité (si le serveur le renvoie).
+    const qualityTxt = this._qualityToText(r.quality);
+    this._markPushed(this.state.currentId, qualityTxt);
     this._toast(
       `${r.pushed} créateur${r.pushed > 1 ? 's' : ''} ajouté${r.pushed > 1 ? 's' : ''} ` +
       `à la base — ${r.created} nouveau${r.created > 1 ? 'x' : ''}, ` +
       `${r.merged} fusionné${r.merged > 1 ? 's' : ''}.`,
       'success'
     );
+    if (qualityTxt) Toast.info(qualityTxt, 'Contrôle qualité');
     this._renderDetail();
+    this._renderHuntsList();
   },
 
   _statCell(label, value, tone) {
-    const color = tone === 'success' ? 'text-success' : 'text-text';
+    const color = tone === 'success' ? 'text-success-text' : 'text-text';
     return `
       <div class="rounded-lg bg-bg p-2.5">
-        <div class="text-[10px] uppercase tracking-wide text-text-muted">${label}</div>
+        <div class="text-[11px] uppercase tracking-wide text-text-muted">${label}</div>
         <div class="text-lg font-bold ${color}">${value}</div>
       </div>
     `;
@@ -783,10 +912,15 @@ const ChasseurCreateurs = {
   },
 
   _toast(msg, tone) {
+    // Mappe nos tons internes vers les types du Toast global
+    // (avant : on passait une string à la place des options → tout muet).
+    const type = tone === 'danger' ? 'error'
+               : (tone === 'success' || tone === 'warn' || tone === 'info') ? tone
+               : 'info';
     if (typeof Toast !== 'undefined' && Toast.show) {
-      Toast.show(msg, tone || 'info');
+      Toast.show(msg, { type });
     } else {
-      console.log('[ChasseurCreateurs]', tone, msg);
+      console.log('[ChasseurCreateurs]', type, msg);
     }
   },
 };

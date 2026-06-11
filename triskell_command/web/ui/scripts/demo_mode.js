@@ -1,13 +1,18 @@
 /* DemoMode — mode démo pour générer des visuels promotionnels.
  *
- * Quand activé :
- *   - Aucun appel "destructif" (envoi mail, save, delete) ne part au serveur ;
- *     l'API retourne un faux succès silencieux.
- *   - Certaines listes (Matinale, mails reçus, etc.) sont surchargées avec des
- *     données fictives crédibles, pour que les screenshots montrent une boîte
- *     qui tourne à plein régime.
+ * 🚨 PRINCIPE DE SÉCURITÉ (liste BLANCHE depuis le 11/06/2026) :
+ *   - En démo, PLUS RIEN ne part au serveur : ni lecture, ni écriture.
+ *   - Un appel API a exactement trois destins :
+ *       1. un faux existe (_fake) → données fictives crédibles ;
+ *       2. il est dans NETWORK_ALLOWED (session + thème, rien de métier)
+ *          → il passe au serveur ;
+ *       3. TOUT LE RESTE est bloqué net ({ok:false, demo_blocked:true}).
+ *   - Avant, c'était une liste NOIRE : toute méthode non reconnue partait
+ *     au VRAI serveur — on pouvait envoyer de vrais mails en plein mode
+ *     démo. Ne jamais revenir à ce fonctionnement.
  *   - Bandeau "MODE DÉMO" visible en haut, masquable temporairement (30 sec)
- *     pour la capture d'écran via un bouton "Masquer 30 sec".
+ *     pour la capture d'écran via un bouton "Masquer 30 sec". Une vigie le
+ *     ré-injecte s'il disparaît (vue qui écrase le DOM, rechargement…).
  *
  * Activation : Réglages → "Mode démo" → bouton Activer.
  * Persisté en localStorage (clé `tc-demo-mode`).
@@ -39,12 +44,17 @@ const DemoMode = {
       this._removeBanner();
       return;
     }
-    // Bannière temporairement masquée pour screenshot ?
+    // Bannière temporairement masquée pour screenshot ? La vigie
+    // (_startBannerWatch) la fera revenir toute seule à l'expiration,
+    // même si la page a été rechargée entre-temps.
     try {
       const until = parseInt(sessionStorage.getItem(this.HIDE_BANNER_UNTIL) || '0', 10);
       if (until && Date.now() < until) return;
     } catch (e) {}
-    if (document.getElementById('demo-banner')) return;
+    if (document.getElementById('demo-banner')) {
+      this._fitBannerPadding();
+      return;
+    }
 
     const banner = document.createElement('div');
     banner.id = 'demo-banner';
@@ -70,7 +80,7 @@ const DemoMode = {
           <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
         </svg>
         <strong style="font-weight:800; letter-spacing:1px;">MODE DÉMO</strong>
-        — aucune action n'est réelle, les données affichées sont fictives.
+        — aucune action ne part au serveur ; certaines tuiles affichent des données d'exemple.
       </span>
       <button id="demo-hide-btn" type="button"
               style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.4); border-radius:6px; padding:3px 10px; font-size:11px; font-weight:600; cursor:pointer;">
@@ -82,7 +92,7 @@ const DemoMode = {
       </button>
     `;
     document.body.insertBefore(banner, document.body.firstChild);
-    document.body.style.paddingTop = '34px';
+    this._fitBannerPadding();
 
     banner.querySelector('#demo-hide-btn').onclick = () => {
       try { sessionStorage.setItem(this.HIDE_BANNER_UNTIL, String(Date.now() + 30_000)); } catch (e) {}
@@ -90,6 +100,28 @@ const DemoMode = {
       setTimeout(() => this.ensureBanner(), 30_000);
     };
     banner.querySelector('#demo-off-btn').onclick = () => this.setOn(false);
+  },
+  // Décale la page de la hauteur RÉELLE du bandeau (mesurée), au lieu d'un
+  // 34px en dur qui se décalait dès que le texte passait sur deux lignes.
+  _fitBannerPadding() {
+    const b = document.getElementById('demo-banner');
+    if (!b) return;
+    const h = b.offsetHeight;
+    if (h) document.body.style.paddingTop = h + 'px';
+  },
+  // Vigie du bandeau : toutes les 5 s, ré-injecte le bandeau s'il a disparu
+  // (vue qui réécrit le haut de page, fin de capture…), ré-ajuste le décalage
+  // si sa hauteur a changé, et le fait revenir à l'expiration de
+  // « Masquer 30 sec » — y compris après un rechargement de la page
+  // (ensureBanner relit l'horodatage à chaque passage).
+  _startBannerWatch() {
+    if (this._bannerWatch) return;
+    this._bannerWatch = setInterval(() => {
+      try {
+        if (!this.isOn()) return;
+        this.ensureBanner();
+      } catch (e) { /* la vigie ne casse jamais l'app */ }
+    }, 5000);
   },
   _removeBanner() {
     const b = document.getElementById('demo-banner');
@@ -100,51 +132,62 @@ const DemoMode = {
   },
 
   // ----- Interception API -----
-  // Méthodes "read" qui passent toujours au serveur (jamais bloquées)
+  // 🚨 LISTE BLANCHE (11/06/2026). Trois destins possibles pour un appel :
+  //   1. un faux (_fake) → données fictives, zéro réseau ;
+  //   2. NETWORK_ALLOWED → passe au serveur (session + thème, rien de métier) ;
+  //   3. tout le reste → BLOQUÉ ({ok:false, demo_blocked:true}).
+  // Ne JAMAIS ré-introduire un « par défaut, ça passe au serveur ».
+
+  // Message renvoyé pour tout appel bloqué (les vues l'affichent tel quel).
+  BLOCKED_MESSAGE: 'Mode démo : cette action est désactivée. Désactive le mode démo (bandeau en haut) pour travailler en réel.',
+
+  // Les SEULES méthodes autorisées à toucher le réseau en démo. Rien ici ne
+  // lit ni n'écrit de données métier : état de session + thème, c'est tout.
+  // (« me » et « avatar » partent en fetch direct sans passer par le Proxy
+  //  d'app.js → hors de portée de cette interception, et inoffensifs.)
+  NETWORK_ALLOWED: new Set([
+    'auth_status',       // a un faux : le réseau ne sert que si le faux disparaît
+    'get_current_user',  // idem
+    'get_theme_mode',
+    'set_theme_mode',
+    'cycle_theme',
+  ]),
+
+  // Compat : health_check.js appelle encore isReadMethod() pour son
+  // diagnostic « fake manquant ». Ne décide PLUS d'aucun passage réseau.
   isReadMethod(method) {
     return /^(get|is|list|fetch|check|me)_/.test(method)
         || /_(list|get|status|count|search|fetch|preview)$/.test(method)
         || ['boot', 'me', 'auth_status'].includes(method);
   },
-  // Méthodes "write" qu'on remplace par un faux succès silencieux
-  isWriteMethod(method) {
-    if (!method) return false;
-    return /^(save|delete|remove|set|create|add|push|migrate|reset|sync|seed|dispatch)_/.test(method)
-        || /_(save|delete|remove|send|set|create|add|upload|update|reset|migrate|schedule|cancel|test|run|run_now|now|audit|merge|approve|reject|mark|convert|dispatch|reply|action|poll)$/.test(method)
-        || method === 'mail_send'
-        || method === 'mail_send_reply'
-        || method === 'mail_schedule'
-        || method === 'mail_scheduled_cancel'
-        || method === 'phare_run_audit'
-        || method === 'phare_merge_action'
-        || method === 'replies_poll_now'
-        || method === 'multichannel_dispatch_phantombuster'
-        || method.includes('_send_')
-        || ['avatar_upload', 'push_subscribe', 'push_test', 'push_unsubscribe',
-            'claude_ask', 'claude_consume_pending', 'cycle_theme'].includes(method);
+
+  // Le refus standard du mode démo (objet neuf à chaque appel : personne
+  // ne peut le muter pour les suivants).
+  _blockedResult() {
+    return { ok: false, demo_blocked: true, error: this.BLOCKED_MESSAGE };
   },
 
   /** Intercepte un appel API.
    *  Retourne { handled: true, result } si on prend la main,
-   *  ou { handled: false } pour laisser passer au serveur. */
+   *  ou { handled: false } pour laisser passer au serveur (liste blanche). */
   intercept(method, payload) {
     if (!this.isOn()) return { handled: false };
-    // Whitelist explicite read → toujours laisser passer
-    if (this.isReadMethod(method) && !this._fake[method]) {
-      return { handled: false };
-    }
-    // Données fictives pour méthodes "list" ciblées
-    if (this._fake[method]) {
+    // 1) Un faux existe → données fictives. Un faux qui plante ne laisse
+    //    JAMAIS filer l'appel au serveur : il bloque, et se signale en console.
+    const fake = Object.prototype.hasOwnProperty.call(this._fake, method)
+      ? this._fake[method] : null;
+    if (typeof fake === 'function') {
       try { return { handled: true, result: this._fake[method](payload) }; }
-      catch (e) { console.warn('demo fake error', method, e); return { handled: false }; }
+      catch (e) {
+        console.error('[DemoMode] faux en erreur → appel bloqué :', method, e);
+        return { handled: true, result: this._blockedResult() };
+      }
     }
-    // Write → faux succès silencieux
-    if (this.isWriteMethod(method)) {
-      return { handled: true, result: { ok: true, demo: true, message_id: 'demo-' + this._rid() } };
-    }
-    return { handled: false };
+    // 2) Liste blanche réseau stricte (session + thème uniquement)
+    if (this.NETWORK_ALLOWED.has(method)) return { handled: false };
+    // 3) Défaut : BLOQUÉ. Rien d'autre ne part au serveur en démo.
+    return { handled: true, result: this._blockedResult() };
   },
-  _rid() { return Math.random().toString(36).slice(2, 12); },
 
   // ----- Données fictives (méthodes appelées par le frontend) -----
   _fake: {
@@ -167,6 +210,152 @@ const DemoMode = {
           drafts_convoy_pending: 3,
         },
         alerts: { convoy_failed_yesterday: 0, convoy_failed_today: 0 },
+      };
+    },
+
+    // ============ Le Guide (barre du bas) ============
+    // Format lu par guide.js et prospection.js : compteurs + missions + robots.
+    // Chiffres alignés sur les autres faux (digest, funnel) pour rester cohérent.
+    guide_snapshot() {
+      const missions = (DemoMode._fake.prospection_missions().missions || [])
+        .map(m => ({ id: m.id, status: m.status, progress: m.progress, counts: m.counts }));
+      return {
+        ok: true,
+        drafts_pending: 8,
+        replies_unhandled: 18,
+        prospects_total: 4820,
+        prospects_new: 3580,
+        autopilot_enabled: true,
+        workers: { healthy: 9, warning: 0, error: 0 },
+        copilot_unseen: 0,
+        missions,
+      };
+    },
+
+    // ============ Lancer une prospection (écran tunnel) ============
+    // Format lu par prospection.js : missions[] + autopilot.enabled.
+    // Deux missions : une terminée (rapport qualité + aperçu), une en cours.
+    prospection_missions() {
+      const now = Date.now();
+      return {
+        ok: true,
+        autopilot: { enabled: true },
+        missions: [
+          {
+            id: 'demo-mission-2',
+            label: 'Commerces locaux — coiffeur à Rennes',
+            source: 'local',
+            params: { metier: 'coiffeur', zone: 'Rennes', volume: 60 },
+            status: 'hunting',
+            dry_run: false,
+            progress: 64,
+            created_at: new Date(now - 25 * 60_000).toISOString(),
+            counts: { found: 31, with_email: 19 },
+            autopilot: {},
+          },
+          {
+            id: 'demo-mission-1',
+            label: 'PME — fleuriste dans le 35',
+            source: 'pme',
+            params: { metier: 'fleuriste', departement: '35', volume: 100 },
+            status: 'handed',
+            dry_run: false,
+            progress: 100,
+            created_at: new Date(now - 3 * 3600_000).toISOString(),
+            counts: { found: 92, with_email: 67, pushed: 58, created: 51, merged: 7 },
+            quality: {
+              total: 67, kept: 58,
+              dropped: { bad_email: 5, placeholder_name: 2, duplicate_in_batch: 2 },
+            },
+            autopilot: { kicked: true, note: 'Auto-pilote prévenu — il écrit aux nouvelles fiches.' },
+            preview: [
+              { nom: 'Fleuriste Pétale',    email: 'contact@petale.exemple.fr',        sort: 'nouvelle fiche' },
+              { nom: 'Au Jardin de Rennes', email: 'bonjour@jardin-rennes.exemple.fr', sort: 'nouvelle fiche' },
+              { nom: 'Rose & Lys',          email: 'hello@rose-lys.exemple.fr',        sort: 'fusionnée' },
+            ],
+          },
+        ],
+      };
+    },
+
+    // En démo, on ne lance RIEN : blocage assumé, avec un message sympa.
+    prospection_start() {
+      return {
+        ok: false, demo_blocked: true,
+        error: 'Mode démo : lance une vraie prospection hors démo 😉 (bandeau en haut → Désactiver).',
+      };
+    },
+    // (prospection_mission_cancel n'a volontairement PAS de faux : le blocage
+    //  par défaut s'en charge — plus jamais de faux succès sur une vraie mission.)
+
+    // ============ Base prospects (écran « Tous les prospects ») ============
+    obelisk_stats() {
+      return { ok: true, stats: { total: 248, with_email: 187, qualified: 64, contacted: 112, won: 9 } };
+    },
+    obelisk_list_creators(payload) {
+      const rows = [
+        { id: 'ob-1', name: 'Maxime Cuisine', handle: 'maximecuisine', audience: 'creator',
+          platform_url: 'https://www.youtube.com/@maximecuisine', industry: 'Cuisine',
+          subscribers: 184000, emails: ['contact@maximecuisine.exemple.fr'], city: 'Lyon', status: 'qualified' },
+        { id: 'ob-2', name: 'LeaPlaysFR', handle: 'leaplaysfr', audience: 'creator',
+          platform_url: 'https://www.twitch.tv/leaplaysfr', industry: 'Gaming',
+          subscribers: 42000, emails: ['pro@leaplays.exemple.fr'], city: 'Bordeaux', status: 'contacted' },
+        { id: 'ob-3', name: 'Le Podcast du Potager', handle: 'podcastpotager', audience: 'creator',
+          platform_url: 'https://podcasts.apple.com/fr/podcast/le-potager', industry: 'Jardinage',
+          subscribers: 8600, emails: ['hello@potager.exemple.fr'], city: 'Angers', status: 'replied' },
+        { id: 'ob-4', name: 'Nora Fitness', handle: 'norafit', audience: 'creator',
+          platform_url: '', sources: [{ name: 'Instagram' }], industry: 'Fitness',
+          subscribers: 96000, emails: ['collab@norafit.exemple.fr'], city: 'Marseille', status: 'new' },
+        { id: 'ob-5', name: 'DevTom', handle: 'devtom', audience: 'creator',
+          platform_url: 'https://github.com/devtom', industry: 'Développement',
+          subscribers: 3100, emails: ['tom@devtom.exemple.fr'], city: 'Toulouse', status: 'new' },
+        { id: 'ob-6', name: 'Crêperie du Port', legal_name: 'Crêperie du Port', audience: 'pro',
+          platform_url: '', sources: [{ name: 'OpenStreetMap' }], industry: 'Restauration',
+          subscribers: null, emails: ['contact@creperie-du-port.exemple.fr'], city: 'Saint-Malo', status: 'qualified' },
+        { id: 'ob-7', name: 'Cabinet Kiné Ouest', legal_name: 'Cabinet Kiné Ouest', audience: 'pro',
+          platform_url: '', sources: [{ name: 'OpenStreetMap' }], industry: 'Santé',
+          subscribers: null, emails: ['accueil@kine-ouest.exemple.fr'], city: 'Brest', status: 'contacted' },
+        { id: 'ob-8', name: 'Hôtel des Remparts', legal_name: 'Hôtel des Remparts', audience: 'pro',
+          platform_url: '', sources: [{ name: 'Pages Jaunes' }], industry: 'Hôtellerie',
+          subscribers: null, emails: ['reservation@remparts.exemple.fr'], city: 'Dinan', status: 'won' },
+        { id: 'ob-9', name: 'Menuiserie Le Goff', legal_name: 'Menuiserie Le Goff', audience: 'pro',
+          platform_url: '', sources: [{ name: 'Registre Sirene' }], industry: 'Artisanat',
+          subscribers: null, emails: ['atelier@legoff-bois.exemple.fr'], city: 'Vannes', status: 'new' },
+      ];
+      const p = payload || {};
+      let filtered = rows;
+      if (p.audience) filtered = filtered.filter(r => r.audience === p.audience);
+      if (p.q) {
+        const q = String(p.q).toLowerCase();
+        filtered = filtered.filter(r =>
+          (r.name || '').toLowerCase().includes(q) || (r.handle || '').toLowerCase().includes(q));
+      }
+      const off = Number(p.offset) || 0;
+      const lim = Number(p.limit) || 50;
+      return { ok: true, rows: filtered.slice(off, off + lim), count: filtered.length };
+    },
+
+    // ============ Chaînes de fabrication (badges + panneau Cockpit) ============
+    pipelines_activity() {
+      const t = (min) => new Date(Date.now() - min * 60_000).toISOString();
+      return {
+        ok: true,
+        pipelines: {
+          lagriffe: { recent: [
+            { name: 'Cabinet Dupont & Co', status: 'devis', at: t(40) },
+            { name: 'Atelier Missor',      status: 'won',   at: t(160) },
+          ] },
+          rankus: { recent: [
+            { name: 'Pharmacie Centrale', status: 'audit', at: t(90) },
+          ] },
+          wow: { recent: [
+            { name: 'Studio Yoga Soleil', status: 'storyboard', at: t(200) },
+          ] },
+          pixelpros: { recent: [
+            { name: 'Plombier Express', status: 'paid', at: t(15) },
+            { name: 'Optique Vision',   status: 'live', at: t(300) },
+          ] },
+        },
       };
     },
 
@@ -331,95 +520,6 @@ const DemoMode = {
       const status = (payload && payload.status) || 'all';
       if (status === 'all') return { ok: true, notes };
       return { ok: true, notes: notes.filter(n => n.category === status) };
-    },
-
-    // ============ Phare SEO ============
-    // Format attendu : {ok, sites_count, total_clicks_30d, avg_position_30d, pending_actions}
-    phare_overview() {
-      return {
-        ok: true,
-        sites_count: 13,
-        total_clicks_30d: 28420,
-        avg_position_30d: 9.4,
-        pending_actions: 6,
-      };
-    },
-    // Format attendu : {ok, sites: [{id, name, domain, clicks_30d, avg_position_30d}]}
-    phare_sites() {
-      return {
-        ok: true,
-        sites: [
-          { id: 's1',  name: 'Triskell Studio',     domain: 'triskell-studio.fr',          clicks_30d: 12480, avg_position_30d: 4.2 },
-          { id: 's2',  name: 'Lagriffe Studio',     domain: 'lagriffe-studio.fr',          clicks_30d: 5240,  avg_position_30d: 6.1 },
-          { id: 's3',  name: 'RankUs Studio',       domain: 'rankus-studio.fr',            clicks_30d: 3890,  avg_position_30d: 8.4 },
-          { id: 's4',  name: 'Studio WoW',          domain: 'studio-wow.fr',               clicks_30d: 2120,  avg_position_30d: 11.2 },
-          { id: 's5',  name: 'Le Druide Antavirus', domain: 'antavirus.fr',                clicks_30d: 1840,  avg_position_30d: 7.8 },
-          { id: 's6',  name: 'Boulangerie Lefèvre', domain: 'boulangerie-lefevre.fr',      clicks_30d: 980,   avg_position_30d: 4.5 },
-          { id: 's7',  name: 'Cabinet Dupont',      domain: 'cabinet-dupont.fr',           clicks_30d: 720,   avg_position_30d: 6.8 },
-          { id: 's8',  name: 'Pharmacie Centrale',  domain: 'pharmacie-centrale.fr',       clicks_30d: 612,   avg_position_30d: 5.2 },
-          { id: 's9',  name: 'Studio Yoga Soleil',  domain: 'yoga-soleil.fr',              clicks_30d: 410,   avg_position_30d: 8.1 },
-          { id: 's10', name: 'Restaurant Le Bistrot',domain:'le-bistrot-vannes.fr',        clicks_30d: 380,   avg_position_30d: 7.4 },
-          { id: 's11', name: 'Atelier Missor',      domain: 'atelier-missor.fr',           clicks_30d: 285,   avg_position_30d: 12.4 },
-          { id: 's12', name: 'Pack Électricien',    domain: 'pack-elec.triskell-studio.fr',clicks_30d: 248,   avg_position_30d: 14.8 },
-          { id: 's13', name: 'Studio PDF',          domain: 'le-studio-pdf.fr',            clicks_30d: 162,   avg_position_30d: 19.2 },
-        ],
-      };
-    },
-    // Format attendu : {ok, actions: [{id, title, kind, created_at, summary}]}
-    phare_pending_actions() {
-      const now = Date.now();
-      return {
-        ok: true,
-        actions: [
-          { id: 'a1', title: 'Ajouter meta description sur 3 pages — cabinet-dupont.fr', kind: 'meta_description', created_at: new Date(now - 3600_000).toISOString(),
-            summary: "L'agent audit a détecté 3 pages sans meta description (impact CTR estimé +14%). PR prête : ajout de descriptions optimisées, 70-155 caractères, mots-clés ciblés." },
-          { id: 'a2', title: 'Compresser 4 images header — yoga-soleil.fr', kind: 'speed', created_at: new Date(now - 7200_000).toISOString(),
-            summary: "Le header pèse 1.2 Mo (4 photos non compressées). Compression sans perte visible → 280 Ko. Gain LCP estimé : -0.8s. PR : conversion WebP + redimensionnement." },
-          { id: 'a3', title: 'Ajouter schema LocalBusiness — pharmacie-centrale.fr', kind: 'schema', created_at: new Date(now - 10800_000).toISOString(),
-            summary: "Pas de structured data LocalBusiness détecté. Ajout JSON-LD avec horaires, coordonnées, geo, type Pharmacy. Visible dans Knowledge Panel Google sous 14 jours." },
-          { id: 'a4', title: 'Réparer 2 liens cassés en footer — atelier-missor.fr', kind: 'broken_link', created_at: new Date(now - 14400_000).toISOString(),
-            summary: "Liens vers /tarifs (404) et vers compte Insta supprimé. PR : retire les liens morts, redirige /tarifs vers /prestations." },
-          { id: 'a5', title: 'Mots-clés long tail — boulangerie-lefevre.fr', kind: 'keywords', created_at: new Date(now - 21600_000).toISOString(),
-            summary: "Opportunité détectée : \"kouign-amann frais Plérin\" (volume 90/mois, KD faible). PR : page dédiée + maillage interne depuis la page d'accueil." },
-          { id: 'a6', title: 'Rafraîchir page \"Services\" — lagriffe-studio.fr', kind: 'refresh', created_at: new Date(now - 28800_000).toISOString(),
-            summary: "Page non touchée depuis 6 mois, position 14 sur \"création site web Bretagne\". PR : refonte du contenu, ajout FAQ, témoignages clients, CTA visible." },
-        ],
-      };
-    },
-    // Format attendu pour l'onglet Site : data.site, data.audit, data.keywords, data.actions
-    phare_site(payload) {
-      const id = (payload && payload.id) || 's1';
-      const now = Date.now();
-      return {
-        ok: true,
-        site: {
-          id,
-          name: 'Triskell Studio',
-          domain: 'triskell-studio.fr',
-          clicks_30d: 12480,
-          avg_position_30d: 4.2,
-          impressions_30d: 124580,
-        },
-        audit: {
-          score: 92,
-          checked_at: new Date(now - 3600_000).toISOString(),
-          summary: 'Site bien optimisé. Quelques améliorations marginales possibles.',
-        },
-        keywords: [
-          { keyword: 'agence web bretagne',          position: 3,  search_volume: 720, clicks: 142 },
-          { keyword: 'création site internet 22',    position: 2,  search_volume: 480, clicks: 124 },
-          { keyword: 'site vitrine entreprise',      position: 5,  search_volume: 1800,clicks: 89 },
-          { keyword: 'lagriffe studio',              position: 1,  search_volume: 90,  clicks: 64 },
-          { keyword: 'rankus seo',                   position: 1,  search_volume: 50,  clicks: 38 },
-          { keyword: 'développeur web plérin',       position: 4,  search_volume: 210, clicks: 28 },
-          { keyword: 'tarif site internet artisan',  position: 8,  search_volume: 320, clicks: 18 },
-        ],
-        actions: [
-          { id: 'a1', title: 'Schema Organization à enrichir', kind: 'schema',     status: 'pending', created_at: new Date(now - 7200_000).toISOString() },
-          { id: 'a2', title: 'Backlink obtenu — Le Télégramme', kind: 'backlinks', status: 'merged',  created_at: new Date(now - 86400_000).toISOString() },
-          { id: 'a3', title: 'Page services rafraîchie',        kind: 'refresh',   status: 'merged',  created_at: new Date(now - 172800_000).toISOString() },
-        ],
-      };
     },
 
     // ============ Tracker (analytics sites + tracking d'ouverture mails) ============
@@ -1112,4 +1212,7 @@ window.DemoMode = DemoMode;
 // Affiche la bannière au boot si activé
 window.addEventListener('DOMContentLoaded', () => {
   try { DemoMode.ensureBanner(); } catch (e) {}
+  // Vigie : ré-injecte le bandeau s'il disparaît (vue qui réécrit le haut
+  // de page, fin de « Masquer 30 sec », rechargement pendant le masquage).
+  try { DemoMode._startBannerWatch(); } catch (e) {}
 });

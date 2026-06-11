@@ -1,9 +1,10 @@
 /* MailsDialogs — modales secondaires du module Mails extraites de mails.js.
  *
- * Ces 3 modales sont attachées à `Mails` après chargement (donc ce
+ * Ces modales sont attachées à `Mails` après chargement (donc ce
  * fichier doit être inclus APRÈS scripts/mails.js dans index.html).
  *
- *   - Mails._showDraftRestoreBanner(overlay, draft, onRestore)
+ *   - Mails._showDraftsBanner(overlay, drafts, onRestore)
+ *   - Mails._openDraftsListDialog(drafts, onRestore)
  *   - Mails._openScheduleDialog(onConfirm)
  *   - Mails._openImageLinkDialog(img)
  *
@@ -21,45 +22,133 @@
     return;
   }
 
-  /** Affiche un bandeau "Brouillon trouvé" en haut du composer.
-   *  onRestore : callback appelée si l'utilisateur clique "Restaurer". */
-  Mails._showDraftRestoreBanner = function(overlay, draft, onRestore) {
+  /** "il y a X min/h/j" à partir d'un timestamp. */
+  const agoLabel = (ts) => {
+    const min = Math.floor((Date.now() - (ts || Date.now())) / 60_000);
+    if (min < 1) return 'à l’instant';
+    if (min < 60) return `il y a ${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `il y a ${h} h`;
+    return `il y a ${Math.floor(h / 24)} j`;
+  };
+
+  /** Affiche un bandeau "N brouillon(s) en attente" en haut du composeur.
+   *  onRestore(draft) : callback appelée avec le brouillon choisi. */
+  Mails._showDraftsBanner = function(overlay, drafts, onRestore) {
     const scrollContainer = overlay.querySelector('.flex-1.overflow-y-auto');
-    if (!scrollContainer) return;
+    if (!scrollContainer || !drafts || !drafts.length) return;
     const banner = document.createElement('div');
-    banner.className = 'mb-3 p-3 rounded-xl border border-accent/40 bg-accent/10 flex items-start gap-3';
-    const ago = (() => {
-      const min = Math.floor((Date.now() - (draft.ts || Date.now())) / 60_000);
-      if (min < 1) return 'à l\'instant';
-      if (min < 60) return `il y a ${min} min`;
-      const h = Math.floor(min / 60);
-      if (h < 24) return `il y a ${h} h`;
-      return `il y a ${Math.floor(h / 24)} j`;
-    })();
-    const preview = (draft.subject || draft.to || '(sans objet)').slice(0, 60);
+    banner.className = 'mb-3 p-3 rounded-xl border border-accent/40 bg-accent/10 flex items-start gap-3 flex-wrap';
+    const last = drafts[0]; // _draftsLoad trie du plus récent au plus ancien
+    const n = drafts.length;
+    const preview = (last.subject || last.to || '(sans objet)').slice(0, 60);
     banner.innerHTML = `
       <svg class="w-5 h-5 text-accent shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
         <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
         <polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
       </svg>
       <div class="flex-1 min-w-0">
-        <div class="text-sm font-semibold text-text">Brouillon trouvé (${ago})</div>
-        <div class="text-xs text-text-muted truncate">${this._escape(preview)}</div>
+        <div class="text-sm font-semibold text-text">${n} brouillon${n > 1 ? 's' : ''} en attente</div>
+        <div class="text-xs text-text-muted truncate">Dernier (${agoLabel(last.ts)}) : ${Mails._escape(preview)}</div>
       </div>
       <div class="flex items-center gap-2 shrink-0">
-        <button type="button" data-draft-restore class="text-xs font-semibold text-accent hover:underline">Restaurer</button>
-        <button type="button" data-draft-discard class="text-xs text-text-muted hover:text-danger">Ignorer</button>
+        <button type="button" data-draft-restore-last class="text-xs font-semibold text-accent hover:underline">Reprendre le dernier</button>
+        <button type="button" data-draft-see-all class="text-xs font-semibold text-text-muted hover:text-accent hover:underline" title="Voir la liste des brouillons (reprendre ou supprimer)">Voir</button>
+        <button type="button" data-draft-hide class="text-xs text-text-muted hover:text-text" title="Masquer ce bandeau (les brouillons sont conservés)">Masquer</button>
       </div>
     `;
     scrollContainer.insertBefore(banner, scrollContainer.firstChild);
-    banner.querySelector('[data-draft-restore]').onclick = () => {
-      try { onRestore && onRestore(); } catch (e) { console.error('draft restore', e); }
+    banner.querySelector('[data-draft-restore-last]').onclick = () => {
+      try { onRestore && onRestore(last); } catch (e) { console.error('draft restore', e); }
       banner.remove();
     };
-    banner.querySelector('[data-draft-discard]').onclick = () => {
-      try { localStorage.removeItem('tc-mail-draft'); } catch (e) {}
+    const seeAllBtn = banner.querySelector('[data-draft-see-all]');
+    if (seeAllBtn) {
+      seeAllBtn.onclick = () => {
+        Mails._openDraftsListDialog(drafts, (d) => {
+          try { onRestore && onRestore(d); } catch (e) { console.error('draft restore', e); }
+          banner.remove();
+        });
+      };
+    }
+    banner.querySelector('[data-draft-hide]').onclick = () => {
+      // Masque le bandeau SANS rien supprimer (la suppression se fait
+      // depuis la liste "Voir", explicitement).
       banner.remove();
     };
+  };
+
+  /** Liste simple des brouillons en attente : reprendre ou supprimer.
+   *  onRestore(draft) : callback appelée si l'utilisateur reprend un brouillon. */
+  Mails._openDraftsListDialog = function(drafts, onRestore) {
+    const ov = document.createElement('div');
+    ov.className = 'fixed inset-0 z-[240] flex items-center justify-center p-4';
+    ov.style.background = 'rgba(15,23,42,0.75)';
+    ov.style.backdropFilter = 'blur(8px)';
+    ov.innerHTML = `
+      <div class="bg-surface rounded-2xl shadow-hero w-full max-w-md border border-border animate-slide-up flex flex-col overflow-hidden max-h-[80vh]">
+        <div class="px-5 pt-4 pb-3 border-b border-border bg-surface-elevated flex items-start justify-between gap-2">
+          <div>
+            <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-0.5">BROUILLONS</div>
+            <h3 class="text-base font-bold">Tes mails en attente</h3>
+          </div>
+          <button data-drafts-close class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
+        </div>
+        <div data-drafts-list class="flex-1 overflow-y-auto p-4 space-y-2"></div>
+      </div>
+    `;
+    document.body.appendChild(ov);
+
+    const close = () => {
+      document.removeEventListener('keydown', escListener);
+      ov.remove();
+    };
+    const escListener = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', escListener);
+    ov.querySelector('[data-drafts-close]').onclick = close;
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+
+    const listEl = ov.querySelector('[data-drafts-list]');
+    const renderList = () => {
+      const items = Mails._draftsLoad();
+      if (!items.length) {
+        listEl.innerHTML = '<div class="text-center py-8 text-sm text-text-muted">Plus aucun brouillon en attente.</div>';
+        return;
+      }
+      listEl.innerHTML = items.map(d => {
+        const subject = (d.subject || '(sans objet)').slice(0, 70);
+        const to = (d.to || '(sans destinataire)').slice(0, 60);
+        return `
+        <div class="card p-3 flex items-center gap-3" data-draft-row="${Mails._escape(d.id)}">
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold text-text truncate">${Mails._escape(subject)}</div>
+            <div class="text-xs text-text-muted truncate">À : ${Mails._escape(to)} · ${agoLabel(d.ts)}</div>
+          </div>
+          <button data-draft-pick="${Mails._escape(d.id)}" class="text-xs font-semibold text-accent hover:underline shrink-0">Reprendre</button>
+          <button data-draft-del="${Mails._escape(d.id)}" class="text-xs text-text-muted hover:text-danger shrink-0"
+                  title="Supprimer ce brouillon" aria-label="Supprimer ce brouillon">Supprimer</button>
+        </div>`;
+      }).join('');
+      listEl.querySelectorAll('[data-draft-pick]').forEach(btn => {
+        btn.onclick = () => {
+          const d = Mails._draftsLoad().find(x => x.id === btn.dataset.draftPick);
+          if (!d) return;
+          close();
+          try { onRestore && onRestore(d); } catch (e) { console.error('draft restore', e); }
+        };
+      });
+      listEl.querySelectorAll('[data-draft-del]').forEach(btn => {
+        btn.onclick = async () => {
+          const ok = await Dialog.confirm(
+            'Supprimer ce brouillon ? Le texte sera perdu.',
+            { title: 'Supprimer le brouillon', okLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true });
+          if (!ok) return;
+          Mails._draftRemove(btn.dataset.draftDel);
+          renderList();
+        };
+      });
+    };
+    renderList();
   };
 
   /** Modale "Envoyer plus tard" : choix date/heure + raccourcis rapides.
@@ -109,7 +198,7 @@
               <button data-preset="${i}" type="button"
                       class="text-left px-3 py-2.5 rounded-xl border border-border hover:border-accent hover:bg-accent/5 transition-colors">
                 <div class="text-sm font-semibold text-text">${p.label}</div>
-                <div class="text-[10px] text-text-muted mt-0.5">${p.kicker}</div>
+                <div class="text-[11px] text-text-muted mt-0.5">${p.kicker}</div>
               </button>
             `).join('')}
           </div>
@@ -198,7 +287,7 @@
       <div class="bg-surface rounded-2xl shadow-hero w-full max-w-md border border-border animate-slide-up flex flex-col overflow-hidden">
         <div class="px-5 pt-4 pb-3 border-b border-border bg-surface-elevated">
           <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">IMAGE</div>
-          <h3 class="text-base font-bold">${existingLink ? 'Modifier le lien' : 'Rendre l\'image cliquable'}</h3>
+          <h3 class="text-base font-bold">${existingLink ? 'Modifier le lien' : 'Rendre l’image cliquable'}</h3>
           <p class="text-xs text-text-muted mt-1">Quand le destinataire cliquera sur l'image, il sera redirigé vers l'URL ci-dessous.</p>
         </div>
         <div class="p-5 space-y-3">
@@ -207,7 +296,7 @@
             <input id="img-link-url" type="url" value="${this._escape(currentUrl)}"
                    placeholder="https://triskell-studio.fr"
                    class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
-            <div class="text-[10px] text-text-muted mt-1">Laisse vide et clique "Enregistrer" pour retirer le lien.</div>
+            <div class="text-[11px] text-text-muted mt-1">Laisse vide et clique "Enregistrer" pour retirer le lien.</div>
           </div>
         </div>
         <div class="px-5 py-4 border-t border-border bg-surface-elevated flex items-center justify-between gap-2">

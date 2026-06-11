@@ -42,20 +42,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "follow_up_7d":  {"days": 7,  "mode": "manual"},
         "follow_up_30d": {"days": 30, "mode": "manual"},
     },
+    # Vouvoiement obligatoire (règle absolue de Jordan) — les anciens
+    # textes par défaut tutoyaient.
     "templates": {
         "follow_up_7d": (
-            "Bonjour {name},\n\n"
-            "Je relance suite à mon mail de la semaine dernière, "
-            "je sais que tu reçois beaucoup de propositions.\n\n"
-            "Si le timing n'est pas bon, fais-moi signe et on reprendra "
-            "contact plus tard. Sinon je reste à dispo.\n\n"
+            "Bonjour,\n\n"
+            "Je me permets de revenir vers vous suite à mon message de la "
+            "semaine dernière — je sais que vous recevez beaucoup de "
+            "sollicitations.\n\n"
+            "Si ce n'est pas le bon moment, dites-le-moi simplement et je "
+            "reviendrai vers vous plus tard. Sinon, je reste à votre "
+            "disposition.\n\n"
             "{signature}"
         ),
         "follow_up_30d": (
-            "Bonjour {name},\n\n"
-            "Dernière relance promis. J'ai pensé à toi en tombant sur "
-            "{soft_hook} — peut-être qu'on se reparle ?\n\n"
-            "Si non, je te laisse tranquille définitivement.\n\n"
+            "Bonjour,\n\n"
+            "Dernière relance, promis. Si le sujet peut vous intéresser un "
+            "jour, je serai ravi d'en parler — sinon, je ne vous "
+            "recontacterai plus.\n\n"
+            "Bonne continuation à vous,\n\n"
             "{signature}"
         ),
     },
@@ -256,14 +261,30 @@ def _should_skip(client, sent_row: dict, stage: str) -> bool:
     except Exception:
         pass
 
-    # Anti-doublon strict (Auto-pilote v2, etape 1.4) :
-    # un mail est deja parti vers ce prospect (a n'importe quel moment) ?
-    # OU le destinataire est-il deja client ?
+    # Anti-doublon cross-runner : un AUTRE envoi est parti vers ce prospect
+    # dans les 48h ? OU le destinataire est-il devenu client ?
+    # ATTENTION a ne PAS remettre forever=True ici : la memoire a vie
+    # matchait le mail INITIAL que la relance est censee suivre -> le drip
+    # sautait 100% des prospects et les relances ne partaient JAMAIS
+    # (bug constate lors de l'audit du 10/06/2026).
     try:
         from . import prospect_status as PS
+        email = ""
+        try:
+            pres = (sb.table("prospects").select("emails")
+                    .eq("id", prospect_id).limit(1).execute())
+            emails = (pres.data or [{}])[0].get("emails") or []
+            email = str(emails[0]).strip() if emails else ""
+        except Exception:
+            pass
         recent = PS.has_recent_send(client, prospect_id=prospect_id,
-                                    forever=True, check_clients=True)
+                                    email=email, hours=48,
+                                    check_clients=True)
         if recent.get("recent"):
+            # Filet : si le seul envoi recent est le mail initial lui-meme
+            # (fenetres J+7/J+30 elargies a ±1h, jamais < 48h), on bloque
+            # quand meme — un envoi < 48h signifie qu'un autre runner ou un
+            # envoi manuel vient de passer.
             return True
     except Exception:
         pass
@@ -344,10 +365,16 @@ def _create_drip_draft(client, app_state, sent_row: dict,
     template = (config.get("templates") or {}).get(stage) or ""
     signature = config.get("signature") or app_state.get(
         "outreach", "from_name", default="") or ""
-    body = template.format(name=name, signature=signature, soft_hook="ton sujet")
+    # name / soft_hook gardes pour compat avec d'anciens textes custom
+    # sauves en reglages ; les textes par defaut n'en utilisent plus.
+    body = template.format(name=name, signature=signature,
+                           soft_hook="votre activité")
     original_subject = (sent_row.get("subject") or "").strip()
-    subj_tmpl = config.get("subject_template") or "Re: {original_subject}"
-    subject = subj_tmpl.format(original_subject=original_subject)
+    if original_subject:
+        subj_tmpl = config.get("subject_template") or "Re: {original_subject}"
+        subject = subj_tmpl.format(original_subject=original_subject)
+    else:
+        subject = "Petit suivi de mon message"
 
     # Crée le draft dans prospect_drafts pour qu'il apparaisse dans
     # la vue "Drafts à valider".
@@ -367,6 +394,17 @@ def _create_drip_draft(client, app_state, sent_row: dict,
 
     # Envoi auto si mode=instant
     if mode == "instant":
+        # Filet anti-variable-oubliee : un texte custom mal sauve ({x} non
+        # rempli) ne doit jamais partir tout seul — il reste en brouillon.
+        try:
+            from . import prospect_status as PS
+            safe = PS.mail_is_safe_to_send(subject, body)
+            if not safe.get("ok"):
+                out["error"] = ("variables non remplies : "
+                                + ", ".join(safe.get("unrendered") or []))
+                return out
+        except Exception:
+            pass
         smtp_cfg = _resolve_smtp_config(app_state, client)
         if not smtp_cfg:
             return out  # draft créé mais pas envoyé : skip

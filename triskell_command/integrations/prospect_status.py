@@ -456,6 +456,70 @@ def should_contact(client, prospect_id: str, *, email: str = "",
 
 
 # =============================================================================
+# Validation d'un brouillon : peut-il encore partir AUJOURD'HUI ?
+# =============================================================================
+# Un brouillon peut dormir des jours dans « Brouillons à valider ». Entre sa
+# création et le clic « Envoyer », le prospect a pu se désinscrire, rebondir,
+# répondre, devenir client, ou être contacté par un autre canal. La décision
+# se rejoue donc au moment de l'envoi, pas seulement à la création.
+#
+# Les relances (kind=follow_up_*) ont par nature un envoi antérieur : pour
+# elles, seul un envoi APRÈS la création du brouillon bloque.
+FOLLOW_UP_DRAFT_KINDS = frozenset({
+    "follow_up_7d", "follow_up_30d", "post_sale", "dormant",
+})
+
+# Libellés humains des statuts bloquants (affichés tels quels dans l'UI).
+_NO_CONTACT_LABELS = {
+    "unsubscribed": "ce prospect s'est désinscrit — envoi interdit",
+    "bounced":      "l'adresse de ce prospect est morte (rebond)",
+    "refused":      "ce prospect a refusé — on ne le recontacte pas",
+    "won":          "ce prospect est déjà client (gagné)",
+    "lost":         "cycle clos avec ce prospect (perdu)",
+}
+
+
+def draft_approval_check(*, status: str, draft_kind: str = "",
+                          last_send_ts: str = "",
+                          draft_created_ts: str = "") -> dict:
+    """Décision PURE (sans réseau) : ce brouillon a-t-il le droit de partir ?
+
+    Args:
+        status          : statut actuel du prospect (lu en base juste avant).
+        draft_kind      : kind du brouillon (first_contact, follow_up_7d...).
+        last_send_ts    : ts ISO du dernier email_sent vers ce prospect
+                          ("" si jamais contacté).
+        draft_created_ts: ts ISO de création du brouillon ("" si inconnu).
+
+    Renvoie {"ok": bool, "reason": str} — reason en français, montrable
+    à l'utilisateur tel quel.
+    """
+    st = (status or "").lower().strip()
+    if st in NO_CONTACT_STATUSES:
+        return {"ok": False,
+                "reason": _NO_CONTACT_LABELS.get(
+                    st, f"statut bloquant : {st}")}
+    if not last_send_ts:
+        return {"ok": True, "reason": ""}
+    kind = (draft_kind or "").lower().strip()
+    if kind in FOLLOW_UP_DRAFT_KINDS:
+        # Relance : un envoi antérieur est attendu. On ne bloque que si un
+        # envoi est parti APRÈS la création de cette relance (quelqu'un est
+        # déjà repassé derrière).
+        if draft_created_ts and last_send_ts > draft_created_ts:
+            return {"ok": False,
+                    "reason": ("un mail est déjà parti vers ce prospect "
+                               f"après la création de cette relance "
+                               f"({last_send_ts[:10]})")}
+        return {"ok": True, "reason": ""}
+    # Premier contact : tout envoi déjà parti = doublon assuré.
+    return {"ok": False,
+            "reason": ("ce prospect a déjà été contacté le "
+                       f"{last_send_ts[:10]} — valider ce brouillon "
+                       "ferait un doublon")}
+
+
+# =============================================================================
 # Variables non remplacees dans un mail
 # =============================================================================
 def find_unrendered_vars(*texts: str) -> list[str]:

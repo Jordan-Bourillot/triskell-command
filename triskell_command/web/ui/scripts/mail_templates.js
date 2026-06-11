@@ -54,12 +54,12 @@ const MailTemplates = {
       from_address: 'noreply@triskell-studio.fr', from_name: 'Lagriffe Studio',
       runtime: 'netlify' },
     { product: 'lagriffe', key: 'preview_ready', label: 'Maquette prête à personnaliser',
-      description: 'Envoyé quand la preview Netlify est déployée et que le client peut commencer la personnalisation.',
+      description: 'Envoyé quand la maquette est en ligne et que le client peut commencer la personnalisation.',
       placeholders: ['first_name', 'customize_url'],
       from_address: 'noreply@triskell-studio.fr', from_name: 'Lagriffe Studio',
       runtime: 'netlify' },
     { product: 'lagriffe', key: 'payment_confirmed', label: 'Confirmation de paiement',
-      description: 'Envoyé après le webhook Stripe (paiement réussi).',
+      description: 'Envoyé automatiquement juste après un paiement réussi.',
       placeholders: ['first_name'],
       from_address: 'noreply@triskell-studio.fr', from_name: 'Lagriffe Studio',
       runtime: 'netlify' },
@@ -132,13 +132,13 @@ const MailTemplates = {
       from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
       runtime: 'pipeline' },
 
-    // ============ contact@triskell-studio.fr — Relances drip (prospection) ============
-    { product: 'drip', key: 'follow_up_7d', label: 'Drip J+7 — follow-up',
+    // ============ contact@triskell-studio.fr — Relances espacées (prospection) ============
+    { product: 'drip', key: 'follow_up_7d', label: 'Relance J+7 (si pas de réponse)',
       description: 'Première relance prospect, 7 jours après le premier mail si pas de réponse.',
       placeholders: ['name', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
       runtime: 'pipeline' },
-    { product: 'drip', key: 'follow_up_30d', label: 'Drip J+30 — dernier rappel',
+    { product: 'drip', key: 'follow_up_30d', label: 'Relance J+30 — dernier rappel',
       description: 'Relance finale, 30 jours après le premier mail.',
       placeholders: ['name', 'signature', 'soft_hook'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
@@ -150,13 +150,13 @@ const MailTemplates = {
       placeholders: ['client_name', 'product_name', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
       runtime: 'pipeline' },
-    { product: 'post_sale', key: 'cross_sell_30d', label: 'Cross-sell J+30',
+    { product: 'post_sale', key: 'cross_sell_30d', label: 'Proposition complémentaire J+30',
       description: '30 jours après l\'achat, proposition d\'un produit complémentaire.',
       placeholders: ['client_name', 'product_name', 'next_product_name', 'next_product_link', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
       runtime: 'pipeline' },
-    { product: 'post_sale', key: 'nps_90d', label: 'Sondage NPS J+90',
-      description: '90 jours après l\'achat, demande de feedback (NPS).',
+    { product: 'post_sale', key: 'nps_90d', label: 'Sondage satisfaction J+90',
+      description: '90 jours après l’achat, demande d’avis (note de satisfaction).',
       placeholders: ['client_name', 'product_name', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
       runtime: 'pipeline' },
@@ -168,7 +168,7 @@ const MailTemplates = {
       from_address: 'contact@triskell-studio.fr', from_name: 'Triskell Studio',
       runtime: 'pipeline' },
     { product: 'delivery_pack_elec', key: 'followup_3d', label: 'Pack Électricien Pro — Suivi J+3',
-      description: '3 jours après livraison : check qu\'on a tout bien reçu.',
+      description: '3 jours après livraison : on vérifie que tout est bien reçu.',
       placeholders: ['client_name', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Triskell Studio',
       runtime: 'pipeline' },
@@ -203,31 +203,31 @@ const MailTemplates = {
       from_address: 'contact@triskell-studio.fr', from_name: 'Triskell Studio',
       runtime: 'pipeline' },
 
-    // ============ Triskell interne (digest matinale, alertes Phare, factures) ============
-    { product: 'internal', key: 'morning_digest', label: 'Triskell Matinale (digest 8h)',
-      description: 'Email digest envoyé chaque matin à 8h, résumé des KPIs et alertes.',
+    // ============ Triskell interne (résumé du matin, alertes Phare, factures) ============
+    { product: 'internal', key: 'morning_digest', label: 'Triskell Matinale (résumé de 8 h)',
+      description: 'Envoyé chaque matin à 8 h : résumé des chiffres clés et des alertes.',
       placeholders: [],
       from_address: 'jordan@triskell-studio.fr', from_name: 'Triskell Matinale',
       runtime: 'pipeline' },
     { product: 'internal', key: 'phare_analyst_report', label: 'Alerte Phare — rapport analyste',
-      description: 'Notif interne quand un analyste Phare termine un rapport.',
+      description: 'Notification interne quand un analyste du Phare termine un rapport.',
       placeholders: ['title', 'body'],
       from_address: 'jordan@triskell-studio.fr', from_name: 'Le Phare',
       runtime: 'pipeline' },
-    { product: 'internal', key: 'phare_validation_alert', label: 'Alerte Phare — validation onpage',
-      description: 'Notif interne quand un changement onpage demande validation.',
+    { product: 'internal', key: 'phare_validation_alert', label: 'Alerte Phare — validation de page',
+      description: 'Notification interne quand un changement sur une page attend ta validation.',
       placeholders: ['title', 'body'],
       from_address: 'jordan@triskell-studio.fr', from_name: 'Le Phare',
       runtime: 'pipeline' },
-    { product: 'internal', key: 'phare_reject_alert', label: 'Alerte Phare — merge rejeté',
-      description: 'Notif interne quand un merge Phare est rejeté.',
+    { product: 'internal', key: 'phare_reject_alert', label: 'Alerte Phare — modification refusée',
+      description: 'Notification interne quand une modification du Phare est refusée.',
       placeholders: ['title', 'body'],
       from_address: 'jordan@triskell-studio.fr', from_name: 'Le Phare',
       runtime: 'pipeline' },
 
     // ============ billing@triskell-studio.fr — Factures Stripe ============
-    { product: 'billing', key: 'invoice_email', label: 'Facture Stripe émise',
-      description: 'Mail envoyé au client après paiement Stripe réussi, avec PDF de la facture en pièce jointe.',
+    { product: 'billing', key: 'invoice_email', label: 'Facture émise',
+      description: 'Mail envoyé au client après un paiement réussi, avec la facture PDF en pièce jointe.',
       placeholders: ['client_name', 'invoice_number', 'amount', 'currency'],
       from_address: 'billing@triskell-studio.fr', from_name: 'Triskell Studio (facturation)',
       runtime: 'pipeline' },
@@ -264,35 +264,56 @@ const MailTemplates = {
 
   // ---------- Render ----------
   async render(container, params) {
+    // Garde anti-perte : si une édition était en cours (re-navigation vers
+    // cette vue, changement d'onglet sidebar), on demande confirmation avant
+    // de tout reconstruire. La copie de travail est synchronisée pendant la
+    // frappe, donc la détection marche même si le routeur a déjà vidé le DOM.
+    // Refus → on reste sur l'onglet courant et la saisie est ré-affichée.
+    let keepEditing = false;
+    if (this._root && this._state.editing && this._isDirty()) {
+      const ok = await this._confirmDiscard();
+      if (!ok) keepEditing = true;
+    }
     this._root = container;
     // L'onglet (transactionnel / prospection) est piloté par la sidebar.
     const tab = params && params.tab;
-    if (tab === 'transactionnel' || tab === 'prospection') {
+    if (!keepEditing && (tab === 'transactionnel' || tab === 'prospection')) {
       if (this._state.categoryMode !== tab) {
         this._state.selected = null;
         this._state.editing = null;
+        this._state.pristine = null;
       }
       this._state.categoryMode = tab;
     }
+    this._state.keepEditing = keepEditing;
     const isProsp = (this._state.categoryMode === 'prospection');
     const transacDisplay = isProsp ? 'none' : 'flex';
     const prospDisplay   = isProsp ? 'flex' : 'none';
+    const audSel = this._state.audienceFilter || 'all';
     container.innerHTML = `
       <section class="animate-slide-up">
         <!-- En-tête épuré : titre court, pas de gros pavé d'intro -->
-        <header class="mb-5 flex items-center justify-between gap-4 flex-wrap">
+        <header class="mb-3 flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h1 class="text-2xl font-bold leading-tight">Modèles de mails</h1>
-            <p class="text-sm text-text-muted mt-1">Sujet, expéditeur, corps — tu modifies, ça s'applique tout de suite.</p>
+            <p class="text-sm text-text-muted mt-1">Sujet, expéditeur, corps — tout se règle ici, sans toucher au code.</p>
           </div>
           <div class="flex items-center gap-2">
-            <button id="mt-banner-help" class="btn btn-ghost text-[12px]" title="Comment ça marche ?">ⓘ Aide</button>
+            <button id="mt-banner-help" class="btn btn-secondary text-[12px]" title="Comment ça marche ?">ⓘ Aide</button>
             <button id="mt-refresh" class="btn btn-secondary text-sm">↻ Rafraîchir</button>
           </div>
         </header>
 
-        <!-- Banner d'aide masqué par défaut, affichable via le bouton ⓘ -->
-        <div id="mt-banner" class="mb-4 text-[12px] text-text-muted px-3 py-2 rounded-lg bg-accent/5 border border-accent/20" style="display:none;"></div>
+        <!-- Encadré de repérage : ce que cet écran pilote (et ce qu'il ne pilote pas) -->
+        <div class="mb-3 text-[12px] leading-relaxed text-text-muted px-3 py-2 rounded-lg bg-accent/5 border border-accent/20">
+          <strong>Transactionnel</strong> = les mails automatiques liés aux ventes (confirmations, livraisons, relances) ·
+          <strong>Prospection</strong> = les mails que l’Auto-pilote envoie tels quels aux prospects.<br>
+          Les modèles du composeur de mails et des autres outils se gèrent dans leurs écrans.
+        </div>
+
+        <!-- Banner d'aide masqué par défaut, affichable via le bouton ⓘ.
+             Sert aussi de bandeau d'erreur VISIBLE quand le chargement échoue. -->
+        <div id="mt-banner" class="mb-4 text-[12px] text-text-muted px-3 py-2 rounded-lg bg-accent/5 border border-accent/20" style="display:none;" aria-live="polite"></div>
 
         <!-- Toolbar : filtre + compteur sur la même ligne, pas de label en double -->
         <div id="mt-toolbar-transac" class="flex items-center gap-2 mb-3 flex-wrap" style="display:${transacDisplay};">
@@ -307,9 +328,9 @@ const MailTemplates = {
             <option value="">— Tous les produits —</option>
           </select>
           <div class="mt-aud-toggle" role="tablist" aria-label="Audience">
-            <button class="mt-aud-btn is-active" data-mt-aud="all" role="tab">Tous</button>
-            <button class="mt-aud-btn" data-mt-aud="creator" role="tab" title="Démarchage de créateurs / influenceurs (partenariats, codes promo, commissions)">Créateurs</button>
-            <button class="mt-aud-btn" data-mt-aud="pro" role="tab" title="Démarchage B2B local (commerces, artisans, cabinets) — vente directe">Pros</button>
+            <button class="mt-aud-btn ${audSel === 'all' ? 'is-active' : ''}" data-mt-aud="all" role="tab" aria-selected="${audSel === 'all'}">Tous</button>
+            <button class="mt-aud-btn ${audSel === 'creator' ? 'is-active' : ''}" data-mt-aud="creator" role="tab" aria-selected="${audSel === 'creator'}" title="Démarchage de créateurs / influenceurs (partenariats, codes promo, commissions)">Créateurs</button>
+            <button class="mt-aud-btn ${audSel === 'pro' ? 'is-active' : ''}" data-mt-aud="pro" role="tab" aria-selected="${audSel === 'pro'}" title="Démarchage d’entreprises locales (commerces, artisans, cabinets) — vente directe">Pros</button>
           </div>
           <button id="mt-new-prosp" class="btn btn-primary text-sm">+ Nouveau modèle</button>
           <span id="mt-count-prosp" class="text-[11px] text-text-muted ml-auto"></span>
@@ -322,7 +343,9 @@ const MailTemplates = {
       </section>
     `;
     this._injectStyles();
-    // Toggle du panneau d'aide
+    // Le bandeau contient l'aide STATIQUE dès le départ : cliquer sur ⓘ Aide
+    // marche même si le chargement n'est pas terminé (ou a échoué).
+    this._setBannerHelp();
     const helpBtn = document.getElementById('mt-banner-help');
     const banner  = document.getElementById('mt-banner');
     if (helpBtn && banner) {
@@ -330,7 +353,10 @@ const MailTemplates = {
         banner.style.display = (banner.style.display === 'none') ? '' : 'none';
       };
     }
-    document.getElementById('mt-refresh').onclick = () => this.refresh();
+    document.getElementById('mt-refresh').onclick = async () => {
+      if (!(await this._confirmDiscard())) return;
+      this.refresh();
+    };
     document.getElementById('mt-sender-filter').onchange = (e) => {
       this._state.senderFilter = e.target.value;
       this._renderList();
@@ -339,37 +365,14 @@ const MailTemplates = {
       this._state.productFilter = e.target.value;
       this._renderList();
     };
-    document.getElementById('mt-new-prosp').onclick = () => this.openNewProspection();
-    document.querySelectorAll('[data-mt-cat]').forEach(btn => {
-      btn.onclick = () => this._switchCategory(btn.dataset.mtCat);
-    });
+    document.getElementById('mt-new-prosp').onclick = async () => {
+      if (!(await this._confirmDiscard())) return;
+      this.openNewProspection();
+    };
     document.querySelectorAll('[data-mt-aud]').forEach(btn => {
       btn.onclick = () => this._switchAudience(btn.dataset.mtAud);
     });
     await this.refresh();
-  },
-
-  _switchCategory(mode) {
-    if (mode !== 'transactionnel' && mode !== 'prospection') return;
-    if (this._state.categoryMode === mode) return;
-    this._state.categoryMode = mode;
-    this._state.selected = null;
-    this._state.editing = null;
-    document.querySelectorAll('[data-mt-cat]').forEach(b => {
-      b.classList.toggle('is-active', b.dataset.mtCat === mode);
-    });
-    document.getElementById('mt-toolbar-transac').style.display = (mode === 'transactionnel') ? '' : 'none';
-    document.getElementById('mt-toolbar-prosp').style.display   = (mode === 'prospection')   ? '' : 'none';
-    this._renderList();
-    // Auto-select : premier template du mode courant
-    const cat = (mode === 'prospection') ? this._state.catalogProspection : this._state.catalog;
-    let target = null;
-    for (const info of Object.values(cat || {})) {
-      const t = (info.templates || [])[0];
-      if (t) { target = { product: t.product, key: t.key }; break; }
-    }
-    if (target) this.openTemplate(target.product, target.key);
-    else this._renderEmptyEditor();
   },
 
   _switchAudience(aud) {
@@ -377,9 +380,38 @@ const MailTemplates = {
     if (this._state.audienceFilter === aud) return;
     this._state.audienceFilter = aud;
     document.querySelectorAll('[data-mt-aud]').forEach(b => {
-      b.classList.toggle('is-active', b.dataset.mtAud === aud);
+      const active = b.dataset.mtAud === aud;
+      b.classList.toggle('is-active', active);
+      b.setAttribute('aria-selected', String(active));
     });
     this._renderList();
+  },
+
+  // ---------- Bandeau d'aide / d'erreur ----------
+  // Texte d'aide statique : ne dépend PAS du chargement.
+  _setBannerHelp() {
+    const banner = document.getElementById('mt-banner');
+    if (!banner) return;
+    banner.classList.remove('mt-banner-error');
+    banner.innerHTML = `<strong>Comment ça marche ?</strong>
+      Chaque mail automatique a un modèle : sujet, expéditeur, corps.
+      Tant que tu n’as rien enregistré, la version par défaut est utilisée ;
+      enregistre ta version pour reprendre la main, décoche « Modèle actif » pour revenir en arrière.
+      Les modèles de <strong>prospection</strong> sont envoyés tels quels par l’Auto-pilote —
+      il remplit seulement les variables <code>{{…}}</code>, il ne réécrit rien.`;
+  },
+
+  // Bandeau d'erreur VISIBLE (échec de chargement) avec bouton Réessayer.
+  _showBannerError(msg) {
+    const banner = document.getElementById('mt-banner');
+    if (!banner) return;
+    banner.classList.add('mt-banner-error');
+    banner.style.display = '';
+    banner.innerHTML = `
+      <span>⚠ ${this._esc(msg)}</span>
+      <button id="mt-banner-retry" class="btn btn-secondary text-[12px]">Réessayer</button>`;
+    const retry = document.getElementById('mt-banner-retry');
+    if (retry) retry.onclick = () => this.refresh();
   },
 
   _injectStyles() {
@@ -399,11 +431,19 @@ const MailTemplates = {
         letter-spacing: .01em; word-break: break-all;
       }
       .mt-product-h .mt-addr-sub {
-        display: block; font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase;
+        display: block; font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
         color: hsl(var(--text-muted)); margin-top: 2px;
       }
+      /* Bandeau en mode erreur (échec de chargement) */
+      #mt-banner.mt-banner-error {
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        background: hsl(var(--danger) / .08);
+        border-color: hsl(var(--danger) / .35);
+        color: hsl(var(--danger-text));
+        font-weight: 600;
+      }
       .mt-row .mt-pill-pipeline {
-        background: hsl(var(--warning) / .15); color: hsl(var(--warning));
+        background: hsl(var(--warning) / .15); color: hsl(var(--warning-text));
       }
       .mt-row {
         display: block; width: 100%; text-align: left;
@@ -417,12 +457,12 @@ const MailTemplates = {
       .mt-row .mt-row-sub { font-size: 11px; color: hsl(var(--text-muted)); margin-top: 2px; }
       .mt-row.is-active .mt-row-sub { color: hsl(var(--accent) / .75); }
       .mt-row .mt-pill {
-        display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 9.5px;
+        display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px;
         font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-        background: hsl(var(--warning) / .15); color: hsl(var(--warning));
+        background: hsl(var(--warning) / .15); color: hsl(var(--warning-text));
         margin-left: 6px; vertical-align: middle;
       }
-      .mt-row .mt-pill-on { background: hsl(var(--success) / .15); color: hsl(var(--success)); }
+      .mt-row .mt-pill-on { background: hsl(var(--success) / .15); color: hsl(var(--success-text)); }
       .mt-row .mt-pill-off { background: hsl(var(--text-muted) / .2); color: hsl(var(--text-muted)); }
       .mt-field { display: block; margin-bottom: 16px; }
       .mt-field > label {
@@ -443,13 +483,20 @@ const MailTemplates = {
         box-shadow: 0 0 0 3px hsl(var(--accent) / .12);
       }
       .mt-placeholder-chip {
-        display: inline-block; padding: 3px 8px; margin: 0 4px 4px 0;
+        display: inline-flex; flex-direction: column; align-items: flex-start;
+        padding: 3px 8px; margin: 0 4px 4px 0;
         font-size: 11px; font-family: ui-monospace, "SF Mono", Consolas, monospace;
         background: hsl(var(--accent) / .1); color: hsl(var(--accent));
         border-radius: 4px; cursor: pointer; border: 1px dashed hsl(var(--accent) / .3);
         transition: background 120ms;
       }
       .mt-placeholder-chip:hover { background: hsl(var(--accent) / .2); }
+      /* Libellé humain sous chaque variable {{x}} */
+      .mt-placeholder-chip .mt-ph-hint {
+        font-size: 11px; font-family: inherit; font-weight: 500;
+        color: hsl(var(--text-muted)); line-height: 1.2;
+        font-family: 'Inter', -apple-system, sans-serif;
+      }
       .mt-toolbar { display: flex; gap: 8px; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid hsl(var(--border)); }
       .mt-toolbar .grow { flex: 1; }
       .mt-preview-frame {
@@ -463,37 +510,6 @@ const MailTemplates = {
         transition: color 120ms, border-color 120ms;
       }
       .mt-tab.is-active { color: hsl(var(--accent)); border-bottom-color: hsl(var(--accent)); }
-
-      /* Toggle Transactionnel / Prospection */
-      .mt-cat-toggle {
-        display: inline-flex; gap: 4px;
-        padding: 4px; border-radius: 12px;
-        background: hsl(var(--bg));
-        border: 1px solid hsl(var(--border));
-      }
-      .mt-cat-btn {
-        display: flex; flex-direction: column; align-items: flex-start;
-        padding: 8px 16px; border-radius: 8px;
-        background: transparent; border: none; cursor: pointer;
-        transition: background 140ms, color 140ms;
-        text-align: left;
-      }
-      .mt-cat-btn:hover { background: hsl(var(--card)); }
-      .mt-cat-btn.is-active {
-        background: hsl(var(--accent) / .14);
-        color: hsl(var(--accent));
-      }
-      .mt-cat-btn .mt-cat-title {
-        font-size: 13px; font-weight: 700; color: inherit; line-height: 1.2;
-      }
-      .mt-cat-btn .mt-cat-ico { font-size: 15px; line-height: 1; }
-      .mt-cat-btn .mt-cat-sub {
-        font-size: 10.5px; color: hsl(var(--text-muted)); margin-top: 2px;
-        font-weight: 500;
-      }
-      .mt-cat-btn.is-active .mt-cat-sub { color: hsl(var(--accent) / .75); }
-      /* Boutons d'onglets compacts : icône + titre alignés en ligne */
-      .mt-cat-btn { flex-direction: row !important; align-items: center !important; gap: 8px !important; padding: 7px 14px !important; }
 
       /* === Toggle Audience (sous-filtre prospection) === */
       .mt-aud-toggle {
@@ -521,14 +537,28 @@ const MailTemplates = {
         box-shadow: 0 1px 2px hsl(0 0% 0% / .08);
       }
 
+      /* === Boutons « catégorie de prospect » dans l'éditeur === */
+      .mt-audsel-btn {
+        padding: 6px 12px; border-radius: 8px;
+        font-size: 12px; font-weight: 600;
+        background: hsl(var(--bg)); color: hsl(var(--text-muted));
+        border: 1px solid hsl(var(--border));
+        cursor: pointer; transition: background 120ms, color 120ms, border-color 120ms;
+      }
+      .mt-audsel-btn:hover { color: hsl(var(--text)); border-color: hsl(var(--accent) / .5); }
+      .mt-audsel-btn.is-active {
+        background: hsl(var(--accent-strong)); color: hsl(var(--on-accent));
+        border-color: hsl(var(--accent-strong));
+      }
+
       /* === Pills audience dans la liste === */
       .mt-pill-aud-creator {
-        background: hsl(265 70% 60% / .15);
-        color: hsl(265 60% 50%);
+        background: hsl(var(--info) / .15);
+        color: hsl(var(--info-text));
       }
       .mt-pill-aud-pro {
-        background: hsl(35 85% 55% / .18);
-        color: hsl(28 80% 42%);
+        background: hsl(var(--warning) / .18);
+        color: hsl(var(--warning-text));
       }
 
       /* === Chips contextuelles (en haut de l'éditeur) === */
@@ -541,8 +571,8 @@ const MailTemplates = {
         color: hsl(var(--text-muted));
       }
       .mt-chip-prosp  { background: hsl(var(--accent) / .12); color: hsl(var(--accent)); border-color: hsl(var(--accent) / .3); }
-      .mt-chip-auto   { background: hsl(var(--success) / .12); color: hsl(var(--success)); border-color: hsl(var(--success) / .3); }
-      .mt-chip-target { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 10.5px; }
+      .mt-chip-auto   { background: hsl(var(--success) / .12); color: hsl(var(--success-text)); border-color: hsl(var(--success) / .3); }
+      .mt-chip-target { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 11px; }
 
       /* === Bandeau d'avertissement compact === */
       .mt-warn {
@@ -626,9 +656,19 @@ const MailTemplates = {
         color: hsl(var(--accent)); letter-spacing: .01em;
       }
       .mt-prod-h .mt-prod-count {
-        display: block; font-size: 9.5px; letter-spacing: .14em;
+        display: block; font-size: 11px; letter-spacing: .12em;
         text-transform: uppercase; color: hsl(var(--text-muted)); margin-top: 2px;
       }
+      /* Petit bouton « + » par produit (création directe sous ce produit) */
+      .mt-prod-add {
+        flex-shrink: 0;
+        width: 22px; height: 22px; line-height: 1;
+        border-radius: 6px; border: 1px solid hsl(var(--border));
+        background: hsl(var(--bg)); color: hsl(var(--text-muted));
+        font-size: 14px; font-weight: 700; cursor: pointer;
+        transition: color 120ms, border-color 120ms;
+      }
+      .mt-prod-add:hover { color: hsl(var(--accent)); border-color: hsl(var(--accent) / .5); }
     `;
     document.head.appendChild(s);
   },
@@ -636,8 +676,7 @@ const MailTemplates = {
   async refresh() {
     this._state.busy = true;
     const list = document.getElementById('mt-list');
-    list.innerHTML = '<div class="p-4 text-[12px] text-text-muted">Chargement…</div>';
-    const banner = document.getElementById('mt-banner');
+    if (list) list.innerHTML = '<div class="p-4 text-[12px] text-text-muted">Chargement…</div>';
 
     // Charge en parallèle : templates + catalogue produits (pour le mode prospection)
     const [res, prods] = await Promise.all([
@@ -647,18 +686,46 @@ const MailTemplates = {
     this._state.catalogueProducts = prods || [];
 
     if (!res || !res.ok) {
-      banner.innerHTML = `<span class="text-danger">Impossible de charger les templates : ${res && res.error ? res.error : 'erreur inconnue'}.</span>`;
+      // Échec de chargement : bandeau d'erreur VISIBLE + état d'erreur dans
+      // la liste — surtout pas la liste de secours affichée comme si tout
+      // allait bien (on risquerait d'éditer à l'aveugle).
+      console.warn('mail_templates.list a échoué :', res && res.error);
+      this._state.loadError = true;
       this._state.products = {};
-    } else {
-      this._state.products = res.products || {};
-      banner.innerHTML = `Templates synchronisés avec Supabase. Choisis dans la barre de gauche entre <strong>Transactionnel</strong> (mails auto envoyés par tes sites) et <strong>Prospection</strong> (mails de démarchage rangés par produit).`;
+      this._showLoadError();
+      this._state.busy = false;
+      return;
     }
+
+    // Chargement OK : on remet le bandeau en mode aide (masqué).
+    if (this._state.loadError) {
+      this._state.loadError = false;
+      this._setBannerHelp();
+      const banner = document.getElementById('mt-banner');
+      if (banner) banner.style.display = 'none';
+    }
+    this._state.products = res.products || {};
 
     this._state.catalog = this._buildCatalog();
     this._state.catalogProspection = this._buildCatalogProspection();
     this._populateSenderFilter();
     this._populateProductFilter();
     this._renderList();
+
+    // Saisie reportée (l'utilisateur a refusé d'abandonner ses modifs) :
+    // on ré-affiche sa copie de travail telle quelle, sans repasser par la base.
+    if (this._state.keepEditing && this._state.editing) {
+      this._state.keepEditing = false;
+      this._state.selected = {
+        product: this._state.editing.product,
+        key: this._state.editing.key,
+      };
+      this._renderList();
+      this._renderEditor({});
+      this._state.busy = false;
+      return;
+    }
+    this._state.keepEditing = false;
 
     // Auto-select : premier template du mode courant, ou celui qui était déjà ouvert
     let target = this._state.selected;
@@ -675,6 +742,36 @@ const MailTemplates = {
     else this._renderEmptyEditor();
 
     this._state.busy = false;
+  },
+
+  // État d'erreur de chargement : bandeau + liste + éditeur neutralisés.
+  _showLoadError() {
+    this._showBannerError('Impossible de charger les modèles. Vérifie ta connexion puis réessaie.');
+    const list = document.getElementById('mt-list');
+    if (list) {
+      list.innerHTML = `
+        <div class="p-4 text-[12px]">
+          <p class="text-danger font-semibold mb-2">⚠ Impossible de charger les modèles.</p>
+          <p class="text-text-muted mb-3">Vérifie ta connexion, puis réessaie.</p>
+          <button data-mt-retry class="btn btn-secondary text-[12px]">Réessayer</button>
+        </div>`;
+      const retry = list.querySelector('[data-mt-retry]');
+      if (retry) retry.onclick = () => this.refresh();
+    }
+    const ed = document.getElementById('mt-editor');
+    if (ed) {
+      if (this._state.keepEditing && this._state.editing) {
+        // Une saisie était en cours et l'utilisateur a refusé de l'abandonner :
+        // on la ré-affiche telle quelle (l'enregistrement reste possible).
+        this._state.keepEditing = false;
+        this._renderEditor({});
+      } else {
+        ed.innerHTML = `<div class="p-8 text-center text-text-muted text-sm">
+          Les modèles n’ont pas pu être chargés — rien à éditer pour l’instant.
+        </div>`;
+      }
+    }
+    this._updateCount(0, 0, this._state.categoryMode === 'prospection' ? 'mt-count-prosp' : 'mt-count');
   },
 
   // Charge la liste des produits du Catalogue Triskell (Pixel Pros, Lagriffe…).
@@ -859,6 +956,12 @@ const MailTemplates = {
   },
 
   _renderList() {
+    // En cas d'échec de chargement, la liste reste en état d'erreur
+    // (pas question d'afficher des données de secours comme si tout allait bien).
+    if (this._state.loadError) {
+      this._showLoadError();
+      return;
+    }
     if (this._state.categoryMode === 'prospection') {
       this._renderListProspection();
     } else {
@@ -888,19 +991,19 @@ const MailTemplates = {
         const isActive = this._state.selected
           && this._state.selected.product === t.product
           && this._state.selected.key === t.key;
-        const label = t._label || this._humanKey(t.key);
+        const label = t._label || t.label || this._humanKey(t.key);
         let pill = '';
         const isPipeline = t._runtime === 'pipeline';
         if (t._source === 'fallback') {
           pill = isPipeline
-            ? '<span class="mt-pill mt-pill-pipeline" title="Modèle codé en dur dans le runner Python — édition pas encore branchée">Pipeline</span>'
-            : '<span class="mt-pill">Par défaut</span>';
+            ? '<span class="mt-pill mt-pill-pipeline" title="Ce mail part avec sa version par défaut — ta version sera branchée dans une prochaine mise à jour">Par défaut</span>'
+            : '<span class="mt-pill" title="Pas encore personnalisé — la version par défaut est utilisée">Par défaut</span>';
         } else if (t.enabled === false) {
-          pill = '<span class="mt-pill mt-pill-off">Off</span>';
+          pill = '<span class="mt-pill mt-pill-off" title="Modèle désactivé — la version par défaut est utilisée">Désactivé</span>';
         } else {
           pill = isPipeline
-            ? '<span class="mt-pill mt-pill-pipeline">Pipeline · édité</span>'
-            : '<span class="mt-pill mt-pill-on">Édité</span>';
+            ? '<span class="mt-pill mt-pill-pipeline" title="Ta version est enregistrée, mais pas encore branchée — la version par défaut part encore">Édité · en attente</span>'
+            : '<span class="mt-pill mt-pill-on" title="Ta version est utilisée pour les envois">Édité</span>';
         }
         html += `
           <button class="mt-row ${isActive ? 'is-active' : ''}"
@@ -915,13 +1018,23 @@ const MailTemplates = {
       html = '<div class="p-4 text-[12px] text-text-muted">Aucun modèle ne correspond à ce filtre.</div>';
     }
     list.innerHTML = html;
+    this._bindListRows(list);
+    this._updateCount(visibleCount, totalCount, 'mt-count');
+  },
+
+  // Clic sur une ligne de la liste : protégé par la garde « modifications
+  // non enregistrées ». Re-cliquer la ligne déjà ouverte ne recharge rien
+  // (ça écraserait la saisie en cours pour rien).
+  _bindListRows(list) {
     list.querySelectorAll('[data-mt-open]').forEach(btn => {
-      btn.onclick = () => {
+      btn.onclick = async () => {
         const [p, k] = btn.dataset.mtOpen.split('::');
+        const sel = this._state.selected;
+        if (sel && sel.product === p && sel.key === k && this._state.editing) return;
+        if (!(await this._confirmDiscard())) return;
         this.openTemplate(p, k);
       };
     });
-    this._updateCount(visibleCount, totalCount, 'mt-count');
   },
 
   _renderListProspection() {
@@ -944,14 +1057,20 @@ const MailTemplates = {
       if (filter && pid !== filter) continue;
       if (filteredTpls.length === 0 && audFilter !== 'all') continue;
       visibleProducts++;
+      const prodLabel = info.label || pid;
       html += `
         <div class="mt-prod-h">
-          <span class="mt-prod-name">${this._esc(info.label || pid)}</span>
+          <div class="flex items-center justify-between gap-2">
+            <span class="mt-prod-name">${this._esc(prodLabel)}</span>
+            <button class="mt-prod-add" data-mt-newprosp="${this._esc(pid)}"
+                    title="Créer un modèle pour ${this._esc(prodLabel)}"
+                    aria-label="Créer un modèle pour ${this._esc(prodLabel)}">+</button>
+          </div>
           <span class="mt-prod-count">${filteredTpls.length} modèle${filteredTpls.length > 1 ? 's' : ''}</span>
         </div>`;
       if (filteredTpls.length === 0) {
         html += `<div class="px-3 py-3 text-[12px] text-text-muted italic">
-          Aucun mail de prospection. Clique sur <strong>+ Nouveau modèle</strong> pour en créer un.
+          Aucun mail de prospection. Clique sur le <strong>+</strong> ci-dessus pour en créer un.
         </div>`;
         continue;
       }
@@ -966,8 +1085,8 @@ const MailTemplates = {
           ? '<span class="mt-pill mt-pill-aud-pro" title="Démarchage B2B local — vente directe">Pros</span>'
           : '<span class="mt-pill mt-pill-aud-creator" title="Démarchage créateur — partenariat">Créateurs</span>';
         const pill = (t.enabled === false)
-          ? '<span class="mt-pill mt-pill-off">Off</span>'
-          : '<span class="mt-pill mt-pill-on">Actif</span>';
+          ? '<span class="mt-pill mt-pill-off" title="Modèle désactivé — l’Auto-pilote ne l’utilise plus">Désactivé</span>'
+          : '<span class="mt-pill mt-pill-on" title="Utilisé par l’Auto-pilote">Actif</span>';
         html += `
           <button class="mt-row ${isActive ? 'is-active' : ''}"
                   data-mt-open="${this._esc(t.product)}::${this._esc(t.key)}">
@@ -981,10 +1100,13 @@ const MailTemplates = {
       html = '<div class="p-4 text-[12px] text-text-muted">Aucun modèle ne correspond à ce filtre.</div>';
     }
     list.innerHTML = html;
-    list.querySelectorAll('[data-mt-open]').forEach(btn => {
-      btn.onclick = () => {
-        const [p, k] = btn.dataset.mtOpen.split('::');
-        this.openTemplate(p, k);
+    this._bindListRows(list);
+    // Boutons « + » par produit : créent un modèle directement sous CE produit.
+    list.querySelectorAll('[data-mt-newprosp]').forEach(btn => {
+      btn.onclick = async (ev) => {
+        ev.stopPropagation();
+        if (!(await this._confirmDiscard())) return;
+        this.openNewProspection(btn.dataset.mtNewprosp);
       };
     });
     this._updateCount(visibleCount, totalCount, 'mt-count-prosp');
@@ -993,12 +1115,27 @@ const MailTemplates = {
   // ---------- Open / edit ----------
   async openTemplate(product, key) {
     this._state.selected = { product, key };
+    this._state.editing = null;
+    this._state.pristine = null;
     this._renderList();
     this._renderEditor({ loading: true });
 
+    // Jeton anti-course : si l'utilisateur clique vite sur plusieurs modèles,
+    // seule la DERNIÈRE réponse a le droit de remplir l'éditeur.
+    const seq = (this._state.openSeq = (this._state.openSeq || 0) + 1);
+
     // Charge depuis la base
     const res = await this._api('get', { product, key });
+    if (seq !== this._state.openSeq) return; // une ouverture plus récente est partie
+
     const known = this.KNOWN.find(k => k.product === product && k.key === key) || {};
+    // « Pas en base » (réponse propre du serveur) = vrai modèle à créer.
+    // Tout le reste (réseau coupé, erreur serveur…) = ERREUR : on bloque
+    // l'édition, sinon « Enregistrer » écraserait le vrai modèle avec du vide.
+    const notInDb = !!(res && (
+      (res.ok && !res.template) ||
+      (!res.ok && /introuvable/i.test(String(res.error || '')))
+    ));
     let tpl;
     if (res && res.ok && res.template) {
       tpl = {
@@ -1007,7 +1144,7 @@ const MailTemplates = {
         _runtime: known.runtime || 'netlify',
         _label: res.template.label || known.label,
       };
-    } else {
+    } else if (notInDb) {
       // Pas en base : template "à créer". Pré-rempli depuis le catalogue connu.
       // (Cas exclusivement transactionnel — un nouveau prospection passe par openNewProspection.)
       tpl = {
@@ -1026,23 +1163,46 @@ const MailTemplates = {
         _runtime: known.runtime || 'netlify',
         _label: known.label,
       };
+    } else {
+      console.warn('mail_templates.get a échoué :', res && res.error);
+      this._renderEditorError(product, key);
+      return;
     }
     this._state.editing = JSON.parse(JSON.stringify(tpl));
+    this._state.pristine = this._snapshotOf(this._state.editing);
     this._renderEditor({});
   },
 
+  // Échec de chargement d'UN modèle : on bloque l'édition (pas de bascule
+  // silencieuse sur un modèle vide) et on propose de réessayer.
+  _renderEditorError(product, key) {
+    const e = document.getElementById('mt-editor');
+    if (!e) return;
+    e.innerHTML = `
+      <div class="p-8 text-center text-sm">
+        <p class="font-semibold mb-1">Impossible de charger ce modèle.</p>
+        <p class="text-text-muted text-[12px] mb-4">
+          L’édition est bloquée pour ne pas écraser la version enregistrée.
+          Vérifie ta connexion, puis réessaie.
+        </p>
+        <button id="mt-retry-get" class="btn btn-secondary">Réessayer</button>
+      </div>`;
+    const b = document.getElementById('mt-retry-get');
+    if (b) b.onclick = () => this.openTemplate(product, key);
+  },
+
   // Ouvre l'éditeur sur un nouveau template de prospection (vide).
-  // Le produit sélectionné par défaut est celui du filtre courant, sinon
-  // le premier produit du catalogue.
-  openNewProspection() {
+  // `forcedPid` (bouton « + » d'un groupe produit) gagne ; sinon le produit
+  // du filtre courant ; sinon le premier produit du catalogue.
+  openNewProspection(forcedPid) {
     const cat = this._state.catalogProspection || {};
-    let pid = this._state.productFilter || '';
+    let pid = forcedPid || this._state.productFilter || '';
     if (!pid) {
       const firstId = Object.keys(cat)[0];
       pid = firstId || 'pixel-pros';
     }
     const prodInfo = cat[pid] || { id: pid, label: pid };
-    // Génère une clé technique unique : prosp_<timestamp_court>
+    // Génère une clé interne unique : prosp_<timestamp_court>
     const ts = Date.now().toString(36);
     const key = `prosp_${ts}`;
     const tpl = {
@@ -1059,12 +1219,13 @@ const MailTemplates = {
       category: 'prospection',
       label: '',
       _isNew: true,
-      _runtime: 'manual',
+      _runtime: 'autopilot',
       _label: `Nouveau modèle — ${prodInfo.label || pid}`,
       _productLabel: prodInfo.label || pid,
     };
     this._state.selected = { product: pid, key };
     this._state.editing = tpl;
+    this._state.pristine = this._snapshotOf(tpl);
     this._renderList();
     this._renderEditor({});
   },
@@ -1101,7 +1262,7 @@ const MailTemplates = {
 
     // Petites pastilles contextuelles : type + cible. Concises, en haut.
     const typeChip = isProspection
-      ? `<span class="mt-chip mt-chip-prosp" title="Mail de prospection — envoi manuel">📨 Prospection</span>`
+      ? `<span class="mt-chip mt-chip-prosp" title="Ce modèle est envoyé tel quel par l’Auto-pilote — il remplit seulement les variables {{…}}, il ne réécrit rien">🤖 Utilisé par l’Auto-pilote — envoyé tel quel</span>`
       : `<span class="mt-chip mt-chip-auto" title="Mail transactionnel — envoyé automatiquement par tes sites">🤖 Auto</span>`;
     const targetChip = isProspection
       ? `<span class="mt-chip mt-chip-target">${this._esc(productLabel)}</span>`
@@ -1110,10 +1271,20 @@ const MailTemplates = {
     // Bandeau d'avertissement : un seul, le plus pertinent
     let warnHtml = '';
     if (!isProspection && isPipeline) {
-      warnHtml = `<div class="mt-warn">⚠ Modifications stockées en base, mais le runner Python lit encore son texte par défaut. Branchage à faire en phase suivante.</div>`;
+      warnHtml = `<div class="mt-warn">⚠ Tes modifications sont bien enregistrées, mais ce mail part encore avec la version par défaut. Pas encore branché : ta version sera utilisée dans une prochaine mise à jour.</div>`;
     } else if (!isProspection && isNew) {
-      warnHtml = `<div class="mt-warn">Modèle pas encore édité — la fonction Netlify utilise sa version par défaut. Modifie et enregistre pour reprendre la main.</div>`;
+      warnHtml = `<div class="mt-warn">Modèle pas encore édité — la version par défaut est utilisée. Modifie et enregistre pour reprendre la main.</div>`;
     }
+
+    // Nouveau modèle de prospection : le produit de rattachement est affiché
+    // en clair sous le titre (pas seulement dans le bloc replié).
+    const newProductLine = (isNew && isProspection)
+      ? `<p class="text-[12px] mt-1">Sera rangé sous le produit&nbsp;: <strong>${this._esc(productLabel)}</strong> <span class="text-text-muted">(modifiable dans ⚙ Réglages avancés)</span></p>`
+      : '';
+
+    // Nouveau modèle ou corps vide → on ouvre sur l'édition (l'aperçu serait
+    // une page blanche) ; sinon sur l'aperçu pour voir le mail final.
+    const startPane = (isNew || !String(t.body_html || '').trim()) ? 'edit' : 'preview';
 
     e.innerHTML = `
       <!-- En-tête minimal : titre + 2 chips. La description et la clé tech sont dépliables. -->
@@ -1123,19 +1294,19 @@ const MailTemplates = {
           ${targetChip}
         </div>
         <h2 class="text-lg font-bold leading-tight">${this._esc(headerLabel)}</h2>
+        ${newProductLine}
         ${t.description ? `<p class="text-[12.5px] text-text-muted mt-1 leading-snug">${this._esc(t.description)}</p>` : ''}
         ${warnHtml}
       </div>
 
-      <!-- Tabs Édition / Aperçu — par défaut on ouvre sur Aperçu pour
-           que Jordan voie tout de suite à quoi ressemble le mail final ;
-           si besoin d'éditer il bascule sur l'onglet ✎ Édition. -->
-      <div class="mt-tabs">
-        <button class="mt-tab" data-mt-pane="edit">✎ Édition</button>
-        <button class="mt-tab is-active" data-mt-pane="preview">👁 Aperçu</button>
+      <!-- Tabs Édition / Aperçu — aperçu par défaut quand le mail a déjà un
+           corps ; édition directe pour un modèle neuf ou vide. -->
+      <div class="mt-tabs" role="tablist" aria-label="Édition ou aperçu du modèle">
+        <button class="mt-tab ${startPane === 'edit' ? 'is-active' : ''}" data-mt-pane="edit" role="tab" aria-selected="${startPane === 'edit'}">✎ Édition</button>
+        <button class="mt-tab ${startPane === 'preview' ? 'is-active' : ''}" data-mt-pane="preview" role="tab" aria-selected="${startPane === 'preview'}">👁 Aperçu</button>
       </div>
 
-      <div id="mt-pane-edit" style="display:none;">
+      <div id="mt-pane-edit" style="display:${startPane === 'edit' ? '' : 'none'};">
         ${isProspection ? `
         <!-- CATÉGORIE DE PROSPECT CIBLÉE : à choisir manuellement.
              L'autopilote utilisera ensuite cette info pour piocher dans
@@ -1168,20 +1339,23 @@ const MailTemplates = {
 
         ${placeholders.length ? `
           <div class="mt-placeholders-row">
-            <span class="text-[10.5px] font-bold tracking-wider uppercase text-text-muted shrink-0">Insérer :</span>
-            <div class="mt-placeholders-chips">${placeholders.map(p => `<span class="mt-placeholder-chip" data-mt-insert="{{${this._esc(p)}}}">{{${this._esc(p)}}}</span>`).join('')}</div>
+            <span class="text-[11px] font-bold tracking-wider uppercase text-text-muted shrink-0">Insérer :</span>
+            <div class="mt-placeholders-chips">${placeholders.map(p => this._placeholderChip(p)).join('')}</div>
           </div>
         ` : ''}
 
-        <!-- CORPS HTML : dominant, le cœur de la page -->
+        <!-- CORPS HTML : dominant, le cœur de la page.
+             Le bouton « + Produit du Catalogue » n'apparaît que si l'écran
+             Catalogue est chargé (sinon il serait mort). -->
         <div class="mt-field">
           <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
             <label style="margin:0; padding:0;">Corps du mail (HTML)</label>
+            ${(typeof Catalogue !== 'undefined' && typeof Catalogue.pickProduct === 'function') ? `
             <button id="mt-insert-product" type="button"
                     class="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-border text-text-muted hover:border-accent hover:text-accent transition-colors"
                     title="Insérer un produit du Catalogue Triskell">
               + Produit du Catalogue
-            </button>
+            </button>` : ''}
           </div>
           <textarea id="mt-body-html" class="mt-textarea-hero" spellcheck="false" placeholder="<p>Bonjour {{first_name}},</p>…">${this._esc(t.body_html || '')}</textarea>
         </div>
@@ -1192,57 +1366,60 @@ const MailTemplates = {
           <div class="mt-advanced-body">
             ${isProspection ? `
               <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <label class="mt-field">
-                  <label>Titre du modèle (interne)</label>
+                <div class="mt-field">
+                  <label for="mt-label">Titre du modèle (interne)</label>
                   <input id="mt-label" value="${this._esc(t.label || '')}" placeholder="Mail 1 — commission classique">
-                </label>
-                <label class="mt-field">
-                  <label>Produit</label>
-                  <select id="mt-product-select">${this._renderProductOptions(t.product)}</select>
-                </label>
+                </div>
+                <div class="mt-field">
+                  <label for="mt-product-select">Produit</label>
+                  <select id="mt-product-select">${this._renderProductOptions(t._pendingProduct || t.product)}</select>
+                </div>
               </div>
             ` : ''}
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <label class="mt-field">
-                <label>Expéditeur (nom)</label>
+              <div class="mt-field">
+                <label for="mt-from-name">Expéditeur (nom)</label>
                 <input id="mt-from-name" value="${this._esc(t.from_name || '')}" placeholder="Lagriffe Studio">
-              </label>
-              <label class="mt-field">
-                <label>Expéditeur (adresse)</label>
+              </div>
+              <div class="mt-field">
+                <label for="mt-from-address">Expéditeur (adresse)</label>
                 <input id="mt-from-address" value="${this._esc(t.from_address || '')}" placeholder="noreply@triskell-studio.fr">
-              </label>
+              </div>
             </div>
 
             <div class="mt-field">
-              <label>Corps texte (fallback pour les clients mail sans HTML)</label>
+              <label for="mt-body-text">Version texte (pour les boîtes mail qui n’affichent pas le HTML)</label>
               <textarea id="mt-body-text" spellcheck="false" style="min-height: 90px;" placeholder="Version texte brut, optionnelle.">${this._esc(t.body_text || '')}</textarea>
             </div>
 
             <label class="mt-field-inline">
               <input type="checkbox" id="mt-enabled" ${t.enabled !== false ? 'checked' : ''}>
-              <span>Modèle actif <span class="text-text-muted text-[12px]">— si décoché, la fonction Netlify retombe sur sa version par défaut.</span></span>
+              <span>Modèle actif <span class="text-text-muted text-[12px]">${isProspection
+                ? '— décoché : l’Auto-pilote ne l’utilisera plus.'
+                : '— décoché : la version par défaut est utilisée à la place.'}</span></span>
             </label>
 
             <div class="text-[11px] text-text-muted pt-2 border-t border-border/50">
-              Clé technique&nbsp;: <code>${this._esc(t.product)}::${this._esc(t.key)}</code>
+              Référence interne&nbsp;: <code>${this._esc(t.product)}::${this._esc(t.key)}</code>
             </div>
           </div>
         </details>
 
-        <!-- Toolbar : enregistrer + supprimer + date de modif -->
+        <!-- Toolbar : enregistrer + dupliquer + supprimer + date de modif -->
         <div class="mt-toolbar">
           <div class="grow text-[11px] text-text-muted">
             ${t.updated_at ? `Dernière modif&nbsp;: ${this._formatDate(t.updated_at)}${t.updated_by ? ` par ${this._esc(t.updated_by)}` : ''}` : ''}
           </div>
-          ${!isNew ? `<button id="mt-delete" class="btn btn-ghost text-danger">Supprimer</button>` : ''}
+          ${!isNew ? `<button id="mt-duplicate" class="btn btn-secondary" title="Créer une copie de ce modèle, à enregistrer ensuite">📑 Dupliquer</button>` : ''}
+          ${!isNew ? `<button id="mt-delete" class="btn btn-secondary text-danger">Supprimer</button>` : ''}
           <button id="mt-save" class="btn btn-primary">💾 Enregistrer</button>
         </div>
       </div>
 
-      <div id="mt-pane-preview">
-        <iframe id="mt-preview-iframe" class="mt-preview-frame" sandbox=""></iframe>
-        <p class="text-[11px] text-text-muted mt-3">Les variables <code>{{…}}</code> sont remplacées par des valeurs d'exemple ci-dessus.</p>
+      <div id="mt-pane-preview" style="display:${startPane === 'preview' ? '' : 'none'};">
+        <iframe id="mt-preview-iframe" class="mt-preview-frame" sandbox="" title="Aperçu du mail avec des valeurs d’exemple"></iframe>
+        <p class="text-[11px] text-text-muted mt-3">Aperçu avec des valeurs d’exemple à la place des variables <code>{{…}}</code>. Fond blanc = fond réel du mail.</p>
       </div>
     `;
 
@@ -1259,6 +1436,7 @@ const MailTemplates = {
         if (!wrap) return;
         wrap.dataset.mtAudienceCurrent = btn.dataset.mtAudsel;
         wrap.querySelectorAll('.mt-audsel-btn').forEach(b => this._styleAudBtn(b));
+        this._syncEditingFromDom();
       };
     });
     const prodBtn = document.getElementById('mt-insert-product');
@@ -1273,13 +1451,33 @@ const MailTemplates = {
     document.getElementById('mt-save').onclick = () => this.save();
     const delBtn = document.getElementById('mt-delete');
     if (delBtn) delBtn.onclick = () => this.deleteCurrent();
-    // L'onglet par défaut est "Aperçu" : on remplit l'iframe tout de suite
-    // sinon elle s'affiche blanche tant qu'on n'a pas re-cliqué.
-    this._renderPreview();
+    const dupBtn = document.getElementById('mt-duplicate');
+    if (dupBtn) dupBtn.onclick = () => this.duplicateCurrent();
+    // Synchro en continu écran → copie de travail : indispensable pour la
+    // garde « modifications non enregistrées », car le routeur vide le DOM
+    // AVANT de re-rendre la vue (au moment du re-render, les champs ont
+    // déjà disparu — seule la copie de travail fait foi).
+    const liveSync = () => this._syncEditingFromDom();
+    ['mt-subject', 'mt-body-html', 'mt-body-text', 'mt-from-name', 'mt-from-address', 'mt-label']
+      .forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', liveSync);
+      });
+    const enabledEl = document.getElementById('mt-enabled');
+    if (enabledEl) enabledEl.addEventListener('change', liveSync);
+    const prodSelEl = document.getElementById('mt-product-select');
+    if (prodSelEl) prodSelEl.addEventListener('change', liveSync);
+    // Si on ouvre sur l'aperçu, on remplit l'iframe tout de suite
+    // (sinon elle s'affiche blanche tant qu'on n'a pas re-cliqué).
+    if (startPane === 'preview') this._renderPreview();
   },
 
   _switchPane(name) {
-    document.querySelectorAll('[data-mt-pane]').forEach(b => b.classList.toggle('is-active', b.dataset.mtPane === name));
+    document.querySelectorAll('[data-mt-pane]').forEach(b => {
+      const active = b.dataset.mtPane === name;
+      b.classList.toggle('is-active', active);
+      b.setAttribute('aria-selected', String(active));
+    });
     document.getElementById('mt-pane-edit').style.display    = (name === 'edit')    ? '' : 'none';
     document.getElementById('mt-pane-preview').style.display = (name === 'preview') ? '' : 'none';
     if (name === 'preview') this._renderPreview();
@@ -1287,19 +1485,14 @@ const MailTemplates = {
 
   // Applique le style "actif" ou "inactif" à un bouton du sélecteur catégorie
   // de prospect. La valeur courante est dans wrap.dataset.mtAudienceCurrent.
-  // ATTENTION : on garde la classe `mt-audsel-btn` dans le className, sinon
-  // au clic suivant le querySelectorAll('.mt-audsel-btn') ne retrouve plus les
-  // boutons et la sélection visuelle ne se met plus à jour.
+  // Le style passe par les classes CSS .mt-audsel-btn (tokens du thème),
+  // plus de couleur en dur.
   _styleAudBtn(btn) {
     const wrap = btn.closest('[data-mt-audience-current]');
     if (!wrap) return;
     const active = btn.dataset.mtAudsel === wrap.dataset.mtAudienceCurrent;
-    const base = 'mt-audsel-btn px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors';
-    if (active) {
-      btn.className = base + ' bg-accent text-white border-accent';
-    } else {
-      btn.className = base + ' bg-bg border-border text-text-muted hover:text-text hover:border-accent/50';
-    }
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-pressed', String(active));
   },
 
   _renderPreview() {
@@ -1335,13 +1528,16 @@ const MailTemplates = {
     ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
     ta.focus();
     ta.selectionStart = ta.selectionEnd = start + text.length;
+    // L'insertion ne déclenche pas d'événement input : on synchronise à la main.
+    this._syncEditingFromDom();
   },
 
-  // ---------- Save / delete ----------
+  // ---------- Save / delete / duplicate ----------
   async save() {
     const t = this._state.editing;
     if (!t) return;
     const isProspection = (t.category === 'prospection');
+    const isPipeline = t._runtime === 'pipeline';
 
     const fields = {
       from_name:    document.getElementById('mt-from-name').value.trim(),
@@ -1354,11 +1550,13 @@ const MailTemplates = {
       description:  t.description || '',
       category:     t.category || 'transactionnel',
     };
+    // Les copies de modèles transactionnels gardent leur titre « (copie) ».
+    if (!isProspection && t.label) fields.label = t.label;
     if (isProspection) {
       const labelEl = document.getElementById('mt-label');
       fields.label = labelEl ? labelEl.value.trim() : (t.label || '');
       if (!fields.label) {
-        alert('Le titre du modèle est obligatoire (ex. "Mail 1 — commission classique").');
+        Toast.error('Le titre du modèle est obligatoire (ex. « Mail 1 — commission classique »).');
         return;
       }
       // Catégorie de prospect choisie via le sélecteur. Si l'utilisateur n'a
@@ -1371,11 +1569,21 @@ const MailTemplates = {
       fields.audience = (audVal === 'pro') ? 'pro' : 'creator';
     }
     if (!fields.subject) {
-      alert('Le sujet du mail est obligatoire.');
+      Toast.error('Le sujet du mail est obligatoire.');
       return;
     }
     if (!fields.from_address) {
-      alert('L\'adresse d\'expéditeur est obligatoire.');
+      Toast.error('L’adresse d’expéditeur est obligatoire.');
+      return;
+    }
+    // Contrôle simple du format d'adresse (un @ et un point après).
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.from_address)) {
+      Toast.error('L’adresse d’expéditeur n’a pas un format valide (ex. contact@triskell-studio.fr).');
+      return;
+    }
+    // Un modèle de prospection ACTIF au corps vide partirait… vide.
+    if (isProspection && fields.enabled && !fields.body_html.trim() && !fields.body_text.trim()) {
+      Toast.error('Le corps du mail est vide — écris le contenu, ou décoche « Modèle actif » le temps de le finir.');
       return;
     }
 
@@ -1391,56 +1599,261 @@ const MailTemplates = {
     const btn = document.getElementById('mt-save');
     if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
 
-    // Si le produit a changé, on supprime l'ancien enregistrement (s'il existait)
-    // puis on upsert sous le nouveau couple (product, key).
-    if (isProspection && targetProduct !== t.product && !t._isNew) {
-      await this._api('delete', { product: t.product, key: t.key });
-    }
+    // Si le produit a changé : on enregistre D'ABORD sous le nouveau couple
+    // (product, key), et on ne supprime l'ancien QU'APRÈS un succès confirmé.
+    // (Dans l'autre ordre, un échec d'enregistrement détruisait le modèle.)
+    const movingProduct = isProspection && targetProduct !== t.product && !t._isNew;
 
     const res = await this._api('save', { product: targetProduct, key: t.key, fields });
-    if (btn) { btn.disabled = false; btn.textContent = 'Enregistrer'; }
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Enregistrer'; }
     if (!res || !res.ok) {
-      alert('Échec de l\'enregistrement : ' + (res && res.error || 'erreur inconnue'));
+      console.warn('mail_templates.save a échoué :', res && res.error);
+      Toast.friendlyError((res && res.error) || null, 'Échec de l’enregistrement — rien n’a été perdu, réessaie dans un instant.');
       return;
+    }
+    if (movingProduct) {
+      const del = await this._api('delete', { product: t.product, key: t.key });
+      if (!del || !del.ok) {
+        console.warn('mail_templates.delete (déplacement) a échoué :', del && del.error);
+        Toast.warn('Modèle enregistré sous le nouveau produit, mais l’ancienne copie n’a pas pu être retirée — supprime-la si tu la vois encore dans la liste.');
+      }
     }
     // Met à jour la sélection (utile si on a changé de produit ou créé un nouveau)
     this._state.selected = { product: targetProduct, key: t.key };
-    this._toast(isProspection
-      ? 'Modèle de prospection enregistré.'
-      : 'Modèle enregistré. Effet immédiat (cache 60 s max côté Netlify).');
+    // Toast adapté à ce que le modèle pilote vraiment (pas de promesse
+    // « effet immédiat » quand l'éditeur dit l'inverse).
+    let okMsg;
+    if (isProspection) {
+      okMsg = 'Modèle enregistré — l’Auto-pilote l’utilisera à son prochain passage.';
+    } else if (isPipeline) {
+      okMsg = 'Modèle enregistré. Pas encore branché : la version par défaut reste utilisée pour l’instant.';
+    } else {
+      okMsg = 'Modèle enregistré — pris en compte pour les prochains envois.';
+    }
+    Toast.success(okMsg);
     await this.refresh();
   },
 
   async deleteCurrent() {
     const t = this._state.editing;
     if (!t) return;
-    if (!confirm('Supprimer ce modèle ? La fonction Netlify retombera sur sa version codée en dur.')) return;
+    const msg = (t.category === 'prospection')
+      ? 'Supprimer ce modèle ? Il disparaîtra pour l’Auto-pilote.'
+      : 'Supprimer ce modèle ? Le mail repartira sur sa version par défaut.';
+    const ok = await Dialog.confirm(msg, {
+      title: 'Supprimer le modèle',
+      okLabel: 'Supprimer',
+      cancelLabel: 'Annuler',
+      danger: true,
+    });
+    if (!ok) return;
+    const btn = document.getElementById('mt-delete');
+    if (btn) btn.disabled = true;
     const res = await this._api('delete', { product: t.product, key: t.key });
     if (!res || !res.ok) {
-      alert('Échec : ' + (res && res.error || 'erreur inconnue'));
+      if (btn) btn.disabled = false;
+      console.warn('mail_templates.delete a échoué :', res && res.error);
+      Toast.friendlyError((res && res.error) || null, 'Échec de la suppression — réessaie dans un instant.');
       return;
     }
-    this._toast('Modèle supprimé.');
+    Toast.success('Modèle supprimé.');
     this._state.selected = null;
     this._state.editing = null;
+    this._state.pristine = null;
     await this.refresh();
   },
 
+  // Copie le modèle affiché (avec les modifs en cours d'écran) sous une
+  // nouvelle clé « (copie) », et ouvre la copie en édition. Rien n'est
+  // enregistré tant qu'on ne clique pas Enregistrer.
+  duplicateCurrent() {
+    const t = this._state.editing;
+    if (!t) return;
+    const f = this._collectDomFields() || {};
+    const copy = JSON.parse(JSON.stringify(t));
+    if (f.subject !== undefined) copy.subject = f.subject;
+    if (f.body_html !== undefined) copy.body_html = f.body_html;
+    if (f.body_text !== undefined) copy.body_text = f.body_text;
+    if (f.from_name !== undefined) copy.from_name = f.from_name;
+    if (f.from_address !== undefined) copy.from_address = f.from_address;
+    if (f.enabled !== undefined) copy.enabled = f.enabled;
+    if (f.label !== undefined) copy.label = f.label;
+    if (f.audience !== undefined) copy.audience = f.audience;
+    const ts = Date.now().toString(36);
+    copy.key = (copy.category === 'prospection') ? `prosp_${ts}` : `${t.key}_copie_${ts}`;
+    const baseLabel = copy.label || t._label || this._humanKey(t.key);
+    copy.label = `${baseLabel} (copie)`;
+    copy._label = copy.label;
+    copy._isNew = true;
+    delete copy.updated_at;
+    delete copy.updated_by;
+    delete copy._pendingProduct;
+    this._state.selected = { product: copy.product, key: copy.key };
+    this._state.editing = copy;
+    // La copie n'existe pas encore en base : tant qu'elle n'est pas
+    // enregistrée, on la traite comme « modifications non enregistrées ».
+    this._state.pristine = this._snapshotOf({ product: copy.product, audience: copy.audience });
+    this._renderList();
+    this._renderEditor({});
+    Toast.info('Copie créée — pense à l’enregistrer.');
+  },
+
+  // ---------- Garde « modifications non enregistrées » ----------
+  // Photo de référence d'un modèle (prise au chargement) : sert à détecter
+  // les modifications non enregistrées dans l'éditeur.
+  _snapshotOf(t) {
+    const x = t || {};
+    return JSON.stringify({
+      subject: x.subject || '',
+      body_html: x.body_html || '',
+      body_text: x.body_text || '',
+      from_name: x.from_name || '',
+      from_address: x.from_address || '',
+      enabled: x.enabled !== false,
+      label: x.label || '',
+      audience: x.audience || 'creator',
+      product: x._pendingProduct || x.product || '',
+    });
+  },
+
+  // Relit les champs de l'éditeur dans le DOM (null si l'éditeur n'est pas affiché).
+  _collectDomFields() {
+    const get = (id) => document.getElementById(id);
+    const subj = get('mt-subject');
+    if (!subj) return null;
+    const f = {
+      subject: subj.value,
+      body_html: (get('mt-body-html') || {}).value || '',
+      body_text: (get('mt-body-text') || {}).value || '',
+      from_name: (get('mt-from-name') || {}).value || '',
+      from_address: (get('mt-from-address') || {}).value || '',
+      enabled: get('mt-enabled') ? get('mt-enabled').checked : true,
+    };
+    const lbl = get('mt-label');
+    if (lbl) f.label = lbl.value;
+    const prodSel = get('mt-product-select');
+    if (prodSel) f.product = prodSel.value;
+    const audWrap = document.querySelector('[data-mt-audience-current]');
+    if (audWrap) f.audience = audWrap.dataset.mtAudienceCurrent || 'creator';
+    return f;
+  },
+
+  // Y a-t-il des modifications par rapport à la photo de référence ?
+  // La copie de travail est synchronisée en continu pendant la frappe
+  // (liveSync) : la détection marche donc même quand le routeur a déjà
+  // vidé le DOM. Si l'éditeur est encore affiché, on resynchronise au cas où.
+  _isDirty() {
+    const t = this._state.editing;
+    if (!t || !this._state.pristine) return false;
+    this._syncEditingFromDom();
+    return this._snapshotOf(t) !== this._state.pristine;
+  },
+
+  // true = on peut continuer (rien à perdre, ou abandon confirmé).
+  async _confirmDiscard() {
+    if (!this._isDirty()) return true;
+    return await Dialog.confirm('Tu as des modifications non enregistrées — les abandonner ?', {
+      title: 'Modifications non enregistrées',
+      okLabel: 'Abandonner',
+      cancelLabel: 'Continuer l’édition',
+      danger: true,
+    });
+  },
+
+  // Reporte la saisie de l'écran dans la copie de travail (pour survivre à
+  // une reconstruction de la vue quand l'utilisateur refuse d'abandonner).
+  _syncEditingFromDom() {
+    const t = this._state.editing;
+    const f = this._collectDomFields();
+    if (!t || !f) return;
+    t.subject = f.subject;
+    t.body_html = f.body_html;
+    t.body_text = f.body_text;
+    t.from_name = f.from_name;
+    t.from_address = f.from_address;
+    t.enabled = f.enabled;
+    if (f.label !== undefined) t.label = f.label;
+    if (f.audience !== undefined) t.audience = f.audience;
+    // Le produit choisi dans le select est gardé de côté : le vrai
+    // déplacement ne se joue qu'à l'enregistrement. Revenir au produit
+    // d'origine efface le « en attente ».
+    if (f.product !== undefined) {
+      if (f.product !== t.product) t._pendingProduct = f.product;
+      else delete t._pendingProduct;
+    }
+  },
+
   // ---------- Utils ----------
+  // Valeurs d'exemple pour l'aperçu : TOUTES les variables des modèles par
+  // défaut doivent avoir une valeur, sinon l'aperçu affiche {{signature}} brut.
   _samplePlaceholders(t) {
     const samples = {
       first_name: 'Jordan',
       last_name: 'Bourillot',
+      name: 'Jordan Bourillot',
       company_name: 'Atelier du Tertre',
+      client_name: 'Atelier du Tertre',
+      signature: 'Jordan — Triskell Studio',
+      product_name: 'Pixel Pros',
+      product_link: 'https://pixel-pros.fr',
+      next_product_name: 'RankUs (suivi de visibilité Google)',
+      next_product_link: 'https://rankus-studio.fr',
       customize_url: 'https://lagriffe-studio.fr/personnaliser?id=xxx',
       mockup_url:    'https://maquette.exemple.fr',
       site_url:      'https://votre-site.fr',
       final_site_url:'https://votre-site.fr',
+      month:         'juin',
+      year:          '2026',
+      invoice_number:'F-2026-042',
+      deliverables_list: 'Site vitrine + logo + fiche Google',
+      soft_hook:     'une idée simple pour gagner des clients',
+      title:         'Rapport prêt',
+      body:          'Le rapport mensuel est disponible.',
       amount:        '49',
       currency:      'EUR',
       email:         'client@exemple.fr',
     };
     return samples;
+  },
+
+  // Libellés humains des variables {{x}} — affichés sous chaque puce et en
+  // info-bulle, pour qu'on sache ce que chaque variable devient à l'envoi.
+  PLACEHOLDER_HINTS: {
+    first_name: 'le prénom du prospect',
+    last_name: 'le nom de famille',
+    name: 'le nom complet',
+    company_name: 'le nom de l’entreprise',
+    client_name: 'le nom du client',
+    signature: 'ta signature',
+    product_name: 'le nom du produit',
+    product_link: 'le lien du produit',
+    next_product_name: 'le produit complémentaire proposé',
+    next_product_link: 'le lien du produit complémentaire',
+    customize_url: 'le lien de personnalisation du site',
+    mockup_url: 'le lien de la maquette',
+    site_url: 'l’adresse du site',
+    final_site_url: 'l’adresse du site final',
+    month: 'le mois du rapport',
+    year: 'l’année',
+    invoice_number: 'le numéro de la facture',
+    deliverables_list: 'la liste de ce qui est livré',
+    soft_hook: 'la phrase d’accroche',
+    title: 'le titre de l’alerte',
+    body: 'le contenu de l’alerte',
+    amount: 'le montant payé',
+    currency: 'la devise (EUR…)',
+    email: 'l’adresse mail du destinataire',
+  },
+
+  // Puce cliquable d'une variable : {{x}} + libellé humain en dessous.
+  _placeholderChip(p) {
+    const hint = this.PLACEHOLDER_HINTS[p] || '';
+    const title = hint
+      ? `{{${p}}} → ${hint}`
+      : `Insère {{${p}}} dans le corps du mail`;
+    return `<span class="mt-placeholder-chip" data-mt-insert="{{${this._esc(p)}}}" title="${this._esc(title)}">
+      <code>{{${this._esc(p)}}}</code>${hint ? `<small class="mt-ph-hint">${this._esc(hint)}</small>` : ''}
+    </span>`;
   },
   _fillPlaceholders(str, vars) {
     return String(str || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, n) => (vars[n] !== undefined ? String(vars[n]) : `{{${n}}}`));
@@ -1453,10 +1866,39 @@ const MailTemplates = {
     return ({ lagriffe: 'Lagriffe Studio', rankus: 'RankUs Studio', wow: 'Studio WoW',
              shared: 'Triskell Studio' })[product] || 'Triskell Studio';
   },
+  // Noms français des clés connues (sinon « follow_up_30d » devenait
+  // « Follow Up 30d », de l'anglais machiné).
+  HUMAN_KEY_NAMES: {
+    follow_up_7d:  'Relance après 7 jours',
+    follow_up_30d: 'Relance après 30 jours',
+    followup_3d:   'Suivi après 3 jours',
+    followup_14d:  'Astuce après 14 jours',
+    followup_30d:  'Avis après 30 jours',
+    welcome: 'Mail de bienvenue',
+    welcome_at_paid: 'Bienvenue après achat',
+    cross_sell_30d: 'Proposition complémentaire après 30 jours',
+    nps_90d: 'Sondage satisfaction après 90 jours',
+    monthly_report: 'Rapport mensuel',
+    invoice_email: 'Facture émise',
+    morning_digest: 'Résumé du matin',
+    brief_received: 'Brief reçu',
+    preview_ready: 'Maquette prête',
+    payment_confirmed: 'Paiement confirmé',
+    site_delivered: 'Site livré',
+    first_version_ready: 'Première version en ligne',
+    interested: 'Réponse — intéressé',
+    not_now: 'Réponse — pas maintenant',
+    no: 'Réponse — refus',
+    unsubscribe: 'Réponse — désinscription',
+    unknown: 'Réponse — intention floue',
+  },
   _humanKey(k) {
-    return String(k || '')
+    const key = String(k || '');
+    if (this.HUMAN_KEY_NAMES[key]) return this.HUMAN_KEY_NAMES[key];
+    return key
       .replace(/_/g, ' ')
       .replace(/\bj(\d+)\b/g, 'J+$1')
+      .replace(/\b(\d+)d\b/g, '$1 jours')
       .replace(/\b\w/g, c => c.toUpperCase());
   },
   _formatDate(iso) {
@@ -1469,19 +1911,6 @@ const MailTemplates = {
     return String(s ?? '')
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  },
-  _toast(msg) {
-    let el = document.getElementById('mt-toast');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'mt-toast';
-      el.style.cssText = 'position:fixed;bottom:20px;right:20px;background:hsl(var(--accent));color:white;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.18);z-index:9999;opacity:0;transition:opacity 180ms;';
-      document.body.appendChild(el);
-    }
-    el.textContent = msg;
-    requestAnimationFrame(() => { el.style.opacity = '1'; });
-    clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 2800);
   },
 };
 

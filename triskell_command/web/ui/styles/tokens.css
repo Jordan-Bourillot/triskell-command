@@ -1,11 +1,16 @@
 /* Design tokens Triskell — 3 modes (light / mid / dark)
  * En HSL pour interpolation propre. Le mode est porté par
  * data-theme="light|mid|dark" sur <html>.
+ *
+ * Règle (audit 10/06/2026) : chaque couleur d'état existe en DEUX
+ * versions — la base (fonds, bordures, barres) et la version `-text`
+ * (texte lisible sur les surfaces du thème, contraste ≥ 4.5:1).
+ * Ne jamais écrire de hsl()/hex en dur dans les vues : toujours ces tokens.
  */
 
 :root,
 [data-theme="mid"] {
-  /* MID — graphite chaud, sweet spot */
+  /* MID — graphite chaud, thème par défaut */
   --bg:               225 18% 20%;
   --surface:          224 16% 24%;
   --surface-elevated: 224 16% 28%;
@@ -13,15 +18,23 @@
   --border-strong:    224 12% 36%;
   --text:             210 40% 96%;
   --text-secondary:   215 16% 80%;
-  --text-muted:       215 14% 64%;
+  --text-muted:       215 14% 70%;       /* 64% → 70% : lisible aussi sur surface-elevated */
   --accent:           239 84% 71%;       /* indigo plus clair sur graphite */
   --accent-hover:     239 84% 78%;
   --accent-glow:      263 90% 76%;       /* violet */
+  --accent-strong:    243 75% 59%;       /* fond des boutons pleins (texte blanc ≥ 6:1) */
+  --accent-strong-hover: 245 70% 52%;    /* hover = plus foncé, jamais moins lisible */
+  --accent-text:      235 100% 84%;      /* accent utilisé comme TEXTE */
   --success:          158 64% 52%;
+  --success-text:     158 64% 60%;
   --warning:          43 96% 56%;
+  --warning-text:     43 96% 62%;
   --danger:           0 91% 71%;
+  --danger-text:      0 91% 78%;
   --info:             199 95% 60%;
+  --info-text:        199 95% 70%;
   --gold:             43 47% 54%;
+  --on-success:       160 35% 8%;       /* texte posé sur un fond vert plein */
   color-scheme: dark;
 }
 
@@ -38,11 +51,19 @@
   --accent:           239 84% 67%;       /* #6366F1 */
   --accent-hover:     245 79% 60%;
   --accent-glow:      263 90% 66%;       /* violet */
+  --accent-strong:    243 75% 59%;
+  --accent-strong-hover: 245 70% 52%;
+  --accent-text:      245 58% 48%;
   --success:          158 64% 39%;
+  --success-text:     160 84% 27%;
   --warning:          38 92% 50%;
+  --warning-text:     30 95% 33%;
   --danger:           0 84% 60%;
+  --danger-text:      0 72% 42%;
   --info:             199 89% 48%;
+  --info-text:        201 96% 32%;
   --gold:             40 60% 49%;
+  --on-success:       0 0% 100%;
   color-scheme: light;
 }
 
@@ -55,14 +76,36 @@
   --border-strong:    215 25% 27%;
   --text:             210 40% 96%;
   --text-secondary:   215 20% 78%;
-  --text-muted:       215 20% 58%;
+  --text-muted:       215 20% 62%;
   --accent:           239 84% 71%;
   --accent-hover:     245 86% 78%;
   --accent-glow:      263 90% 76%;
+  --accent-strong:    243 75% 59%;
+  --accent-strong-hover: 245 70% 52%;
+  --accent-text:      235 100% 84%;
   --success:          158 64% 52%;
+  --success-text:     158 64% 60%;
   --warning:          43 96% 56%;
+  --warning-text:     43 96% 62%;
   --danger:           0 91% 71%;
+  --danger-text:      0 91% 78%;
   --info:             199 95% 60%;
+  --info-text:        199 95% 70%;
   --gold:             43 47% 54%;
+  --on-success:       160 35% 8%;
   color-scheme: dark;
+}
+
+/* ---- Alias (résolus dynamiquement par thème) ----
+ * Plusieurs vues référencent ces noms : ils pointaient dans le vide
+ * avant l'audit (cartes sans fond). Ne pas les retirer. */
+:root {
+  --card:         var(--surface-elevated);
+  --surface-2:    var(--surface-elevated);
+  --bg-secondary: var(--bg);
+  --text-primary: var(--text);
+  /* Texte posé SUR un fond accent-strong / danger (boutons pleins).
+   * Blanc dans les 3 thèmes actuels — passer par ce token permet d'en
+   * changer un jour sans retoucher les vues. */
+  --on-accent:    0 0% 100%;
 }

@@ -5,8 +5,8 @@
 const Wow = makePipelineView({
   apiPrefix: 'wow',
   kicker:    'STUDIO WOW',
-  title:     'Le pipeline WoW sous tes yeux.',
-  subtitle:  'Chaque demande client, son étage dans le pipeline, et l\'historique pas à pas.',
+  title:     'La chaîne de fabrication WoW sous tes yeux.',
+  subtitle:  'Chaque demande client, son étage dans la chaîne, et l’historique pas à pas.',
   stages:        PIPELINE_BASE_STAGES,
   statusLabels:  PIPELINE_BASE_STATUS_LABELS,
   statusColors:  PIPELINE_BASE_STATUS_COLORS,

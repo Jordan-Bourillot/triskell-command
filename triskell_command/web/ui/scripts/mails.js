@@ -13,10 +13,19 @@
 
 const Mails = {
   state: {
-    tab: 'reply',         // 'reply' | 'inbound' | 'sent'
+    tab: 'reply',         // 'reply' | 'inbound' | 'sent' | 'scheduled'
     accountFilter: '',    // id du compte (vide = tous)
     accounts: [],
     mails: [],
+    // Sous-ensemble actuellement AFFICHÉ (résultats de recherche inclus).
+    // C'est sur cette liste que travaillent "Tout sélectionner" et la barre
+    // de sélection — jamais sur state.mails complet.
+    visibleMails: [],
+    // Texte de recherche en cours (vidé au changement d'onglet).
+    searchQuery: '',
+    // Nombre de mails demandés au serveur. L'endpoint ne sait pas paginer
+    // par décalage, donc "Charger plus" augmente ce plafond (100 → 300 → 500).
+    listLimit: 100,
     lastKnownInboundId: null,  // pour la notif desktop
     notifPollHandle: null,
     // Mails déjà ouverts (lus) : Set d'ids, persisté en localStorage.
@@ -88,10 +97,79 @@ const Mails = {
     return this._loadReadIds().has(String(id));
   },
 
+  // ----------------------------------------------------------------------
+  // Brouillons du composeur : LISTE de brouillons (clé 'tc-mail-drafts',
+  // tableau {id, ts, to, subject, body_text, body_html, …}, max 10).
+  // L'ancienne clé unique 'tc-mail-draft' est migrée automatiquement
+  // en premier brouillon à la première lecture.
+  // ----------------------------------------------------------------------
+  DRAFTS_STORAGE_KEY: 'tc-mail-drafts',
+  LEGACY_DRAFT_KEY: 'tc-mail-draft',
+  DRAFTS_MAX: 10,
+  DRAFT_MAX_AGE_MS: 30 * 24 * 3600 * 1000, // 30 jours
+
+  _draftsLoad() {
+    let list = [];
+    try {
+      const raw = localStorage.getItem(this.DRAFTS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) list = parsed;
+    } catch (_) { list = []; }
+    // Migration : ancienne clé unique → premier brouillon de la liste.
+    try {
+      const legacyRaw = localStorage.getItem(this.LEGACY_DRAFT_KEY);
+      if (legacyRaw) {
+        const d = JSON.parse(legacyRaw);
+        if (d && typeof d === 'object') {
+          d.id = d.id || ('d-legacy-' + (d.ts || Date.now()));
+          d.ts = d.ts || Date.now();
+          if (!list.some(x => x && x.id === d.id)) list.unshift(d);
+        }
+        localStorage.removeItem(this.LEGACY_DRAFT_KEY);
+        this._draftsPersist(list);
+      }
+    } catch (_) {
+      try { localStorage.removeItem(this.LEGACY_DRAFT_KEY); } catch (_) {}
+    }
+    // Nettoyage : brouillons trop vieux (> 30 jours) ou malformés.
+    const now = Date.now();
+    const fresh = list.filter(d => d && d.id && (now - (d.ts || 0)) < this.DRAFT_MAX_AGE_MS);
+    fresh.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    if (fresh.length !== list.length) this._draftsPersist(fresh);
+    return fresh;
+  },
+
+  _draftsPersist(list) {
+    try {
+      localStorage.setItem(this.DRAFTS_STORAGE_KEY,
+        JSON.stringify((list || []).slice(0, this.DRAFTS_MAX)));
+      return true;
+    } catch (_) { return false; }
+  },
+
+  /** Ajoute ou met à jour UN brouillon (par id), sans toucher aux autres. */
+  _draftUpsert(d) {
+    if (!d || !d.id) return false;
+    const list = this._draftsLoad();
+    const i = list.findIndex(x => x.id === d.id);
+    d.ts = Date.now();
+    if (i >= 0) list[i] = d; else list.unshift(d);
+    list.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    return this._draftsPersist(list);
+  },
+
+  _draftRemove(id) {
+    if (!id) return;
+    this._draftsPersist(this._draftsLoad().filter(d => d.id !== id));
+  },
+
   async render(container, params) {
-    if (params && params.tab && ['inbound', 'reply', 'sent'].includes(params.tab)) {
+    if (params && params.tab && ['inbound', 'reply', 'sent', 'scheduled'].includes(params.tab)) {
       this.state.tab = params.tab;
     }
+    // Le champ de recherche repart vide à chaque affichage de la vue :
+    // on aligne l'état (sinon un ancien filtre s'appliquerait en silence).
+    this.state.searchQuery = '';
     container.innerHTML = `
       <section class="animate-slide-up">
         <div class="mb-5 sm:mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
@@ -105,8 +183,8 @@ const Mails = {
               <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
               Nouveau mail
             </button>
-            <button id="m-prospect" class="btn btn-secondary"
-                    style="background: linear-gradient(135deg, #7c6acc, #e85d2c); color: white; border: 0;"
+            <button id="m-prospect" class="btn btn-secondary text-white"
+                    style="background: linear-gradient(135deg, hsl(var(--accent-strong)), hsl(var(--accent))); border: 0;"
                     title="Mail de prospection en direct — Claude analyse le site cible et adapte le modèle">
               <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
               Prospection en direct
@@ -115,21 +193,23 @@ const Mails = {
           </div>
         </div>
 
-        <div class="flex gap-2 mb-4 border-b border-border">
+        <div class="flex gap-2 mb-4 border-b border-border overflow-x-auto">
           <button data-mtab="inbound" class="m-tab ${this.state.tab === 'inbound' ? 'is-active' : ''}">Boîte de réception</button>
           <button data-mtab="reply"   class="m-tab ${this.state.tab === 'reply' ? 'is-active' : ''}">Réponses prospects</button>
           <button data-mtab="sent"    class="m-tab ${this.state.tab === 'sent' ? 'is-active' : ''}">Messages envoyés</button>
+          <button data-mtab="scheduled" class="m-tab ${this.state.tab === 'scheduled' ? 'is-active' : ''}">Programmés</button>
         </div>
 
         <div class="flex items-center gap-3 mb-4 flex-wrap">
-          <label class="text-xs text-text-muted">Compte :</label>
-          <select id="m-account-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm">
+          <label id="m-account-label" class="text-xs text-text-muted">Compte :</label>
+          <select id="m-account-filter" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm"
+                  title="Filtre indicatif : les mails les plus anciens n'ont pas l'information du compte et seront masqués par ce filtre.">
             <option value="">— Tous —</option>
           </select>
           <button id="m-toggle-auto" class="px-3 py-1.5 rounded-lg bg-bg border border-border text-xs hover:border-accent transition-colors"
                   style="display:none;" title="Notifications, newsletters, rapports DMARC, alertes sécurité…">
           </button>
-          <div class="relative flex-1 min-w-[220px] max-w-md">
+          <div id="m-search-wrap" class="relative flex-1 min-w-[220px] max-w-md">
             <input id="m-search" type="search" placeholder="Rechercher un mail (sujet, expéditeur, contenu)…"
                    class="w-full pl-9 pr-3 py-1.5 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
             <svg class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -187,7 +267,8 @@ const Mails = {
     s.textContent = `
       .m-tab { padding: 10px 18px; font-size: 13px; font-weight: 600;
                color: hsl(var(--text-muted)); border-bottom: 2px solid transparent;
-               transition: color 160ms, border-color 160ms; }
+               transition: color 160ms, border-color 160ms;
+               flex-shrink: 0; white-space: nowrap; }
       .m-tab:hover { color: hsl(var(--text)); }
       .m-tab.is-active { color: hsl(var(--accent)); border-bottom-color: hsl(var(--accent)); }
 
@@ -201,6 +282,7 @@ const Mails = {
         width: 3px; border-radius: 0 2px 2px 0; background: hsl(var(--accent));
       }
       .mail-row { position: relative; }
+      .mail-row:focus-visible { outline: 2px solid hsl(var(--accent) / 0.5); outline-offset: -2px; }
       .mail-row.is-read .mail-row-from,
       .mail-row.is-read .mail-row-subject { color: hsl(var(--text-muted)); font-weight: 500; }
       .mail-row.is-read .mail-row-snippet { color: hsl(var(--text-muted) / 0.8); }
@@ -276,6 +358,12 @@ const Mails = {
   _switchTab(tab) {
     this.state.tab = tab;
     this.state.selectedIds = new Set();
+    // La recherche est propre à un onglet : on la réinitialise en changeant.
+    this.state.searchQuery = '';
+    const searchInput = document.getElementById('m-search');
+    if (searchInput) searchInput.value = '';
+    // On repart du plafond de base (le "Charger plus" est par onglet).
+    this.state.listLimit = 100;
     document.querySelectorAll('[data-mtab]').forEach(b => {
       b.classList.toggle('is-active', b.dataset.mtab === tab);
     });
@@ -309,20 +397,45 @@ const Mails = {
     }
     root.innerHTML = `<div class="card p-6 text-text-muted text-sm">Chargement…</div>`;
 
-    // Note pour "Tous entrants"
-    if (this.state.tab === 'inbound') {
-      // Pour l'instant, on récupère reply_received et on prévient le user
-      // que le worker IMAP ne loggue pas encore les autres entrants
+    // Filtre compte / bascule notifs auto / recherche : sans objet sur
+    // l'onglet "Programmés" (liste à part, côté serveur d'envoi).
+    const isScheduledTab = this.state.tab === 'scheduled';
+    const accountLabelEl = document.getElementById('m-account-label');
+    const accountSelEl = document.getElementById('m-account-filter');
+    const searchWrapEl = document.getElementById('m-search-wrap');
+    if (accountLabelEl) accountLabelEl.style.display = isScheduledTab ? 'none' : '';
+    if (accountSelEl) accountSelEl.style.display = isScheduledTab ? 'none' : '';
+    if (searchWrapEl) searchWrapEl.style.display = isScheduledTab ? 'none' : '';
+    if (isScheduledTab) {
+      const tb = document.getElementById('m-toggle-auto');
+      if (tb) tb.style.display = 'none';
+      await this._loadScheduled(root, countEl);
+      return;
     }
 
     const kindMap = { reply: 'reply', sent: 'sent', inbound: 'inbound' };
-    const r = await App.api.mails_list({
-      kind: kindMap[this.state.tab] || 'all',
-      account_id: this.state.accountFilter || '',
-      limit: 100,
-    });
+    let r = null;
+    try {
+      r = await App.api.mails_list({
+        kind: kindMap[this.state.tab] || 'all',
+        account_id: this.state.accountFilter || '',
+        limit: this.state.listLimit || 100,
+      });
+    } catch (e) {
+      console.error('[mails] mails_list', e);
+      r = null;
+    }
     if (!r || !r.ok) {
-      root.innerHTML = `<div class="card p-6 text-danger">${(r && r.error) || 'Erreur API'}</div>`;
+      if (r && r.error) console.error('[mails] mails_list :', r.error);
+      root.innerHTML = `
+        <div class="card p-8 text-center">
+          <div class="text-3xl mb-3 opacity-60">⚠</div>
+          <p class="text-sm text-text mb-1 font-semibold">Impossible de charger les mails.</p>
+          <p class="text-xs text-text-muted mb-4">Vérifie ta connexion puis réessaie.</p>
+          <button id="m-retry" class="btn btn-secondary">Réessayer</button>
+        </div>`;
+      const retryBtn = root.querySelector('#m-retry');
+      if (retryBtn) retryBtn.onclick = () => this._load();
       return;
     }
     const allMails = r.mails || [];
@@ -347,16 +460,37 @@ const Mails = {
       if (toggleBtn) toggleBtn.style.display = 'none';
     }
 
-    countEl.textContent = hiddenAutoCount > 0
-      ? `${this.state.mails.length} mail(s) — ${hiddenAutoCount} notif(s) auto cachée(s)`
-      : `${this.state.mails.length} mail(s)`;
+    // Le serveur a-t-il probablement plus de mails que le plafond demandé ?
+    const limit = this.state.listLimit || 100;
+    const maybeMore = allMails.length >= limit;
+    this.state.hasMore = maybeMore && limit < 500;
+    const recentNote = maybeMore ? ` — les ${limit} plus récents` : '';
 
-    const limitedBanner = '';
+    countEl.textContent = (hiddenAutoCount > 0
+      ? `${this.state.mails.length} mail(s) — ${hiddenAutoCount} notif(s) auto cachée(s)`
+      : `${this.state.mails.length} mail(s)`) + recentNote;
+
+    // Bandeau d'information sur la Boîte de réception : elle ne contient
+    // que les réponses liées à la prospection, pas toute la boîte mail.
+    const limitedBanner = this.state.tab === 'inbound'
+      ? `<div class="mb-3 px-4 py-2.5 rounded-xl border border-border bg-bg text-[11px] text-text-muted">
+           ℹ Cette boîte montre les réponses liées à ta prospection — pas toute ta boîte mail.
+         </div>`
+      : '';
 
     if (!this.state.mails.length) {
-      const hint = hiddenAutoCount > 0
-        ? `<p class="text-text-muted">Aucun mail visible — ${hiddenAutoCount} notif(s) auto cachée(s). Clique sur "Afficher les notifs auto" pour les voir.</p>`
-        : `<p class="text-text-muted">Aucun mail dans cette catégorie.</p>`;
+      let hint;
+      if (hiddenAutoCount > 0) {
+        hint = `<p class="text-text-muted">Aucun mail visible — ${hiddenAutoCount} notif(s) auto cachée(s). Clique sur "Afficher les notifs auto" pour les voir.</p>`;
+      } else if (this.state.accountFilter) {
+        hint = `<p class="text-text-muted">Aucun mail pour ce compte. Les mails les plus anciens n'ont pas l'information du compte : remets le filtre sur « — Tous — » pour tout voir.</p>`;
+      } else if (this.state.tab === 'sent') {
+        hint = `<p class="text-text-muted">Aucun mail envoyé pour l'instant. Écris-en un avec « Nouveau mail », ou lance une prospection.</p>`;
+      } else if (!this.state.accounts.length) {
+        hint = `<p class="text-text-muted">Aucun mail ici. Configure d'abord un compte mail dans les Réglages.</p>`;
+      } else {
+        hint = `<p class="text-text-muted">Aucun mail dans cette catégorie. Lance une prospection pour recevoir tes premières réponses.</p>`;
+      }
       root.innerHTML = limitedBanner + `
         <div class="card p-10 text-center">
           <div class="text-3xl mb-3 opacity-60">∅</div>
@@ -365,25 +499,140 @@ const Mails = {
       `;
       return;
     }
+    this.state.limitedBanner = limitedBanner;
     // Si une recherche est en cours, on délègue à _applySearch (qui filtre)
     if (this.state.searchQuery) {
       this._applySearch();
       return;
     }
-    this._renderListAndBulk(root, limitedBanner);
+    this._renderListAndBulk(root, limitedBanner, this.state.mails);
   },
 
-  _renderListAndBulk(root, limitedBanner) {
-    root.innerHTML = limitedBanner + this._renderBulkBar() +
-      `<div class="mail-list">${this.state.mails.map(m => this._mailRow(m)).join('')}</div>`;
+  // ----------------------------------------------------------------------
+  // Onglet "Programmés" : les envois différés (bouton "Plus tard" du
+  // composeur). Liste + annulation par ligne.
+  // ----------------------------------------------------------------------
+  async _loadScheduled(root, countEl) {
+    let r = null;
+    try {
+      r = await App.api.mail_scheduled_list();
+    } catch (e) {
+      console.error('[mails] mail_scheduled_list', e);
+      r = null;
+    }
+    if (!r || !r.ok) {
+      if (r && r.error) console.error('[mails] mail_scheduled_list :', r.error);
+      if (countEl) countEl.textContent = '';
+      root.innerHTML = `
+        <div class="card p-8 text-center">
+          <div class="text-3xl mb-3 opacity-60">⚠</div>
+          <p class="text-sm text-text mb-1 font-semibold">Impossible de charger les envois programmés.</p>
+          <p class="text-xs text-text-muted mb-4">Vérifie ta connexion puis réessaie.</p>
+          <button id="m-sched-retry" class="btn btn-secondary">Réessayer</button>
+        </div>`;
+      const retryBtn = root.querySelector('#m-sched-retry');
+      if (retryBtn) retryBtn.onclick = () => this._load();
+      return;
+    }
+    const items = r.mails || [];
+    if (countEl) countEl.textContent = `${items.length} envoi(s) programmé(s)`;
+    if (!items.length) {
+      root.innerHTML = `
+        <div class="card p-10 text-center">
+          <div class="text-3xl mb-3 opacity-60">🕐</div>
+          <p class="text-text-muted">Aucun envoi programmé. Dans « Nouveau mail », le bouton « Plus tard » permet de programmer un envoi à l'heure que tu veux.</p>
+        </div>`;
+      return;
+    }
+    root.innerHTML = `
+      <div class="mb-3 px-4 py-2.5 rounded-xl border border-border bg-bg text-[11px] text-text-muted">
+        ℹ Ces mails partiront automatiquement à l'heure prévue, même si tu fermes l'app. Tu peux encore les annuler.
+      </div>
+      <div class="space-y-2">
+        ${items.map(it => {
+          const when = this._fmtDateLong(it.scheduled_at);
+          const to = it.to || '(destinataire inconnu)';
+          const subject = it.subject || '(sans objet)';
+          const preview = (it.body_preview || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+          const attCount = Number(it.attachments_count) || 0;
+          return `
+          <div class="card p-4 flex items-start gap-3 flex-wrap">
+            <div class="w-9 h-9 rounded-full bg-accent/15 text-accent flex items-center justify-center shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="text-xs font-bold text-accent">Partira le ${this._escape(when)}</div>
+              <div class="text-sm font-semibold text-text truncate mt-0.5">${this._escape(subject)}</div>
+              <div class="text-xs text-text-muted truncate">À : ${this._escape(to)}${attCount ? ` · ${attCount} pièce(s) jointe(s)` : ''}</div>
+              ${preview ? `<div class="text-[11px] text-text-muted/80 truncate mt-1">${this._escape(preview)}</div>` : ''}
+            </div>
+            <button data-sched-cancel="${this._escape(it.id)}" data-sched-to="${this._escape(to)}"
+                    class="m-bulkbar-btn m-bulkbar-btn-secondary shrink-0"
+                    title="Annuler cet envoi programmé" aria-label="Annuler cet envoi programmé">
+              Annuler
+            </button>
+          </div>`;
+        }).join('')}
+      </div>`;
+    root.querySelectorAll('[data-sched-cancel]').forEach(btn => {
+      btn.onclick = async () => {
+        const id = btn.dataset.schedCancel;
+        const to = btn.dataset.schedTo || 'ce destinataire';
+        const ok = await Dialog.confirm(
+          `Annuler l'envoi programmé pour ${to} ? Le mail ne partira pas.`,
+          { title: 'Annuler cet envoi', okLabel: "Annuler l'envoi", cancelLabel: 'Le garder', danger: true });
+        if (!ok) return;
+        btn.disabled = true;
+        btn.textContent = 'Annulation…';
+        try {
+          const r2 = await App.api.mail_scheduled_cancel({ id });
+          if (r2 && r2.ok) {
+            Toast.success('Envoi annulé — le mail ne partira pas.');
+            await this._load();
+          } else {
+            btn.disabled = false;
+            btn.textContent = 'Annuler';
+            Toast.error((r2 && r2.error) || 'Ce mail est peut-être déjà parti. Rafraîchis la liste.');
+          }
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = 'Annuler';
+          Toast.friendlyError(e, "Impossible d'annuler cet envoi pour le moment.");
+        }
+      };
+    });
+  },
+
+  _renderListAndBulk(root, limitedBanner, mails) {
+    const list = mails || this.state.mails || [];
+    this.state.visibleMails = list;
+    const loadMoreHtml = (this.state.hasMore && !this.state.searchQuery)
+      ? `<div class="text-center mt-4">
+           <button id="m-load-more" class="btn btn-secondary">Charger plus de mails</button>
+         </div>`
+      : '';
+    root.innerHTML = (limitedBanner || '') + this._renderBulkBar() +
+      `<div class="mail-list">${list.map(m => this._mailRow(m)).join('')}</div>` +
+      loadMoreHtml;
     this._wireListEvents(root);
+    const loadMoreBtn = root.querySelector('#m-load-more');
+    if (loadMoreBtn) {
+      loadMoreBtn.onclick = () => {
+        // L'endpoint ne pagine pas par décalage : on augmente le plafond.
+        this.state.listLimit = this.state.listLimit >= 300 ? 500 : 300;
+        this._load();
+      };
+    }
   },
 
   _renderBulkBar() {
     const selected = this.state.selectedIds || new Set();
-    const total = (this.state.mails || []).length;
+    // La case "Tout sélectionner" porte sur les mails AFFICHÉS (recherche
+    // incluse), jamais sur la liste complète.
+    const visible = this.state.visibleMails || this.state.mails || [];
     const n = selected.size;
-    const allSelected = n > 0 && n === total;
+    const allSelected = visible.length > 0 &&
+      visible.every(m => selected.has(String(m.id)));
     return `
       <div class="m-bulkbar">
         <label class="flex items-center gap-2 cursor-pointer">
@@ -400,80 +649,113 @@ const Mails = {
     `;
   },
 
+  // ----------------------------------------------------------------------
+  // Évènements de la liste : DÉLÉGATION. Un seul jeu d'écouteurs est posé
+  // sur le conteneur #m-content (une fois par rendu de la vue) — il survit
+  // aux innerHTML successifs. Avant, chaque rafraîchissement de la barre de
+  // sélection ré-attachait des écouteurs sur les MÊMES lignes : croissance
+  // exponentielle → des dizaines de fenêtres de détail empilées.
+  // ----------------------------------------------------------------------
   _wireListEvents(root) {
-    // Clic sur ligne = ouvre modale détail (mais pas si on a cliqué sur la checkbox).
-    root.querySelectorAll('[data-mail-open]').forEach(el => {
-      el.addEventListener('click', (e) => {
-        if (e.target.closest('.mail-row-checkbox-wrap')) return;
-        const id = el.dataset.mailOpen;
-        const mail = this.state.mails.find(m => String(m.id) === String(id));
-        if (mail) {
-          this._markRead(id);
-          el.classList.remove('is-unread');
-          el.classList.add('is-read');
-          this._openDetail(mail);
+    if (root.dataset.mailsWired === '1') return;
+    root.dataset.mailsWired = '1';
+
+    const openRow = (rowEl) => {
+      const id = rowEl.dataset.mailOpen;
+      const mail = (this.state.mails || []).find(m => String(m.id) === String(id));
+      if (!mail) return;
+      this._markRead(id);
+      rowEl.classList.remove('is-unread');
+      rowEl.classList.add('is-read');
+      this._openDetail(mail);
+    };
+
+    root.addEventListener('click', async (e) => {
+      // Boutons de la barre de sélection
+      if (e.target.closest('#m-bulk-clear')) {
+        this.state.selectedIds = new Set();
+        root.querySelectorAll('[data-mail-check]').forEach(cb => { cb.checked = false; });
+        root.querySelectorAll('[data-mail-open].is-selected').forEach(row => row.classList.remove('is-selected'));
+        this._refreshBulkBar(root);
+        return;
+      }
+      const delBtn = e.target.closest('#m-bulk-delete');
+      if (delBtn) {
+        const ids = Array.from(this.state.selectedIds || []);
+        if (!ids.length || delBtn.disabled) return;
+        const ok = await Dialog.confirm(
+          `Supprimer ${ids.length} mail${ids.length > 1 ? 's' : ''} de l’historique ? Les messages déjà envoyés ou reçus ne sont pas rappelés, on efface juste la trace côté Triskell.`,
+          { title: 'Supprimer la sélection', okLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true });
+        if (!ok) return;
+        delBtn.disabled = true;
+        delBtn.textContent = 'Suppression…';
+        try {
+          const r = await App.api.mails_delete({ ids });
+          if (r && r.ok) {
+            this.state.selectedIds = new Set();
+            Toast.success(`${ids.length} mail${ids.length > 1 ? 's' : ''} supprimé${ids.length > 1 ? 's' : ''} de l’historique.`);
+            await this._load();
+          } else {
+            this._refreshBulkBar(root); // ré-affiche la barre (bouton réactivé)
+            console.error('[mails] mails_delete :', r && r.error);
+            Toast.error('La suppression a échoué. Réessaie.');
+          }
+        } catch (err) {
+          this._refreshBulkBar(root);
+          Toast.friendlyError(err, 'La suppression a échoué. Réessaie.');
         }
-      });
+        return;
+      }
+      // Clic sur une ligne = ouvre le détail (sauf clic sur la case à cocher)
+      const row = e.target.closest('[data-mail-open]');
+      if (row && !e.target.closest('.mail-row-checkbox-wrap')) openRow(row);
     });
-    // Cases à cocher de chaque ligne
-    root.querySelectorAll('[data-mail-check]').forEach(cb => {
-      cb.addEventListener('change', (e) => {
-        e.stopPropagation();
+
+    root.addEventListener('change', (e) => {
+      // Case d'une ligne
+      const cb = e.target.closest('[data-mail-check]');
+      if (cb) {
         const id = String(cb.dataset.mailCheck);
         if (cb.checked) this.state.selectedIds.add(id);
         else this.state.selectedIds.delete(id);
-        // Re-render la barre d'action + état visuel de la ligne, sans recharger la liste
-        this._refreshBulkBar(root);
-        const row = root.querySelector(`[data-mail-open="${id.replace(/"/g, '\\"')}"]`);
+        const row = cb.closest('[data-mail-open]');
         if (row) row.classList.toggle('is-selected', cb.checked);
-      });
+        this._refreshBulkBar(root);
+        return;
+      }
+      // "Tout sélectionner" : uniquement les mails AFFICHÉS (recherche
+      // comprise), mise à jour ciblée des lignes — le filtre reste en place.
+      const allBox = e.target.closest('#m-bulk-all');
+      if (allBox) {
+        const checked = allBox.checked;
+        root.querySelectorAll('[data-mail-check]').forEach(boxEl => {
+          const id = String(boxEl.dataset.mailCheck);
+          boxEl.checked = checked;
+          if (checked) this.state.selectedIds.add(id);
+          else this.state.selectedIds.delete(id);
+          const row = boxEl.closest('[data-mail-open]');
+          if (row) row.classList.toggle('is-selected', checked);
+        });
+        this._refreshBulkBar(root);
+      }
     });
-    // Tout sélectionner
-    const allBox = root.querySelector('#m-bulk-all');
-    if (allBox) {
-      allBox.addEventListener('change', () => {
-        if (allBox.checked) {
-          this.state.selectedIds = new Set((this.state.mails || []).map(m => String(m.id)));
-        } else {
-          this.state.selectedIds = new Set();
-        }
-        this._renderListAndBulk(root, '');
-      });
-    }
-    // Annuler sélection
-    const clearBtn = root.querySelector('#m-bulk-clear');
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => {
-        this.state.selectedIds = new Set();
-        this._renderListAndBulk(root, '');
-      });
-    }
-    // Supprimer la sélection
-    const delBtn = root.querySelector('#m-bulk-delete');
-    if (delBtn) {
-      delBtn.addEventListener('click', async () => {
-        const ids = Array.from(this.state.selectedIds || []);
-        if (!ids.length) return;
-        if (!confirm(`Supprimer ${ids.length} mail${ids.length > 1 ? 's' : ''} de l’historique local ?`)) return;
-        delBtn.disabled = true;
-        delBtn.textContent = 'Suppression…';
-        const r = await App.api.mails_delete({ ids });
-        if (r && r.ok) {
-          this.state.selectedIds = new Set();
-          await this._load();
-        } else {
-          delBtn.disabled = false;
-          alert('Échec suppression : ' + ((r && r.error) || 'erreur inconnue'));
-        }
-      });
-    }
+
+    // Clavier : Entrée ou Espace sur une ligne focusée = ouvrir le détail
+    root.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const row = e.target.closest && e.target.closest('[data-mail-open]');
+      if (!row || e.target.closest('.mail-row-checkbox-wrap')) return;
+      e.preventDefault();
+      openRow(row);
+    });
   },
 
+  // Ne re-rend QUE la barre de sélection (les écouteurs délégués sur le
+  // conteneur restent valides — aucun ré-attachement).
   _refreshBulkBar(root) {
     const bar = root.querySelector('.m-bulkbar');
     if (!bar) return;
     bar.outerHTML = this._renderBulkBar();
-    this._wireListEvents(root);
   },
 
   _mailRow(m) {
@@ -524,7 +806,8 @@ const Mails = {
       : this._escape(senderName || '—');
     const fromCellClass = sentFromEmail ? 'mail-row-from is-stacked' : 'mail-row-from';
     return `
-      <div class="mail-row ${stateClass}" data-mail-open="${this._escape(m.id)}">
+      <div class="mail-row ${stateClass}" data-mail-open="${this._escape(m.id)}"
+           role="button" tabindex="0" aria-label="Ouvrir le mail : ${this._escape(subject)}">
         <label class="mail-row-checkbox-wrap flex items-center" onclick="event.stopPropagation()">
           <input type="checkbox" class="mail-row-checkbox" data-mail-check="${this._escape(m.id)}" ${isSelected ? 'checked' : ''}>
         </label>
@@ -549,12 +832,16 @@ const Mails = {
     const extra = m.extra || {};
     const subject = m.subject || '(sans objet)';
     const fromAddr = extra.from || '';
-    const fromInitial = (fromAddr[0] || '?').toUpperCase();
+    const toAddr = extra.to || '';
     const accountId = extra.account_id || '';
     const accountLabel = (this.state.accounts.find(a => a.id === accountId) || {}).label || accountId;
     const accountEmail = (this.state.accounts.find(a => a.id === accountId) || {}).from_email || '';
     const ts = this._fmtDateLong(m.ts);
     const isSent = m.kind === 'email_sent';
+    // Mail ENVOYÉ : la personne à afficher en tête est le DESTINATAIRE,
+    // pas l'expéditeur (qui est nous-même).
+    const headAddr = isSent ? toAddr : fromAddr;
+    const headInitial = (headAddr[0] || '?').toUpperCase();
     // On préfère toujours le HTML complet stocké dans extra (gras / couleurs
     // / liens / mise en page) — fallback sur le texte si absent (anciens
     // logs ou mails sans partie HTML). Vrai pour les envoyés ET les reçus.
@@ -583,7 +870,7 @@ const Mails = {
 
         <!-- ========== Top bar : badge + close ========== -->
         <div class="px-6 pt-4 pb-3 flex items-center justify-between border-b border-border bg-surface-elevated">
-          <span class="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full"
+          <span class="text-[11px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full"
                 style="background: hsl(var(--${kindColor}) / 0.15); color: hsl(var(--${kindColor}));">
             ${this._escape(kindLabel)}
           </span>
@@ -598,22 +885,26 @@ const Mails = {
             <h2 class="text-xl font-bold leading-snug text-text">${this._escape(subject)}</h2>
           </div>
 
-          <!-- Sender card -->
+          <!-- Carte expéditeur (mail reçu) / destinataire (mail envoyé) -->
           <div class="px-6 pb-4">
             <div class="flex items-start gap-3 p-4 rounded-xl bg-bg border border-border">
               <div class="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-base shrink-0"
                    style="background: linear-gradient(135deg, hsl(var(--${kindColor})), hsl(var(--accent)));">
-                ${this._escape(fromInitial)}
+                ${this._escape(headInitial)}
               </div>
               <div class="flex-1 min-w-0">
                 <div class="flex items-baseline justify-between gap-3 flex-wrap">
-                  <div class="text-sm font-semibold text-text truncate">${this._escape(fromAddr || '(expéditeur inconnu)')}</div>
+                  <div class="text-sm font-semibold text-text truncate">${isSent
+                    ? `À : ${this._escape(toAddr || '(destinataire inconnu)')}`
+                    : this._escape(fromAddr || '(expéditeur inconnu)')}</div>
                   <div class="text-[11px] text-text-muted shrink-0">${ts}</div>
                 </div>
                 <div class="text-xs text-text-muted mt-0.5">
-                  → reçu sur <span class="font-medium text-text">${this._escape(accountLabel)}</span>${accountEmail ? ` <span class="opacity-70">(${this._escape(accountEmail)})</span>` : ''}
+                  ${isSent
+                    ? `envoyé depuis <span class="font-medium text-text">${this._escape(accountLabel)}</span>${accountEmail ? ` <span class="opacity-70">(${this._escape(accountEmail)})</span>` : ''}`
+                    : `→ reçu sur <span class="font-medium text-text">${this._escape(accountLabel)}</span>${accountEmail ? ` <span class="opacity-70">(${this._escape(accountEmail)})</span>` : ''}`}
                 </div>
-                ${classification ? `<div class="text-[11px] mt-2"><span class="text-text-muted">Classification IA :</span> <span class="font-medium" style="color: hsl(var(--${kindColor}));">${this._escape(classification)}</span></div>` : ''}
+                ${classification ? `<div class="text-[11px] mt-2"><span class="text-text-muted">Lecture IA :</span> <span class="font-medium" style="color: hsl(var(--${kindColor}));">${this._escape(this._classificationLabel(classification))}</span></div>` : ''}
               </div>
             </div>
           </div>
@@ -637,200 +928,153 @@ const Mails = {
                 </div>
               `).join('')}
             </div>
-            <div class="text-[10px] text-text-muted mt-2 italic">Le contenu binaire n'est pas archivé — seul le nom et la taille sont conservés.</div>
+            <div class="text-[11px] text-text-muted mt-2 italic">Le contenu binaire n'est pas archivé — seul le nom et la taille sont conservés.</div>
           </div>
           ` : ''}
 
+          ${isSent ? '' : `
           <!-- Séparateur visuel -->
           <div class="px-6"><div class="border-t border-border"></div></div>
 
-          <!-- Composer (toujours présent, mais condensé tant que pas activé) -->
+          <!-- Bouton Répondre (mails reçus uniquement) → ouvre le composeur -->
           <div id="md-composer" class="px-6 py-5">
-            <div id="md-composer-collapsed" class="">
-              <button id="md-toggle-composer" class="w-full flex items-center justify-between gap-3 px-5 py-4 rounded-xl border border-dashed border-border hover:border-accent hover:bg-accent/5 transition-all group" ${fromAddr ? '' : 'disabled'}>
-                <div class="flex items-center gap-3">
-                  <div class="w-9 h-9 rounded-full bg-accent/15 text-accent flex items-center justify-center group-hover:bg-accent group-hover:text-white transition-colors">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M3 10h11M9 5l-5 5 5 5M21 19V5"/></svg>
-                  </div>
-                  <div class="text-left">
-                    <div class="text-sm font-semibold text-text">Répondre</div>
-                    <div class="text-[11px] text-text-muted">${fromAddr ? `Réponse à ${this._escape(fromAddr)} depuis ${this._escape(accountLabel)}` : 'Adresse expéditeur manquante'}</div>
-                  </div>
+            <button id="md-toggle-composer" class="w-full flex items-center justify-between gap-3 px-5 py-4 rounded-xl border border-dashed border-border hover:border-accent hover:bg-accent/5 transition-all group" ${fromAddr ? '' : 'disabled'}>
+              <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-full bg-accent/15 text-accent flex items-center justify-center group-hover:bg-accent group-hover:text-white transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M3 10h11M9 5l-5 5 5 5M21 19V5"/></svg>
                 </div>
-                <svg class="w-4 h-4 text-text-muted group-hover:text-accent transition-colors" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-              </button>
-            </div>
-
-            <div id="md-composer-form" class="hidden space-y-3">
-              <div class="text-xs uppercase tracking-widest text-text-muted font-bold mb-2">VOTRE RÉPONSE</div>
-
-              <!-- Depuis + À côte à côte -->
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-[11px] font-medium text-text-secondary mb-1">Depuis quelle adresse</label>
-                  <select id="md-cmp-from" class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent">
-                    ${this.state.accounts.map(a =>
-                      `<option value="${this._escape(a.id)}" ${a.id === accountId ? 'selected' : ''}>${this._escape(a.label)}</option>`
-                    ).join('')}
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-[11px] font-medium text-text-secondary mb-1">Destinataire</label>
-                  <input id="md-cmp-to" type="email" value="${this._escape(fromAddr)}"
-                         class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
+                <div class="text-left">
+                  <div class="text-sm font-semibold text-text">Répondre</div>
+                  <div class="text-[11px] text-text-muted">${fromAddr ? `Réponse à ${this._escape(fromAddr)} depuis ${this._escape(accountLabel)}` : 'Adresse expéditeur manquante'}</div>
                 </div>
               </div>
-
-              <div>
-                <label class="block text-[11px] font-medium text-text-secondary mb-1">Objet</label>
-                <input id="md-cmp-subject" type="text" value="${this._escape(replySubject)}"
-                       class="w-full px-3 py-2.5 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"/>
-              </div>
-
-              <div>
-                <label class="block text-[11px] font-medium text-text-secondary mb-1">Message</label>
-                <textarea id="md-cmp-body" rows="8"
-                          class="w-full px-3 py-3 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed resize-y"
-                          placeholder="Tape ta réponse ici…&#10;&#10;Astuce : Ctrl+Entrée pour envoyer."></textarea>
-              </div>
-
-              <div class="flex items-center justify-between gap-3">
-                <button id="md-cmp-cancel" class="text-xs text-text-muted hover:text-danger transition-colors">Annuler la réponse</button>
-                <div id="md-cmp-status" class="text-xs text-text-muted text-right flex-1"></div>
-              </div>
-            </div>
+              <svg class="w-4 h-4 text-text-muted group-hover:text-accent transition-colors" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
           </div>
+          `}
         </div>
 
         <!-- ========== Footer sticky : actions ========== -->
         <div id="md-footer" class="px-6 py-4 border-t border-border bg-surface-elevated flex items-center justify-between gap-2 shrink-0">
-          <button id="md-delete" class="text-xs text-text-muted hover:text-danger transition-colors ${isSent ? '' : 'invisible'}" title="Supprimer ce mail de l'historique local">
+          <button id="md-delete" class="text-xs text-text-muted hover:text-danger transition-colors" title="Supprimer ce mail de l'historique local">
             🗑 Supprimer de l'historique
           </button>
           <div class="flex items-center gap-2">
             <button id="md-ok" class="btn btn-secondary">Fermer</button>
-            <button id="md-send" class="btn btn-primary hidden">
-              <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>
-              Envoyer la réponse
-            </button>
           </div>
         </div>
       </div>
     `;
     document.body.appendChild(overlay);
 
-    const close = () => overlay.remove();
-    const cmpForm  = overlay.querySelector('#md-composer-form');
-    const cmpHint  = overlay.querySelector('#md-composer-collapsed');
+    // close() retire AUSSI l'écouteur Échap : sinon chaque ouverture de
+    // détail fermée au bouton laissait un écouteur clavier orphelin.
+    const close = () => {
+      document.removeEventListener('keydown', escListener);
+      overlay.remove();
+    };
     const toggleBtn = overlay.querySelector('#md-toggle-composer');
-    const cancelBtn = overlay.querySelector('#md-cmp-cancel');
-    const sendBtn = overlay.querySelector('#md-send');
-    const okBtn   = overlay.querySelector('#md-ok');
-    const scroll  = overlay.querySelector('#md-scroll');
+    const okBtn = overlay.querySelector('#md-ok');
 
     overlay.querySelector('#md-close').onclick = close;
     okBtn.onclick = close;
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
-    // Bouton Supprimer (mails envoyés uniquement) — purge la trace locale
-    // dans email_history. N'agit pas sur le serveur SMTP / la boîte mail
-    // du destinataire (le message est déjà parti).
+    // Bouton Supprimer — purge la trace locale dans l'historique, pour les
+    // mails envoyés COMME reçus (même API que la corbeille groupée).
+    // N'agit pas sur la boîte mail distante.
     const deleteBtn = overlay.querySelector('#md-delete');
-    if (deleteBtn && isSent) {
+    if (deleteBtn) {
       deleteBtn.onclick = async () => {
-        if (!confirm('Supprimer ce mail de l’historique local ? (Le destinataire l’a déjà reçu, on ne supprime que la trace côté Triskell.)')) return;
+        const ok = await Dialog.confirm(
+          isSent
+            ? 'Supprimer ce mail de l’historique ? Le destinataire l’a déjà reçu — on efface juste la trace côté Triskell.'
+            : 'Supprimer ce mail de l’historique ? Il reste dans ta vraie boîte mail — on efface juste la trace côté Triskell.',
+          { title: 'Supprimer ce mail', okLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true });
+        if (!ok) return;
         deleteBtn.disabled = true;
         deleteBtn.textContent = 'Suppression…';
-        const r = await App.api.mail_delete({ id: m.id });
-        if (r && r.ok) {
-          close();
-          await this._load();
-        } else {
+        try {
+          const r = await App.api.mail_delete({ id: m.id });
+          if (r && r.ok) {
+            Toast.success('Mail supprimé de l’historique.');
+            close();
+            await this._load();
+          } else {
+            deleteBtn.disabled = false;
+            deleteBtn.textContent = '🗑 Supprimer de l’historique';
+            console.error('[mails] mail_delete :', r && r.error);
+            Toast.error('La suppression a échoué. Réessaie.');
+          }
+        } catch (e) {
           deleteBtn.disabled = false;
           deleteBtn.textContent = '🗑 Supprimer de l’historique';
-          alert('Échec suppression : ' + ((r && r.error) || 'erreur inconnue'));
+          Toast.friendlyError(e, 'La suppression a échoué. Réessaie.');
         }
       };
     }
 
-    const escListener = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escListener); } };
+    const escListener = (e) => { if (e.key === 'Escape') close(); };
     document.addEventListener('keydown', escListener);
 
-    // Bouton "Répondre ici" → ouvre le composer dédié (HTML supporté)
-    toggleBtn.onclick = () => {
-      close();
-      this._openComposer({
-        prefilledTo: fromAddr,
-        prefilledSubject: replySubject,
-        prefilledAccountId: accountId,
-        inReplyTo: inReplyTo,
-        title: 'Répondre',
-      });
-    };
-    // Le composer inline n'est plus utilisé — on garde les references pour
-    // compat (cancel button d'avant) mais on les masque
-    if (cmpForm) cmpForm.classList.add('hidden');
-    if (cmpHint) cmpHint.classList.remove('hidden');
-    if (sendBtn) sendBtn.classList.add('hidden');
-    if (cancelBtn) cancelBtn.onclick = () => { /* no-op */ };
-
-    // Ctrl+Entrée pour envoyer
-    overlay.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        e.preventDefault();
-        if (!sendBtn.classList.contains('hidden')) sendBtn.click();
-      }
-    });
-
-    sendBtn.onclick = async () => {
-      const status = overlay.querySelector('#md-cmp-status');
-      const account_id = overlay.querySelector('#md-cmp-from').value;
-      const to = overlay.querySelector('#md-cmp-to').value.trim();
-      const subj = overlay.querySelector('#md-cmp-subject').value.trim();
-      const bodyVal = overlay.querySelector('#md-cmp-body').value;
-      if (!to || !subj || !bodyVal.trim()) {
-        status.textContent = '✗ Destinataire, sujet et message requis.';
-        status.className = 'text-xs text-danger text-right flex-1';
-        return;
-      }
-      const replyBtnDefaultHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M2 21l21-9-21-9v7l15 2-15 2z"/></svg>Envoyer la réponse';
-      const resetReplyBtn = () => {
-        sendBtn.disabled = false;
-        sendBtn.innerHTML = replyBtnDefaultHTML;
+    // Bouton "Répondre" (mails reçus) → ouvre le composeur dédié, avec la
+    // citation du message d'origine pré-remplie quand le texte est dispo.
+    if (toggleBtn) {
+      toggleBtn.onclick = () => {
+        close();
+        this._openComposer({
+          prefilledTo: fromAddr,
+          prefilledSubject: replySubject,
+          prefilledAccountId: accountId,
+          inReplyTo: inReplyTo,
+          prefilledBodyHtml: this._buildReplyQuoteHtml(m),
+          title: 'Répondre',
+        });
       };
-      const doReplySend = async (force) => {
-        sendBtn.disabled = true;
-        sendBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-9-9"/></svg>Envoi…';
-        status.textContent = '';
-        try {
-          const r = await App.api.mail_send_reply({
-            account_id, to, subject: subj, body: bodyVal,
-            in_reply_to: inReplyTo || '',
-            force: !!force,
-          });
-          if (r && r.ok) {
-            if (window.MailAddressBook) window.MailAddressBook.record(to);
-            status.textContent = '✓ Envoyé !';
-            status.className = 'text-xs text-success text-right flex-1';
-            sendBtn.innerHTML = '✓ Envoyé';
-            setTimeout(close, 1200);
-          } else if (r && r.warnings && r.warnings.length) {
-            resetReplyBtn();
-            Mails._renderSendWarnings(status, r.warnings,
-              () => doReplySend(true), resetReplyBtn);
-          } else {
-            status.textContent = `✗ ${(r && r.error) || 'Erreur inconnue'}`;
-            status.className = 'text-xs text-danger text-right flex-1';
-            resetReplyBtn();
-          }
-        } catch (e) {
-          status.textContent = `✗ ${e}`;
-          status.className = 'text-xs text-danger text-right flex-1';
-          resetReplyBtn();
-        }
-      };
-      doReplySend(false);
+    }
+  },
+
+  /** Construit la citation HTML du message d'origine pour une réponse :
+   *  « Le <date>, <expéditeur> a écrit : » + texte préfixé « > ».
+   *  Renvoie '' si aucun texte source n'est disponible. */
+  _buildReplyQuoteHtml(m) {
+    const extra = (m && m.extra) || {};
+    const sourceText = (extra.body_excerpt || m.body || '').trim();
+    if (!sourceText) return '';
+    const who = extra.from || '(expéditeur inconnu)';
+    const when = this._fmtDateLong(m.ts);
+    const quotedLines = sourceText.split('\n')
+      .map(l => `&gt; ${this._escape(l)}`).join('<br>');
+    return `<p><br></p><p><br></p>` +
+      `<p>Le ${this._escape(when)}, ${this._escape(who)} a écrit :</p>` +
+      `<blockquote>${quotedLines}</blockquote>`;
+  },
+
+  /** Traduit la classification IA brute en français lisible. */
+  _classificationLabel(c) {
+    const key = String(c || '').trim().toLowerCase();
+    const table = {
+      'interested': 'Intéressé',
+      'interesse': 'Intéressé',
+      'not_interested': 'Pas intéressé',
+      'not_now': 'Pas maintenant',
+      'later': 'À recontacter plus tard',
+      'refus': 'Refus',
+      'refused': 'Refus',
+      'rejection': 'Refus',
+      'unsubscribe': 'Désinscription',
+      'unsubscribed': 'Désinscription',
+      'neutral': 'Neutre',
+      'question': 'Question posée',
+      'auto_reply': 'Réponse automatique',
+      'out_of_office': 'Absent du bureau',
+      'bounce': 'Adresse en erreur',
+      'spam': 'Indésirable',
+      'positive': 'Positif',
+      'negative': 'Négatif',
+      'other': 'Autre',
     };
+    return table[key] || String(c || '');
   },
 
   _fmtDateLong(iso) {
@@ -863,9 +1107,10 @@ const Mails = {
     }).join('');
     statusEl.className = '';
     statusEl.innerHTML = `
-      <div class="mt-2 p-3 rounded-lg border border-amber-400/40 bg-amber-50 dark:bg-amber-900/20 text-sm">
-        <div class="font-semibold text-amber-700 dark:text-amber-300 mb-1">⚠ À vérifier avant d'envoyer</div>
-        <ul class="list-disc list-inside text-amber-800 dark:text-amber-200 mb-2">${msgs}</ul>
+      <div class="mt-2 p-3 rounded-lg border text-sm"
+           style="border-color: hsl(var(--warning) / 0.4); background: hsl(var(--warning) / 0.10);">
+        <div class="font-semibold mb-1" style="color: hsl(var(--warning-text));">⚠ À vérifier avant d'envoyer</div>
+        <ul class="list-disc list-inside mb-2" style="color: hsl(var(--warning-text));">${msgs}</ul>
         <div class="flex gap-2 justify-end">
           <button type="button" data-warn-act="cancel" class="btn btn-secondary btn-sm">Annuler</button>
           <button type="button" data-warn-act="force" class="btn btn-primary btn-sm">Envoyer quand même</button>
@@ -882,6 +1127,8 @@ const Mails = {
   // Recherche côté client : filtre l'affichage sans recharger l'API
   // ----------------------------------------------------------------------
   _applySearch() {
+    // Sans objet sur l'onglet Programmés (liste à part, pas de recherche).
+    if (this.state.tab === 'scheduled') return;
     const q = (this.state.searchQuery || '').toLowerCase();
     const root = document.getElementById('m-content');
     const countEl = document.getElementById('m-count');
@@ -907,16 +1154,14 @@ const Mails = {
       ? `${visible.length} / ${all.length} mail(s) (recherche : "${q}")`
       : `${all.length} mail(s)`;
     if (!visible.length) {
+      this.state.visibleMails = [];
       root.innerHTML = `<div class="card p-10 text-center"><div class="text-3xl mb-3 opacity-60">∅</div><p class="text-text-muted">Aucun résultat pour "${this._escape(q)}".</p></div>`;
       return;
     }
-    // Sauvegarde la liste de référence pour les binds (sélection / clic)
-    const fullMails = this.state.mails;
-    this.state.mails = visible;
-    root.innerHTML = this._renderBulkBar() +
-      `<div class="mail-list">${visible.map(m => this._mailRow(m)).join('')}</div>`;
-    this._wireListEvents(root);
-    this.state.mails = fullMails;
+    // Rendu via le chemin commun : la sélection et "Tout sélectionner"
+    // travaillent sur CETTE liste filtrée (state.visibleMails), pas sur
+    // state.mails complet — et le filtre reste affiché.
+    this._renderListAndBulk(root, q ? '' : (this.state.limitedBanner || ''), visible);
   },
 
   // ----------------------------------------------------------------------
@@ -1006,17 +1251,17 @@ const Mails = {
         <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-0 overflow-hidden">
           <!-- Code -->
           <div class="flex flex-col border-r border-border overflow-hidden">
-            <div class="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-text-muted bg-bg border-b border-border">Code HTML</div>
+            <div class="px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-text-muted bg-bg border-b border-border">Code HTML</div>
             <textarea id="ph-input" placeholder='<p>Bonjour <strong>{prénom}</strong>,</p>...'
                       class="flex-1 px-3 py-3 text-xs bg-bg focus:outline-none font-mono leading-relaxed resize-none"></textarea>
           </div>
           <!-- Aperçu -->
           <div class="flex flex-col overflow-hidden">
-            <div class="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-text-muted bg-bg border-b border-border flex items-center justify-between">
+            <div class="px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-text-muted bg-bg border-b border-border flex items-center justify-between">
               <span>Aperçu (rendu mail)</span>
               <span id="ph-empty-hint" class="text-text-muted/60 normal-case font-normal tracking-normal">↪ tape du HTML pour voir le rendu</span>
             </div>
-            <iframe id="ph-preview" sandbox="allow-same-origin"
+            <iframe id="ph-preview" sandbox="allow-popups"
                     class="flex-1 w-full bg-white border-0"></iframe>
           </div>
         </div>
@@ -1097,7 +1342,7 @@ const Mails = {
           </div>
         </div>
         <!-- Iframe rendu -->
-        <iframe id="hp-frame" sandbox="allow-same-origin" class="flex-1 w-full bg-white border-0"></iframe>
+        <iframe id="hp-frame" sandbox="allow-popups" class="flex-1 w-full bg-white border-0"></iframe>
         <div class="px-6 py-3 border-t border-border bg-surface-elevated flex items-center justify-between gap-2">
           <button id="hp-ok" class="btn btn-primary">Fermer l'aperçu</button>
           <div class="text-[11px] text-text-muted text-right">ⓘ Rendu isolé (sandbox). Les vrais clients mail (Gmail, Outlook…) peuvent légèrement différer.</div>
@@ -1106,13 +1351,15 @@ const Mails = {
     `;
     document.body.appendChild(overlay);
     overlay.querySelector('#hp-frame').srcdoc = this._buildPreviewDoc(htmlContent);
-    const close = () => overlay.remove();
+    const close = () => {
+      document.removeEventListener('keydown', escListener);
+      overlay.remove();
+    };
+    const escListener = (e) => { if (e.key === 'Escape') close(); };
     overlay.querySelector('#hp-close').onclick = close;
     overlay.querySelector('#hp-ok').onclick = close;
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    document.addEventListener('keydown', function esc(e) {
-      if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
-    });
+    document.addEventListener('keydown', escListener);
   },
 
   // Construit un document HTML auto-suffisant (avec styles "mail-friendly")
@@ -1206,10 +1453,20 @@ const Mails = {
         btn.onclick = async () => {
           const tid = btn.dataset.tmRemove;
           const tpl = tpls.find(x => x.id === tid);
-          if (!confirm(`Supprimer le modèle "${tpl && tpl.name}" ?`)) return;
-          const r = await App.api.user_mail_template_remove({ id: tid });
-          if (r && r.ok) reload();
-          else alert('Échec : ' + (r && r.error || 'inconnu'));
+          const ok = await Dialog.confirm(
+            `Supprimer le modèle "${(tpl && tpl.name) || ''}" ? Il ne sera plus proposé dans le composeur.`,
+            { title: 'Supprimer ce modèle', okLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true });
+          if (!ok) return;
+          try {
+            const r = await App.api.user_mail_template_remove({ id: tid });
+            if (r && r.ok) { Toast.success('Modèle supprimé.'); reload(); }
+            else {
+              console.error('[mails] user_mail_template_remove :', r && r.error);
+              Toast.error('La suppression du modèle a échoué.');
+            }
+          } catch (e) {
+            Toast.friendlyError(e, 'La suppression du modèle a échoué.');
+          }
         };
       });
       listEl.querySelectorAll('[data-tm-rename]').forEach(btn => {
@@ -1217,12 +1474,19 @@ const Mails = {
           const tid = btn.dataset.tmRename;
           const tpl = tpls.find(x => x.id === tid);
           const newName = prompt('Nouveau nom :', (tpl && tpl.name) || '');
-          if (!newName || newName === (tpl && tpl.name)) return;
-          const r = await App.api.user_mail_template_save({
-            template: { ...tpl, name: newName }
-          });
-          if (r && r.ok) reload();
-          else alert('Échec : ' + (r && r.error || 'inconnu'));
+          if (!newName || newName === (tpl && tpl.name)) return; // null = annuler
+          try {
+            const r = await App.api.user_mail_template_save({
+              template: { ...tpl, name: newName }
+            });
+            if (r && r.ok) { Toast.success('Modèle renommé.'); reload(); }
+            else {
+              console.error('[mails] user_mail_template_save :', r && r.error);
+              Toast.error('Le renommage a échoué.');
+            }
+          } catch (e) {
+            Toast.friendlyError(e, 'Le renommage a échoué.');
+          }
         };
       });
     };
@@ -1310,7 +1574,7 @@ const Mails = {
             <div>
               <div class="flex items-center justify-between mb-1 gap-2">
                 <label class="block text-[11px] font-medium text-text-secondary">Destinataires</label>
-                <div class="flex items-center gap-1 text-[10px] font-semibold">
+                <div class="flex items-center gap-1 text-[11px] font-semibold">
                   <button id="cmp-toggle-cc" type="button" class="px-1.5 py-0.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Afficher ou masquer le champ Cc">+ Cc</button>
                   <button id="cmp-toggle-bcc" type="button" class="px-1.5 py-0.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Afficher ou masquer le champ Cci (copie cachée)">+ Cci</button>
                 </div>
@@ -1461,7 +1725,7 @@ const Mails = {
             </div>
             <div id="cmp-attachments-list" class="space-y-1.5 text-xs"></div>
             <input id="cmp-attachment-input" type="file" multiple class="hidden">
-            <div id="cmp-attachments-total" class="text-[10px] text-text-muted mt-1.5"></div>
+            <div id="cmp-attachments-total" class="text-[11px] text-text-muted mt-1.5"></div>
           </div>
 
           <div id="cmp-status" class="text-xs text-text-muted"></div>
@@ -1626,12 +1890,12 @@ const Mails = {
           max-width: 100%;
         }
         .chips-input .chip span {
-          max-width: 280px;
+          max-width: min(280px, 60vw);
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .chips-input .chip.invalid {
-          background: rgba(239, 68, 68, 0.15);
-          color: #ef4444;
+          background: hsl(var(--danger) / 0.15);
+          color: hsl(var(--danger-text));
         }
         .chips-input .chip button {
           appearance: none;
@@ -1702,12 +1966,31 @@ const Mails = {
       document.head.appendChild(s);
     }
 
-    const close = () => overlay.remove();
+    // Fermeture = JAMAIS de perte : le brouillon courant est sauvegardé
+    // silencieusement (sauf après un envoi réussi, où il est supprimé).
+    // autosaveDraftNow / autosaveTimer sont définis plus bas (ils ont besoin
+    // de captureDraftState) — close() n'est appelée que par des évènements
+    // utilisateur, donc toujours après l'initialisation complète.
+    let suppressDraftSave = false;
+    let autosaveDraftNow = () => {};
+    let autosaveTimer = null;
+    const close = () => {
+      try { if (!suppressDraftSave) autosaveDraftNow(); } catch (_) {}
+      if (autosaveTimer) { clearInterval(autosaveTimer); autosaveTimer = null; }
+      overlay.remove();
+    };
     overlay.querySelector('#cmp-close').onclick = close;
     overlay.querySelector('#cmp-cancel').onclick = close;
     // Volontairement PAS de fermeture sur clic en dehors : Jordan a perdu
     // des mails ainsi. La modale ne se ferme que via × ou Annuler.
     // Idem pour Escape : on retire pour éviter une fermeture accidentelle.
+    // Changement de vue : on ferme proprement la modale (avec autosauvegarde)
+    // au lieu de la laisser orpheline par-dessus le nouvel écran.
+    if (typeof App !== 'undefined' && App.onViewCleanup) {
+      App.onViewCleanup(() => {
+        if (document.body.contains(overlay)) close();
+      });
+    }
 
     // ----------------------------------------------------------------------
     // Chips destinataires (To / Cc / Cci)
@@ -1942,6 +2225,11 @@ const Mails = {
     const textArea = overlay.querySelector('#cmp-body-text');
     const htmlArea = overlay.querySelector('#cmp-body-html');
     const toolbar = overlay.querySelector('#cmp-toolbar');
+    // Le texte a-t-il été modifié à la main depuis la dernière synchro ?
+    // Sert à reconstruire le HTML quand on rebascule (sinon on enverrait
+    // une version périmée du message).
+    let textDirty = false;
+    textArea.addEventListener('input', () => { textDirty = true; });
 
     const previewTopBtn = overlay.querySelector('#cmp-preview-top');
     const setMode = (m) => {
@@ -1953,9 +2241,12 @@ const Mails = {
         htmlArea.classList.add('hidden');
         toolbar.classList.add('hidden');
         if (previewTopBtn) previewTopBtn.classList.add('hidden');
-        // Si on revient en texte depuis HTML : convertit le HTML en texte basique
-        if (htmlArea.innerHTML && !textArea.value) {
+        // Si on revient en texte depuis HTML : convertit TOUJOURS le HTML en
+        // texte basique (avant : seulement si la zone texte était vide, donc
+        // on retombait sur une version périmée du message).
+        if (htmlArea.innerHTML.trim()) {
           textArea.value = htmlArea.innerText;
+          textDirty = false;
         }
       } else {
         textBtn.className = 'px-2.5 py-1 rounded-lg font-semibold text-text-muted hover:bg-bg';
@@ -1964,10 +2255,29 @@ const Mails = {
         htmlArea.classList.remove('hidden');
         toolbar.classList.remove('hidden');
         if (previewTopBtn) previewTopBtn.classList.remove('hidden');
-        // Si on passe en HTML avec du texte déjà : convertit en paragraphes
-        if (textArea.value && !htmlArea.innerHTML) {
-          htmlArea.innerHTML = textArea.value
-            .split(/\n\n+/).map(p => `<p>${this._escape(p).replace(/\n/g, '<br>')}</p>`).join('');
+        // Si on passe en HTML avec du texte déjà : convertit en paragraphes.
+        // Aussi quand le texte a été modifié à la main depuis la dernière
+        // synchro (sinon l'envoi partirait avec l'ancien HTML), en
+        // reconstruisant le bloc signature à part pour ne pas le perdre.
+        if (textArea.value && (!htmlArea.innerHTML || textDirty)) {
+          let raw = textArea.value;
+          if (signature && raw.endsWith('\n\n' + signature)) {
+            raw = raw.slice(0, -(signature.length + 2));
+          } else if (signature && raw.endsWith(signature)) {
+            raw = raw.slice(0, -signature.length);
+          }
+          const mainHtml = raw.split(/\n\n+/).filter(p => p.trim().length)
+            .map(p => `<p>${this._escape(p).replace(/\n/g, '<br>')}</p>`).join('') || '<p><br></p>';
+          let sigBlockHtml = '';
+          if (signatureHtml) {
+            sigBlockHtml = SIG_MARK_HTML + signatureHtml + SIG_MARK_HTML_END;
+          } else if (signature) {
+            const sigAsHtml = signature.split(/\n\n+/)
+              .map(p => `<p>${this._escape(p).replace(/\n/g, '<br>')}</p>`).join('');
+            sigBlockHtml = SIG_MARK_HTML + sigAsHtml + SIG_MARK_HTML_END;
+          }
+          htmlArea.innerHTML = mainHtml + sigBlockHtml;
+          textDirty = false;
         }
         // Force Chrome à utiliser <p> pour les nouveaux paragraphes (Entrée),
         // sinon les boutons "liste" / "titre" / "citation" ne trouvent pas
@@ -2044,7 +2354,7 @@ const Mails = {
     const renderAttachments = () => {
       const visible = attachments.filter(a => !a.inline);
       if (!visible.length) {
-        attListEl.innerHTML = '<div class="text-text-muted italic">Aucune pièce jointe pour l\'instant.</div>';
+        attListEl.innerHTML = '<div class="text-text-muted italic">Aucune pièce jointe pour l’instant.</div>';
       } else {
         attListEl.innerHTML = visible.map((a) => {
           const realIdx = attachments.indexOf(a);
@@ -2069,7 +2379,7 @@ const Mails = {
       if (tot > 0) {
         const over = tot > MAX_TOTAL_BYTES;
         attTotalEl.textContent = `Total : ${fmtSize(tot)}${over ? ' — limite SMTP dépassée, retire des fichiers.' : ' / 22 Mo max recommandé'}`;
-        attTotalEl.className = `text-[10px] mt-1.5 ${over ? 'text-danger font-semibold' : 'text-text-muted'}`;
+        attTotalEl.className = `text-[11px] mt-1.5 ${over ? 'text-danger font-semibold' : 'text-text-muted'}`;
       } else {
         attTotalEl.textContent = '';
       }
@@ -2135,7 +2445,7 @@ const Mails = {
         renderAttachments();
       } catch (e) {
         console.error('Insertion image KO :', e);
-        alert('Impossible de lire cette image.');
+        Toast.error('Impossible de lire cette image.');
       }
     };
 
@@ -2624,25 +2934,32 @@ const Mails = {
           .map(p => `<p>${this._escape(p).replace(/\n/g, '<br>')}</p>`).join('');
       }
       if (!htmlContent || htmlContent === '<p></p>') {
-        alert('Le contenu est vide. Écris quelque chose avant de sauvegarder.');
+        Toast.warn('Le contenu est vide. Écris quelque chose avant de sauvegarder.');
         return;
       }
       const name = prompt('Nom du modèle (ex : "Devis envoyé", "Suivi 1 mois") :');
-      if (!name) return;
+      if (!name) return; // null = annuler
       const useSubject = subjectInput.value.trim();
-      const wantSubj = useSubject && confirm(`Sauvegarder aussi l'objet "${useSubject}" comme objet par défaut du modèle ?`);
-      const r = await App.api.user_mail_template_save({
-        template: { name, body_html: htmlContent, subject_default: wantSubj ? useSubject : '' }
-      });
-      if (r && r.ok) {
-        tplMenu.classList.add('hidden');
-        // Petite confirmation visuelle
-        const status = overlay.querySelector('#cmp-status');
-        status.textContent = `✓ Modèle "${name}" sauvegardé.`;
-        status.className = 'text-xs text-success';
-        setTimeout(() => { if (status.textContent.startsWith('✓ Modèle')) status.textContent = ''; }, 3000);
-      } else {
-        alert('Échec sauvegarde : ' + (r && r.error || 'inconnu'));
+      const wantSubj = useSubject && await Dialog.confirm(
+        `Sauvegarder aussi l'objet "${useSubject}" comme objet par défaut du modèle ?`,
+        { title: 'Objet du modèle', okLabel: "Oui, garder l'objet", cancelLabel: 'Non, sans objet' });
+      try {
+        const r = await App.api.user_mail_template_save({
+          template: { name, body_html: htmlContent, subject_default: wantSubj ? useSubject : '' }
+        });
+        if (r && r.ok) {
+          tplMenu.classList.add('hidden');
+          // Petite confirmation visuelle
+          const status = overlay.querySelector('#cmp-status');
+          status.textContent = `✓ Modèle "${name}" sauvegardé.`;
+          status.className = 'text-xs text-success';
+          setTimeout(() => { if (status.textContent.startsWith('✓ Modèle')) status.textContent = ''; }, 3000);
+        } else {
+          console.error('[mails] user_mail_template_save :', r && r.error);
+          Toast.error('La sauvegarde du modèle a échoué.');
+        }
+      } catch (e) {
+        Toast.friendlyError(e, 'La sauvegarde du modèle a échoué.');
       }
     };
 
@@ -2777,12 +3094,14 @@ const Mails = {
     });
 
     // ----------------------------------------------------------------------
-    // Brouillons (localStorage)
+    // Brouillons (localStorage, PLUSIEURS brouillons — voir _draftsLoad)
     // ----------------------------------------------------------------------
     // Permet de quitter le composer sans perdre ce qu'on a écrit. Stocké
     // dans le navigateur (pas synchronisé entre PC pour l'instant).
+    // Chaque composeur travaille sur SON brouillon (id mémorisé ci-dessous) :
+    // enregistrer n'écrase jamais les autres brouillons en attente.
     // Limite : les pièces jointes ne sont PAS sauvegardées (trop lourd).
-    const DRAFT_KEY = 'tc-mail-draft';
+    let currentDraftId = null;
 
     const captureDraftState = () => {
       let body_html_val = '';
@@ -2805,20 +3124,61 @@ const Mails = {
     };
     const isDraftMeaningful = (d) => {
       if ((d.to || '').trim()) return true;
+      if ((d.cc || '').trim() || (d.bcc || '').trim()) return true;
       if ((d.subject || '').trim()) return true;
-      const txt = (d.body_text || '').trim();
-      if (txt && (!signature || txt !== signature)) return true;
-      // Pour HTML : on retire les espaces et tags vides
-      const compactHtml = (d.body_html || '').replace(/\s+/g, '');
-      const sigCompact = (signatureHtml || '').replace(/\s+/g, '');
-      // Si HTML contient autre chose que les <p><br></p> initiaux + la signature
-      const stripped = compactHtml
-        .replace(/<p><br><\/p>/g, '')
-        .replace(/<divdata-signature-block[^>]*>.*?<\/div>/g, '')
-        .replace(sigCompact, '');
-      if (stripped.length > 0) return true;
+      // Texte : on ignore la signature (présente par défaut dans un mail vierge)
+      let txt = (d.body_text || '');
+      if (signature) {
+        if (txt.endsWith('\n\n' + signature)) txt = txt.slice(0, -(signature.length + 2));
+        else if (txt.endsWith(signature)) txt = txt.slice(0, -signature.length);
+      }
+      if (txt.trim()) return true;
+      // HTML : on retire le bloc signature via le DOM (fiable même si la
+      // signature contient des <div> imbriqués — l'ancien ménage par regex
+      // laissait des restes et créait des brouillons fantômes), puis on
+      // regarde s'il reste du texte ou une image insérée.
+      if (d.body_html) {
+        const probe = document.createElement('div');
+        probe.innerHTML = d.body_html;
+        probe.querySelectorAll('[data-signature-block]').forEach(n => n.remove());
+        if ((probe.textContent || '').trim()) return true;
+        if (probe.querySelector('img')) return true;
+      }
       return false;
     };
+
+    // Empreinte du contenu : sert à ne PAS créer de brouillon quand on
+    // ferme un composeur pré-rempli (réponse, prospection) sans avoir
+    // rien tapé soi-même.
+    const draftFingerprint = (d) =>
+      [d.to, d.cc, d.bcc, d.subject, d.body_text, d.body_html].join('\u0001');
+    let initialFingerprint = null; // posé en fin d'initialisation, plus bas
+
+    // Sauvegarde silencieuse du brouillon courant (réutilisée par le bouton
+    // Brouillon, l'auto-sauvegarde 20 s, la fermeture et la navigation).
+    // Renvoie true si quelque chose a été enregistré.
+    autosaveDraftNow = (force) => {
+      const d = captureDraftState();
+      if (!isDraftMeaningful(d)) return false;
+      // Composeur pré-rempli (réponse, prospection…) fermé sans avoir rien
+      // tapé : on ne crée PAS de brouillon fantôme. Dès qu'un brouillon
+      // existe (bouton Brouillon ou reprise), on continue de le mettre à
+      // jour. `force` = demande explicite de l'utilisateur (bouton).
+      if (!force && !currentDraftId && initialFingerprint !== null &&
+          draftFingerprint(d) === initialFingerprint) {
+        return false;
+      }
+      if (!currentDraftId) {
+        currentDraftId = 'd-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+      }
+      d.id = currentDraftId;
+      return this._draftUpsert(d);
+    };
+    // Auto-sauvegarde toutes les 20 s tant que le composeur est ouvert :
+    // plus aucune perte de texte, même en changeant de vue ou d'onglet.
+    autosaveTimer = setInterval(() => {
+      try { autosaveDraftNow(); } catch (_) {}
+    }, 20_000);
 
     // Bouton "Brouillon" du footer
     const draftBtn = overlay.querySelector('#cmp-draft');
@@ -2826,16 +3186,14 @@ const Mails = {
       draftBtn.onclick = () => {
         const d = captureDraftState();
         if (!isDraftMeaningful(d)) {
-          alert('Rien à enregistrer en brouillon — écris d\'abord ton mail.');
+          Toast.warn('Rien à enregistrer en brouillon — écris d’abord ton mail.');
           return;
         }
-        try {
-          localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
-          const orig = draftBtn.innerHTML;
+        if (autosaveDraftNow(true)) {
           draftBtn.innerHTML = '<svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Brouillon enregistré';
           setTimeout(close, 700);
-        } catch (e) {
-          alert('Impossible d\'enregistrer le brouillon : ' + e.message);
+        } else {
+          Toast.error('Impossible d’enregistrer le brouillon (stockage du navigateur plein ou bloqué).');
         }
       };
     }
@@ -2843,22 +3201,33 @@ const Mails = {
     // Annuler : si du contenu rédigé, propose Brouillon ou Perdre
     const cancelBtn = overlay.querySelector('#cmp-cancel');
     if (cancelBtn) {
-      cancelBtn.onclick = () => {
+      cancelBtn.onclick = async () => {
         const d = captureDraftState();
-        if (!isDraftMeaningful(d)) {
+        // Rien d'utile OU composeur pré-rempli jamais touché → fermeture simple.
+        const untouched = !currentDraftId && initialFingerprint !== null &&
+          draftFingerprint(d) === initialFingerprint;
+        if (!isDraftMeaningful(d) || untouched) {
+          suppressDraftSave = true;
           close();
           return;
         }
-        const choice = confirm(
-          'Tu as commencé à rédiger un mail.\n\n' +
-          'OK   → enregistrer en brouillon (tu pourras reprendre plus tard)\n' +
-          'Annuler → perdre le contenu'
-        );
-        if (choice) {
-          try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch (e) {}
+        const keep = await Dialog.confirm(
+          'Tu as commencé à rédiger ce mail. Le garder en brouillon pour le reprendre plus tard ?',
+          { title: 'Mail en cours', okLabel: 'Garder en brouillon', cancelLabel: 'Ne pas garder' });
+        if (keep) {
+          autosaveDraftNow(true);
+          suppressDraftSave = true;
+          Toast.success('Brouillon enregistré — tu le retrouveras en ouvrant « Nouveau mail ».');
           close();
-        } else {
-          if (confirm('Confirmer la perte de ce que tu as écrit ?')) close();
+          return;
+        }
+        const sure = await Dialog.confirm(
+          'Vraiment supprimer ce que tu as écrit ? Il n’y aura pas de retour en arrière.',
+          { title: 'Supprimer le texte', okLabel: 'Supprimer', cancelLabel: 'Revenir au mail', danger: true });
+        if (sure) {
+          if (currentDraftId) this._draftRemove(currentDraftId);
+          suppressDraftSave = true;
+          close();
         }
       };
     }
@@ -2946,7 +3315,10 @@ const Mails = {
                 }
                 status.textContent = `✓ Mail programmé pour ${prettyDate}`;
                 status.className = 'text-xs text-success';
-                try { localStorage.removeItem('tc-mail-draft'); } catch (e) {}
+                Toast.success(`Programmé pour ${prettyDate} — retrouve-le dans l'onglet Programmés.`);
+                // Le brouillon n'a plus de raison d'être : l'envoi est planifié.
+                if (currentDraftId) this._draftRemove(currentDraftId);
+                suppressDraftSave = true;
                 setTimeout(close, 1200);
               } else if (r && r.warnings && r.warnings.length) {
                 resetSchedBtn();
@@ -2972,13 +3344,10 @@ const Mails = {
     const sigEditBtn = overlay.querySelector('#cmp-sig-edit');
     if (sigEditBtn) {
       sigEditBtn.onclick = () => {
-        const d = captureDraftState();
-        if (isDraftMeaningful(d)) {
-          try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch (e) {}
-        }
+        // close() sauvegarde déjà le brouillon courant silencieusement.
         close();
         if (typeof App !== 'undefined' && App.show) {
-          App.show('config');
+          App.show('config', { tab: 'mails' });
           // Le rendu Config est async (fetch settings), on retente jusqu'à
           // ce que la liste signatures soit dans le DOM (max 2 sec).
           let tries = 20;
@@ -2995,48 +3364,54 @@ const Mails = {
       };
     }
 
-    // Restauration brouillon à l'ouverture (si présent et < 30 jours)
-    if (!opts.prefilledTo && !opts.prefilledSubject && !opts.inReplyTo) {
+    // Brouillons en attente à l'ouverture d'un composeur vierge :
+    // bandeau « N brouillon(s) en attente — Reprendre le dernier / Voir ».
+    if (!opts.prefilledTo && !opts.prefilledSubject && !opts.inReplyTo && !opts.prefilledBodyHtml) {
       try {
-        const raw = localStorage.getItem(DRAFT_KEY);
-        if (raw) {
-          const d = JSON.parse(raw);
-          if (d && d.ts && (Date.now() - d.ts < 30 * 24 * 3600 * 1000)) {
-            this._showDraftRestoreBanner(overlay, d, () => {
-              const splitAddrs = (s) => (s || '').split(/[\s,;]+/).filter(Boolean);
-              chipsTo.setValues(splitAddrs(d.to));
-              const ccArr = splitAddrs(d.cc);
-              const bccArr = splitAddrs(d.bcc);
-              if (ccArr.length) {
-                chipsCc.setValues(ccArr);
-                overlay.querySelector('#cmp-cc-row').classList.remove('hidden');
-              }
-              if (bccArr.length) {
-                chipsBcc.setValues(bccArr);
-                overlay.querySelector('#cmp-bcc-row').classList.remove('hidden');
-              }
-              overlay.querySelector('#cmp-subject').value = d.subject || '';
-              if (d.account_id) {
-                const fs = overlay.querySelector('#cmp-from');
-                if (fs && [...fs.options].some(o => o.value === d.account_id)) fs.value = d.account_id;
-              }
-              if (d.signature_id !== undefined) {
-                const ss = overlay.querySelector('#cmp-signature');
-                if (ss && [...ss.options].some(o => o.value === d.signature_id)) ss.value = d.signature_id;
-              }
-              if (d.body_text) textArea.value = d.body_text;
-              if (d.body_html) htmlArea.innerHTML = d.body_html;
-              setMode(d.mode === 'text' ? 'text' : 'html');
-            });
-          }
+        const drafts = this._draftsLoad(); // migre l'ancienne clé unique au passage
+        if (drafts.length) {
+          const restoreDraft = (d) => {
+            const splitAddrs = (s) => (s || '').split(/[\s,;]+/).filter(Boolean);
+            chipsTo.setValues(splitAddrs(d.to));
+            const ccArr = splitAddrs(d.cc);
+            const bccArr = splitAddrs(d.bcc);
+            if (ccArr.length) {
+              chipsCc.setValues(ccArr);
+              overlay.querySelector('#cmp-cc-row').classList.remove('hidden');
+            }
+            if (bccArr.length) {
+              chipsBcc.setValues(bccArr);
+              overlay.querySelector('#cmp-bcc-row').classList.remove('hidden');
+            }
+            overlay.querySelector('#cmp-subject').value = d.subject || '';
+            if (d.account_id) {
+              const fs = overlay.querySelector('#cmp-from');
+              if (fs && [...fs.options].some(o => o.value === d.account_id)) fs.value = d.account_id;
+            }
+            if (d.signature_id !== undefined) {
+              const ss = overlay.querySelector('#cmp-signature');
+              if (ss && [...ss.options].some(o => o.value === d.signature_id)) ss.value = d.signature_id;
+            }
+            if (d.body_text) textArea.value = d.body_text;
+            if (d.body_html) htmlArea.innerHTML = d.body_html;
+            setMode(d.mode === 'text' ? 'text' : 'html');
+            // Les sauvegardes suivantes mettront à jour CE brouillon,
+            // sans toucher aux autres.
+            currentDraftId = d.id;
+          };
+          this._showDraftsBanner(overlay, drafts, restoreDraft);
         }
-      } catch (e) {}
+      } catch (e) { console.error('[mails] restauration brouillons', e); }
     }
 
     // Par défaut, on ouvre directement le mode HTML enrichi (plus pratique
     // pour insérer images / mise en forme). L'utilisateur peut basculer en
     // mode "Texte" via le toggle s'il préfère.
     setMode('html');
+
+    // Empreinte de référence : l'état du composeur juste après ouverture
+    // (pré-remplissages compris). Tant que rien n'a changé, pas de brouillon.
+    initialFingerprint = draftFingerprint(captureDraftState());
 
     // Focus initial
     setTimeout(() => {
@@ -3076,7 +3451,7 @@ const Mails = {
         body = textArea.value;
       }
       if (!toList.length || !subj || (!body.trim() && !body_html)) {
-        status.textContent = '✗ Au moins un destinataire, l\'objet et le message sont requis.';
+        status.textContent = '✗ Au moins un destinataire, l’objet et le message sont requis.';
         status.className = 'text-xs text-danger';
         return;
       }
@@ -3133,7 +3508,8 @@ const Mails = {
             status.className = 'text-xs text-success';
             sendBtn.innerHTML = '✓ Envoyé';
             // Le brouillon n'a plus de raison d'être après envoi
-            try { localStorage.removeItem('tc-mail-draft'); } catch (e) {}
+            if (currentDraftId) this._draftRemove(currentDraftId);
+            suppressDraftSave = true;
             setTimeout(() => { close(); this._load(); }, 1200);
           } else if (r && r.warnings && r.warnings.length) {
             // Adresse déjà contactée et/ou présente en clients : on propose
@@ -3167,6 +3543,9 @@ const Mails = {
     ov.style.background = 'rgba(15,23,42,0.78)';
     ov.style.backdropFilter = 'blur(10px)';
     let step = 'category'; // 'category' | 'celebrityKind' | 'businessKind' | 'url' | 'loading'
+    // Passe à true dès que la fenêtre est fermée : la génération côté
+    // serveur continue, mais l'interface rend la main et ignore le résultat.
+    let aborted = false;
     let chosenCategory = null;
     // Subtype :
     //  - business    → 'template' | 'personalized'
@@ -3366,6 +3745,7 @@ const Mails = {
               category: chosenCategory,
               subtype: chosenSubtype || '',
             });
+            if (aborted) return; // l'utilisateur a annulé pendant la génération
             if (r && r.ok) {
               close();
               const prefilledAttachments = [];
@@ -3405,6 +3785,7 @@ const Mails = {
               }, 50);
             }
           } catch (e) {
+            if (aborted) return; // fenêtre déjà fermée par l'utilisateur
             step = 'url';
             render();
             setTimeout(() => {
@@ -3420,24 +3801,31 @@ const Mails = {
           <div class="bg-surface rounded-2xl shadow-hero w-full max-w-lg border border-border animate-slide-up overflow-hidden">
             <div class="p-12 text-center">
               <div class="w-16 h-16 mx-auto mb-5 rounded-2xl flex items-center justify-center"
-                   style="background: linear-gradient(135deg, #7c6acc, #e85d2c);">
+                   style="background: linear-gradient(135deg, hsl(var(--accent-strong)), hsl(var(--accent)));">
                 <svg class="w-8 h-8 text-white animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                   <path d="M21 12a9 9 0 11-9-9"/>
                 </svg>
               </div>
               <div class="text-base font-bold text-text mb-1">Claude analyse le site…</div>
               <div class="text-xs text-text-muted">Téléchargement du contenu, capture de l'aperçu, choix du modèle, rédaction du mail. Compte 15-40 secondes.</div>
+              <button id="pf-loading-cancel" class="btn btn-secondary mt-6">Annuler</button>
+              <div class="text-[11px] text-text-muted mt-2">Annuler ferme cette fenêtre — rien ne sera envoyé.</div>
             </div>
           </div>
         `;
+        const cancelLoadingBtn = ov.querySelector('#pf-loading-cancel');
+        if (cancelLoadingBtn) cancelLoadingBtn.onclick = close;
       }
     };
 
     const close = () => {
+      aborted = true;
       document.removeEventListener('keydown', escListener);
       ov.remove();
     };
-    const escListener = (e) => { if (e.key === 'Escape' && step !== 'loading') close(); };
+    // Échap ferme la fenêtre à toutes les étapes, génération comprise
+    // (la génération côté serveur continue, mais l'interface rend la main).
+    const escListener = (e) => { if (e.key === 'Escape') close(); };
     document.addEventListener('keydown', escListener);
     ov.addEventListener('click', (e) => { if (e.target === ov && step !== 'loading') close(); });
 
@@ -3445,7 +3833,7 @@ const Mails = {
     document.body.appendChild(ov);
   },
 
-  // _showDraftRestoreBanner, _openScheduleDialog, _openImageLinkDialog
+  // _showDraftsBanner, _openDraftsListDialog, _openScheduleDialog, _openImageLinkDialog
   // ont été extraits dans scripts/mails_dialogs.js (chargé après mails.js
   // dans index.html). Ils sont attachés à Mails à l'init de cette modale.
 
@@ -3453,8 +3841,8 @@ const Mails = {
     return `
       <div class="card p-8 text-center">
         <div class="text-3xl mb-3 opacity-60">⏻</div>
-        <h2 class="text-lg font-bold mb-2">Backend non disponible.</h2>
-        <p class="text-text-muted text-sm">Lance Triskell Command via <code class="text-xs px-1.5 py-0.5 rounded bg-bg">python run_web.py</code>.</p>
+        <h2 class="text-lg font-bold mb-2">Le serveur ne répond pas.</h2>
+        <p class="text-text-muted text-sm">Patiente quelques secondes puis rafraîchis la page. Si ça persiste, redémarre Triskell Command.</p>
       </div>
     `;
   },
@@ -3486,18 +3874,17 @@ const Mails = {
     const wrapped = `<base target="_blank">${text}`;
     // Échappe pour l'attribut srcdoc (& et " uniquement, les < > restent intacts)
     const srcdoc = wrapped.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-    // sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" :
-    //  - allow-same-origin : auto-resize de l iframe par lecture scrollHeight
+    // sandbox="allow-popups" UNIQUEMENT (sécurité) :
     //  - allow-popups : autorise target="_blank" (sinon clics inertes)
-    //  - allow-popups-to-escape-sandbox : le nouvel onglet n herite pas
-    //    de la sandbox (sinon il aurait les memes restrictions)
-    const onload = "try{var d=this.contentDocument;if(d){this.style.height=(d.documentElement.scrollHeight+24)+'px';}}catch(e){}";
+    //  - PAS de allow-same-origin ni allow-popups-to-escape-sandbox : un mail
+    //    malveillant ne doit avoir AUCUN accès à la page Triskell ni ouvrir
+    //    d'onglet hors bac à sable. Conséquence : on ne peut plus lire la
+    //    hauteur du contenu → hauteur fixe confortable (60vh) + ascenseur.
     return `<div class="rounded-xl bg-white border border-border overflow-hidden">
       <iframe class="w-full block"
-              sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+              sandbox="allow-popups"
               srcdoc="${srcdoc}"
-              style="border:0;min-height:300px;background:#fff;"
-              onload="${onload}"></iframe>
+              style="border:0;height:60vh;min-height:300px;background:#fff;"></iframe>
     </div>`;
   },
 
@@ -3505,7 +3892,11 @@ const Mails = {
     if (!iso) return '—';
     try {
       const d = new Date(iso);
-      return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      // Année affichée seulement si différente de l'année en cours
+      // (sinon "12/06 09:30" d'il y a deux ans semble tout récent).
+      const opts = { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' };
+      if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+      return d.toLocaleString('fr-FR', opts);
     } catch { return iso.slice(0, 16); }
   },
 

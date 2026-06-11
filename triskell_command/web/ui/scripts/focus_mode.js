@@ -1,13 +1,14 @@
-/* FocusMode — bouton "Concentration" qui masque temporairement notifs
- * et KPIs anxiogènes pour laisser Jordan travailler sereinement.
+/* FocusMode — bouton "Concentration" qui masque temporairement les
+ * chiffres et alertes visuelles pour laisser Jordan travailler sereinement.
+ * (Les notifications push du téléphone, elles, continuent d'arriver.)
  *
  * Quand activé pour N minutes (15/30/60/120) :
- *   - Masque les notifs push (Push.disable temporaire) + le bouton notifs
- *   - Masque les KPIs anxiogènes du Cockpit (Hier en chiffres, Aujourd'hui)
- *   - Garde la priorité du jour visible (mais pas les chiffres rouges)
- *   - Affiche un mode plein-écran "Focus" avec timer countdown
- *   - Si Jordan a un projet en cours (ex : "livrer site Lefèvre"), affiche
- *     le titre + temps écoulé en grand
+ *   - Masque le bandeau notifs + floute les KPIs anxiogènes du Cockpit
+ *     (grille de chiffres + bandeau d'alerte) ; la priorité du jour reste visible
+ *   - Affiche un écran plein-écran "Concentration" avec compte à rebours
+ *   - "Continuer dans l'app" masque l'écran SANS arrêter la session :
+ *     une pastille 🎯 discrète (haut-droite) permet de le ré-afficher,
+ *     tout comme le bouton Concentration du Cockpit
  *
  * État persisté en sessionStorage : focus_until (timestamp + intention)
  * → si rechargement de page pendant focus, on garde le mode actif.
@@ -86,7 +87,7 @@ const FocusMode = {
         <span>Concentration</span>
         <span class="focus-btn-time">· ${label}</span>
       `;
-      btn.title = `Concentration en cours — encore ${label}. Cliquer pour réafficher l'écran focus.`;
+      btn.title = `Concentration en cours — encore ${label}. Cliquer pour réafficher l’écran Concentration.`;
       btn.setAttribute('aria-pressed', 'true');
     } else {
       btn.classList.remove('is-focus-active');
@@ -154,11 +155,35 @@ const FocusMode = {
       .focus-btn:hover { color: hsl(var(--text)); border-color: hsl(var(--accent)); }
       .focus-btn--danger:hover { color: hsl(var(--danger)); border-color: hsl(var(--danger)); }
 
-      /* Quand mode focus actif, masque le bandeau notif et les KPIs Cockpit */
+      /* Pastille flottante quand l'écran Concentration est masqué :
+         rappelle la session en cours, clic = ré-affiche l'écran. */
+      #focus-pill {
+        position: fixed;
+        top: 14px; right: 16px;
+        z-index: 9991;
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: hsl(var(--surface-elevated));
+        border: 1px solid hsl(var(--accent) / 0.45);
+        color: hsl(var(--text));
+        font-size: 12px; font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        cursor: pointer;
+        box-shadow: 0 6px 18px hsl(var(--accent) / 0.18);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      #focus-pill:hover { border-color: hsl(var(--accent) / 0.8); }
+      #focus-pill:focus-visible { outline: 2px solid hsl(var(--accent)); outline-offset: 2px; }
+
+      /* Quand mode focus actif, masque le bandeau notif et floute les
+         chiffres du Cockpit. Sélecteurs par CLASSE (pas par position
+         nth-child, fragile) : si les blocs n'existent pas, rien ne casse. */
       body.is-focus-mode #push-toggle-row { display: none !important; }
-      body.is-focus-mode #m-content > div:nth-child(2),
-      body.is-focus-mode #m-content > div:nth-child(3) {
+      body.is-focus-mode #m-content .cockpit-grid,
+      body.is-focus-mode #m-content .cockpit-alert {
         opacity: 0.25; filter: blur(2px); transition: opacity 300ms, filter 300ms;
+        pointer-events: none;
       }
 
       /* Bouton "Concentration" — état armé (focus mode ON) */
@@ -177,17 +202,17 @@ const FocusMode = {
         display: inline-block;
         width: 9px; height: 9px;
         border-radius: 50%;
-        background: hsl(142 71% 45%);
+        background: hsl(var(--success));
         margin-right: 2px;
-        box-shadow: 0 0 0 0 hsl(142 71% 45% / 0.6);
+        box-shadow: 0 0 0 0 hsl(var(--success) / 0.6);
         animation: focus-btn-pulse 1.8s ease-in-out infinite;
         vertical-align: middle;
         position: relative;
         top: -1px;
       }
       @keyframes focus-btn-pulse {
-        0%, 100% { box-shadow: 0 0 0 0 hsl(142 71% 45% / 0.55); }
-        50%      { box-shadow: 0 0 0 7px hsl(142 71% 45% / 0); }
+        0%, 100% { box-shadow: 0 0 0 0 hsl(var(--success) / 0.55); }
+        50%      { box-shadow: 0 0 0 7px hsl(var(--success) / 0); }
       }
       .focus-btn-time {
         font-variant-numeric: tabular-nums;
@@ -202,7 +227,14 @@ const FocusMode = {
   showOverlay() {
     this._injectStyles();
     document.body.classList.add('is-focus-mode');
-    if (document.getElementById('focus-overlay')) return;
+    this._removePill();
+    const existing = document.getElementById('focus-overlay');
+    if (existing) {
+      // L'écran avait été masqué par "Continuer dans l'app" → on le ré-affiche
+      existing.style.display = '';
+      this._render();
+      return;
+    }
     const ov = document.createElement('div');
     ov.id = 'focus-overlay';
     ov.innerHTML = `
@@ -210,18 +242,36 @@ const FocusMode = {
       <div class="focus-intent" id="focus-intent-text"></div>
       <div class="focus-timer" id="focus-timer-text">--:--</div>
       <div class="focus-actions">
+        <button id="focus-continue" class="focus-btn">Continuer dans l’app</button>
         <button id="focus-extend" class="focus-btn">+ 15 minutes</button>
         <button id="focus-stop" class="focus-btn focus-btn--danger">Sortir du mode</button>
       </div>
     `;
     document.body.appendChild(ov);
+    // Masque l'écran SANS arrêter la session (pastille 🎯 pour le ré-afficher)
+    ov.querySelector('#focus-continue').onclick = () => this.maskOverlay();
     ov.querySelector('#focus-extend').onclick = () => {
       const newUntil = (this.getEndsAt() || Date.now()) + 15 * 60_000;
       try { sessionStorage.setItem(this.STORAGE_KEY, String(newUntil)); } catch (e) {}
       this._render();
     };
-    ov.querySelector('#focus-stop').onclick = () => {
-      if (confirm('Sortir du mode Concentration ?')) this.stop();
+    // Sortie directe ; confirmation seulement s'il reste plus de 10 minutes
+    ov.querySelector('#focus-stop').onclick = async () => {
+      const remaining = Math.max(0, this.getEndsAt() - Date.now());
+      if (remaining > 10 * 60_000 && typeof Dialog !== 'undefined' && Dialog.confirm) {
+        const confirmPromise = Dialog.confirm(
+          `Il reste ${Math.ceil(remaining / 60_000)} min de concentration. Sortir quand même ?`,
+          { title: 'Mode Concentration', okLabel: 'Sortir', cancelLabel: 'Continuer' }
+        );
+        // La boîte de confirmation vit normalement SOUS cet écran plein
+        // (z-index 940 < 9990) : on la fait passer au-dessus, sinon elle
+        // serait invisible et le bouton semblerait mort.
+        const dlg = document.getElementById('tc-dialog-overlay');
+        if (dlg) dlg.style.zIndex = '10001';
+        const ok = await confirmPromise;
+        if (!ok) return;
+      }
+      this.stop();
     };
     this._render();
     if (!this._tickInterval) {
@@ -229,8 +279,46 @@ const FocusMode = {
     }
   },
 
+  /** Masque l'écran Concentration sans arrêter la session :
+   *  les chiffres restent floutés, et une pastille discrète en haut à
+   *  droite permet de ré-afficher l'écran à tout moment. */
+  maskOverlay() {
+    const ov = document.getElementById('focus-overlay');
+    if (ov) ov.style.display = 'none';
+    this._showPill();
+  },
+
+  _showPill() {
+    if (document.getElementById('focus-pill')) return;
+    const pill = document.createElement('button');
+    pill.id = 'focus-pill';
+    pill.type = 'button';
+    pill.title = 'Concentration en cours — cliquer pour ré-afficher l’écran';
+    pill.setAttribute('aria-label', 'Ré-afficher l’écran Concentration');
+    pill.innerHTML = '<span aria-hidden="true">🎯</span><span class="focus-pill-time">--</span>';
+    pill.onclick = () => this.showOverlay();
+    document.body.appendChild(pill);
+    this._updatePill();
+  },
+
+  _removePill() {
+    const pill = document.getElementById('focus-pill');
+    if (pill) pill.remove();
+  },
+
+  _updatePill() {
+    const t = document.querySelector('#focus-pill .focus-pill-time');
+    if (!t) return;
+    const remaining = Math.max(0, this.getEndsAt() - Date.now());
+    const mins = Math.ceil(remaining / 60_000);
+    t.textContent = mins >= 60
+      ? `${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, '0')}`
+      : `${mins} min`;
+  },
+
   hideOverlay() {
     document.body.classList.remove('is-focus-mode');
+    this._removePill();
     const ov = document.getElementById('focus-overlay');
     if (ov) ov.remove();
     if (this._tickInterval) {
@@ -254,6 +342,7 @@ const FocusMode = {
     ov.querySelector('#focus-timer-text').textContent = txt;
     const intent = this.getIntent();
     ov.querySelector('#focus-intent-text').textContent = intent || 'Tu travailles sans interruption.';
+    this._updatePill();
     this._paintButton();
   },
 
@@ -269,17 +358,17 @@ const FocusMode = {
     const ov = document.createElement('div');
     ov.id = 'focus-start-modal';
     ov.className = 'fixed inset-0 z-[230] flex items-center justify-center p-4';
-    ov.style.background = 'rgba(15,23,42,0.78)';
+    ov.style.background = 'hsl(var(--bg) / 0.78)';
     ov.style.backdropFilter = 'blur(10px)';
     ov.innerHTML = `
       <div class="bg-surface rounded-2xl shadow-hero w-full max-w-md border border-border animate-slide-up flex flex-col overflow-hidden">
         <div class="px-6 pt-5 pb-3 border-b border-border bg-surface-elevated flex items-start justify-between">
           <div>
-            <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">MODE CONCENTRATION</div>
+            <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-0.5">MODE CONCENTRATION</div>
             <h3 class="text-lg font-bold">Sur quoi tu te concentres ?</h3>
-            <p class="text-xs text-text-muted mt-1">L'app masque notifs et chiffres pendant la session. Tu reçois rien, tu vois rien, tu bosses.</p>
+            <p class="text-xs text-text-muted mt-1">Les chiffres et alertes visuelles sont masqués. Les notifications du téléphone continuent d'arriver.</p>
           </div>
-          <button id="fs-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
+          <button id="fs-close" title="Fermer" aria-label="Fermer" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
         </div>
         <div class="p-5 space-y-4">
           <div>
@@ -293,7 +382,7 @@ const FocusMode = {
               ${[15, 30, 60, 120].map(m => `
                 <button data-mins="${m}" class="px-3 py-2.5 rounded-xl border border-border hover:border-accent hover:bg-accent/5 transition-all">
                   <div class="text-base font-bold">${m}</div>
-                  <div class="text-[10px] text-text-muted">min</div>
+                  <div class="text-[11px] text-text-muted">min</div>
                 </button>
               `).join('')}
             </div>

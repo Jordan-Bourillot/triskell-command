@@ -12,13 +12,16 @@
 const Obelisk = {
   state: {
     tab: 'search',
-    filters: { platform: '', status: '', q: '', has_email: '', country: '', job_id: '', audience: '' },
+    filters: { platform: '', status: '', q: '', has_email: '', country: '',
+               job_id: '', audience: '', exported: '', contacted: '',
+               city: '', sort_by: '' },
     jobFilterInfo: null,    // {id, niche, created_at, status} pour afficher la puce
     page: 0,
     pageSize: 50,
     rows: [],
     total: 0,
     stats: null,
+    statsError: false,      // true si le dernier chargement des stats a échoué
     selected: null,         // prospect en cours dans le drawer
     config: null,
     jobId: null,
@@ -26,10 +29,29 @@ const Obelisk = {
     searchAudience: null,   // 'creator' | 'pro' (lazy-init depuis localStorage)
   },
 
+  // Filtres "réels" posés par l'utilisateur (le tri n'en fait pas partie :
+  // il ne doit JAMAIS faire apparaître un bouton de suppression).
+  _FILTER_KEYS: ['q', 'platform', 'status', 'has_email', 'country', 'job_id',
+                 'exported', 'contacted', 'city', 'audience'],
+  // Filtres que le serveur sait vraiment appliquer à la suppression filtrée
+  // (cf. obelisk_delete_creators_filtered côté serveur)…
+  _DELETE_FILTER_KEYS: ['platform', 'status', 'q', 'has_email', 'audience', 'city'],
+  // …et ceux qu'il IGNORE : si l'un d'eux est actif, proposer la suppression
+  // filtrée supprimerait BIEN PLUS que ce qui est affiché. On masque.
+  _DELETE_UNSUPPORTED_KEYS: ['job_id', 'country', 'exported', 'contacted'],
+  // L'export, lui, ignore "exported" et "contacted" → boutons désactivés.
+  _EXPORT_UNSUPPORTED_KEYS: ['exported', 'contacted'],
+
   _AUDIENCE_KEY: 'obelisk-search-audience',
   _LIST_AUDIENCE_KEY: 'obelisk-list-audience',
   _LS_SEARCH_DRAFT: 'obelisk:search-draft',
   _LS_LIST_FILTERS: 'obelisk:list-filters',
+
+  // Une clé de brouillon PAR audience : basculer Créateurs ↔ Pros ne doit
+  // plus écraser le brouillon de l'autre mode.
+  _searchDraftKey() {
+    return this._LS_SEARCH_DRAFT + ':' + this._getSearchAudience();
+  },
 
   _saveSearchDraft() {
     try {
@@ -45,19 +67,15 @@ const Obelisk = {
       const plats = [];
       document.querySelectorAll('[data-ob-plat]:checked').forEach(cb => plats.push(cb.dataset.obPlat));
       draft['plats'] = plats;
-      draft['_aud'] = this._getSearchAudience();
-      localStorage.setItem(this._LS_SEARCH_DRAFT, JSON.stringify(draft));
+      localStorage.setItem(this._searchDraftKey(), JSON.stringify(draft));
     } catch (e) {}
   },
 
   _applySearchDraft() {
     let draft = null;
-    try { draft = JSON.parse(localStorage.getItem(this._LS_SEARCH_DRAFT) || 'null'); }
+    try { draft = JSON.parse(localStorage.getItem(this._searchDraftKey()) || 'null'); }
     catch (e) {}
     if (!draft) return;
-    // Brouillon d'une autre audience (créateur vs pro) → on l'ignore pour
-    // ne pas mélanger les contextes.
-    if (draft._aud && draft._aud !== this._getSearchAudience()) return;
     Object.entries(draft).forEach(([id, v]) => {
       if (id === 'plats' || id === '_aud' || id === 'ob-monet') return;
       const el = document.getElementById(id);
@@ -122,6 +140,9 @@ const Obelisk = {
     this.state.filters.audience = aud;
     try { localStorage.setItem(this._LIST_AUDIENCE_KEY, aud); } catch (e) {}
     this.state.page = 0;
+    // Changement de filtre → la sélection en cours n'a plus de sens.
+    this.state.selectedIds = new Set();
+    this._saveListFilters();
     this._renderCreators();
   },
 
@@ -172,6 +193,10 @@ const Obelisk = {
     new: 'Nouveau', qualified: 'Qualifié', contacted: 'Contacté',
     replied: 'A répondu', refused: 'Refusé', won: 'Gagné', lost: 'Perdu',
   },
+  // États des recherches (le serveur parle anglais, pas l'écran)
+  JOB_STATUS_LABELS: {
+    done: 'Terminée', failed: 'Échouée', running: 'En cours', pending: 'En attente',
+  },
   STATUS_COLORS: {
     new: 'text-text-muted bg-bg',
     qualified: 'text-info bg-info/10',
@@ -182,12 +207,27 @@ const Obelisk = {
     lost: 'text-text-muted bg-text-muted/10',
   },
 
-  async _api(method, payload) {
+  async _api(method, payload, opts) {
     if (!App.api) return null;
     const fn = App.api['obelisk_' + method];
     if (typeof fn !== 'function') return null;
     try { return await fn(payload || {}); }
-    catch (e) { console.warn('obelisk.' + method, e); return null; }
+    catch (e) {
+      console.warn('obelisk.' + method, e);
+      // Erreur réseau/serveur → message français lisible. Les appels de
+      // fond (sondages, stats) passent {silent:true} pour ne pas spammer.
+      if (!opts || !opts.silent) {
+        if (window.Toast && Toast.friendlyError) Toast.friendlyError(e);
+      }
+      return null;
+    }
+  },
+
+  // N'accepte que les vraies adresses web (http/https) — bloque les
+  // javascript: et autres bizarreries ramenées par les extracteurs.
+  _safeUrl(u) {
+    const s = String(u || '').trim();
+    return /^https?:\/\//i.test(s) ? s : '';
   },
 
   // ---------- Notifications : badge sidebar + données pour cockpit ----------
@@ -245,8 +285,8 @@ const Obelisk = {
       <section class="animate-slide-up">
         <header class="ob-header">
           <div class="ob-header-text">
-            <div class="hero-kicker">OBELISK</div>
-            <h1 class="ob-title">Trouve les créateurs vierges de ta niche</h1>
+            <div class="hero-kicker">OBÉLISK</div>
+            <h1 class="ob-title">Trouve des créateurs et des pros à démarcher</h1>
           </div>
           <div class="ob-header-actions">
             <div id="ob-stats-inline" class="ob-stats-inline"></div>
@@ -297,7 +337,7 @@ const Obelisk = {
           </div>
         </header>
         <div class="ob-flow-strip">
-          <span class="ob-flow-step"><b>1 · Trouver</b> — Obélisk, Chasseur, Créateur, Google, Argus</span>
+          <span class="ob-flow-step"><b>1 · Trouver</b> — Obélisk, Le Chasseur, Prospecteur Google…</span>
           <span class="ob-flow-arrow">→</span>
           <span class="ob-flow-step"><b>2 · Ici</b> — tout atterrit dans cette base, sans doublon</span>
           <span class="ob-flow-arrow">→</span>
@@ -359,7 +399,7 @@ const Obelisk = {
         font-variant-numeric: tabular-nums;
       }
       .ob-stats-inline .stat .l {
-        font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase;
+        font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
         color: hsl(var(--text-muted)); font-weight: 600; margin-top: 3px;
       }
       .ob-icon-btn {
@@ -421,15 +461,23 @@ const Obelisk = {
         font-size: 14px; color: hsl(var(--text-muted)); max-width: 520px; line-height: 1.55;
         margin-bottom: 22px;
       }
-      .ob-empty-hero .ob-platforms-tease {
-        display: flex; flex-wrap: wrap; justify-content: center; gap: 6px;
-        margin-top: 18px; max-width: 520px;
+      /* Portes d'entrée du hero vide : un bouton par outil + import */
+      .ob-empty-doors {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 10px; width: 100%; max-width: 680px; margin-top: 6px;
       }
-      .ob-empty-hero .ob-platforms-tease span {
-        font-size: 11px; color: hsl(var(--text-muted));
-        padding: 3px 9px; border-radius: 999px;
+      .ob-empty-door {
+        display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+        padding: 14px 16px; border-radius: 12px; cursor: pointer; text-align: left;
         background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
+        transition: border-color 140ms, background 140ms;
       }
+      .ob-empty-door:hover {
+        border-color: hsl(var(--accent) / .6);
+        background: hsl(var(--accent) / .05);
+      }
+      .ob-empty-door b { font-size: 13.5px; color: hsl(var(--text)); }
+      .ob-empty-door span { font-size: 11.5px; color: hsl(var(--text-muted)); line-height: 1.4; }
 
       /* Filtres : barre légère, sans cadre lourd */
       .ob-filters {
@@ -527,9 +575,12 @@ const Obelisk = {
         background: hsl(var(--card)); border: 1px solid hsl(var(--border));
         border-radius: 12px; overflow: hidden;
       }
-      .ob-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      /* Sur petit écran : le tableau (8 colonnes) défile horizontalement
+         au lieu d'être coupé. */
+      .ob-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .ob-table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 13px; }
       .ob-table th {
-        text-align: left; font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+        text-align: left; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
         font-weight: 700; color: hsl(var(--text-muted));
         padding: 12px 14px; border-bottom: 1px solid hsl(var(--border));
         background: hsl(var(--bg) / .4);
@@ -541,9 +592,12 @@ const Obelisk = {
       .ob-table tr:last-child td { border-bottom: none; }
       .ob-table tr.is-clickable { cursor: pointer; transition: background 100ms; }
       .ob-table tr.is-clickable:hover { background: hsl(var(--accent) / .04); }
+      .ob-table tr.is-clickable:focus-visible {
+        outline: 2px solid hsl(var(--accent)); outline-offset: -2px;
+      }
       .ob-pill {
         display: inline-block; padding: 3px 9px; border-radius: 999px;
-        font-size: 10.5px; font-weight: 600;
+        font-size: 11px; font-weight: 600;
         background: hsl(var(--accent) / .12); color: hsl(var(--accent));
       }
       .ob-score {
@@ -560,12 +614,16 @@ const Obelisk = {
       }
       .ob-status-select {
         padding: 5px 26px 5px 10px; border-radius: 999px; font-size: 11.5px;
-        background: hsl(var(--bg)); color: hsl(var(--text));
+        background-color: hsl(var(--bg)); color: hsl(var(--text));
         border: 1px solid hsl(var(--border)); font-weight: 600;
         appearance: none;
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='3' stroke-linecap='round'><path d='m6 9 6 6 6-6'/></svg>");
+        /* Petite flèche dessinée en CSS (suit le thème, aucune couleur en dur) */
+        background-image:
+          linear-gradient(45deg, transparent 50%, hsl(var(--text-muted)) 50%),
+          linear-gradient(135deg, hsl(var(--text-muted)) 50%, transparent 50%);
+        background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+        background-size: 5px 5px, 5px 5px;
         background-repeat: no-repeat;
-        background-position: right 8px center;
       }
       .ob-pager {
         display: flex; align-items: center; justify-content: space-between;
@@ -582,7 +640,7 @@ const Obelisk = {
       }
       .ob-drawer.is-open { transform: translateX(0); }
       .ob-drawer-backdrop {
-        position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 79;
+        position: fixed; inset: 0; background: hsl(var(--bg) / .6); z-index: 79;
         opacity: 0; pointer-events: none; transition: opacity 160ms;
       }
       .ob-drawer-backdrop.is-open { opacity: 1; pointer-events: auto; }
@@ -590,7 +648,7 @@ const Obelisk = {
         background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
         border-radius: 10px; padding: 14px 16px;
       }
-      .ob-drawer .ob-stat .label { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: hsl(var(--text-muted)); font-weight: 700; }
+      .ob-drawer .ob-stat .label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: hsl(var(--text-muted)); font-weight: 700; }
       .ob-drawer .ob-stat .value { font-size: 24px; font-weight: 700; color: hsl(var(--text)); margin-top: 4px; line-height: 1; }
 
       /* Liste prospects — toggle Tous / Créateurs / Pros */
@@ -609,9 +667,9 @@ const Obelisk = {
       }
       .ob-audience-pill:hover { color: hsl(var(--text)); }
       .ob-audience-pill.is-on {
-        background: hsl(var(--accent));
-        color: white;
-        box-shadow: 0 1px 4px hsl(var(--accent) / .35);
+        background: hsl(var(--accent) / .16);
+        color: hsl(var(--accent-text));
+        box-shadow: inset 0 0 0 1px hsl(var(--accent) / .45);
       }
 
       /* Onglet Recherche */
@@ -647,7 +705,7 @@ const Obelisk = {
         display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
       }
       .ob-platform-chip {
-        display: flex; align-items: center; gap: 6px;
+        display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
         padding: 8px 10px; border-radius: 8px; font-size: 12.5px;
         background: hsl(var(--bg)); border: 1px solid hsl(var(--border));
         cursor: pointer; user-select: none;
@@ -655,6 +713,12 @@ const Obelisk = {
       .ob-platform-chip.is-on {
         background: hsl(var(--accent) / .12); border-color: hsl(var(--accent));
         color: hsl(var(--accent)); font-weight: 600;
+      }
+      /* Astuce affichée EN CLAIR sous le nom de la plateforme (un title
+         seul est invisible sur mobile). */
+      .ob-platform-tip {
+        flex-basis: 100%; font-size: 11px; font-weight: 400;
+        color: hsl(var(--text-muted)); line-height: 1.35;
       }
       .ob-radio-grid {
         display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -699,7 +763,7 @@ const Obelisk = {
         background: hsl(var(--surface));
         border: 1px solid hsl(var(--border));
         border-radius: 10px;
-        overflow: hidden;
+        /* pas d'overflow:hidden ici : le menu « ⋯ » dépasse de la barre */
       }
       .ob-bulkbar-inner {
         display: flex; align-items: center; gap: 10px;
@@ -713,17 +777,39 @@ const Obelisk = {
         white-space: nowrap;
       }
       .ob-bulkbar-danger {
-        background: hsl(var(--danger)); color: white; border: 0;
+        background: hsl(var(--danger) / 0.15); color: hsl(var(--danger-text));
+        border: 1px solid hsl(var(--danger) / 0.5);
       }
       .ob-bulkbar-danger:hover {
-        background: hsl(var(--danger) / 0.85);
+        background: hsl(var(--danger) / 0.25);
       }
       .ob-bulkbar-danger-soft {
-        background: hsl(var(--danger) / 0.1); color: hsl(var(--danger));
+        background: hsl(var(--danger) / 0.1); color: hsl(var(--danger-text));
         border: 1px solid hsl(var(--danger) / 0.4);
       }
       .ob-bulkbar-danger-soft:hover {
         background: hsl(var(--danger) / 0.18);
+      }
+      /* Menu "⋯" — actions avancées (Tout supprimer y est rangé pour ne
+         plus traîner en permanence dans la barre). */
+      .ob-more { position: relative; }
+      .ob-more summary {
+        list-style: none; cursor: pointer;
+        width: 30px; height: 30px; border-radius: 8px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border: 1px solid hsl(var(--border)); color: hsl(var(--text-muted));
+        font-size: 16px; line-height: 1; background: hsl(var(--card));
+        user-select: none;
+      }
+      .ob-more summary::-webkit-details-marker { display: none; }
+      .ob-more summary:hover { color: hsl(var(--text)); }
+      .ob-more summary:focus-visible { outline: 2px solid hsl(var(--accent)); }
+      .ob-more[open] summary { color: hsl(var(--text)); border-color: hsl(var(--text-muted) / .5); }
+      .ob-more .ob-more-menu {
+        position: absolute; right: 0; top: 36px; z-index: 6;
+        background: hsl(var(--surface-elevated)); border: 1px solid hsl(var(--border));
+        border-radius: 10px; padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+        white-space: nowrap;
       }
       .ob-table tr.is-selected {
         background: hsl(var(--accent) / 0.08) !important;
@@ -749,7 +835,11 @@ const Obelisk = {
 
   async _loadStats() {
     const wrap = document.getElementById('ob-stats-inline');
-    const res = await this._api('stats');
+    const res = await this._api('stats', null, { silent: true });
+    // On retient l'échec : la liste affichera un vrai état d'erreur avec
+    // bouton « Réessayer » au lieu d'un faux « base vide ».
+    this.state.statsError = !(res && res.ok);
+    if (this.state.statsError && res) console.warn('[prospects] stats en erreur :', res.error);
     const st = (res && res.ok && res.stats) ? res.stats : { total: 0, with_email: 0, qualified: 0, contacted: 0, won: 0 };
     this.state.stats = st;
     if (!wrap) return;
@@ -779,27 +869,63 @@ const Obelisk = {
   // Onglet Créateurs : filtres + tableau paginé
   // -------------------------------------------------------------------
   _hasActiveFilters() {
-    const f = this.state.filters;
-    return !!(f.q || f.platform || f.status || f.has_email || f.country || f.job_id);
+    const f = this.state.filters || {};
+    // Le tri (sort_by) n'est PAS un filtre : il ne doit jamais déclencher
+    // l'affichage d'un bouton destructeur.
+    return this._FILTER_KEYS.some(k => f[k] != null && String(f[k]) !== '');
+  },
+
+  // Liste des clés de filtre actives parmi celles passées.
+  _activeAmong(keys) {
+    const f = this.state.filters || {};
+    return keys.filter(k => f[k] != null && String(f[k]) !== '');
   },
 
   async _renderCreators() {
     const c = document.getElementById('ob-content');
     const totalAll = (this.state.stats && this.state.stats.total) || 0;
 
-    // Si aucun créateur en base ET aucun filtre actif → grand empty hero
-    if (totalAll === 0 && !this._hasActiveFilters()) {
-      c.innerHTML = this._emptyHeroHtml();
-      const cta = document.getElementById('ob-empty-cta');
-      if (cta) cta.onclick = () => {
-        if (this._standalone) App.show('obelisk');
-        else this.switchTab('search');
+    // Stats injoignables → vrai état d'erreur avec bouton Réessayer
+    // (et surtout PAS un faux « base vide » rassurant).
+    if (totalAll === 0 && this.state.statsError) {
+      c.innerHTML = `
+        <div class="ob-empty-hero">
+          <div class="icon">⚠️</div>
+          <h2>Impossible de charger ta base de prospects.</h2>
+          <p>Le serveur n’a pas répondu. Vérifie ta connexion internet, puis réessaie.</p>
+          <button id="ob-stats-retry" class="btn btn-primary" style="padding: 11px 22px; font-size: 14px;">Réessayer</button>
+        </div>`;
+      const rb = document.getElementById('ob-stats-retry');
+      if (rb) rb.onclick = async () => {
+        rb.disabled = true;
+        await this._loadStats();
+        await this._renderCreators();
       };
+      return;
+    }
+
+    // Si la base est VRAIMENT vide et qu'aucun filtre n'est posé (le choix
+    // Tous/Créateurs/Pros ne compte pas) → grand écran d'accueil multi-portes.
+    const realFilters = this._FILTER_KEYS.filter(k => k !== 'audience');
+    if (totalAll === 0 && this._activeAmong(realFilters).length === 0) {
+      c.innerHTML = this._emptyHeroHtml();
+      c.querySelectorAll('[data-ob-door]').forEach(b => {
+        b.onclick = () => {
+          const door = b.dataset.obDoor;
+          if (door === 'import') { this._openImportFile(); return; }
+          App.show(door);
+        };
+      });
       return;
     }
 
     // Persistance du toggle "Type" (Tous / Créateurs / Pros)
     const listAud = this._getListAudience();
+    // L'export ne sait pas filtrer sur "déjà exporté" / "déjà contacté" :
+    // si l'un de ces filtres est actif, le fichier sorti ne correspondrait
+    // pas à la liste affichée → boutons désactivés avec explication.
+    const exportBlocked = this._activeAmong(this._EXPORT_UNSUPPORTED_KEYS).length > 0;
+    const exportBlockTitle = 'Indisponible avec les filtres « Export » ou « Contact » : le fichier exporté ne saurait pas les respecter et serait différent de la liste affichée.';
 
     c.innerHTML = `
       <div class="ob-audience-toggle" role="tablist" aria-label="Type de prospect">
@@ -818,32 +944,32 @@ const Obelisk = {
 
       <div class="ob-filters">
         <div class="ob-search">
-          <input id="ob-f-q" placeholder="Rechercher un nom, un handle, un site…" value="${this._esc(this.state.filters.q)}">
+          <input id="ob-f-q" placeholder="Rechercher un nom, un pseudo, un site…" aria-label="Rechercher un prospect" value="${this._esc(this.state.filters.q)}">
         </div>
-        <select id="ob-f-platform">
+        <select id="ob-f-platform" aria-label="Filtrer par plateforme">
           <option value="">Toutes plateformes</option>
           ${this.PLATFORMS.map(p => `<option value="${p.id}" ${this.state.filters.platform === p.id ? 'selected' : ''}>${this._esc(p.label)}</option>`).join('')}
         </select>
-        <select id="ob-f-status">
+        <select id="ob-f-status" aria-label="Filtrer par statut">
           <option value="">Tous statuts</option>
           ${Object.entries(this.STATUS_LABELS).map(([k, l]) => `<option value="${k}" ${this.state.filters.status === k ? 'selected' : ''}>${this._esc(l)}</option>`).join('')}
         </select>
-        <select id="ob-f-email">
+        <select id="ob-f-email" aria-label="Filtrer selon la présence d’un email">
           <option value="">Email : tous</option>
           <option value="yes" ${this.state.filters.has_email === 'yes' ? 'selected' : ''}>Avec email</option>
           <option value="no" ${this.state.filters.has_email === 'no' ? 'selected' : ''}>Sans email</option>
         </select>
-        <select id="ob-f-exported" title="Filtrer les prospects selon qu'ils ont déjà été inclus dans un export Excel/PDF">
+        <select id="ob-f-exported" aria-label="Filtrer selon l’export" title="Filtrer les prospects selon qu’ils ont déjà été inclus dans un export Excel/PDF">
           <option value="">Export : tous</option>
           <option value="no" ${this.state.filters.exported === 'no' ? 'selected' : ''}>Jamais exportés</option>
           <option value="yes" ${this.state.filters.exported === 'yes' ? 'selected' : ''}>Déjà exportés</option>
         </select>
-        <select id="ob-f-contacted" title="Filtrer les prospects selon qu'on leur a déjà écrit un mail">
+        <select id="ob-f-contacted" aria-label="Filtrer selon le contact" title="Filtrer les prospects selon qu’on leur a déjà écrit un mail">
           <option value="">Contact : tous</option>
           <option value="no" ${this.state.filters.contacted === 'no' ? 'selected' : ''}>Jamais contactés</option>
           <option value="yes" ${this.state.filters.contacted === 'yes' ? 'selected' : ''}>Déjà contactés</option>
         </select>
-        <select id="ob-f-sort" title="Ordre de tri de la liste">
+        <select id="ob-f-sort" aria-label="Ordre de tri" title="Ordre de tri de la liste">
           <option value="subs_desc" ${(!this.state.filters.sort_by || this.state.filters.sort_by === 'subs_desc' || this.state.filters.sort_by === 'score') ? 'selected' : ''}>Tri : Abonnés (+ → -)</option>
           <option value="subs_asc" ${this.state.filters.sort_by === 'subs_asc' ? 'selected' : ''}>Tri : Abonnés (- → +)</option>
         </select>
@@ -851,47 +977,52 @@ const Obelisk = {
 
       <div id="ob-active-filters"></div>
 
-      <div class="ob-export-bar" style="display:flex; justify-content:flex-end; gap:8px; margin: 6px 0 10px;">
-        <button id="ob-purge-nonfr" class="btn btn-ghost" title="Supprimer définitivement les prospects non-francophones"
-                style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px; color:#c44; border-color:rgba(196,68,68,0.4);">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-          Nettoyer non-francophones
-        </button>
-        <button id="ob-purge-guessed" class="btn btn-ghost" title="Supprimer définitivement les prospects dont tous les emails sont génériques (contact@, info@, hello@, …) — donc devinés à partir du domaine et jamais lus en vrai"
-                style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px; color:#c44; border-color:rgba(196,68,68,0.4);">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-          Supprimer mails devinés
-        </button>
-        <div style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px 5px 10px; border:1px solid rgba(196,68,68,0.4); border-radius:8px; font-size:12px; color:#c44;">
-          <span>Supprimer si &lt;</span>
-          <input id="ob-purge-min-subs" type="number" min="1" placeholder="ex: 500"
-                 title="Tous les prospects avec moins de cette valeur d'abonnés seront supprimés (les prospects sans nombre d'abonnés mesuré sont préservés)"
-                 style="width:80px; padding:3px 6px; border:1px solid hsl(var(--border)); border-radius:6px; background:transparent; color:hsl(var(--text)); font-size:12px; text-align:center;"/>
-          <span>abonnés</span>
-          <button id="ob-purge-subs" type="button" title="Lance la suppression (avec preview + confirmation)"
-                  style="margin-left:4px; padding:3px 8px; border:1px solid rgba(196,68,68,0.4); border-radius:6px; background:transparent; color:#c44; font-size:12px; cursor:pointer;">
-            Go
+      <div class="ob-export-bar" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; margin: 6px 0 10px;">
+        <div style="display:inline-flex; flex-wrap:wrap; align-items:center; gap:8px; margin-right:auto;">
+          <button id="ob-purge-nonfr" class="btn btn-ghost" title="Supprimer définitivement les prospects non-francophones — sur TOUTE la base, toutes sources confondues"
+                  style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px; color:hsl(var(--danger-text)); border-color:hsl(var(--danger) / 0.4);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+            Nettoyer non-francophones
           </button>
+          <button id="ob-purge-guessed" class="btn btn-ghost" title="Supprimer définitivement les prospects dont tous les emails sont génériques (contact@, info@, hello@, …) — donc devinés à partir du domaine et jamais lus en vrai. Sur TOUTE la base, toutes sources confondues"
+                  style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px; color:hsl(var(--danger-text)); border-color:hsl(var(--danger) / 0.4);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+            Supprimer mails devinés
+          </button>
+          ${listAud === 'creator' ? `
+          <div style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px 5px 10px; border:1px solid hsl(var(--danger) / 0.4); border-radius:8px; font-size:12px; color:hsl(var(--danger-text));">
+            <span>Supprimer si &lt;</span>
+            <input id="ob-purge-min-subs" type="number" min="1" placeholder="ex: 500" aria-label="Seuil d’abonnés"
+                   title="Tous les prospects avec moins de cette valeur d’abonnés seront supprimés, sur TOUTE la base (ceux sans nombre d’abonnés mesuré sont préservés)"
+                   style="width:80px; padding:3px 6px; border:1px solid hsl(var(--border)); border-radius:6px; background:transparent; color:hsl(var(--text)); font-size:12px; text-align:center;"/>
+            <span>abonnés</span>
+            <button id="ob-purge-subs" type="button" title="Lance la suppression (aperçu du nombre + confirmation avant d’agir)"
+                    style="margin-left:4px; padding:3px 8px; border:1px solid hsl(var(--danger) / 0.4); border-radius:6px; background:transparent; color:hsl(var(--danger-text)); font-size:12px; cursor:pointer;">
+              Go
+            </button>
+          </div>` : ''}
         </div>
         <div style="display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid hsl(var(--border)); border-radius:8px; font-size:12px; color:hsl(var(--text-muted));">
           <span>Combien :</span>
-          <input id="ob-export-count" type="number" min="1" max="5000" placeholder="tous"
-                 title="Nombre max de prospects à inclure dans l'export (laisse vide pour tout exporter)"
+          <input id="ob-export-count" type="number" min="1" max="5000" placeholder="tous" aria-label="Nombre maximum à exporter"
+                 title="Nombre max de prospects à inclure dans l’export (laisse vide pour tout exporter)"
                  style="width:70px; padding:3px 6px; border:1px solid hsl(var(--border)); border-radius:6px; background:transparent; color:hsl(var(--text)); font-size:12px; text-align:center;"/>
         </div>
-        <button id="ob-export-xlsx" class="btn btn-ghost" title="Télécharger la liste filtrée en Excel"
-                style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px;">
+        <button id="ob-export-xlsx" class="btn btn-ghost" ${exportBlocked ? 'disabled' : ''}
+                title="${exportBlocked ? exportBlockTitle : 'Télécharger la liste filtrée en Excel'}"
+                style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px;${exportBlocked ? ' opacity:.5; cursor:not-allowed;' : ''}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/><line x1="9" y1="18" x2="15" y2="18"/></svg>
           Excel
         </button>
-        <button id="ob-export-pdf" class="btn btn-ghost" title="Télécharger la liste filtrée en PDF"
-                style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px;">
+        <button id="ob-export-pdf" class="btn btn-ghost" ${exportBlocked ? 'disabled' : ''}
+                title="${exportBlocked ? exportBlockTitle : 'Télécharger la liste filtrée en PDF'}"
+                style="display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12px;${exportBlocked ? ' opacity:.5; cursor:not-allowed;' : ''}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg>
           PDF
         </button>
       </div>
 
-      <div id="ob-table-wrap" class="ob-table-card"></div>
+      <div id="ob-table-wrap"></div>
       <div id="ob-pager" class="ob-pager"></div>
     `;
 
@@ -906,7 +1037,13 @@ const Obelisk = {
       // Le filtre "pays" reste dans state mais n'est plus exposé dans
       // l'UI (Obelisk est purement francophone maintenant, voir purge).
       this.state.page = 0;
+      // Changement de filtre → on repart d'une sélection vide (sinon des
+      // fiches cochées hors écran resteraient supprimables sans le voir).
+      this.state.selectedIds = new Set();
       this._saveListFilters();
+      // Mise à jour ciblée (PAS de re-render complet : on perdrait le focus
+      // du champ de recherche pendant la frappe).
+      this._syncExportButtons();
       this._loadCreators();
     };
 
@@ -950,48 +1087,69 @@ const Obelisk = {
     await this._loadCreators();
   },
 
+  // Active/désactive les boutons d'export selon les filtres en cours,
+  // sans re-render (appelé à chaque changement de filtre).
+  _syncExportButtons() {
+    const blocked = this._activeAmong(this._EXPORT_UNSUPPORTED_KEYS).length > 0;
+    const blockTitle = 'Indisponible avec les filtres « Export » ou « Contact » : le fichier exporté ne saurait pas les respecter et serait différent de la liste affichée.';
+    [['ob-export-xlsx', 'Télécharger la liste filtrée en Excel'],
+     ['ob-export-pdf',  'Télécharger la liste filtrée en PDF']].forEach(([id, normalTitle]) => {
+      const b = document.getElementById(id);
+      if (!b) return;
+      b.disabled = blocked;
+      b.title = blocked ? blockTitle : normalTitle;
+      b.style.opacity = blocked ? '.5' : '';
+      b.style.cursor = blocked ? 'not-allowed' : '';
+    });
+  },
+
   // ── Purge des non-francophones (preview puis confirmation) ────────
   async _purgeNonFrench() {
     const btn = document.getElementById('ob-purge-nonfr');
     const originalLabel = btn ? btn.innerHTML : '';
-    if (btn) { btn.disabled = true; btn.innerHTML = 'Scan…'; }
+    if (btn) { btn.disabled = true; btn.innerHTML = 'Analyse…'; }
     try {
       // 1) Preview
       const audit = await this._api('audit_non_french');
       if (!audit || !audit.ok) {
-        alert("Impossible de scanner la base : " + ((audit && audit.error) || 'erreur inconnue'));
+        if (audit) Toast.friendlyError(audit.error, 'Impossible d’analyser la base.');
         return;
       }
       const count = audit.non_fr_count || 0;
       const total = audit.total_scanned || 0;
       if (count === 0) {
-        alert(`Aucun non-francophone détecté sur les ${total} prospects scannés. Rien à supprimer.`);
+        Toast.info(`Aucun non-francophone détecté sur les ${total} prospects analysés. Rien à supprimer.`);
         return;
       }
       // Exemples lisibles
       const exLines = (audit.examples || []).map(e =>
         `  • ${e.name} ${e.country ? '('+e.country+') ' : ''}— ${e.reason}`
       ).join('\n');
-      const msg =
-        `Sur ${total} prospects scannés, ${count} ne sont PAS confirmés francophones.\n\n` +
+      const ok = await Dialog.confirm(
+        `Sur ${total} prospects analysés, ${count} ne sont pas confirmés francophones.\n\n` +
         `Exemples :\n${exLines}\n\n` +
-        `Veux-tu vraiment les SUPPRIMER définitivement de la base ?\n` +
-        `(action irréversible)`;
-      if (!window.confirm(msg)) {
-        return;
-      }
+        `⚠ Ils seront supprimés définitivement de TOUTE la base, toutes sources confondues ` +
+        `(pas seulement la liste affichée). Aucun retour en arrière possible.`,
+        { title: 'Nettoyer les non-francophones',
+          okLabel: `Supprimer ${count} prospect${count > 1 ? 's' : ''}`,
+          cancelLabel: 'Annuler', danger: true });
+      if (!ok) return;
       // 2) Purge réelle
       if (btn) btn.innerHTML = `Suppression de ${count}…`;
       const res = await this._api('purge_non_french', { confirm: 'PURGE_NON_FR' });
       if (!res || !res.ok) {
-        alert("Suppression échouée : " + ((res && res.error) || 'erreur inconnue'));
+        if (res) Toast.friendlyError(res.error, 'La suppression a échoué.');
         return;
       }
-      alert(`✅ ${res.deleted || 0} prospect(s) non-francophones supprimés.`);
-      // Recharge la liste
+      const n = res.deleted || 0;
+      Toast.success(`${n} prospect${n > 1 ? 's' : ''} non-francophone${n > 1 ? 's' : ''} supprimé${n > 1 ? 's' : ''}.`);
+      // Recharge compteurs + liste (en repartant de la première page)
+      this.state.page = 0;
+      this._saveListFilters();
+      await this._loadStats();
       await this._loadCreators();
     } catch (err) {
-      alert("Erreur : " + (err && err.message || err));
+      Toast.friendlyError(err, 'La suppression a échoué.');
     } finally {
       if (btn) { btn.disabled = false; btn.innerHTML = originalLabel; }
     }
@@ -1001,41 +1159,48 @@ const Obelisk = {
   async _purgeGuessedEmails() {
     const btn = document.getElementById('ob-purge-guessed');
     const originalLabel = btn ? btn.innerHTML : '';
-    if (btn) { btn.disabled = true; btn.innerHTML = 'Scan…'; }
+    if (btn) { btn.disabled = true; btn.innerHTML = 'Analyse…'; }
     try {
       // 1) Preview
       const audit = await this._api('audit_guessed_emails');
       if (!audit || !audit.ok) {
-        alert("Impossible de scanner la base : " + ((audit && audit.error) || 'erreur inconnue'));
+        if (audit) Toast.friendlyError(audit.error, 'Impossible d’analyser la base.');
         return;
       }
       const count = audit.count || 0;
       const total = audit.total_scanned || 0;
       if (count === 0) {
-        alert(`Aucun prospect avec uniquement des mails devinés sur les ${total} scannés. Rien à supprimer.`);
+        Toast.info(`Aucun prospect avec uniquement des mails devinés sur les ${total} analysés. Rien à supprimer.`);
         return;
       }
       const exLines = (audit.examples || []).map(e =>
         `  • ${e.name} — ${e.email}`
       ).join('\n');
-      const msg =
-        `Sur ${total} prospects scannés, ${count} n'ont que des mails génériques (contact@, info@, hello@, …).\n` +
-        `Ces mails ont été devinés à partir du domaine, ils n'ont jamais été lus en vrai.\n\n` +
+      const ok = await Dialog.confirm(
+        `Sur ${total} prospects analysés, ${count} n’ont que des mails génériques (contact@, info@, hello@, …).\n` +
+        `Ces mails ont été devinés à partir du domaine, ils n’ont jamais été lus en vrai.\n\n` +
         `Exemples :\n${exLines}\n\n` +
-        `Veux-tu vraiment les SUPPRIMER définitivement de la base ?\n` +
-        `(action irréversible)`;
-      if (!window.confirm(msg)) return;
+        `⚠ Ils seront supprimés définitivement de TOUTE la base, toutes sources confondues ` +
+        `(pas seulement la liste affichée). Aucun retour en arrière possible.`,
+        { title: 'Supprimer les mails devinés',
+          okLabel: `Supprimer ${count} prospect${count > 1 ? 's' : ''}`,
+          cancelLabel: 'Annuler', danger: true });
+      if (!ok) return;
       // 2) Purge réelle
       if (btn) btn.innerHTML = `Suppression de ${count}…`;
       const res = await this._api('purge_guessed_emails', { confirm: 'PURGE_GUESSED' });
       if (!res || !res.ok) {
-        alert("Suppression échouée : " + ((res && res.error) || 'erreur inconnue'));
+        if (res) Toast.friendlyError(res.error, 'La suppression a échoué.');
         return;
       }
-      alert(`✅ ${res.deleted || 0} prospect(s) à mails devinés supprimés.`);
+      const n = res.deleted || 0;
+      Toast.success(`${n} prospect${n > 1 ? 's' : ''} à mails devinés supprimé${n > 1 ? 's' : ''}.`);
+      this.state.page = 0;
+      this._saveListFilters();
+      await this._loadStats();
       await this._loadCreators();
     } catch (err) {
-      alert("Erreur : " + (err && err.message || err));
+      Toast.friendlyError(err, 'La suppression a échoué.');
     } finally {
       if (btn) { btn.disabled = false; btn.innerHTML = originalLabel; }
     }
@@ -1047,33 +1212,37 @@ const Obelisk = {
     const btn = document.getElementById('ob-purge-subs');
     const threshold = input ? parseInt(input.value, 10) : 0;
     if (!threshold || threshold <= 0) {
-      alert("Entre un nombre d'abonnés minimum (ex: 500).");
+      Toast.warn('Entre un nombre d’abonnés minimum (ex : 500).');
       input?.focus();
       return;
     }
     const originalLabel = btn ? btn.innerHTML : '';
-    if (btn) { btn.disabled = true; btn.innerHTML = 'Scan…'; }
+    if (btn) { btn.disabled = true; btn.innerHTML = 'Analyse…'; }
     try {
       // 1) Preview
       const pre = await this._api('purge_below_subs', { threshold });
       if (!pre || !pre.ok) {
-        alert("Impossible de scanner : " + ((pre && pre.error) || 'erreur inconnue'));
+        if (pre) Toast.friendlyError(pre.error, 'Impossible d’analyser la base.');
         return;
       }
       const count = pre.count || 0;
       if (count === 0) {
-        alert(`Aucun prospect avec moins de ${threshold.toLocaleString('fr-FR')} abonnés. Rien à supprimer.`);
+        Toast.info(`Aucun prospect avec moins de ${threshold.toLocaleString('fr-FR')} abonnés. Rien à supprimer.`);
         return;
       }
       const exLines = (pre.examples || []).map(e =>
         `  • ${e.name} — ${Number(e.subscribers || 0).toLocaleString('fr-FR')} abonnés`
       ).join('\n');
-      const msg =
+      const ok = await Dialog.confirm(
         `${count.toLocaleString('fr-FR')} prospects ont moins de ${threshold.toLocaleString('fr-FR')} abonnés.\n\n` +
         `Exemples :\n${exLines}\n\n` +
-        `Confirmer la SUPPRESSION définitive de ces ${count} prospects ?\n` +
-        `(action irréversible)`;
-      if (!window.confirm(msg)) return;
+        `⚠ Ils seront supprimés définitivement de TOUTE la base, toutes sources confondues ` +
+        `(pas seulement la liste affichée). Ceux sans nombre d’abonnés mesuré sont préservés. ` +
+        `Aucun retour en arrière possible.`,
+        { title: `Supprimer sous ${threshold.toLocaleString('fr-FR')} abonnés`,
+          okLabel: `Supprimer ${count} prospect${count > 1 ? 's' : ''}`,
+          cancelLabel: 'Annuler', danger: true });
+      if (!ok) return;
       // 2) Suppression réelle
       if (btn) btn.innerHTML = `Suppression de ${count}…`;
       const res = await this._api('purge_below_subs', {
@@ -1081,21 +1250,37 @@ const Obelisk = {
         confirm: 'PURGE_BELOW_SUBS',
       });
       if (!res || !res.ok) {
-        alert("Suppression échouée : " + ((res && res.error) || 'erreur inconnue'));
+        if (res) Toast.friendlyError(res.error, 'La suppression a échoué.');
         return;
       }
-      alert(`✅ ${res.deleted || 0} prospect(s) supprimés.`);
+      const n = res.deleted || 0;
+      Toast.success(`${n} prospect${n > 1 ? 's' : ''} supprimé${n > 1 ? 's' : ''}.`);
       if (input) input.value = '';
+      this.state.page = 0;
+      this._saveListFilters();
+      await this._loadStats();
       await this._loadCreators();
     } catch (err) {
-      alert("Erreur : " + (err && err.message || err));
+      Toast.friendlyError(err, 'La suppression a échoué.');
     } finally {
       if (btn) { btn.disabled = false; btn.innerHTML = originalLabel; }
     }
   },
 
   // ── Importer fichier (Excel / CSV) ───────────────────────────────
-  _openImportFile() {
+  async _openImportFile() {
+    // Petit mode d'emploi AVANT d'ouvrir le sélecteur : quelles colonnes
+    // le fichier doit contenir, et ce qui se passera après.
+    const ok = await Dialog.confirm(
+      'Ton fichier (Excel ou CSV) doit avoir une ligne par prospect, avec :\n' +
+      '  • une colonne « nom »\n' +
+      '  • une colonne « email »\n' +
+      '  • en bonus si tu les as : téléphone, ville, site\n\n' +
+      'Les fiches déjà connues seront fusionnées (jamais de doublon), et les ' +
+      'clients ou désinscrits ne seront pas ajoutés.',
+      { title: 'Importer une liste de prospects',
+        okLabel: 'Choisir le fichier', cancelLabel: 'Annuler' });
+    if (!ok) return;
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.xlsx,.xlsm,.xls,.csv,.tsv,.txt';
@@ -1119,7 +1304,7 @@ const Obelisk = {
     try {
       // 20 Mo max côté front aussi
       if (file.size > 20 * 1024 * 1024) {
-        alert("Fichier trop gros (max 20 Mo).");
+        Toast.warn('Fichier trop gros (20 Mo maximum).');
         return;
       }
       const buf = await file.arrayBuffer();
@@ -1139,26 +1324,27 @@ const Obelisk = {
         data:     b64,
       });
       if (!res || !res.ok) {
-        alert("Import impossible : " +
-              ((res && res.error) || 'erreur inconnue'));
+        if (res) Toast.friendlyError(res.error, 'Le fichier n’a pas pu être importé.');
         return;
       }
-      const parts = [];
-      parts.push(`✓ ${res.inserted} nouveau(x) prospect(s) ajouté(s).`);
-      if (res.duplicates) parts.push(`${res.duplicates} déjà présent(s) (ignorés).`);
-      if (res.skipped)    parts.push(`${res.skipped} ligne(s) vide(s) ou incomplètes.`);
-      if (res.errors)     parts.push(`${res.errors} erreur(s) durant l'insertion.`);
-      parts.push(`Total lu : ${res.total} ligne(s).`);
-      alert(parts.join('\n'));
-      // Recharge stats + liste
+      // Bilan détaillé : ajoutés / fusionnés / refusés
+      const added   = res.inserted   || 0;
+      const merged  = res.duplicates || 0;
+      const refused = (res.skipped || 0) + (res.errors || 0);
+      const totalRead = res.total || 0;
+      const detail =
+        `${added} ajouté${added > 1 ? 's' : ''} · ` +
+        `${merged} fusionné${merged > 1 ? 's' : ''} (déjà connus) · ` +
+        `${refused} refusé${refused > 1 ? 's' : ''} (lignes vides, incomplètes ou en erreur) — ` +
+        `${totalRead} ligne${totalRead > 1 ? 's' : ''} lue${totalRead > 1 ? 's' : ''}.`;
+      if (added > 0) Toast.success(detail, 'Import terminé');
+      else Toast.warn(detail, 'Import terminé — rien d’ajouté');
+      // Recharge stats + vue complète (l'import peut partir de l'écran
+      // d'accueil vide : il faut reconstruire la liste, pas juste la remplir)
       await this._loadStats();
-      if (typeof this._loadCreators === 'function') {
-        await this._loadCreators();
-      } else {
-        await this.refresh();
-      }
+      await this._renderCreators();
     } catch (err) {
-      alert("Import en erreur : " + (err && err.message || err));
+      Toast.friendlyError(err, 'Le fichier n’a pas pu être importé.');
     } finally {
       if (btn) {
         btn.disabled = false;
@@ -1169,6 +1355,12 @@ const Obelisk = {
 
   // ── Export Excel / PDF (depuis les filtres en cours) ──────────────
   async _exportList(format) {
+    // Le serveur ne sait pas filtrer l'export sur "déjà exporté" /
+    // "déjà contacté" : le fichier ne correspondrait pas à la liste.
+    if (this._activeAmong(this._EXPORT_UNSUPPORTED_KEYS).length > 0) {
+      Toast.warn('Retire d’abord les filtres « Export » et « Contact » : l’export ne sait pas les respecter.');
+      return;
+    }
     const btn = document.getElementById(format === 'xlsx' ? 'ob-export-xlsx' : 'ob-export-pdf');
     const originalLabel = btn ? btn.innerHTML : '';
     if (btn) {
@@ -1196,7 +1388,7 @@ const Obelisk = {
       if (limit) payload.limit = limit;
       const res = await this._api('export', payload);
       if (!res || !res.ok) {
-        alert("Export impossible : " + ((res && res.error) || 'erreur inconnue'));
+        if (res) Toast.friendlyError(res.error, 'L’export n’a pas pu être généré.');
         return;
       }
       // Décode le base64 et déclenche le download
@@ -1212,8 +1404,9 @@ const Obelisk = {
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 60000);
+      Toast.success('Le fichier est téléchargé.');
     } catch (err) {
-      alert("Export en erreur : " + (err && err.message || err));
+      Toast.friendlyError(err, 'L’export n’a pas pu être généré.');
     } finally {
       if (btn) {
         btn.disabled = false;
@@ -1226,14 +1419,26 @@ const Obelisk = {
     return `
       <div class="ob-empty-hero">
         <div class="icon">🔭</div>
-        <h2>Ton CRM est vierge.</h2>
-        <p>Décris ta cible (niche, secteur, mot-clé) et Obelisk balaie les plateformes
-           pour repérer les créateurs non monétisés, enrichir leurs emails et te préparer les drafts.</p>
-        <button id="ob-empty-cta" class="btn btn-primary" style="padding: 11px 22px; font-size: 14px;">
-          Lancer ma première recherche
-        </button>
-        <div class="ob-platforms-tease">
-          ${this.PLATFORMS.map(p => `<span>${this._esc(p.label)}</span>`).join('')}
+        <h2>Ta base de prospects est vide.</h2>
+        <p>C’est ici que tout arrive : chaque outil de recherche verse ses trouvailles
+           dans cette base commune, sans doublon. Choisis une porte d’entrée :</p>
+        <div class="ob-empty-doors">
+          <button type="button" class="ob-empty-door" data-ob-door="obelisk">
+            <b>🔭 Obélisk</b>
+            <span>Créateurs (YouTube, Twitch…) et pros (commerces, cabinets, chercheurs…)</span>
+          </button>
+          <button type="button" class="ob-empty-door" data-ob-door="chasseur">
+            <b>🎯 Le Chasseur</b>
+            <span>PME françaises, par métier et département</span>
+          </button>
+          <button type="button" class="ob-empty-door" data-ob-door="prospecteur_google">
+            <b>📍 Prospecteur Google</b>
+            <span>Commerces locaux, ville par ville — repère ceux sans site</span>
+          </button>
+          <button type="button" class="ob-empty-door" data-ob-door="import">
+            <b>📂 Importer un fichier</b>
+            <span>Tu as déjà une liste Excel ou CSV ? Verse-la ici.</span>
+          </button>
         </div>
       </div>
     `;
@@ -1255,26 +1460,41 @@ const Obelisk = {
     if (f.status)    chips.push(['status', this.STATUS_LABELS[f.status] || f.status]);
     if (f.has_email) chips.push(['has_email', f.has_email === 'yes' ? 'Avec email' : 'Sans email']);
     if (f.country)   chips.push(['country', f.country === 'FR' ? '🇫🇷 France' : f.country === 'OTHERS' ? '🌍 Hors France' : f.country]);
+    if (f.exported)  chips.push(['exported', f.exported === 'yes' ? 'Déjà exportés' : 'Jamais exportés']);
+    if (f.contacted) chips.push(['contacted', f.contacted === 'yes' ? 'Déjà contactés' : 'Jamais contactés']);
+    if (f.audience)  chips.push(['audience', f.audience === 'creator' ? 'Type : Créateurs' : 'Type : Pros']);
     if (chips.length === 0) { wrap.className = ''; wrap.innerHTML = ''; return; }
     wrap.className = 'ob-active-filters';
     wrap.innerHTML = chips.map(([k, l, extra]) =>
-      `<span class="chip ${extra || ''}">${this._esc(l)}<button data-ob-rmf="${k}" aria-label="Retirer">×</button></span>`
+      `<span class="chip ${extra || ''}">${this._esc(l)}<button data-ob-rmf="${k}" aria-label="Retirer ce filtre" title="Retirer ce filtre">×</button></span>`
     ).join('') + `<button class="clear-all" data-ob-clearall>Tout effacer</button>`;
     wrap.querySelectorAll('[data-ob-rmf]').forEach(b => {
       b.onclick = () => {
         const k = b.dataset.obRmf;
         this.state.filters[k] = '';
         if (k === 'job_id') this.state.jobFilterInfo = null;
+        // Le type Tous/Créateurs/Pros est aussi mémorisé à part
+        if (k === 'audience') {
+          try { localStorage.setItem(this._LIST_AUDIENCE_KEY, ''); } catch (e) {}
+        }
         this.state.page = 0;
+        this.state.selectedIds = new Set();
         this._saveListFilters();
         this._renderCreators();
       };
     });
     const clr = wrap.querySelector('[data-ob-clearall]');
     if (clr) clr.onclick = () => {
-      this.state.filters = { platform: '', status: '', q: '', has_email: '', country: '', job_id: '', audience: '' };
+      // On efface les FILTRES, pas le tri choisi.
+      const keepSort = (this.state.filters || {}).sort_by || '';
+      this.state.filters = { platform: '', status: '', q: '', has_email: '',
+                             country: '', job_id: '', audience: '',
+                             exported: '', contacted: '', city: '',
+                             sort_by: keepSort };
       this.state.jobFilterInfo = null;
+      try { localStorage.setItem(this._LIST_AUDIENCE_KEY, ''); } catch (e) {}
       this.state.page = 0;
+      this.state.selectedIds = new Set();
       this._saveListFilters();
       this._renderCreators();
     };
@@ -1284,43 +1504,63 @@ const Obelisk = {
     this._renderActiveFilters();
     const wrap = document.getElementById('ob-table-wrap');
     if (!wrap) return;
-    wrap.innerHTML = '<div style="padding: 36px; text-align: center; font-size: 13px; color: hsl(var(--text-muted));">Chargement…</div>';
+    wrap.innerHTML = '<div class="ob-table-card" style="padding: 36px; text-align: center; font-size: 13px; color: hsl(var(--text-muted));">Chargement…</div>';
     const offset = this.state.page * this.state.pageSize;
     const res = await this._api('list_creators', {
       ...this.state.filters,
       limit: this.state.pageSize,
       offset,
-    });
+    }, { silent: true });
     if (!res || !res.ok) {
-      wrap.innerHTML = `<div style="padding: 24px; color: hsl(var(--danger)); font-size: 13px;">Erreur : ${this._esc(res && res.error || 'inconnu')}</div>`;
+      // Vrai état d'erreur (avec retry) — pas un message technique brut.
+      if (res) console.warn('[prospects] liste en erreur :', res.error);
+      wrap.innerHTML = `
+        <div class="ob-table-card" style="padding: 48px 24px; text-align: center;">
+          <div style="font-size: 28px; opacity: .5; margin-bottom: 10px;">⚠️</div>
+          <div style="font-weight: 600; color: hsl(var(--text)); margin-bottom: 4px; font-size: 15px;">La liste n’a pas pu être chargée.</div>
+          <div style="font-size: 13px; color: hsl(var(--text-muted)); margin-bottom: 16px;">Vérifie ta connexion internet, puis réessaie.</div>
+          <button id="ob-retry-list" class="btn btn-secondary">Réessayer</button>
+        </div>`;
+      const rb = document.getElementById('ob-retry-list');
+      if (rb) rb.onclick = () => this._loadCreators();
+      const pagerErr = document.getElementById('ob-pager');
+      if (pagerErr) pagerErr.innerHTML = '';
       return;
     }
     this.state.rows = res.rows || [];
     this.state.total = res.count || 0;
 
+    // Si la page courante est passée hors bornes (après une suppression,
+    // par exemple), on se recale sur la dernière page existante.
+    if (this.state.total > 0 && offset >= this.state.total) {
+      this.state.page = Math.max(0, Math.ceil(this.state.total / this.state.pageSize) - 1);
+      this._saveListFilters();
+      return this._loadCreators();
+    }
+
     if (this.state.rows.length === 0) {
       const ji = this.state.jobFilterInfo;
       const jobActive = this.state.filters.job_id && ji;
       let icon = '🔭';
-      let title = 'Aucun créateur ne correspond.';
+      let title = 'Aucun prospect ne correspond.';
       let sub   = 'Élargis tes filtres ou lance une nouvelle recherche.';
       if (jobActive) {
         if (ji.status === 'running' || ji.status === 'pending') {
           icon = '⏳';
           title = 'La recherche est encore en cours.';
-          sub   = 'Reviens dans une minute, ou consulte la progression dans l\'onglet « Nouvelle recherche ».';
+          sub   = 'Reviens dans une minute, ou suis la progression sur l’écran Obélisk.';
         } else if (ji.status === 'failed') {
           icon = '⚠️';
           title = 'La recherche a échoué.';
-          sub   = 'Aucun créateur n\'a été inséré. Ouvre l\'onglet « Nouvelle recherche » pour voir le détail.';
+          sub   = 'Aucun prospect n’a été ajouté. Ouvre l’écran Obélisk pour voir le détail.';
         } else {
           icon = '🪹';
-          title = 'Cette recherche n\'a remonté aucun créateur.';
-          sub   = 'Soit les plateformes n\'ont rien trouvé, soit tes filtres avancés ont tout écarté.';
+          title = 'Cette recherche n’a remonté aucun prospect.';
+          sub   = 'Soit les plateformes n’ont rien trouvé, soit tes filtres avancés ont tout écarté.';
         }
       }
       wrap.innerHTML = `
-        <div style="padding: 56px 24px; text-align: center;">
+        <div class="ob-table-card" style="padding: 56px 24px; text-align: center;">
           <div style="font-size: 32px; opacity: .5; margin-bottom: 12px;">${icon}</div>
           <div style="font-weight: 600; color: hsl(var(--text)); margin-bottom: 4px; font-size: 15px;">${this._esc(title)}</div>
           <div style="font-size: 13px; color: hsl(var(--text-muted)); max-width: 460px; margin: 0 auto;">${this._esc(sub)}</div>
@@ -1330,23 +1570,36 @@ const Obelisk = {
       if (!(this.state.selectedIds instanceof Set)) {
         this.state.selectedIds = new Set();
       }
+      // La barre d'actions vit HORS de la carte du tableau : la carte
+      // coupe ce qui dépasse (coins arrondis) et rognerait le menu « ⋯ ».
       wrap.innerHTML = `
         <div id="ob-bulkbar" class="ob-bulkbar" hidden></div>
+        <div class="ob-table-card">
+        <div class="ob-table-scroll">
         <table class="ob-table">
           <thead><tr>
-            <th style="width:40px;"><input type="checkbox" id="ob-select-all" title="Tout sélectionner (page)"></th>
-            <th>Créateur</th><th>Plateforme</th><th>Niche</th><th>Abonnés</th><th>Email</th><th>Ville</th><th>Statut</th>
+            <th style="width:40px;"><input type="checkbox" id="ob-select-all" title="Tout sélectionner sur cette page" aria-label="Tout sélectionner sur cette page"></th>
+            <th>Prospect</th><th>Plateforme</th><th>Niche</th><th>Abonnés</th><th>Email</th><th>Ville</th><th>Statut</th>
           </tr></thead>
           <tbody>
             ${this.state.rows.map(p => this._rowHtml(p)).join('')}
           </tbody>
         </table>
+        </div>
+        </div>
       `;
       this._bindRowSelection();
       this._renderBulkbar();
       wrap.querySelectorAll('[data-ob-open]').forEach(tr => {
         tr.onclick = (ev) => {
           if (ev.target.closest('select, button, a, input[type="checkbox"]')) return;
+          this.openCreator(tr.dataset.obOpen);
+        };
+        // Accessible au clavier : Entrée ou Espace ouvre la fiche
+        tr.onkeydown = (ev) => {
+          if (ev.key !== 'Enter' && ev.key !== ' ') return;
+          if (ev.target.closest('select, button, a, input')) return;
+          ev.preventDefault();
           this.openCreator(tr.dataset.obOpen);
         };
       });
@@ -1370,8 +1623,20 @@ const Obelisk = {
     `;
     const prev = pager.querySelector('[data-ob-prev]');
     const next = pager.querySelector('[data-ob-next]');
-    if (prev) prev.onclick = () => { this.state.page = Math.max(0, this.state.page - 1); this._saveListFilters(); this._loadCreators(); };
-    if (next) next.onclick = () => { this.state.page = Math.min(lastPage, this.state.page + 1); this._saveListFilters(); this._loadCreators(); };
+    // Changement de page → on vide la sélection (évite les fiches cochées
+    // invisibles, supprimables sans s'en rendre compte).
+    if (prev) prev.onclick = () => {
+      this.state.page = Math.max(0, this.state.page - 1);
+      this.state.selectedIds = new Set();
+      this._saveListFilters();
+      this._loadCreators();
+    };
+    if (next) next.onclick = () => {
+      this.state.page = Math.min(lastPage, this.state.page + 1);
+      this.state.selectedIds = new Set();
+      this._saveListFilters();
+      this._loadCreators();
+    };
   },
 
   _rowHtml(p) {
@@ -1380,9 +1645,10 @@ const Obelisk = {
     const status = p.status || 'new';
     const sel = (this.state.selectedIds instanceof Set) && this.state.selectedIds.has(p.id);
     return `
-      <tr class="is-clickable ${sel ? 'is-selected' : ''}" data-ob-open="${this._esc(p.id)}">
+      <tr class="is-clickable ${sel ? 'is-selected' : ''}" data-ob-open="${this._esc(p.id)}"
+          tabindex="0" role="button" title="Ouvrir la fiche">
         <td style="width:40px;">
-          <input type="checkbox" data-ob-select="${this._esc(p.id)}" ${sel ? 'checked' : ''}>
+          <input type="checkbox" data-ob-select="${this._esc(p.id)}" ${sel ? 'checked' : ''} aria-label="Sélectionner ce prospect">
         </td>
         <td>
           <div style="font-weight: 600; color: hsl(var(--text));">${this._esc(p.name || p.handle || p.legal_name || '(sans nom)')}</div>
@@ -1394,7 +1660,7 @@ const Obelisk = {
         <td>${emails[0] ? `<a href="mailto:${this._esc(emails[0])}" style="color: hsl(var(--info));" onclick="event.stopPropagation()">${this._esc(emails[0])}</a>${emails.length > 1 ? ` <span style="color: hsl(var(--text-muted)); font-size: 11.5px;">+${emails.length - 1}</span>` : ''}` : '<span style="color: hsl(var(--text-muted));">—</span>'}</td>
         <td style="color: hsl(var(--text-muted));">${this._esc(p.city || '—')}</td>
         <td>
-          <select class="ob-status-select" data-ob-status="${this._esc(p.id)}">
+          <select class="ob-status-select" data-ob-status="${this._esc(p.id)}" aria-label="Statut de ce prospect">
             ${Object.entries(this.STATUS_LABELS).map(([k, l]) => `<option value="${k}" ${status === k ? 'selected' : ''}>${this._esc(l)}</option>`).join('')}
           </select>
         </td>
@@ -1449,15 +1715,27 @@ const Obelisk = {
     if (!bar) return;
     const n = this.state.selectedIds ? this.state.selectedIds.size : 0;
     const total = this.state.total || 0;
-    const hasFilters = Object.values(this.state.filters || {}).some(
-      v => v !== '' && v !== 0);
+    // hasFilters : les VRAIS filtres seulement — le tri (sort_by) et les
+    // valeurs vides ne comptent pas. Sinon un simple choix de tri faisait
+    // apparaître un bouton de suppression de masse.
+    const hasFilters = this._hasActiveFilters();
+    // « Supprimer les résultats filtrés » n'est proposé QUE si tous les
+    // filtres actifs sont ceux que le serveur sait appliquer à la
+    // suppression. Avec un filtre non géré (recherche récente, pays,
+    // exportés, contactés), le serveur supprimerait BIEN PLUS que la liste
+    // affichée → bouton masqué.
+    const supportedOn   = this._activeAmong(this._DELETE_FILTER_KEYS);
+    const unsupportedOn = this._activeAmong(this._DELETE_UNSUPPORTED_KEYS);
+    const canDeleteFiltered = supportedOn.length > 0 && unsupportedOn.length === 0 && total > 0;
     bar.hidden = false;
     bar.innerHTML = `
       <div class="ob-bulkbar-inner">
         <span class="ob-bulkbar-info">
           ${n > 0
             ? `<strong>${n}</strong> sélectionné${n > 1 ? 's' : ''}`
-            : `<strong>${total}</strong> créateur${total > 1 ? 's' : ''} au total`}
+            : (hasFilters
+                ? `<strong>${Number(total).toLocaleString('fr-FR')}</strong> affiché${total > 1 ? 's' : ''}`
+                : `<strong>${Number(total).toLocaleString('fr-FR')}</strong> prospect${total > 1 ? 's' : ''} au total`)}
         </span>
         <span style="flex:1;"></span>
         ${n > 0 ? `
@@ -1468,18 +1746,29 @@ const Obelisk = {
             🗑 Supprimer la sélection (${n})
           </button>
         ` : `
-          ${hasFilters ? `
-            <button class="btn btn-secondary ob-bulkbar-btn" data-ob-bulk="delete-filtered">
-              Supprimer les résultats filtrés
+          ${canDeleteFiltered ? `
+            <button class="btn btn-secondary ob-bulkbar-btn" data-ob-bulk="delete-filtered"
+                    title="Supprime uniquement les fiches qui correspondent aux filtres en cours">
+              Supprimer les ${Number(total).toLocaleString('fr-FR')} fiches filtrées
             </button>` : ''}
-          <button class="btn ob-bulkbar-btn ob-bulkbar-danger-soft" data-ob-bulk="delete-all">
-            ⚠ Tout supprimer
-          </button>
         `}
+        <details class="ob-more">
+          <summary title="Actions avancées" aria-label="Actions avancées">⋯</summary>
+          <div class="ob-more-menu">
+            <button class="btn ob-bulkbar-btn ob-bulkbar-danger-soft" data-ob-bulk="delete-all">
+              ⚠ Tout supprimer
+            </button>
+          </div>
+        </details>
       </div>
     `;
     bar.querySelectorAll('[data-ob-bulk]').forEach(btn => {
-      btn.onclick = () => this._handleBulkAction(btn.dataset.obBulk);
+      btn.onclick = async () => {
+        // Anti double-clic pendant l'action
+        btn.disabled = true;
+        try { await this._handleBulkAction(btn.dataset.obBulk); }
+        finally { btn.disabled = false; }
+      };
     });
   },
 
@@ -1492,52 +1781,90 @@ const Obelisk = {
     if (action === 'delete-selected') {
       const ids = Array.from(this.state.selectedIds);
       if (ids.length === 0) return;
-      if (!confirm(`Supprimer ${ids.length} créateur${ids.length > 1 ? 's' : ''} sélectionné${ids.length > 1 ? 's' : ''} ?\n\nCette action est définitive.`)) {
-        return;
-      }
+      const sN = ids.length > 1 ? 's' : '';
+      const ok = await Dialog.confirm(
+        `${ids.length} prospect${sN} sélectionné${sN} ser${ids.length > 1 ? 'ont' : 'a'} supprimé${sN} définitivement de la base.\n\nAucun retour en arrière possible.`,
+        { title: 'Supprimer la sélection',
+          okLabel: `Supprimer ${ids.length} prospect${sN}`,
+          cancelLabel: 'Annuler', danger: true });
+      if (!ok) return;
       const r = await this._api('delete_creators_bulk', { ids });
       if (r && r.ok) {
+        const d = r.deleted != null ? r.deleted : ids.length;
+        Toast.success(`${d} prospect${d > 1 ? 's' : ''} supprimé${d > 1 ? 's' : ''}.`);
         this.state.selectedIds = new Set();
+        // (si la page courante n'existe plus, _loadCreators se recale seul)
         await this._loadStats();
         await this._loadCreators();
-      } else {
-        alert('Suppression échouée : ' + ((r && r.error) || 'erreur'));
+      } else if (r) {
+        Toast.friendlyError(r.error, 'La suppression a échoué.');
       }
       return;
     }
     if (action === 'delete-filtered') {
-      const f = this.state.filters || {};
-      if (!confirm(`Supprimer TOUS les créateurs qui matchent les filtres actuels ?\n\nCette action est définitive.`)) {
+      // Garde-fou : on revérifie qu'aucun filtre NON géré par le serveur
+      // n'est actif (sinon il supprimerait bien plus que l'affiché).
+      if (this._activeAmong(this._DELETE_UNSUPPORTED_KEYS).length > 0) {
+        Toast.warn('Ce type de filtre (recherche récente, pays, exportés, contactés) ne peut pas servir à une suppression groupée.');
         return;
       }
-      const r = await this._api('delete_creators_filtered', f);
+      const supportedOn = this._activeAmong(this._DELETE_FILTER_KEYS);
+      if (supportedOn.length === 0) return;
+      const total = this.state.total || 0;
+      if (!total) return;
+      const sN = total > 1 ? 's' : '';
+      const ok = await Dialog.confirm(
+        `${Number(total).toLocaleString('fr-FR')} prospect${sN} correspond${total > 1 ? 'ent' : ''} aux filtres en cours — exactement la liste affichée.\n\n` +
+        `Il${sN} ser${total > 1 ? 'ont' : 'a'} supprimé${sN} définitivement de la base. Aucun retour en arrière possible.`,
+        { title: 'Supprimer les fiches filtrées',
+          okLabel: `Supprimer ${Number(total).toLocaleString('fr-FR')} prospect${sN}`,
+          cancelLabel: 'Annuler', danger: true });
+      if (!ok) return;
+      // On n'envoie QUE les filtres que le serveur honore.
+      const f = this.state.filters || {};
+      const payload = {};
+      supportedOn.forEach(k => { payload[k] = f[k]; });
+      const r = await this._api('delete_creators_filtered', payload);
       if (r && r.ok) {
-        alert(`${r.deleted || 0} créateur(s) supprimé(s).`);
+        const d = r.deleted || 0;
+        Toast.success(`${d} prospect${d > 1 ? 's' : ''} supprimé${d > 1 ? 's' : ''}.`);
         this.state.selectedIds = new Set();
+        this.state.page = 0;
+        this._saveListFilters();
         await this._loadStats();
         await this._loadCreators();
-      } else {
-        alert('Suppression échouée : ' + ((r && r.error) || 'erreur'));
+      } else if (r) {
+        Toast.friendlyError(r.error, 'La suppression a échoué.');
       }
       return;
     }
     if (action === 'delete-all') {
       // Double confirmation pour cette action destructive
-      const first = confirm('⚠ TOUT SUPPRIMER : tous tes créateurs Obelisk vont être effacés définitivement.\n\nContinuer ?');
+      const grandTotal = (this.state.stats && this.state.stats.total) || 0;
+      const first = await Dialog.confirm(
+        `TOUTE la base de prospects va être effacée définitivement` +
+        `${grandTotal ? ` (${Number(grandTotal).toLocaleString('fr-FR')} fiches)` : ''}, ` +
+        `toutes sources confondues.\n\nAucun retour en arrière possible.`,
+        { title: '⚠ Tout supprimer', okLabel: 'Continuer',
+          cancelLabel: 'Annuler', danger: true });
       if (!first) return;
-      const typed = prompt('Pour confirmer, tape « SUPPRIMER TOUT » exactement :');
+      const typed = prompt('Dernière vérification — tape « SUPPRIMER TOUT » (en majuscules) pour confirmer :');
+      if (typed === null) return; // Annuler → on ne touche à rien
       if ((typed || '').trim() !== 'SUPPRIMER TOUT') {
-        alert('Confirmation incorrecte — rien supprimé.');
+        Toast.warn('Texte de confirmation incorrect — rien n’a été supprimé.');
         return;
       }
       const r = await this._api('delete_all_creators', { confirm: 'DELETE_ALL' });
       if (r && r.ok) {
-        alert(`${r.deleted || 0} créateur(s) supprimé(s).`);
+        const d = r.deleted || 0;
+        Toast.success(`${d} prospect${d > 1 ? 's' : ''} supprimé${d > 1 ? 's' : ''}. La base est vide.`);
         this.state.selectedIds = new Set();
+        this.state.page = 0;
+        this._saveListFilters();
         await this._loadStats();
-        await this._loadCreators();
-      } else {
-        alert('Suppression échouée : ' + ((r && r.error) || 'erreur'));
+        await this._renderCreators();
+      } else if (r) {
+        Toast.friendlyError(r.error, 'La suppression a échoué.');
       }
       return;
     }
@@ -1570,7 +1897,24 @@ const Obelisk = {
   },
 
   async _quickStatus(id, status) {
-    await this._api('update_creator', { id, fields: { status, last_contact_at: status === 'contacted' ? new Date().toISOString() : null } });
+    const row = (this.state.rows || []).find(r => r && r.id === id);
+    const prev = (row && row.status) || 'new';
+    if (prev === status) return;
+    // On n'envoie last_contact_at QUE s'il change vraiment (passage à
+    // « Contacté ») — plus jamais de null qui écrasait la date existante.
+    const fields = { status };
+    if (status === 'contacted') fields.last_contact_at = new Date().toISOString();
+    const res = await this._api('update_creator', { id, fields });
+    if (!res || !res.ok) {
+      // Rollback visuel : la liste déroulante reprend l'ancien statut
+      document.querySelectorAll('[data-ob-status]').forEach(sel => {
+        if (sel.dataset.obStatus === id) sel.value = prev;
+      });
+      if (res) Toast.friendlyError(res.error, 'Le statut n’a pas pu être changé.');
+      return;
+    }
+    if (row) row.status = status;
+    Toast.success(`Statut changé : ${this.STATUS_LABELS[status] || status}.`);
     await this._loadStats();
   },
 
@@ -1579,18 +1923,29 @@ const Obelisk = {
   // -------------------------------------------------------------------
   async openCreator(id) {
     const res = await this._api('get_creator', { id });
-    if (!res || !res.ok) { alert('Impossible de charger ce créateur.'); return; }
+    if (!res || !res.ok) {
+      if (res) Toast.friendlyError(res.error, 'Impossible de charger ce prospect.');
+      return;
+    }
     this.state.selected = res.prospect;
     this._renderDrawer();
   },
 
   closeDrawer() {
+    this._removeDrawerEsc();
     const d = document.getElementById('ob-drawer');
     const b = document.getElementById('ob-drawer-backdrop');
     if (d) d.classList.remove('is-open');
     if (b) b.classList.remove('is-open');
     setTimeout(() => { if (d) d.remove(); if (b) b.remove(); }, 220);
     this.state.selected = null;
+  },
+
+  _removeDrawerEsc() {
+    if (this._drawerEsc) {
+      document.removeEventListener('keydown', this._drawerEsc);
+      this._drawerEsc = null;
+    }
   },
 
   _renderDrawer() {
@@ -1615,6 +1970,8 @@ const Obelisk = {
     const tags = Array.isArray(p.tags) ? p.tags : [];
     const sources = Array.isArray(p.sources) ? p.sources : [];
 
+    const purl = this._safeUrl(p.platform_url);
+    const wurl = this._safeUrl(p.website);
     d.innerHTML = `
       <div class="flex items-start justify-between mb-4">
         <div>
@@ -1622,7 +1979,7 @@ const Obelisk = {
           <h2 class="text-2xl font-bold leading-tight">${this._esc(p.name || p.handle || '(sans nom)')}</h2>
           ${p.handle ? `<div class="text-sm text-text-muted">@${this._esc(p.handle)}</div>` : ''}
         </div>
-        <button onclick="Obelisk.closeDrawer()" class="text-text-muted hover:text-text text-2xl leading-none">×</button>
+        <button onclick="Obelisk.closeDrawer()" class="text-text-muted hover:text-text text-2xl leading-none" title="Fermer" aria-label="Fermer la fiche">×</button>
       </div>
 
       <div class="grid grid-cols-2 gap-3 mb-5">
@@ -1631,53 +1988,57 @@ const Obelisk = {
       </div>
 
       ${p.platform_url ? `<div class="mb-4">
-        <div class="text-[10px] uppercase tracking-widest font-bold text-text-muted mb-1">Profil</div>
-        <a href="${this._esc(p.platform_url)}" target="_blank" rel="noopener" class="text-info hover:underline text-sm break-all">${this._esc(p.platform_url)}</a>
+        <div class="text-[11px] uppercase tracking-widest font-bold text-text-muted mb-1">Profil</div>
+        ${purl
+          ? `<a href="${this._esc(purl)}" target="_blank" rel="noopener" class="text-info hover:underline text-sm break-all">${this._esc(p.platform_url)}</a>`
+          : `<span class="text-sm break-all text-text-muted" title="Adresse non reconnue — lien désactivé par sécurité">${this._esc(p.platform_url)}</span>`}
       </div>` : ''}
 
       ${emails.length ? `<div class="mb-4">
-        <div class="text-[10px] uppercase tracking-widest font-bold text-text-muted mb-1">Emails</div>
+        <div class="text-[11px] uppercase tracking-widest font-bold text-text-muted mb-1">Emails</div>
         ${emails.map(e => `<a href="mailto:${this._esc(e)}" class="block text-info hover:underline text-sm">${this._esc(e)}</a>`).join('')}
       </div>` : ''}
 
       ${phones.length ? `<div class="mb-4">
-        <div class="text-[10px] uppercase tracking-widest font-bold text-text-muted mb-1">Téléphones</div>
+        <div class="text-[11px] uppercase tracking-widest font-bold text-text-muted mb-1">Téléphones</div>
         ${phones.map(t => `<div class="text-sm">${this._esc(t)}</div>`).join('')}
       </div>` : ''}
 
       ${p.website ? `<div class="mb-4">
-        <div class="text-[10px] uppercase tracking-widest font-bold text-text-muted mb-1">Site</div>
-        <a href="${this._esc(p.website)}" target="_blank" rel="noopener" class="text-info hover:underline text-sm break-all">${this._esc(p.website)}</a>
+        <div class="text-[11px] uppercase tracking-widest font-bold text-text-muted mb-1">Site</div>
+        ${wurl
+          ? `<a href="${this._esc(wurl)}" target="_blank" rel="noopener" class="text-info hover:underline text-sm break-all">${this._esc(p.website)}</a>`
+          : `<span class="text-sm break-all text-text-muted" title="Adresse non reconnue — lien désactivé par sécurité">${this._esc(p.website)}</span>`}
       </div>` : ''}
 
       ${(p.city || p.country) ? `<div class="mb-4">
-        <div class="text-[10px] uppercase tracking-widest font-bold text-text-muted mb-1">Localisation</div>
+        <div class="text-[11px] uppercase tracking-widest font-bold text-text-muted mb-1">Localisation</div>
         <div class="text-sm">${this._esc([p.city, p.postal_code, p.country].filter(Boolean).join(' · '))}</div>
       </div>` : ''}
 
       ${p.description ? `<div class="mb-4">
-        <div class="text-[10px] uppercase tracking-widest font-bold text-text-muted mb-1">Description</div>
+        <div class="text-[11px] uppercase tracking-widest font-bold text-text-muted mb-1">Description</div>
         <div class="text-sm leading-relaxed text-text-muted">${this._esc(p.description).slice(0, 600)}${p.description.length > 600 ? '…' : ''}</div>
       </div>` : ''}
 
       <div class="mb-4">
-        <div class="text-[10px] uppercase tracking-widest font-bold text-text-muted mb-1">Monétisation</div>
+        <div class="text-[11px] uppercase tracking-widest font-bold text-text-muted mb-1">Monétisation</div>
         <div class="text-sm">${p.monetized ? `<span class="text-warning">Déjà monétisé</span>` : `<span class="text-success">Pas (encore) monétisé</span>`}</div>
         ${reasons.length ? `<div class="text-[11px] text-text-muted mt-1">${this._esc(reasons.join(' · '))}</div>` : ''}
       </div>
 
       ${sources.length ? `<div class="mb-4">
-        <div class="text-[10px] uppercase tracking-widest font-bold text-text-muted mb-1">Sources</div>
+        <div class="text-[11px] uppercase tracking-widest font-bold text-text-muted mb-1">Sources</div>
         ${sources.map(s => `<div class="text-[11px] text-text-muted">${this._esc(s.name || '')} · ${this._esc(s.source_id || '')}</div>`).join('')}
       </div>` : ''}
 
       <div class="border-t border-border pt-4 mt-5">
-        <div class="text-[10px] uppercase tracking-widest font-bold text-text-muted mb-2">Statut CRM</div>
-        <select id="ob-d-status" class="ob-status-select w-full">
+        <div class="text-[11px] uppercase tracking-widest font-bold text-text-muted mb-2">Statut</div>
+        <select id="ob-d-status" class="ob-status-select w-full" aria-label="Statut de ce prospect">
           ${Object.entries(this.STATUS_LABELS).map(([k, l]) => `<option value="${k}" ${(p.status || 'new') === k ? 'selected' : ''}>${this._esc(l)}</option>`).join('')}
         </select>
 
-        <div class="text-[10px] uppercase tracking-widest font-bold text-text-muted mb-1 mt-4">Notes</div>
+        <div class="text-[11px] uppercase tracking-widest font-bold text-text-muted mb-1 mt-4">Notes</div>
         <textarea id="ob-d-notes" rows="4" style="width:100%; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px; font-family: inherit;" placeholder="Notes internes (non envoyées au prospect)…">${this._esc(p.notes || '')}</textarea>
 
         <div class="flex gap-2 mt-4">
@@ -1685,8 +2046,13 @@ const Obelisk = {
           <button id="ob-d-save" class="btn btn-secondary ${emails[0] ? '' : 'flex-1'}">Enregistrer</button>
         </div>
 
+        <button id="ob-d-timeline" class="btn btn-secondary w-full mt-3"
+                title="Toute l’histoire de ce prospect : ajout en base, mails, réponses, paiements…">
+          📋 Voir tout son parcours
+        </button>
+
         <div class="mt-6 pt-4 border-t border-border">
-          <button id="ob-d-delete" class="text-danger text-[11px] hover:underline">Supprimer ce créateur</button>
+          <button id="ob-d-delete" class="text-danger text-[11px] hover:underline">Supprimer ce prospect</button>
         </div>
       </div>
     `;
@@ -1698,37 +2064,72 @@ const Obelisk = {
       d.classList.add('is-open');
     });
 
-    document.getElementById('ob-d-save').onclick = async () => {
+    // Échap ferme la fiche. L'écouteur est retiré à la fermeture ET au
+    // changement de vue (sinon il survivrait à la navigation).
+    this._removeDrawerEsc();
+    this._drawerEsc = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); this.closeDrawer(); }
+    };
+    document.addEventListener('keydown', this._drawerEsc);
+    App.onViewCleanup(() => this.closeDrawer());
+
+    const saveBtn = document.getElementById('ob-d-save');
+    saveBtn.onclick = async () => {
       const fields = {
         status: document.getElementById('ob-d-status').value,
         notes: document.getElementById('ob-d-notes').value,
       };
+      saveBtn.disabled = true;
       const res = await this._api('update_creator', { id: p.id, fields });
-      if (!res || !res.ok) { alert('Échec : ' + (res && res.error || 'inconnu')); return; }
-      this._toast('Enregistré.');
+      saveBtn.disabled = false;
+      if (!res || !res.ok) {
+        if (res) Toast.friendlyError(res.error, 'L’enregistrement a échoué.');
+        return;
+      }
+      Toast.success('Fiche enregistrée.');
       await this._loadCreators();
       await this._loadStats();
       this.closeDrawer();
     };
-    document.getElementById('ob-d-delete').onclick = async () => {
-      if (!confirm('Supprimer définitivement ce créateur ?')) return;
+    const delBtn = document.getElementById('ob-d-delete');
+    delBtn.onclick = async () => {
+      const ok = await Dialog.confirm(
+        `« ${p.name || p.handle || 'Ce prospect'} » sera supprimé définitivement de la base.\n\nAucun retour en arrière possible.`,
+        { title: 'Supprimer ce prospect', okLabel: 'Supprimer',
+          cancelLabel: 'Annuler', danger: true });
+      if (!ok) return;
+      delBtn.disabled = true;
       const res = await this._api('delete_creator', { id: p.id });
-      if (!res || !res.ok) { alert('Échec : ' + (res && res.error || 'inconnu')); return; }
-      this._toast('Supprimé.');
+      delBtn.disabled = false;
+      if (!res || !res.ok) {
+        if (res) Toast.friendlyError(res.error, 'La suppression a échoué.');
+        return;
+      }
+      Toast.success('Prospect supprimé.');
       await this._loadCreators();
       await this._loadStats();
       this.closeDrawer();
+    };
+    // Toute la vie de ce prospect (ajout, mails, réponses, paiements…)
+    const tlBtn = document.getElementById('ob-d-timeline');
+    if (tlBtn) tlBtn.onclick = () => {
+      const pid = p.id;
+      this.closeDrawer();
+      App.show('prospect_timeline', { id: pid });
     };
   },
 
   async compose(id) {
     const res = await this._api('get_creator', { id });
-    if (!res || !res.ok) return;
+    if (!res || !res.ok) {
+      if (res) Toast.friendlyError(res.error, 'Impossible de charger ce prospect.');
+      return;
+    }
     const p = res.prospect;
     const emails = Array.isArray(p.emails) ? p.emails : [];
-    if (!emails[0]) { alert('Pas d\'email pour ce créateur.'); return; }
-    // Marque automatiquement comme contacté
-    await this._api('update_creator', { id, fields: { status: 'contacted', last_contact_at: new Date().toISOString() } });
+    if (!emails[0]) { Toast.warn('Pas d’email pour ce prospect.'); return; }
+    // NB : on ne marque PLUS « Contacté » ici. Ouvrir le composeur n'est
+    // pas un envoi — le statut se met à jour quand un mail part vraiment.
     // Utilise le composer Mails si dispo, sinon mailto:
     if (typeof Mails !== 'undefined' && Mails._openComposer) {
       App.show('mails');
@@ -1747,7 +2148,7 @@ const Obelisk = {
     const c = document.getElementById('ob-content');
     // Charge la config user pour pré-remplir la liste de plateformes par défaut
     if (!this.state.config) {
-      const r = await this._api('get_config');
+      const r = await this._api('get_config', null, { silent: true });
       if (r && r.ok) this.state.config = r.config;
     }
     const cfg = this.state.config || {};
@@ -1763,8 +2164,8 @@ const Obelisk = {
       ? 'Nouvelle recherche — Pros & entreprises'
       : 'Nouvelle recherche — Créateurs & influenceurs';
     const headIntro = isPro
-      ? 'Restos, artisans, cabinets, hôtels, chercheurs, labos… Obelisk balaie les annuaires publics, récupère les emails et stocke tout dans ton CRM.'
-      : 'Audience, abonnés, codes promo, partenariats. Obelisk balaie les plateformes activées (YouTube, LinkedIn, Instagram, TikTok…), enrichit les profils et stocke tout dans ton CRM.';
+      ? 'Restos, artisans, cabinets, hôtels, chercheurs, labos… Obélisk balaie les annuaires publics, récupère les emails et range tout dans ta base de prospects.'
+      : 'Audience, abonnés, codes promo, partenariats. Obélisk balaie les plateformes cochées (YouTube, LinkedIn, Instagram, TikTok…), complète les fiches et range tout dans ta base de prospects.';
     const nichePlaceholder = isPro
       ? 'ex : restaurant, plombier, ostéopathe, avocat, laboratoire santé'
       : 'ex : entrepreneur, coaching, growth, formation';
@@ -1789,7 +2190,7 @@ const Obelisk = {
           <label class="block mb-4">
             <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Niche(s) — séparées par virgules pour en lancer plusieurs</div>
             <input id="ob-s-niche" placeholder="${this._esc(nichePlaceholder)}" value="${this._esc(cfg.niche || '')}" style="width:100%; padding:10px 14px; border-radius:8px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 14px;">
-            <div class="text-[11px] text-text-muted mt-1">Une virgule = une recherche supplémentaire. Tout est fusionné dans un seul job, avec dédup automatique.</div>
+            <div class="text-[11px] text-text-muted mt-1">Une virgule = une recherche en plus. Tous les résultats arrivent ensemble, et les doublons sont fusionnés automatiquement.</div>
           </label>
 
           ${isPro ? `
@@ -1807,6 +2208,7 @@ const Obelisk = {
                 <label class="ob-platform-chip ${defaultPlatforms.has(p.id) ? 'is-on' : ''}" ${p.tip ? `title="${this._esc(p.tip)}"` : ''}>
                   <input type="checkbox" data-ob-plat="${p.id}" data-ob-aud="${aud}" ${defaultPlatforms.has(p.id) ? 'checked' : ''} style="margin: 0;">
                   ${this._esc(p.label)}
+                  ${p.tip ? `<span class="ob-platform-tip">${this._esc(p.tip)}</span>` : ''}
                 </label>
               `).join('')}
             </div>
@@ -1852,7 +2254,7 @@ const Obelisk = {
               <input id="ob-s-with-email" type="checkbox" ${cfg.only_with_email !== false ? 'checked' : ''}>
               <div>
                 <div class="font-semibold text-sm">Uniquement ceux avec un email</div>
-                <div class="text-[11px] text-text-muted">Si décoché, tu auras aussi les profils sans email (à enrichir à la main après).</div>
+                <div class="text-[11px] text-text-muted">Si décoché, tu auras aussi les profils sans email (à compléter à la main après).</div>
               </div>
             </label>
             <label class="ob-toggle-row">
@@ -1865,7 +2267,7 @@ const Obelisk = {
           </div>
 
           <label class="block mb-5">
-            <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Max par plateforme</div>
+            <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Max par plateforme (entre 5 et 500)</div>
             <input id="ob-s-max" type="number" min="5" max="500" value="${cfg.max_per_platform || 30}" style="width: 120px; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px;">
           </label>
 
@@ -1894,38 +2296,66 @@ const Obelisk = {
     // Restaure le brouillon de recherche en cours (saisies non lancées)
     this._applySearchDraft();
     this._bindSearchDraftPersist();
+    // Une recherche suit déjà son cours (retour d'onglet) ? On réaffiche
+    // sa progression au lieu de laisser la zone vide.
+    if (this.state.jobPoll && this.state.jobId) this._pollJob();
     this._loadRecentJobs();
   },
 
   async _loadRecentJobs() {
     const wrap = document.getElementById('ob-s-jobs');
     if (!wrap) return;
-    const res = await this._api('list_jobs', { limit: 8 });
-    const jobs = (res && res.jobs) || [];
-    if (jobs.length === 0) { wrap.innerHTML = '<div class="text-[12px] text-text-muted">Aucune recherche pour l\'instant.</div>'; return; }
+    const res = await this._api('list_jobs', { limit: 8 }, { silent: true });
+    if (!res || !res.ok) {
+      // Échec de chargement ≠ « aucune recherche » : on le dit, avec retry.
+      if (res) console.warn('[obelisk] recherches récentes en erreur :', res.error);
+      wrap.innerHTML = `<div class="text-[12px]">
+        <span class="text-danger">Impossible de charger les recherches récentes.</span>
+        <button id="ob-jobs-retry" type="button" class="underline text-text-muted" style="background:none; border:none; cursor:pointer; font-size:12px; padding:0 4px;">Réessayer</button>
+      </div>`;
+      const rb = document.getElementById('ob-jobs-retry');
+      if (rb) rb.onclick = () => this._loadRecentJobs();
+      return;
+    }
+    const jobs = res.jobs || [];
+    if (jobs.length === 0) { wrap.innerHTML = '<div class="text-[12px] text-text-muted">Aucune recherche pour l’instant.</div>'; return; }
     this._lastJobs = jobs;
     wrap.innerHTML = jobs.map(j => {
       const found = (j.stats && j.stats.found) || 0;
       const statusColor = j.status === 'done' ? 'text-success' : j.status === 'failed' ? 'text-danger' : j.status === 'running' ? 'text-warning' : 'text-text-muted';
+      const statusLabel = this.JOB_STATUS_LABELS[j.status] || j.status;
       const when = j.created_at ? new Date(j.created_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '';
-      return `<div class="ob-job-row" data-ob-job="${this._esc(j.id)}" title="Voir les créateurs trouvés par cette recherche">
+      return `<div class="ob-job-row" data-ob-job="${this._esc(j.id)}" title="Voir les prospects trouvés par cette recherche" role="button" tabindex="0">
         <div class="ob-job-row-top">
           <div class="ob-job-row-niche">${this._esc(j.niche)}</div>
           <span class="ob-job-row-arrow">›</span>
         </div>
         <div class="ob-job-row-meta">
-          <span class="${statusColor}">${this._esc(j.status)}${found ? ` · ${found} trouvés` : ''}</span>
+          <span class="${statusColor}">${this._esc(statusLabel)}${found ? ` · ${found} trouvés` : ''}</span>
           <span>${this._esc(when)}</span>
         </div>
       </div>`;
     }).join('');
     wrap.querySelectorAll('[data-ob-job]').forEach(row => {
-      row.onclick = () => {
+      const open = () => {
         const jid = row.dataset.obJob;
         const job = (this._lastJobs || []).find(x => x.id === jid);
         this._openJobResults(job || { id: jid });
       };
+      row.onclick = open;
+      row.onkeydown = (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); }
+      };
     });
+
+    // Rattachement : si une recherche tourne encore (lancée avant qu'on
+    // quitte la vue, ou depuis un autre écran), on raccroche la
+    // progression au lieu de la laisser invisible.
+    const active = jobs.find(j => j.status === 'running' || j.status === 'pending');
+    if (active && !this.state.jobPoll) {
+      this.state.jobId = active.id;
+      this._pollJob();
+    }
   },
 
   _openJobResults(job) {
@@ -1939,16 +2369,25 @@ const Obelisk = {
       found:      (job.stats && job.stats.found) || 0,
     };
     this.state.page = 0;
+    this.state.selectedIds = new Set();
+    // ⚠ Indispensable : la vue « Tous les prospects » recharge ses filtres
+    // depuis le navigateur au rendu. Sans cette sauvegarde, le filtre
+    // « cette recherche » serait écrasé et on afficherait TOUTE la base.
+    this._saveListFilters();
     App.show('prospects_crm');
   },
 
   async _launchSearch() {
     const niche = document.getElementById('ob-s-niche').value.trim();
-    const max   = parseInt(document.getElementById('ob-s-max').value, 10) || 30;
+    const maxEl = document.getElementById('ob-s-max');
+    const maxRaw = parseInt(maxEl.value, 10);
+    // Clamp côté écran : toujours entre 5 et 500 par plateforme.
+    const max = Math.min(500, Math.max(5, Number.isFinite(maxRaw) ? maxRaw : 30));
+    maxEl.value = max;
     const platforms = [];
     document.querySelectorAll('[data-ob-plat]:checked').forEach(cb => platforms.push(cb.dataset.obPlat));
-    if (!niche)             { alert('Renseigne une niche.'); return; }
-    if (!platforms.length)  { alert('Coche au moins une plateforme.'); return; }
+    if (!niche)             { Toast.warn('Renseigne une niche avant de lancer.'); return; }
+    if (!platforms.length)  { Toast.warn('Coche au moins une plateforme.'); return; }
 
     // Filtres avancés — certains n'existent qu'en mode "créateur"
     const monetEl = document.querySelector('input[name="ob-monet"]:checked');
@@ -1980,18 +2419,23 @@ const Obelisk = {
       niche, platforms, max_per_platform: max, filters,
     });
     btn.disabled = false; btn.textContent = 'Lancer la recherche';
-    if (!res || !res.ok) { alert('Échec : ' + (res && res.error || 'inconnu')); return; }
+    if (!res || !res.ok) {
+      if (res) Toast.friendlyError(res.error, 'La recherche n’a pas pu démarrer.');
+      return;
+    }
+    Toast.success('Recherche lancée — tu peux quitter cet écran, elle continue côté serveur.');
     this.state.jobId = res.job_id;
     this._pollJob();
   },
 
   _pollJob() {
-    if (this.state.jobPoll) clearInterval(this.state.jobPoll);
+    if (this.state.jobPoll) { clearInterval(this.state.jobPoll); this.state.jobPoll = null; }
     const wrap = document.getElementById('ob-s-progress');
     if (wrap) wrap.innerHTML = `<div class="text-[11px] uppercase font-bold tracking-widest text-text-muted mb-2">En cours…</div><pre class="ob-progress" id="ob-progress-pre">(démarrage)</pre>`;
 
     const tick = async () => {
-      const r = await this._api('get_job', { job_id: this.state.jobId });
+      // Erreur passagère (réseau…) → silencieux, on retentera au tick suivant
+      const r = await this._api('get_job', { job_id: this.state.jobId }, { silent: true });
       if (!r || !r.ok) return;
       const job = r.job;
       const pre = document.getElementById('ob-progress-pre');
@@ -2011,15 +2455,24 @@ const Obelisk = {
           wrap2.insertAdjacentHTML('beforeend', `
             <div class="mt-3 p-3 rounded-lg ${job.status === 'done' ? 'bg-success/10 text-success border border-success/30' : 'bg-danger/10 text-danger border border-danger/30'}">
               ${job.status === 'done'
-                ? `✓ Recherche terminée — ${stats.found || 0} trouvés, ${stats.enriched || 0} enrichis, ${stats.drafts || 0} drafts.`
-                : `✗ Échec : ${this._esc(job.error || 'erreur inconnue')}`}
+                ? `✓ Recherche terminée — ${stats.found || 0} trouvés, ${stats.enriched || 0} fiches complétées, ${stats.drafts || 0} brouillons préparés.`
+                : `✗ La recherche a échoué — aucun prospect n’a été ajouté.`}
             </div>
+            ${job.status === 'failed' && job.error ? `
+              <details class="mt-2 text-[11px] text-text-muted">
+                <summary class="cursor-pointer underline">Détail technique</summary>
+                <pre class="ob-progress mt-1">${this._esc(job.error)}</pre>
+              </details>` : ''}
           `);
         }
       }
     };
     tick();
-    this.state.jobPoll = setInterval(tick, 2500);
+    // Minuteur lié à la vue : nettoyé automatiquement quand on change
+    // d'écran (avant, il tournait pour toujours). Au retour sur l'écran,
+    // _loadRecentJobs raccroche la progression si la recherche tourne encore.
+    this.state.jobPoll = App.viewInterval(tick, 2500);
+    App.onViewCleanup(() => { this.state.jobPoll = null; });
   },
 
   // -------------------------------------------------------------------
@@ -2027,24 +2480,24 @@ const Obelisk = {
   // -------------------------------------------------------------------
   async _renderSettings() {
     const c = document.getElementById('ob-content');
-    const r = await this._api('get_config');
+    const r = await this._api('get_config', null, { silent: true });
     const cfg = (r && r.ok && r.config) || {};
     this.state.config = cfg;
     c.innerHTML = `
       <div class="bg-card border border-border rounded-xl p-6 max-w-3xl">
-        <h3 class="text-lg font-bold mb-1">Réglages Obelisk</h3>
-        <p class="text-sm text-text-muted mb-6">Clés API par plateforme, préférences IA, catalogue d'offres injecté dans les mails générés.</p>
+        <h3 class="text-lg font-bold mb-1">Réglages Obélisk</h3>
+        <p class="text-sm text-text-muted mb-6">Clés d’accès par plateforme, préférences IA, et catalogue d’offres utilisé dans les mails générés.</p>
 
         <div class="space-y-4">
           ${this._settingField('niche',              'Niche par défaut',        cfg.niche || '',         'text')}
-          ${this._settingField('youtube_api_key',    'YouTube Data API v3 — clé', cfg.youtube_api_key || '', 'password')}
-          ${this._settingField('twitch_client_id',   'Twitch — Client ID',      cfg.twitch_client_id || '', 'text')}
-          ${this._settingField('twitch_client_secret','Twitch — Client Secret', cfg.twitch_client_secret || '', 'password')}
-          ${this._settingField('github_token',       'GitHub — Personal Token (optionnel)', cfg.github_token || '', 'password')}
-          ${this._settingField('ai_provider',        'IA — fournisseur',        cfg.ai_provider || 'google', 'text')}
-          ${this._settingField('ai_model',           'IA — modèle',             cfg.ai_model || 'gemini-2.5-flash', 'text')}
-          ${this._settingField('product_override',   'Forcer un produit pour cette session (laisser vide pour laisser l\'IA choisir)', cfg.product_override || '', 'text')}
-          ${this._settingTextarea('catalog',         'Catalogue d\'offres (multi-lignes — injecté dans le contexte IA)', cfg.catalog || '')}
+          ${this._settingField('youtube_api_key',    'Clé YouTube (fournie par Google, sert à chercher des chaînes)', cfg.youtube_api_key || '', 'password')}
+          ${this._settingField('twitch_client_id',   'Twitch — identifiant d’application', cfg.twitch_client_id || '', 'text')}
+          ${this._settingField('twitch_client_secret','Twitch — code secret d’application', cfg.twitch_client_secret || '', 'password')}
+          ${this._settingField('github_token',       'GitHub — clé d’accès (optionnelle)', cfg.github_token || '', 'password')}
+          ${this._settingField('ai_provider',        'IA — service utilisé (ex : google, deepseek, openai)', cfg.ai_provider || 'google', 'text')}
+          ${this._settingField('ai_model',           'IA — modèle (ex : gemini-2.5-flash)', cfg.ai_model || 'gemini-2.5-flash', 'text')}
+          ${this._settingField('product_override',   'Forcer un produit pour cette session (vide = l’IA choisit)', cfg.product_override || '', 'text')}
+          ${this._settingTextarea('catalog',         'Catalogue d’offres (une offre par ligne — l’IA s’en sert pour personnaliser les mails)', cfg.catalog || '')}
         </div>
 
         <div class="mt-6 pt-4 border-t border-border flex justify-end">
@@ -2077,8 +2530,11 @@ const Obelisk = {
     btn.disabled = true; btn.textContent = 'Enregistrement…';
     const res = await this._api('save_config', { config: cfg });
     btn.disabled = false; btn.textContent = 'Enregistrer les réglages';
-    if (!res || !res.ok) { alert('Échec : ' + (res && res.error || 'inconnu')); return; }
-    this._toast('Réglages enregistrés.');
+    if (!res || !res.ok) {
+      if (res) Toast.friendlyError(res.error, 'Les réglages n’ont pas pu être enregistrés.');
+      return;
+    }
+    Toast.success('Réglages enregistrés.');
     this.state.config = cfg;
   },
 
@@ -2089,19 +2545,6 @@ const Obelisk = {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  },
-  _toast(msg) {
-    let el = document.getElementById('ob-toast');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'ob-toast';
-      el.style.cssText = 'position:fixed;bottom:20px;right:20px;background:hsl(var(--accent));color:white;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.18);z-index:9999;opacity:0;transition:opacity 180ms;';
-      document.body.appendChild(el);
-    }
-    el.textContent = msg;
-    requestAnimationFrame(() => { el.style.opacity = '1'; });
-    clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 2500);
   },
 };
 

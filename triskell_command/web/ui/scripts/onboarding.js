@@ -3,12 +3,26 @@
  * Affichée si `get_current_user().needs_onboarding == true`.
  * Demande prénom (obligatoire) + email pro (optionnel).
  * Sauve via save_user_identity() puis ferme la modale.
+ * "Plus tard" n'enregistre RIEN : la modale est juste reportée et
+ * revient au prochain jour distinct.
  *
  * App.init() appelle Onboarding.checkAndShow() au boot.
  */
 
 const Onboarding = {
   shown: false,
+  SNOOZE_KEY: 'tc-onboarding-snoozed-on',
+
+  _isSnoozedToday() {
+    try {
+      return localStorage.getItem(this.SNOOZE_KEY) === new Date().toDateString();
+    } catch (e) { return false; }
+  },
+
+  _snoozeToday() {
+    try { localStorage.setItem(this.SNOOZE_KEY, new Date().toDateString()); }
+    catch (e) {}
+  },
 
   async checkAndShow() {
     if (!App.api || this.shown) return;
@@ -20,6 +34,11 @@ const Onboarding = {
       App.currentUser = r || {};
       return;
     }
+    // "Plus tard" cliqué aujourd'hui → on n'insiste pas, on re-proposera demain
+    if (this._isSnoozedToday()) {
+      App.currentUser = r || {};
+      return;
+    }
     this._show();
   },
 
@@ -28,7 +47,7 @@ const Onboarding = {
     const overlay = document.createElement('div');
     overlay.id = 'onboarding-overlay';
     overlay.className = 'fixed inset-0 z-[200] flex items-center justify-center p-6';
-    overlay.style.background = 'rgba(15,23,42,0.65)';
+    overlay.style.background = 'hsl(var(--bg) / 0.65)';
     overlay.style.backdropFilter = 'blur(8px)';
     overlay.innerHTML = `
       <div class="bg-surface rounded-3xl shadow-hero w-full max-w-md
@@ -55,7 +74,7 @@ const Onboarding = {
             <label class="block text-xs font-medium text-text-secondary mb-1.5">
               Ton prénom (ou prénom + nom)
             </label>
-            <input type="text" id="ob-name" autofocus
+            <input type="text" id="ob-name"
                    placeholder="ex : Jordan, ou Jordan Bourillot"
                    class="w-full px-4 py-3 text-base rounded-xl bg-bg border border-border
                           focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent" />
@@ -69,7 +88,7 @@ const Onboarding = {
                    class="w-full px-4 py-3 text-base rounded-xl bg-bg border border-border
                           focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent" />
             <div class="text-[11px] text-text-muted mt-1">
-              Tu pourras compléter le reste (mot de passe, IMAP) plus tard dans Réglages.
+              Tu pourras compléter le reste (mot de passe du compte mail) plus tard dans Réglages.
             </div>
           </div>
         </div>
@@ -96,21 +115,43 @@ const Onboarding = {
     emailInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') saveBtn.click();
     });
+    // La bordure rouge s'efface dès qu'on retape
+    nameInput.addEventListener('input', () => { nameInput.style.borderColor = ''; });
+    emailInput.addEventListener('input', () => { emailInput.style.borderColor = ''; });
 
     skipBtn.onclick = () => {
-      // Pose un nom neutre pour ne pas re-prompt à chaque lancement
-      this._save('Toi', '', overlay);
+      // "Plus tard" : on n'enregistre RIEN (surtout pas un faux prénom).
+      // On mémorise juste le report et on re-proposera au prochain jour.
+      this._snoozeToday();
+      overlay.style.opacity = '0';
+      overlay.style.transition = 'opacity 200ms';
+      setTimeout(() => overlay.remove(), 220);
     };
 
     saveBtn.onclick = async () => {
       const name = nameInput.value.trim();
+      const email = emailInput.value.trim();
       if (!name) {
         nameInput.style.borderColor = 'hsl(var(--danger))';
         nameInput.focus();
         return;
       }
+      // Validation simple de l'email (un @ et un point après), s'il est rempli
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        emailInput.style.borderColor = 'hsl(var(--danger))';
+        if (window.Toast) Toast.warn('Cet email ne semble pas valide — vérifie-le (ou laisse le champ vide).');
+        emailInput.focus();
+        return;
+      }
       saveBtn.disabled = true; saveBtn.textContent = 'Enregistrement…';
-      await this._save(name, emailInput.value.trim(), overlay);
+      try {
+        await this._save(name, email, overlay);
+      } finally {
+        // Quoi qu'il arrive, le bouton redevient cliquable (si la modale
+        // est encore là) : un échec ne doit jamais coincer le 1er lancement.
+        saveBtn.disabled = false;
+        saveBtn.textContent = "C'est parti ✓";
+      }
     };
   },
 
@@ -121,7 +162,7 @@ const Onboarding = {
         full_name: fullName, email,
       });
       if (!r || !r.ok) {
-        alert('Erreur : ' + ((r && r.error) || 'inconnue'));
+        if (window.Toast) Toast.friendlyError((r && r.error) || 'save_user_identity', 'Impossible d’enregistrer ton prénom. Réessaie dans un instant.');
         return;
       }
       // Recharge l'identité côté App + rafraîchit la vue
@@ -137,7 +178,7 @@ const Onboarding = {
         if (typeof UserBadge !== 'undefined') UserBadge.refresh();
       }, 220);
     } catch (e) {
-      alert('Erreur : ' + e);
+      if (window.Toast) Toast.friendlyError(e, 'Impossible d’enregistrer ton prénom. Réessaie dans un instant.');
     }
   },
 };

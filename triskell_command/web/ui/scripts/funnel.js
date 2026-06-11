@@ -4,7 +4,9 @@ const Funnel = {
   period: '30d',
   segment: 'all',
   PERIODS: { '7d': '7 jours', '30d': '30 jours', '90d': '90 jours', 'all': 'Tout' },
-  SEGMENTS: { 'all': 'Tous', 'creators': 'Créateurs', 'b2b_local': 'B2B local' },
+  // Libellés longs pour les titres de sections (« 7 derniers jours »…)
+  PERIOD_TITLES: { '7d': '7 derniers jours', '30d': '30 derniers jours', '90d': '90 derniers jours', 'all': 'depuis le début' },
+  SEGMENTS: { 'all': 'Tous', 'creators': 'Créateurs', 'b2b_local': 'Commerces locaux' },
   STAGES: [
     { key: 'prospects',  label: 'Prospects' },
     { key: 'sent',       label: 'Envoyés' },
@@ -40,11 +42,11 @@ const Funnel = {
     if (!wrap) return;
     wrap.innerHTML = `
       <div>
-        <div class="text-[10px] font-bold tracking-widest text-text-muted mb-2">PÉRIODE</div>
+        <div class="text-[11px] font-bold tracking-widest text-text-muted mb-2">PÉRIODE</div>
         <div class="flex gap-2 flex-wrap" id="f-periods"></div>
       </div>
       <div>
-        <div class="text-[10px] font-bold tracking-widest text-text-muted mb-2">TYPE DE PROSPECT</div>
+        <div class="text-[11px] font-bold tracking-widest text-text-muted mb-2">TYPE DE PROSPECT</div>
         <div class="flex gap-2 flex-wrap" id="f-segments"></div>
       </div>
     `;
@@ -71,8 +73,9 @@ const Funnel = {
   _chipStyle(active) {
     if (active) {
       return `padding: 7px 14px; border-radius: 999px; font-size: 12.5px;
-              font-weight: 600; background: hsl(var(--accent));
-              color: white; border: 0; cursor: pointer; transition: all 160ms;`;
+              font-weight: 600; background: hsl(var(--accent-strong));
+              color: hsl(var(--on-accent)); border: 1px solid hsl(var(--accent-strong));
+              cursor: pointer; transition: all 160ms;`;
     }
     return `padding: 7px 14px; border-radius: 999px; font-size: 12.5px;
             font-weight: 500; background: transparent;
@@ -92,21 +95,43 @@ const Funnel = {
     try {
       data = await App.api.get_funnel({ period: this.period, segment: this.segment });
     } catch (e) {
-      slot.innerHTML = `<div class="card p-6 text-danger">Erreur : ${e}</div>`;
+      console.error('[Funnel] chargement', e);
+      slot.innerHTML = `
+        <div class="card p-10 text-center">
+          <div class="text-3xl mb-3">⚠️</div>
+          <h2 class="text-xl font-semibold mb-2">Impossible de charger tes conversions</h2>
+          <p class="text-text-secondary mb-6">Le serveur n'a pas répondu. Vérifie ta connexion, puis réessaie.</p>
+          <button class="btn btn-primary" onclick="Funnel.refresh()">Réessayer</button>
+        </div>
+      `;
       return;
     }
     if (!data || !data.ok) {
+      if (data && data.error) console.warn('[Funnel] connexion', data.error);
       slot.innerHTML = `
         <div class="card p-10 text-center">
           <div class="text-3xl mb-3">🔌</div>
           <h2 class="text-xl font-semibold mb-2">Connexion requise</h2>
           <p class="text-text-secondary mb-6">Connecte-toi à la base partagée Triskell.</p>
-          <button class="btn btn-primary" onclick="App.show('config')">Aller dans Réglages</button>
+          <button class="btn btn-primary" onclick="App.show('config', {tab:'account'})">Aller dans Réglages</button>
         </div>
       `;
       return;
     }
+    // Tout à zéro sur la période → on ORIENTE au lieu d'aligner des 0 muets
+    const stagesTotal = Object.values(data.stages || {}).reduce((a, b) => a + (b || 0), 0);
+    const emptyNote = stagesTotal === 0 ? `
+      <div class="card p-8 text-center text-text-muted mb-10 -mt-6">
+        <div class="text-3xl mb-3">🌱</div>
+        <p class="text-sm max-w-xl mx-auto">
+          Rien à mesurer sur cette période pour l'instant. Les chiffres apparaissent dès que
+          des prospects entrent dans la base et que des mails partent —
+          lance une prospection pour démarrer, ou élargis la période ci-dessus.
+        </p>
+      </div>
+    ` : '';
     slot.innerHTML = this._renderStages(data) +
+                     emptyNote +
                      `<div id="f-templates"></div>` +
                      this._renderBars('Types de réponses reçues', data.by_category, 'accent') +
                      this._renderBars('Où en sont tes prospects', data.by_status, 'accent-glow') +
@@ -116,12 +141,23 @@ const Funnel = {
 
   // ---- Performance par modèle de mail (chargée à part : requête lourde) ----
   async _loadTemplatePerf() {
-    const slot = document.getElementById('f-templates');
-    if (!slot || !App.api || typeof App.api.funnel_by_template !== 'function') return;
+    // (Pas de garde typeof sur App.api.funnel_by_template : App.api est un
+    // Proxy, typeof renvoie toujours "function" — la garde ne testait rien.)
+    if (!App.api || !document.getElementById('f-templates')) return;
+    // Le tableau suit le MÊME filtre de période que le reste de l'écran
+    const wantedPeriod = this.period;
     let r = null;
     try {
-      r = await App.api.funnel_by_template({ period: this.period === 'all' ? 'all' : '90d' });
-    } catch (e) { r = null; }
+      r = await App.api.funnel_by_template({ period: wantedPeriod });
+    } catch (e) {
+      console.warn('[Funnel] perf par modèle', e);
+      r = null;
+    }
+    // L'utilisateur a changé de période pendant le chargement → résultat périmé
+    if (wantedPeriod !== this.period) return;
+    // On relit le créneau APRÈS l'attente : l'écran a pu être re-rendu entre-temps
+    const slot = document.getElementById('f-templates');
+    if (!slot) return;
     if (!r || !r.ok || !(r.rows || []).length) {
       slot.innerHTML = '';
       return;
@@ -129,7 +165,7 @@ const Funnel = {
     const rows = r.rows.slice(0, 12);
     slot.innerHTML = `
       <div class="mb-10">
-        <div class="section-label">Quel modèle de mail fait répondre ? (90 derniers jours)</div>
+        <div class="section-label">Quel modèle de mail fait répondre ? (${this.PERIOD_TITLES[wantedPeriod] || wantedPeriod})</div>
         <div class="card p-0 overflow-hidden">
           <table class="w-full text-sm">
             <thead class="bg-bg">
@@ -147,8 +183,8 @@ const Funnel = {
                   <td class="px-4 py-2.5 font-medium truncate max-w-[280px]" title="${this._esc(t.template)}">${this._esc(t.template)}</td>
                   <td class="px-4 py-2.5 text-right tabular-nums">${t.sent}</td>
                   <td class="px-4 py-2.5 text-right tabular-nums">${t.replies}</td>
-                  <td class="px-4 py-2.5 text-right tabular-nums ${t.interested > 0 ? 'text-success font-semibold' : ''}">${t.interested}</td>
-                  <td class="px-4 py-2.5 text-right tabular-nums font-bold ${t.reply_rate >= 5 ? 'text-success' : ''}">${t.reply_rate}%</td>
+                  <td class="px-4 py-2.5 text-right tabular-nums ${t.interested > 0 ? 'text-success-text font-semibold' : ''}">${t.interested}</td>
+                  <td class="px-4 py-2.5 text-right tabular-nums font-bold ${t.reply_rate >= 5 ? 'text-success-text' : ''}">${t.reply_rate}%</td>
                 </tr>`).join('')}
             </tbody>
           </table>
@@ -164,7 +200,7 @@ const Funnel = {
     const stages = data.stages || {};
     let prev = null;
     return `
-      <div class="grid grid-cols-5 gap-4 mb-12">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-12">
         ${this.STAGES.map((s, i) => {
           const value = stages[s.key] || 0;
           let delta = '';
@@ -201,7 +237,7 @@ const Funnel = {
             const pct = Math.max(2, Math.round(100 * v / max));
             return `
               <div class="flex items-center gap-4">
-                <div class="w-44 text-sm text-text-secondary truncate">${this._esc(k)}</div>
+                <div class="w-28 sm:w-44 text-sm text-text-secondary truncate" title="${this._esc(k)}">${this._esc(k)}</div>
                 <div class="flex-1 h-2 rounded-full" style="background: hsl(var(--border));">
                   <div class="h-full rounded-full" style="width: ${pct}%; background: hsl(var(--${color === 'text-secondary' ? 'text-secondary' : color}));"></div>
                 </div>
@@ -228,7 +264,13 @@ const Funnel = {
       by_status: { new: 870, qualified: 180, contacted: 124, replied: 38, won: 3 },
       by_product: { 'obelisk': 84, 'pack-elec': 62, 'eliks': 41, 'studio-pdf': 24 },
     };
-    return this._renderStages(fake) +
+    const banner = `
+      <div class="card p-3 mb-6 text-center text-[12px] text-text-muted">
+        Données d'exemple — connecte l'app au serveur pour voir tes vrais chiffres.
+      </div>
+    `;
+    return banner +
+           this._renderStages(fake) +
            this._renderBars('Types de réponses reçues', fake.by_category, 'accent') +
            this._renderBars('Où en sont tes prospects', fake.by_status, 'accent-glow') +
            this._renderBars('Produits les plus mis en avant', fake.by_product, 'text-secondary');

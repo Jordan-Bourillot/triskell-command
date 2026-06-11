@@ -28,6 +28,7 @@ const Guide = {
   eventMsg: null,        // confirmation éphémère ("✓ ...")
   eventTimer: null,
   pollTimer: null,
+  _doneSeen: null,       // ids des missions terminées déjà confirmées
   collapsed: false,
   visits: 0,
   welcomed: false,
@@ -35,6 +36,7 @@ const Guide = {
   LS: {
     collapsed: 'triskell.guide.collapsed',
     visits: 'triskell.guide.visits',
+    lastDay: 'triskell.guide.lastday',
     welcomed: 'triskell.guide.welcomed',
   },
 
@@ -67,17 +69,25 @@ const Guide = {
     mails:          { here: 'Ta boîte mail intégrée.' },
     funnel:         { here: 'Tes taux de transformation, étape par étape.' },
     revenue:        { here: 'Tes encaissements, toutes sources confondues.' },
-    health:         { here: 'L’état de tes 11 robots et de tes envois.' },
+    health:         { here: 'L’état de tes robots et de tes envois.' },
     catalogue:      { here: 'Ton catalogue de produits et d’offres.' },
     mail_templates: { here: 'Tes modèles de mails — l’app les remplit, ne les réécrit pas.' },
     config:         { here: 'Les réglages (comptes mail, clés, automatismes).' },
     clients:        { here: 'Tes projets clients en cours.' },
     clients_master: { here: 'Ton fichier clients (ceux qui ont déjà acheté).' },
-    pixelpros:      { here: 'Le pipeline des sites Pixel Pros.' },
+    pixelpros:      { here: 'La chaîne de fabrication des sites Pixel Pros.' },
     phare:          { here: 'Le suivi SEO de tes sites.' },
-    geo:            { here: 'Ton agence GEO (visibilité locale).' },
+    geo:            { here: 'Le GEO : faire citer tes sites par les IA (ChatGPT, Perplexity…).' },
     brain:          { here: 'Ta boîte à idées partagée avec Thomas.' },
     tutorial:       { here: 'La visite guidée complète.' },
+    wow:            { here: 'Le suivi des demandes de sites Studio WoW, étape par étape.' },
+    rankus:         { here: 'Le suivi des demandes SEO RankUs, étape par étape.' },
+    lagriffe:       { here: 'Le suivi des demandes de sites Lagriffe, étape par étape.' },
+    eliks:          { here: 'Eliks Studio — notre service de croissance sur les réseaux.' },
+    delivery:       { here: 'Les kits envoyés automatiquement aux clients à la livraison.' },
+    abtest:         { here: 'Tes tests A/B : deux versions d’un mail, la meilleure gagne.' },
+    'pixelpros-affiliates': { here: 'Tes affiliés Pixel Pros et leurs commissions.' },
+    prospect_timeline: { here: 'Toute l’histoire de ce prospect, dans l’ordre.' },
   },
 
   // ---------- init ----------
@@ -86,10 +96,18 @@ const Guide = {
     this._inited = true;
     try {
       this.collapsed = localStorage.getItem(this.LS.collapsed) === '1';
-      this.visits = parseInt(localStorage.getItem(this.LS.visits) || '0', 10) + 1;
-      localStorage.setItem(this.LS.visits, String(this.visits));
+      // Le niveau d'accompagnement compte des JOURS de visite distincts,
+      // pas des rechargements de page (avant : 5 F5 = « habitué »).
+      const today = new Date().toISOString().slice(0, 10);
+      let visits = parseInt(localStorage.getItem(this.LS.visits) || '0', 10) || 0;
+      if (localStorage.getItem(this.LS.lastDay) !== today) {
+        visits += 1;
+        localStorage.setItem(this.LS.visits, String(visits));
+        localStorage.setItem(this.LS.lastDay, today);
+      }
+      this.visits = visits;
       this.welcomed = localStorage.getItem(this.LS.welcomed) === '1';
-    } catch (e) { /* stockage indisponible : mode sans mémoire */ }
+    } catch (e) { this.visits = 1; /* stockage indisponible : mode sans mémoire */ }
 
     this._injectStyles();
     this._mount();
@@ -151,21 +169,49 @@ const Guide = {
   },
 
   _detectEvent(prev, cur) {
-    if (!prev || !cur) return null;
-    const d = (k) => (cur[k] == null || prev[k] == null) ? 0 : cur[k] - prev[k];
-    // Une chasse vient de se terminer
-    const prevActive = (prev.missions || []).filter(m => m.status === 'hunting' || m.status === 'handing');
-    for (const pm of prevActive) {
-      const now = (cur.missions || []).find(m => m.id === pm.id);
-      if (now && now.status === 'handed') {
-        const c = now.counts || {};
-        return `✓ Chasse terminée — ${c.pushed || c.found || 0} prospect(s) versés dans ta base.`;
+    if (!cur) return null;
+    // Fins de chasse : le serveur renvoie les missions terminées des
+    // 2 dernières heures (recent_done) — fiable même si une 2e chasse
+    // tourne encore. Au premier instantané on NOTE sans annoncer (vieilles
+    // fins). Si le champ n'existe pas (vieux serveur), repli défensif sur
+    // la comparaison d'instantanés.
+    if (Array.isArray(cur.recent_done)) {
+      if (!this._doneSeen) {
+        this._doneSeen = new Set(
+          cur.recent_done.map(m => m && m.id).filter(Boolean));
+      } else {
+        for (const m of cur.recent_done) {
+          if (!m || !m.id || this._doneSeen.has(m.id)) continue;
+          this._doneSeen.add(m.id);
+          if (m.status === 'error') {
+            return `⚠ Une prospection s’est arrêtée en erreur — détails sur l’écran Prospection.`;
+          }
+          if (m.status === 'handed') {
+            return (typeof m.pushed === 'number')
+              ? `✓ Chasse terminée — ${m.pushed} prospect(s) versés dans ta base.`
+              : '✓ Chasse terminée — les prospects sont dans ta base.';
+          }
+          // Statut inconnu ou abandon volontaire → pas de fausse fanfare.
+        }
       }
-      if (now && now.status === 'error') {
-        return `⚠ Une prospection s’est arrêtée en erreur — détails sur l’écran Prospection.`;
+    } else if (prev) {
+      const prevActive = (prev.missions || []).filter(m => m.status === 'hunting' || m.status === 'handing');
+      for (const pm of prevActive) {
+        const now = (cur.missions || []).find(m => m.id === pm.id);
+        if (now && now.status === 'handed') {
+          const c = now.counts || {};
+          return `✓ Chasse terminée — ${c.pushed || c.found || 0} prospect(s) versés dans ta base.`;
+        }
+        if (now && now.status === 'error') {
+          return `⚠ Une prospection s’est arrêtée en erreur — détails sur l’écran Prospection.`;
+        }
       }
     }
-    if (d('drafts_pending') < 0) return '✓ Brouillon traité — le mail est parti.';
+    if (!prev) return null;
+    const d = (k) => (cur[k] == null || prev[k] == null) ? 0 : cur[k] - prev[k];
+    // La baisse du compteur peut venir d'un envoi COMME d'un rejet → on
+    // confirme le traitement, pas l'envoi.
+    if (d('drafts_pending') < 0) return '✓ Brouillon traité.';
     if (d('replies_unhandled') < 0) return '✓ Réponse traitée. Au suivant !';
     if (d('prospects_total') > 0) return `✓ ${d('prospects_total')} prospect(s) de plus dans ta base.`;
     if (!prev.autopilot_enabled && cur.autopilot_enabled) {
@@ -177,11 +223,21 @@ const Guide = {
     return null;
   },
 
+  // La base partagée est injoignable quand le serveur renvoie « je ne sais
+  // pas » (null) sur TOUS les compteurs. Dans ce cas on ne recommande rien :
+  // conseiller « lance une prospection » sur des chiffres absents serait faux.
+  _dbDown() {
+    const s = this.snap;
+    return !!s && s.prospects_total == null && s.drafts_pending == null
+        && s.replies_unhandled == null;
+  },
+
   // ---------- LA recommandation : une seule, calculée, jamais générique ----------
   // Renvoie {label, view, why} — ou null (= rien d'urgent, statut suffit).
   _recommend() {
     const s = this.snap;
     if (!s) return null;
+    if (this._dbDown()) return null;
     const w = s.workers || {};
     if ((w.error || 0) > 0) {
       return { label: 'Voir Santé', view: 'health',
@@ -209,7 +265,8 @@ const Guide = {
       return { label: 'Jeter un œil à Santé', view: 'health',
                why: `${w.warning} robot(s) à surveiller`, soft: true };
     }
-    if ((s.prospects_new || 0) === 0) {
+    // Strict : si le compteur est inconnu (null), on ne conclut rien.
+    if (s.prospects_new === 0) {
       return { label: 'Lancer une prospection', view: 'prospection',
                why: 'la machine est prête, il ne manque que des cibles' };
     }
@@ -226,7 +283,17 @@ const Guide = {
     // latérale, quelle que soit la taille d'écran ou son repli.
     this._position();
     window.addEventListener('resize', () => this._position());
-    setInterval(() => this._position(), 2000); // suit le repli de la sidebar
+    // Suit le repli de la sidebar SANS minuteur permanent : on observe la
+    // taille de la zone de contenu (composant global, jamais démonté →
+    // l'observateur vit aussi longtemps que la page).
+    const content = document.getElementById('content');
+    if (typeof ResizeObserver !== 'undefined' && content) {
+      this._resizeObs = new ResizeObserver(() => this._position());
+      this._resizeObs.observe(content);
+    } else {
+      // Très vieux navigateur : repli sur l'ancien minuteur.
+      setInterval(() => this._position(), 2000);
+    }
   },
 
   _position() {
@@ -260,10 +327,12 @@ const Guide = {
     const rec = this._recommend();
     const lvl = this.level();
 
-    // Zone du milieu : confirmation éphémère > statut de l'écran
+    // Zone du milieu : confirmation éphémère > base injoignable > statut
     let mid;
     if (this.eventMsg) {
       mid = `<span class="guide-event">${this._esc(this.eventMsg)}</span>`;
+    } else if (this._dbDown()) {
+      mid = `<span class="guide-status">Connexion à la base impossible — les chiffres reviennent dès qu’elle répond.</span>`;
     } else if (rec && rec.view === this.view && vt.inview) {
       mid = `<span class="guide-status">${this._esc(vt.inview)}</span>`;
     } else {
@@ -339,8 +408,13 @@ const Guide = {
     const overlayOpen = [...document.querySelectorAll('.fixed.inset-0')]
       .some(o => !o.classList.contains('hidden')
               && getComputedStyle(o).display !== 'none');
-    if (overlayOpen && tries < 60) {
-      return setTimeout(() => this._welcomeWhenClear(tries + 1), 2000);
+    if (overlayOpen) {
+      if (tries < 60) {
+        return setTimeout(() => this._welcomeWhenClear(tries + 1), 2000);
+      }
+      // ~2 min d'attente : on n'impose RIEN par-dessus une fenêtre ouverte.
+      // La carte retentera sa chance à la prochaine session.
+      return;
     }
     if (this.welcomed) return;
     const el = document.getElementById('guide-bar');
@@ -373,7 +447,11 @@ const Guide = {
     };
     card.querySelector('#guide-w-tour').onclick = () => {
       close();
-      if (typeof Tutorial !== 'undefined' && Tutorial.open) Tutorial.open();
+      if (typeof Tutorial !== 'undefined' && Tutorial.open) {
+        Tutorial.open();
+      } else if (typeof Toast !== 'undefined') {
+        Toast.info('La visite guidée n’est pas disponible pour le moment — je te guide en direct depuis cette barre.');
+      }
     };
   },
 
@@ -410,7 +488,7 @@ const Guide = {
       }
       .guide-event { color: hsl(var(--success)); font-weight: 600;
                      animation: guideFade .3s ease-out; }
-      .guide-why { color: hsl(var(--text-muted)); font-size: 11.5px; flex-shrink: 0; }
+      .guide-why { color: hsl(var(--text-muted)); font-size: 12px; flex-shrink: 0; }
       .guide-chip {
         flex-shrink: 0; border: 0; cursor: pointer;
         background: hsl(var(--accent)); color: #fff;
@@ -442,7 +520,7 @@ const Guide = {
       }
       .guide-tipline {
         margin-top: 6px; text-align: center;
-        font-size: 11.5px; color: hsl(var(--text-muted));
+        font-size: 12px; color: hsl(var(--text-muted));
         background: hsl(var(--surface) / .85); backdrop-filter: blur(8px);
         border: 1px dashed hsl(var(--border));
         border-radius: 999px; padding: 5px 14px;

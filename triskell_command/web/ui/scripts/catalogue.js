@@ -178,6 +178,8 @@ const Catalogue = {
     let bundles = [];
     let disabledIds = new Set();
     let usedFull = false;
+    let loadedOk = false;
+    this._loadError = false;
     // 1. Essai sur le nouveau endpoint (produits + bundles editables)
     if (App && App.api && typeof App.api.catalog_get_full === 'function') {
       try {
@@ -187,6 +189,7 @@ const Catalogue = {
           bundles  = data.bundles  || [];
           disabledIds = new Set(data.disabled_ids || []);
           usedFull = true;
+          loadedOk = true;
         }
       } catch (e) { console.warn('catalogue: catalog_get_full failed', e); }
     }
@@ -197,9 +200,13 @@ const Catalogue = {
         if (data && data.ok) {
           products = [...(this.SITES || []), ...(data.apps || [])];
           disabledIds = new Set(data.disabled_ids || []);
+          loadedOk = true;
         }
       } catch (e) { console.warn('catalogue: get_apps_catalog failed', e); }
     }
+    // Double échec : on le signale (la vue affiche un état d'erreur avec
+    // un bouton Réessayer au lieu d'une grille vide trompeuse).
+    if (!loadedOk) this._loadError = true;
     // Normalise les produits pour garantir les champs utilises par la vue
     products = products.map(a => ({
       ...a,
@@ -240,21 +247,24 @@ const Catalogue = {
       else this._disabledIds.add(productId);
     }
     this._renderGrid();
+    const rollback = () => {
+      if (it) it.is_active = !makeActive;
+      if (this._disabledIds) {
+        if (makeActive) this._disabledIds.add(productId);
+        else this._disabledIds.delete(productId);
+      }
+      this._renderGrid();
+    };
     try {
       const r = await App.api.catalog_set_active({ id: productId, active: makeActive });
       if (!r || !r.ok) {
-        // Rollback en cas d'erreur
-        if (it) it.is_active = !makeActive;
-        if (this._disabledIds) {
-          if (makeActive) this._disabledIds.add(productId);
-          else this._disabledIds.delete(productId);
-        }
-        this._renderGrid();
+        rollback();
+        Toast.error(this._errFr(r && r.error, 'Changement impossible pour le moment, réessaie.'));
       }
     } catch (e) {
       console.warn('catalog_set_active failed', e);
-      if (it) it.is_active = !makeActive;
-      this._renderGrid();
+      rollback();
+      Toast.friendlyError(e, 'Changement impossible pour le moment, réessaie.');
     }
   },
 
@@ -280,6 +290,26 @@ const Catalogue = {
     const grid    = document.getElementById('catalogue-grid');
     if (loading) loading.classList.add('hidden');
     if (grid)    grid.classList.remove('hidden');
+    if (this._loadError) {
+      // État d'erreur clair + bouton Réessayer (au lieu d'une grille vide)
+      if (grid) {
+        grid.innerHTML = `
+          <div class="card p-10 text-center">
+            <div class="text-3xl mb-3">📡</div>
+            <p class="text-text font-semibold mb-1">Impossible de charger le catalogue.</p>
+            <p class="text-text-muted text-sm mb-4">Vérifie ta connexion, puis réessaie.</p>
+            <button id="catalogue-retry" class="btn btn-primary">Réessayer</button>
+          </div>`;
+        const retry = document.getElementById('catalogue-retry');
+        if (retry) retry.onclick = () => {
+          this._items = null;
+          this._loadPromise = null;
+          this._loadError = false;
+          this.render(this._root);
+        };
+      }
+      return;
+    }
     this._renderGrid();
   },
 
@@ -313,24 +343,46 @@ const Catalogue = {
       (groups[cat] = groups[cat] || []).push(it);
     });
 
-    const sections = this.CATEGORY_ORDER.map(cat => {
-      const list = groups[cat];
-      if (!list || !list.length) return '';
-      const label = this.CATEGORY_LABELS[cat] || cat;
-      return `
+    const sectionHtml = (cat, label, list, withAddBtn) => `
         <div class="mb-10">
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-[11px] tracking-widest font-bold text-text-muted">${this._esc(label.toUpperCase())}</h2>
-            <button data-add-in-cat="${this._esc(cat)}"
+            ${withAddBtn ? `<button data-add-in-cat="${this._esc(cat)}"
                     class="btn btn-secondary text-xs"
-                    style="padding:6px 12px;">+ Ajouter un produit</button>
+                    style="padding:6px 12px;">+ Ajouter un produit</button>` : ''}
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             ${list.map(it => this._tile(it)).join('')}
           </div>
         </div>
       `;
+
+    let sections = this.CATEGORY_ORDER.map(cat => {
+      const list = groups[cat];
+      if (!list || !list.length) return '';
+      return sectionHtml(cat, this.CATEGORY_LABELS[cat] || cat, list, true);
     }).join('');
+
+    // Catégories inconnues : regroupées dans une section « Autres »
+    // (avant, ces produits étaient tout simplement invisibles).
+    const leftovers = Object.keys(groups)
+      .filter(cat => !this.CATEGORY_ORDER.includes(cat))
+      .flatMap(cat => groups[cat]);
+    if (leftovers.length) {
+      sections += sectionHtml('', 'Autres', leftovers, false);
+    }
+
+    // Catalogue chargé mais vraiment vide : message + bouton d'ajout
+    // (sinon aucun bouton « + Ajouter un produit » n'apparaît nulle part).
+    if (!(this._items || []).length) {
+      sections = `
+        <div class="card p-10 text-center">
+          <div class="text-3xl mb-3">🗂️</div>
+          <p class="text-text font-semibold mb-1">Aucun produit dans le catalogue.</p>
+          <p class="text-text-muted text-sm mb-4">Ajoute ton premier produit pour qu'il apparaisse dans tes mails et ta prospection.</p>
+          <button data-add-in-cat="pro" class="btn btn-primary">+ Ajouter un produit</button>
+        </div>`;
+    }
 
     grid.innerHTML = bundlesHtml + sections;
 
@@ -363,8 +415,8 @@ const Catalogue = {
               style="background:${this._esc(b.color || '#6366F1')};">${this._esc((b.name || 'P')[0])}</div>`;
     const countTxt = (b.product_ids || []).length + ' produit' + ((b.product_ids || []).length > 1 ? 's' : '');
     const priceBadge = b.price != null
-      ? `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-accent/15 text-accent">${b.price} €</span>`
-      : `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-warning/15 text-warning" style="background:rgba(217,119,6,0.15);color:#92400e;">PACK</span>`;
+      ? `<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-accent/15 text-accent">${b.price} €</span>`
+      : `<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-warning/15 text-warning-text">PACK</span>`;
     const isActive = b.is_active !== false;
     return `
       <div style="position:relative;${isActive ? '' : 'opacity:0.45;'}">
@@ -380,17 +432,19 @@ const Catalogue = {
                 <div class="font-semibold text-[15px] leading-tight">${this._esc(b.name || '')}</div>
                 ${priceBadge}
               </div>
-              <div class="text-[10px] text-text-muted">${countTxt}</div>
+              <div class="text-[11px] text-text-muted">${countTxt}</div>
             </div>
           </div>
           <p class="text-xs text-text-secondary line-clamp-2 leading-snug">${this._esc(b.tagline || '')}</p>
         </button>
         <button data-toggle-id="${this._esc(b.id)}"
                 data-toggle-active="${isActive ? '1' : '0'}"
+                aria-pressed="${isActive ? 'true' : 'false'}"
+                aria-label="${isActive ? 'Désactiver ce pack' : 'Activer ce pack'}"
                 title="${isActive ? 'Désactiver ce pack' : 'Activer ce pack'}"
                 style="position:absolute;top:10px;right:10px;width:36px;height:20px;border-radius:999px;border:none;cursor:pointer;
-                       background:${isActive ? '#10b981' : '#9ca3af'};transition:background 0.15s ease;padding:0;">
-          <span style="position:absolute;top:2px;left:${isActive ? '18px' : '2px'};width:16px;height:16px;border-radius:999px;background:#fff;transition:left 0.15s ease;box-shadow:0 1px 2px rgba(0,0,0,0.25);"></span>
+                       background:${isActive ? 'hsl(var(--success))' : 'hsl(var(--text-muted))'};transition:background 0.15s ease;padding:0;">
+          <span style="position:absolute;top:2px;left:${isActive ? '18px' : '2px'};width:16px;height:16px;border-radius:999px;background:hsl(var(--surface-elevated));transition:left 0.15s ease;box-shadow:0 1px 2px rgba(0,0,0,0.25);"></span>
         </button>
       </div>
     `;
@@ -405,28 +459,32 @@ const Catalogue = {
               style="background: ${this._esc(it.color || '#6366F1')};">${this._esc(it.initial || (it.name || '?')[0])}</div>`;
 
     const badge = it.coming_soon
-      ? `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-text-muted/15 text-text-muted">Bientôt</span>`
-      : (it.price != null
-          ? `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-accent/15 text-accent">${it.price} €</span>`
-          : (it.price_from
-              ? `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-accent/15 text-accent">${this._esc(String(it.price_from))}</span>`
-              : (it.kind === 'service'
-                  ? `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-success/15 text-success">Service</span>`
-                  : '')));
+      ? `<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-text-muted/15 text-text-muted">Bientôt</span>`
+      : (it.kind === 'demo'
+          ? `<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-info/15 text-info" title="Exemple à montrer dans les mails, pas un produit à vendre">Démo</span>`
+          : (it.price != null
+              ? `<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-accent/15 text-accent">${it.price} €</span>`
+              : (it.price_from
+                  ? `<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-accent/15 text-accent">${this._esc(String(it.price_from))}</span>`
+                  : (it.kind === 'service'
+                      ? `<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-success/15 text-success">Service</span>`
+                      : ''))));
 
     const isActive = it.is_active !== false;
     const toggleOn = isActive ? 'on' : 'off';
     const toggle = `
       <button data-toggle-id="${this._esc(it.id)}"
               data-toggle-active="${isActive ? '1' : '0'}"
+              aria-pressed="${isActive ? 'true' : 'false'}"
+              aria-label="${isActive ? 'Désactiver ce produit' : 'Activer ce produit'}"
               title="${isActive ? 'Cliquer pour désactiver' : 'Cliquer pour activer'} — un produit désactivé n'apparaît plus dans les mails ni dans la prospection IA"
               class="catalog-toggle catalog-toggle-${toggleOn}"
               style="position:absolute;top:10px;right:10px;width:36px;height:20px;border-radius:999px;border:none;cursor:pointer;
-                     background:${isActive ? '#10b981' : '#9ca3af'};
+                     background:${isActive ? 'hsl(var(--success))' : 'hsl(var(--text-muted))'};
                      transition:background 0.15s ease;
                      padding:0;">
         <span style="position:absolute;top:2px;left:${isActive ? '18px' : '2px'};
-                     width:16px;height:16px;border-radius:999px;background:#fff;
+                     width:16px;height:16px;border-radius:999px;background:hsl(var(--surface-elevated));
                      transition:left 0.15s ease;
                      box-shadow:0 1px 2px rgba(0,0,0,0.25);"></span>
       </button>
@@ -511,10 +569,13 @@ const Catalogue = {
             ${visual}
             <div class="flex-1 min-w-0">
               <div class="hero-kicker mb-1">${this._esc((this.CATEGORY_LABELS[it.category] || '').toUpperCase())}</div>
-              <h2 class="text-2xl font-bold leading-tight mb-1">${this._esc(it.name || '')}</h2>
+              <h2 class="text-2xl font-bold leading-tight mb-1 flex items-center gap-2 flex-wrap">
+                <span>${this._esc(it.name || '')}</span>
+                ${it.kind === 'demo' ? `<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-info/15 text-info align-middle" title="Exemple à montrer dans les mails, pas un produit à vendre">Démo</span>` : ''}
+              </h2>
               <p class="text-text-secondary text-sm">${this._esc(it.tagline || '')}</p>
             </div>
-            <button id="catalogue-detail-close"
+            <button id="catalogue-detail-close" aria-label="Fermer la fiche" title="Fermer"
                     class="w-9 h-9 rounded-lg flex items-center justify-center
                            text-text-muted hover:text-text hover:bg-bg
                            transition-colors text-2xl leading-none shrink-0">×</button>
@@ -531,6 +592,12 @@ const Catalogue = {
               <div>
                 <div class="text-[11px] tracking-widest font-bold text-text-muted mb-2">FONCTION</div>
                 <p class="text-text leading-relaxed whitespace-pre-line">${this._esc(it.description)}</p>
+              </div>` : ''}
+
+            ${it.sales_pitch ? `
+              <div>
+                <div class="text-[11px] tracking-widest font-bold text-text-muted mb-2">ARGUMENTAIRE POUR LES MAILS DE PROSPECTION</div>
+                <p class="text-text text-sm leading-relaxed whitespace-pre-line">${this._esc(it.sales_pitch)}</p>
               </div>` : ''}
 
             ${features ? `
@@ -562,10 +629,11 @@ const Catalogue = {
           <div class="px-7 py-4 border-t border-border bg-surface-elevated flex items-center justify-between flex-wrap gap-2 sticky bottom-0">
             <div class="flex gap-2">
               <button id="catalogue-detail-edit" class="btn btn-secondary">✎ Modifier</button>
-              ${!it.is_builtin ? `<button id="catalogue-detail-delete" class="btn btn-secondary" style="color:#dc2626;">Supprimer</button>` : ''}
+              ${!it.is_builtin ? `<button id="catalogue-detail-delete" class="btn btn-secondary text-danger">Supprimer</button>` : ''}
             </div>
             <div class="flex gap-2">
-              <button id="catalogue-detail-copy" class="btn btn-secondary">Copier le pitch</button>
+              <button id="catalogue-detail-copy" class="btn btn-secondary"
+                      title="Copie le nom, la phrase d’accroche et le lien — prêt à coller dans un mail">Copier la présentation</button>
               ${url ? `<button id="catalogue-detail-open" class="btn btn-primary">Ouvrir le site</button>` : ''}
             </div>
           </div>
@@ -585,6 +653,7 @@ const Catalogue = {
     });
     ov.addEventListener('click', (e) => { if (e.target === ov) this._closeDetail(); });
     document.getElementById('catalogue-detail-close').onclick = () => this._closeDetail();
+    this._bindDetailEsc(); // fiche fermable par Échap
     const openBtn = document.getElementById('catalogue-detail-open');
     if (openBtn) {
       openBtn.onclick = async () => {
@@ -598,24 +667,36 @@ const Catalogue = {
       try {
         await navigator.clipboard.writeText(this.snippetText(it));
         const btn = document.getElementById('catalogue-detail-copy');
-        if (btn) { btn.textContent = 'Copié ✓'; setTimeout(() => { btn.textContent = 'Copier le pitch'; }, 1400); }
-      } catch (e) { console.warn(e); }
+        if (btn) { btn.textContent = 'Copié ✓'; setTimeout(() => { btn.textContent = 'Copier la présentation'; }, 1400); }
+      } catch (e) {
+        console.warn(e);
+        Toast.error('Copie impossible — ton navigateur a bloqué l’accès au presse-papiers.');
+      }
     };
     const editBtn = document.getElementById('catalogue-detail-edit');
     if (editBtn) editBtn.onclick = () => this._openProductEdit(it.id, it.category || '');
     const delBtn = document.getElementById('catalogue-detail-delete');
     if (delBtn) delBtn.onclick = async () => {
-      if (!confirm(`Supprimer définitivement "${it.name}" du catalogue ?`)) return;
+      const sure = await Dialog.confirm(
+        `Supprimer définitivement « ${it.name} » du catalogue ?`,
+        { title: 'Supprimer ce produit', okLabel: 'Supprimer', danger: true });
+      if (!sure) return;
+      delBtn.disabled = true;
       try {
         const r = await App.api.catalog_delete_product({ id: it.id });
         if (r && r.ok) {
           this._items = (this._items || []).filter(x => x.id !== it.id);
           this._closeDetail();
           this._renderGrid();
+          Toast.success('Produit supprimé.');
         } else {
-          alert('Suppression impossible : ' + (r && r.error || 'erreur inconnue'));
+          delBtn.disabled = false;
+          Toast.error(this._errFr(r && r.error, 'Suppression impossible, réessaie.'));
         }
-      } catch (e) { alert('Erreur : ' + e); }
+      } catch (e) {
+        delBtn.disabled = false;
+        Toast.friendlyError(e, 'Suppression impossible, réessaie.');
+      }
     };
   },
 
@@ -628,9 +709,10 @@ const Catalogue = {
       ? { id: '', name: '', tagline: '', description: '', motto: '', sales_pitch: '',
           category: defaultCategory || 'pro', kind: 'service', price: null, price_original: null,
           price_from: '', price_note: '', buy_url: '', logo: '', color: '#6366F1',
-          initial: '', keywords: '', prospect_pitch: '' }
+          initial: '', keywords: '', prospect_pitch: '', personas: [], links: [] }
       : ((this._items || []).find(x => x.id === productId) || null);
     if (!it) return;
+    this._unbindDetailEsc(); // pas d'Échap pendant l'édition (risque de perte de saisie)
     const cats = this.CATEGORY_ORDER;
     const html = `
       <div id="catalogue-detail-overlay"
@@ -645,7 +727,7 @@ const Catalogue = {
               <div class="hero-kicker mb-1">${isNew ? 'NOUVEAU PRODUIT' : 'ÉDITION'}</div>
               <h2 class="text-2xl font-bold leading-tight">${isNew ? 'Créer un produit' : this._esc(it.name || '')}</h2>
             </div>
-            <button id="cat-edit-close"
+            <button id="cat-edit-close" aria-label="Fermer le formulaire" title="Fermer"
                     class="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg transition-colors text-2xl leading-none shrink-0">×</button>
           </div>
           <form id="cat-edit-form" class="px-7 py-6 space-y-4">
@@ -667,7 +749,7 @@ const Catalogue = {
               pour qu'il visualise ce que tu peux lui faire. L'IA inclut le lien dans le mail comme
               preuve visuelle adaptée à son métier, mais ne le vend pas comme produit.
             </p>
-            <div class="grid grid-cols-3 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               ${this._field('price', 'Prix (€)', it.price, { type: 'number', placeholder: '0' })}
               ${this._field('price_original', 'Prix barré (€)', it.price_original, { type: 'number', placeholder: 'optionnel' })}
               ${this._field('price_from', 'Texte « à partir de »', it.price_from, { placeholder: 'Ex : À partir de 49 €' })}
@@ -676,8 +758,8 @@ const Catalogue = {
             ${this._field('buy_url', 'Lien public du produit', it.buy_url, { placeholder: 'https://…' })}
             ${this._field('logo', 'URL de l’image / logo', it.logo, { placeholder: 'https://…/logo.png — laisse vide pour un avatar lettre' })}
             <div class="grid grid-cols-2 gap-3">
-              ${this._field('color', 'Couleur fallback (si pas de logo)', it.color, { type: 'color' })}
-              ${this._field('initial', 'Initiale fallback', it.initial, { maxlength: 2, placeholder: 'Ex : L' })}
+              ${this._field('color', 'Couleur si pas de logo', it.color, { type: 'color' })}
+              ${this._field('initial', 'Lettre si pas de logo', it.initial, { maxlength: 2, placeholder: 'Ex : L' })}
             </div>
             <div class="border-t border-border pt-4 mt-2">
               <div class="flex items-center justify-between mb-3">
@@ -688,10 +770,27 @@ const Catalogue = {
               <p class="text-[11px] text-text-muted mt-1">Affiché en liste à puces dans la fiche produit.</p>
             </div>
             <div class="border-t border-border pt-4 mt-2">
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-[11px] tracking-widest font-bold text-text-muted">POUR QUI (profils types)</div>
+                <button type="button" id="cat-persona-add" class="text-xs text-accent hover:underline">+ Ajouter un profil</button>
+              </div>
+              <div id="cat-persona-list" class="space-y-2"></div>
+              <p class="text-[11px] text-text-muted mt-1">Affiché en vignettes « POUR QUI » sur la fiche produit.</p>
+            </div>
+            <div class="border-t border-border pt-4 mt-2">
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-[11px] tracking-widest font-bold text-text-muted">LIENS</div>
+                <button type="button" id="cat-link-add" class="text-xs text-accent hover:underline">+ Ajouter un lien</button>
+              </div>
+              <div id="cat-link-list" class="space-y-2"></div>
+              <p class="text-[11px] text-text-muted mt-1">Affichés en bas de la fiche produit (site, page de vente, démo…).</p>
+            </div>
+            <div class="border-t border-border pt-4 mt-2">
               <div class="text-[11px] tracking-widest font-bold text-text-muted mb-3">UTILISATION PAR L'IA EN PROSPECTION</div>
               ${this._field('keywords', 'Mots-clés (séparés par virgules)', it.keywords, { placeholder: 'Ex : électricien, artisan, BTP' })}
-              ${this._fieldArea('prospect_pitch', 'Pitch court pour les mails de prospection', it.prospect_pitch, { rows: 3, placeholder: 'En 1-2 phrases : à qui s’adresse ce produit et pourquoi.' })}
-              <p class="text-[11px] text-text-muted mt-1">Ces deux champs guident l'IA quand elle écrit des mails — c'est ce qu'elle « connaît » sur ton produit.</p>
+              ${this._fieldArea('sales_pitch', 'Argumentaire pour les mails de prospection', it.sales_pitch, { rows: 3, placeholder: 'L’argument fort que l’IA peut reprendre tel quel dans un mail.' })}
+              ${this._fieldArea('prospect_pitch', 'Présentation courte pour les mails (1-2 phrases)', it.prospect_pitch, { rows: 3, placeholder: 'En 1-2 phrases : à qui s’adresse ce produit et pourquoi.' })}
+              <p class="text-[11px] text-text-muted mt-1">Ces champs guident l'IA quand elle écrit des mails — c'est ce qu'elle « connaît » sur ton produit.</p>
             </div>
           </form>
           <div class="px-7 py-4 border-t border-border bg-surface-elevated flex items-center justify-end gap-2 sticky bottom-0">
@@ -710,9 +809,23 @@ const Catalogue = {
       const card = ov && ov.querySelector('.catalogue-detail-card');
       if (card) card.style.transform = 'scale(1) translateY(0)';
     });
-    document.getElementById('cat-edit-close').onclick = () => this._closeDetail();
-    document.getElementById('cat-edit-cancel').onclick = () => this._closeDetail();
-    ov.addEventListener('click', (e) => { if (e.target === ov) this._closeDetail(); });
+    // Garde anti-perte de saisie : toute modification marque le formulaire
+    // « sale » ; un clic à côté demande alors confirmation avant de fermer.
+    let dirty = false;
+    const form0 = document.getElementById('cat-edit-form');
+    if (form0) form0.addEventListener('input', () => { dirty = true; });
+    const closeGuarded = async () => {
+      if (dirty) {
+        const sure = await Dialog.confirm(
+          'Tu as des modifications non enregistrées. Fermer sans enregistrer ?',
+          { title: 'Modifications non enregistrées', okLabel: 'Fermer sans enregistrer', cancelLabel: 'Continuer la saisie', danger: true });
+        if (!sure) return;
+      }
+      this._closeDetail();
+    };
+    document.getElementById('cat-edit-close').onclick = () => closeGuarded();
+    document.getElementById('cat-edit-cancel').onclick = () => closeGuarded();
+    ov.addEventListener('click', (e) => { if (e.target === ov) closeGuarded(); });
     // --- Editeur de liste de fonctionnalités ---
     const featList = document.getElementById('cat-feat-list');
     const escHtml = (s) => this._esc(s);
@@ -726,41 +839,101 @@ const Catalogue = {
         <input type="text" placeholder="Détail (1 phrase courte)" value="${escHtml(detail || '')}"
                class="cat-feat-detail px-3 py-2 rounded-lg border border-border bg-bg text-sm focus:outline-none focus:border-accent"
                style="flex:2 1 0; min-width:0;" />
-        <button type="button" class="cat-feat-remove px-3 py-2 text-text-muted hover:text-red-500 text-lg leading-none" title="Retirer cette ligne">×</button>
+        <button type="button" class="cat-feat-remove px-3 py-2 text-text-muted hover:text-danger text-lg leading-none" title="Retirer cette ligne" aria-label="Retirer cette ligne">×</button>
       `;
       featList.appendChild(row);
-      row.querySelector('.cat-feat-remove').onclick = () => row.remove();
+      row.querySelector('.cat-feat-remove').onclick = () => { row.remove(); dirty = true; };
     };
     (it.features || []).forEach(f => {
       if (typeof f === 'string') addFeatureRow(f, '');
       else addFeatureRow(f.title || '', f.detail || '');
     });
     if (!(it.features || []).length) addFeatureRow('', '');
-    document.getElementById('cat-feat-add').onclick = () => addFeatureRow('', '');
+    document.getElementById('cat-feat-add').onclick = () => { addFeatureRow('', ''); dirty = true; };
+    // --- Editeur de profils « POUR QUI » (personas) ---
+    const personaList = document.getElementById('cat-persona-list');
+    const addPersonaRow = (icon, name, description) => {
+      const row = document.createElement('div');
+      row.className = 'cat-persona-row flex gap-2 items-start';
+      row.innerHTML = `
+        <input type="text" placeholder="👤" value="${escHtml(icon || '')}" maxlength="4"
+               aria-label="Émoji du profil"
+               class="cat-persona-icon px-2 py-2 rounded-lg border border-border bg-bg text-sm text-center focus:outline-none focus:border-accent"
+               style="flex:0 0 52px; min-width:0;" />
+        <input type="text" placeholder="Profil (ex : Artisan)" value="${escHtml(name || '')}"
+               class="cat-persona-name px-3 py-2 rounded-lg border border-border bg-bg text-sm focus:outline-none focus:border-accent"
+               style="flex:1 1 0; min-width:0;" />
+        <input type="text" placeholder="En 1 phrase : pourquoi c’est pour lui" value="${escHtml(description || '')}"
+               class="cat-persona-desc px-3 py-2 rounded-lg border border-border bg-bg text-sm focus:outline-none focus:border-accent"
+               style="flex:2 1 0; min-width:0;" />
+        <button type="button" class="cat-persona-remove px-3 py-2 text-text-muted hover:text-danger text-lg leading-none" title="Retirer ce profil" aria-label="Retirer ce profil">×</button>
+      `;
+      personaList.appendChild(row);
+      row.querySelector('.cat-persona-remove').onclick = () => { row.remove(); dirty = true; };
+    };
+    (it.personas || []).forEach(p => addPersonaRow(p.icon || '', p.name || '', p.description || ''));
+    document.getElementById('cat-persona-add').onclick = () => { addPersonaRow('', '', ''); dirty = true; };
+    // --- Editeur de liens ---
+    const linkList = document.getElementById('cat-link-list');
+    const addLinkRow = (label, urlVal) => {
+      const row = document.createElement('div');
+      row.className = 'cat-link-row flex gap-2 items-start';
+      row.innerHTML = `
+        <input type="text" placeholder="Libellé (ex : Voir la démo)" value="${escHtml(label || '')}"
+               class="cat-link-label px-3 py-2 rounded-lg border border-border bg-bg text-sm focus:outline-none focus:border-accent"
+               style="flex:1 1 0; min-width:0;" />
+        <input type="text" placeholder="https://…" value="${escHtml(urlVal || '')}"
+               class="cat-link-url px-3 py-2 rounded-lg border border-border bg-bg text-sm focus:outline-none focus:border-accent"
+               style="flex:2 1 0; min-width:0;" />
+        <button type="button" class="cat-link-remove px-3 py-2 text-text-muted hover:text-danger text-lg leading-none" title="Retirer ce lien" aria-label="Retirer ce lien">×</button>
+      `;
+      linkList.appendChild(row);
+      row.querySelector('.cat-link-remove').onclick = () => { row.remove(); dirty = true; };
+    };
+    (it.links || []).forEach(l => addLinkRow(l.label || '', l.url || ''));
+    document.getElementById('cat-link-add').onclick = () => { addLinkRow('', ''); dirty = true; };
     document.getElementById('cat-edit-save').onclick = async () => {
       const form = document.getElementById('cat-edit-form');
       const data = {};
       form.querySelectorAll('input[name], textarea[name], select[name]').forEach(el => { data[el.name] = el.value; });
+      // Validation côté client : le nom est vraiment obligatoire
+      if (!(data.name || '').trim()) {
+        Toast.error('Il manque le nom du produit.');
+        const nameInput = form.querySelector('input[name=name]');
+        if (nameInput) nameInput.focus();
+        return;
+      }
       data.features = Array.from(form.querySelectorAll('.cat-feat-row')).map(r => ({
         title:  r.querySelector('.cat-feat-title').value.trim(),
         detail: r.querySelector('.cat-feat-detail').value.trim(),
       })).filter(f => f.title || f.detail);
+      data.personas = Array.from(form.querySelectorAll('.cat-persona-row')).map(r => ({
+        icon:        r.querySelector('.cat-persona-icon').value.trim(),
+        name:        r.querySelector('.cat-persona-name').value.trim(),
+        description: r.querySelector('.cat-persona-desc').value.trim(),
+      })).filter(p => p.name || p.description);
+      data.links = Array.from(form.querySelectorAll('.cat-link-row')).map(r => ({
+        label: r.querySelector('.cat-link-label').value.trim(),
+        url:   r.querySelector('.cat-link-url').value.trim(),
+      })).filter(l => l.url);
       if (!isNew) data.id = it.id;
       const saveBtn = document.getElementById('cat-edit-save');
       saveBtn.disabled = true; saveBtn.textContent = 'Enregistrement…';
       try {
         const r = await App.api.catalog_save_product(data);
         if (r && r.ok) {
+          dirty = false;
           this._items = null; this._loadPromise = null;
           await this.list();
           this._closeDetail();
           this._renderGrid();
+          Toast.success(isNew ? 'Produit créé.' : 'Produit enregistré.');
         } else {
-          alert('Sauvegarde impossible : ' + (r && r.error || 'erreur inconnue'));
+          Toast.error(this._errFr(r && r.error, 'Enregistrement impossible, réessaie.'));
           saveBtn.disabled = false; saveBtn.textContent = 'Enregistrer';
         }
       } catch (e) {
-        alert('Erreur : ' + e);
+        Toast.friendlyError(e, 'Enregistrement impossible, réessaie.');
         saveBtn.disabled = false; saveBtn.textContent = 'Enregistrer';
       }
     };
@@ -802,7 +975,7 @@ const Catalogue = {
               <h2 class="text-2xl font-bold leading-tight mb-1">${this._esc(b.name || '')}</h2>
               <p class="text-text-secondary text-sm">${this._esc(b.tagline || '')}</p>
             </div>
-            <button id="cat-bundle-close" class="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg transition-colors text-2xl leading-none shrink-0">×</button>
+            <button id="cat-bundle-close" aria-label="Fermer la fiche" title="Fermer" class="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg transition-colors text-2xl leading-none shrink-0">×</button>
           </div>
           <div class="px-7 py-6 space-y-6">
             ${b.description ? `<p class="text-text leading-relaxed whitespace-pre-line">${this._esc(b.description)}</p>` : ''}
@@ -813,7 +986,7 @@ const Catalogue = {
             ${priceLine ? `<div><div class="text-[11px] tracking-widest font-bold text-text-muted mb-2">TARIF</div><div class="text-sm">${priceLine}</div></div>` : ''}
           </div>
           <div class="px-7 py-4 border-t border-border bg-surface-elevated flex items-center justify-between gap-2 sticky bottom-0">
-            <button id="cat-bundle-delete" class="btn btn-secondary" style="color:#dc2626;">Supprimer</button>
+            <button id="cat-bundle-delete" class="btn btn-secondary text-danger">Supprimer</button>
             <div class="flex gap-2">
               <button id="cat-bundle-edit" class="btn btn-secondary">✎ Modifier</button>
               ${b.buy_url ? `<button id="cat-bundle-open" class="btn btn-primary">Ouvrir le lien</button>` : ''}
@@ -833,17 +1006,30 @@ const Catalogue = {
     });
     ov.addEventListener('click', (e) => { if (e.target === ov) this._closeDetail(); });
     document.getElementById('cat-bundle-close').onclick = () => this._closeDetail();
+    this._bindDetailEsc(); // fiche fermable par Échap
     document.getElementById('cat-bundle-edit').onclick = () => this._openBundleEdit(b.id);
-    document.getElementById('cat-bundle-delete').onclick = async () => {
-      if (!confirm(`Supprimer le pack "${b.name}" ?`)) return;
+    const delBundleBtn = document.getElementById('cat-bundle-delete');
+    delBundleBtn.onclick = async () => {
+      const sure = await Dialog.confirm(
+        `Supprimer le pack « ${b.name} » ?`,
+        { title: 'Supprimer ce pack', okLabel: 'Supprimer', danger: true });
+      if (!sure) return;
+      delBundleBtn.disabled = true;
       try {
         const r = await App.api.catalog_delete_bundle({ id: b.id });
         if (r && r.ok) {
           this._bundles = (this._bundles || []).filter(x => x.id !== b.id);
           this._closeDetail();
           this._renderGrid();
-        } else { alert('Suppression impossible'); }
-      } catch (e) { alert('Erreur : ' + e); }
+          Toast.success('Pack supprimé.');
+        } else {
+          delBundleBtn.disabled = false;
+          Toast.error(this._errFr(r && r.error, 'Suppression du pack impossible, réessaie.'));
+        }
+      } catch (e) {
+        delBundleBtn.disabled = false;
+        Toast.friendlyError(e, 'Suppression du pack impossible, réessaie.');
+      }
     };
     const openBtn = document.getElementById('cat-bundle-open');
     if (openBtn) openBtn.onclick = () => window.open(b.buy_url, '_blank', 'noopener,noreferrer');
@@ -859,6 +1045,7 @@ const Catalogue = {
           buy_url: '', logo: '', color: '#6366F1', product_ids: [] }
       : (this.byBundleId(bundleId) || null);
     if (!b) return;
+    this._unbindDetailEsc(); // pas d'Échap pendant l'édition (risque de perte de saisie)
     const productOptions = (this._items || []).map(p => {
       const checked = (b.product_ids || []).includes(p.id) ? 'checked' : '';
       return `
@@ -882,7 +1069,7 @@ const Catalogue = {
               <div class="hero-kicker mb-1">${isNew ? 'NOUVEAU PACK' : 'ÉDITION DU PACK'}</div>
               <h2 class="text-2xl font-bold leading-tight">${isNew ? 'Créer un pack' : this._esc(b.name || '')}</h2>
             </div>
-            <button id="cat-bedit-close" class="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg transition-colors text-2xl leading-none shrink-0">×</button>
+            <button id="cat-bedit-close" aria-label="Fermer le formulaire" title="Fermer" class="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg transition-colors text-2xl leading-none shrink-0">×</button>
           </div>
           <form id="cat-bedit-form" class="px-7 py-6 space-y-4">
             ${this._field('name', 'Nom du pack', b.name, { required: true, placeholder: 'Ex : Pack lancement artisan' })}
@@ -894,7 +1081,7 @@ const Catalogue = {
             </div>
             ${this._field('buy_url', 'Lien public du pack', b.buy_url, { placeholder: 'https://…' })}
             ${this._field('logo', 'URL de l’image', b.logo, { placeholder: 'https://…/pack.png — optionnel' })}
-            ${this._field('color', 'Couleur fallback', b.color, { type: 'color' })}
+            ${this._field('color', 'Couleur si pas de logo', b.color, { type: 'color' })}
             <div>
               <label class="block text-sm font-semibold mb-2">Produits inclus</label>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[260px] overflow-y-auto p-2 border border-border rounded-xl">
@@ -918,15 +1105,38 @@ const Catalogue = {
       const card = ov && ov.querySelector('.catalogue-detail-card');
       if (card) card.style.transform = 'scale(1) translateY(0)';
     });
-    ov.addEventListener('click', (e) => { if (e.target === ov) this._closeDetail(); });
-    document.getElementById('cat-bedit-close').onclick = () => this._closeDetail();
-    document.getElementById('cat-bedit-cancel').onclick = () => this._closeDetail();
+    // Garde anti-perte de saisie (mêmes règles que le formulaire produit)
+    let dirty = false;
+    const bform = document.getElementById('cat-bedit-form');
+    if (bform) {
+      bform.addEventListener('input', () => { dirty = true; });
+      bform.addEventListener('change', () => { dirty = true; }); // cases produits
+    }
+    const closeGuarded = async () => {
+      if (dirty) {
+        const sure = await Dialog.confirm(
+          'Tu as des modifications non enregistrées. Fermer sans enregistrer ?',
+          { title: 'Modifications non enregistrées', okLabel: 'Fermer sans enregistrer', cancelLabel: 'Continuer la saisie', danger: true });
+        if (!sure) return;
+      }
+      this._closeDetail();
+    };
+    ov.addEventListener('click', (e) => { if (e.target === ov) closeGuarded(); });
+    document.getElementById('cat-bedit-close').onclick = () => closeGuarded();
+    document.getElementById('cat-bedit-cancel').onclick = () => closeGuarded();
     document.getElementById('cat-bedit-save').onclick = async () => {
       const form = document.getElementById('cat-bedit-form');
       const data = {};
       form.querySelectorAll('input[type=text], input[type=number], input[type=color], textarea, input[type=url], input:not([type])').forEach(el => {
         if (el.name && el.name !== 'product_ids') data[el.name] = el.value;
       });
+      // Validation côté client : le nom est vraiment obligatoire
+      if (!(data.name || '').trim()) {
+        Toast.error('Il manque le nom du pack.');
+        const nameInput = form.querySelector('input[name=name]');
+        if (nameInput) nameInput.focus();
+        return;
+      }
       data.product_ids = Array.from(form.querySelectorAll('input[name=product_ids]:checked')).map(c => c.value);
       if (!isNew) data.id = b.id;
       const btn = document.getElementById('cat-bedit-save');
@@ -934,16 +1144,18 @@ const Catalogue = {
       try {
         const r = await App.api.catalog_save_bundle(data);
         if (r && r.ok) {
+          dirty = false;
           this._items = null; this._loadPromise = null;
           await this.list();
           this._closeDetail();
           this._renderGrid();
+          Toast.success(isNew ? 'Pack créé.' : 'Pack enregistré.');
         } else {
-          alert('Sauvegarde impossible : ' + (r && r.error || 'erreur inconnue'));
+          Toast.error(this._errFr(r && r.error, 'Enregistrement impossible, réessaie.'));
           btn.disabled = false; btn.textContent = 'Enregistrer';
         }
       } catch (e) {
-        alert('Erreur : ' + e);
+        Toast.friendlyError(e, 'Enregistrement impossible, réessaie.');
         btn.disabled = false; btn.textContent = 'Enregistrer';
       }
     };
@@ -995,6 +1207,7 @@ const Catalogue = {
   },
 
   _closeDetail() {
+    this._unbindDetailEsc();
     const ov = document.getElementById('catalogue-detail-overlay');
     if (!ov) return;
     ov.style.opacity = '0';
@@ -1004,6 +1217,36 @@ const Catalogue = {
       const slot = document.getElementById('catalogue-detail-modal');
       if (slot) slot.innerHTML = '';
     }, 200);
+  },
+
+  // ---- Échap sur les fiches en LECTURE (pas sur les formulaires :
+  // un Échap pendant une saisie ferait perdre le travail en cours) ----
+  _detailEsc: null,
+  _bindDetailEsc() {
+    this._unbindDetailEsc();
+    this._detailEsc = (e) => {
+      if (e.key === 'Escape') this._closeDetail();
+    };
+    document.addEventListener('keydown', this._detailEsc);
+  },
+  _unbindDetailEsc() {
+    if (this._detailEsc) {
+      document.removeEventListener('keydown', this._detailEsc);
+      this._detailEsc = null;
+    }
+  },
+
+  // ---- Codes d'erreur serveur → messages français lisibles ----
+  _errFr(code, fallback) {
+    const map = {
+      invalid_product: 'Il manque au moins le nom du produit.',
+      invalid_bundle:  'Il manque au moins le nom du pack.',
+      write_failed:    'Enregistrement impossible, réessaie.',
+      no_id:           'Élément introuvable — recharge la page et réessaie.',
+    };
+    if (code && map[code]) return map[code];
+    if (code) console.warn('catalogue: erreur serveur', code);
+    return fallback || 'Une erreur est survenue. Réessaie dans un instant.';
   },
 
   // ===========================================================
@@ -1030,13 +1273,64 @@ const Catalogue = {
     ov.style.opacity = '0';
     document.body.appendChild(ov);
 
+    // close() : protégé contre le double appel (clic + Échap rapprochés)
+    // et retire TOUJOURS l'écouteur Échap, quelle que soit la fermeture.
+    let closed = false;
+    const onEsc = (e) => { if (e.key === 'Escape') close(null); };
     const close = (product) => {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener('keydown', onEsc);
       ov.style.opacity = '0';
       setTimeout(() => { ov.remove(); }, 180);
       if (typeof callback === 'function') callback(product || null);
     };
 
-    const render = () => {
+    // Coquille rendue UNE fois : à la frappe on ne re-rend que la liste
+    // (le champ de recherche garde le focus et la saisie en cours).
+    ov.innerHTML = `
+      <div class="bg-surface rounded-3xl shadow-hero w-full max-w-[760px] max-h-[78vh]
+                  flex flex-col overflow-hidden"
+           style="border: 1px solid hsl(var(--border));">
+        <div class="px-6 pt-5 pb-3 border-b border-border">
+          <div class="flex items-center gap-3 mb-3">
+            <svg class="w-5 h-5 text-text-muted shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input id="catalogue-picker-search" type="text" autofocus
+                   placeholder="Trouve un produit à insérer…"
+                   class="flex-1 bg-transparent border-0 outline-none text-base"/>
+            <button id="catalogue-picker-close" aria-label="Fermer" title="Fermer" class="text-text-muted hover:text-text text-2xl leading-none">×</button>
+          </div>
+          <div id="catalogue-picker-cats" class="flex gap-2 flex-wrap"></div>
+        </div>
+        <div id="catalogue-picker-grid" class="flex-1 overflow-y-auto px-6 py-4 grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+      </div>
+    `;
+
+    const renderCats = () => {
+      const catsHost = ov.querySelector('#catalogue-picker-cats');
+      if (!catsHost) return;
+      const cats = ['all', ...this.CATEGORY_ORDER];
+      catsHost.innerHTML = cats.map(c => `
+        <button data-pcat="${c}"
+                class="px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors
+                       ${cat === c ? 'border-accent text-accent bg-accent/10' : 'border-border text-text-muted hover:text-text'}">
+          ${c === 'all' ? 'Tous' : this._esc(this.CATEGORY_LABELS[c] || c)}
+        </button>
+      `).join('');
+      catsHost.querySelectorAll('[data-pcat]').forEach(b => {
+        b.onclick = () => { cat = b.dataset.pcat; renderCats(); renderGrid(); };
+      });
+    };
+
+    const renderGrid = () => {
+      const grid = ov.querySelector('#catalogue-picker-grid');
+      if (!grid) return;
+      if (this._loadError) {
+        grid.innerHTML = '<div class="text-text-muted text-sm py-8 text-center col-span-2">Catalogue impossible à charger — vérifie ta connexion, puis rouvre ce choix de produit.</div>';
+        return;
+      }
       const filtered = items.filter(it => {
         if (cat !== 'all' && it.category !== cat) return false;
         if (!q) return true;
@@ -1045,16 +1339,6 @@ const Catalogue = {
             || (it.tagline || '').toLowerCase().includes(needle)
             || (it.id || '').toLowerCase().includes(needle);
       });
-
-      const cats = ['all', ...this.CATEGORY_ORDER];
-      const catButtons = cats.map(c => `
-        <button data-pcat="${c}"
-                class="px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors
-                       ${cat === c ? 'border-accent text-accent bg-accent/10' : 'border-border text-text-muted hover:text-text'}">
-          ${c === 'all' ? 'Tous' : this._esc(this.CATEGORY_LABELS[c] || c)}
-        </button>
-      `).join('');
-
       const tiles = filtered.map(it => {
         const visual = it.logo
           ? `<img src="${this._esc(it.logo)}" alt="" class="w-10 h-10 rounded-lg shrink-0" style="object-fit: contain;" />`
@@ -1072,42 +1356,8 @@ const Catalogue = {
           </button>
         `;
       }).join('');
-
-      ov.innerHTML = `
-        <div class="bg-surface rounded-3xl shadow-hero w-full max-w-[760px] max-h-[78vh]
-                    flex flex-col overflow-hidden"
-             style="border: 1px solid hsl(var(--border));">
-          <div class="px-6 pt-5 pb-3 border-b border-border">
-            <div class="flex items-center gap-3 mb-3">
-              <svg class="w-5 h-5 text-text-muted shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-              </svg>
-              <input id="catalogue-picker-search" type="text" autofocus
-                     placeholder="Trouve un produit à insérer…"
-                     class="flex-1 bg-transparent border-0 outline-none text-base"
-                     value="${this._esc(q)}"/>
-              <button id="catalogue-picker-close" class="text-text-muted hover:text-text text-2xl leading-none">×</button>
-            </div>
-            <div class="flex gap-2 flex-wrap">${catButtons}</div>
-          </div>
-          <div id="catalogue-picker-grid" class="flex-1 overflow-y-auto px-6 py-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            ${tiles || '<div class="text-text-muted text-sm py-8 text-center col-span-2">Aucun produit ne correspond.</div>'}
-          </div>
-        </div>
-      `;
-
-      requestAnimationFrame(() => { ov.style.opacity = '1'; });
-
-      const input = document.getElementById('catalogue-picker-search');
-      if (input) {
-        input.focus();
-        input.addEventListener('input', (e) => { q = e.target.value; render(); });
-      }
-      document.getElementById('catalogue-picker-close').onclick = () => close(null);
-      ov.querySelectorAll('[data-pcat]').forEach(b => {
-        b.onclick = () => { cat = b.dataset.pcat; render(); };
-      });
-      ov.querySelectorAll('[data-pid]').forEach(b => {
+      grid.innerHTML = tiles || '<div class="text-text-muted text-sm py-8 text-center col-span-2">Aucun produit ne correspond.</div>';
+      grid.querySelectorAll('[data-pid]').forEach(b => {
         b.onclick = () => {
           const product = items.find(x => x.id === b.dataset.pid);
           close(product || null);
@@ -1115,14 +1365,18 @@ const Catalogue = {
       });
     };
 
-    render();
+    renderCats();
+    renderGrid();
+    requestAnimationFrame(() => { ov.style.opacity = '1'; });
+
+    const input = ov.querySelector('#catalogue-picker-search');
+    if (input) {
+      input.focus();
+      input.addEventListener('input', (e) => { q = e.target.value; renderGrid(); });
+    }
+    ov.querySelector('#catalogue-picker-close').onclick = () => close(null);
     ov.addEventListener('click', (e) => { if (e.target === ov) close(null); });
-    document.addEventListener('keydown', function esc(e) {
-      if (e.key === 'Escape') {
-        document.removeEventListener('keydown', esc);
-        close(null);
-      }
-    });
+    document.addEventListener('keydown', onEsc);
   },
 
   // ===========================================================

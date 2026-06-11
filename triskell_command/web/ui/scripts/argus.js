@@ -13,6 +13,8 @@ const Argus = {
   state: {
     statusPollTimer: null,
     referenceCount: 0,
+    lastPaused: false,
+    pollFails: 0,
   },
 
   _LS_FORM: 'argus:form',
@@ -90,7 +92,7 @@ const Argus = {
     this._root = container;
     container.innerHTML = `
       <section class="animate-slide-up">
-        <div class="mb-6 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-relaxed">
+        <div class="mb-6 rounded-2xl border border-warning/30 bg-warning/10 p-4 text-sm leading-relaxed">
           <strong>⏸️ Argus est en pause.</strong>
           Ses sources (Pages Jaunes, Europages, recherche web) bloquent le
           serveur : aux derniers essais, il n'a quasiment rien ramené. Il a
@@ -116,7 +118,7 @@ const Argus = {
         <div class="grid gap-6 lg:grid-cols-[360px_1fr]">
 
           <!-- Colonne gauche : formulaire -->
-          <aside id="argus-form" class="space-y-5 rounded-2xl border border-white/5 bg-card-soft p-5">
+          <aside id="argus-form" class="space-y-5 card p-5">
             <div>
               <label class="block text-xs font-semibold tracking-wider uppercase opacity-70 mb-2">
                 Sources
@@ -144,8 +146,8 @@ const Argus = {
                 </label>
               </div>
               <div class="flex gap-2 mt-2">
-                <button id="argus-all" type="button" class="text-xs px-2 py-1 rounded bg-white/5 hover:bg-white/10">Tout</button>
-                <button id="argus-none" type="button" class="text-xs px-2 py-1 rounded bg-white/5 hover:bg-white/10">Aucun</button>
+                <button id="argus-all" type="button" class="text-xs px-2 py-1 rounded bg-text/5 hover:bg-text/10">Tout</button>
+                <button id="argus-none" type="button" class="text-xs px-2 py-1 rounded bg-text/5 hover:bg-text/10">Aucun</button>
               </div>
             </div>
 
@@ -154,7 +156,7 @@ const Argus = {
                 Secteur / mot-clé
               </label>
               <input id="argus-query" type="text"
-                     class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 focus:border-white/30 outline-none text-sm"
+                     class="w-full px-3 py-2 rounded-lg bg-surface border border-border-strong focus:border-accent outline-none text-sm"
                      placeholder="plombier, boulangerie, agence immobilière…">
             </div>
 
@@ -163,7 +165,7 @@ const Argus = {
                 Ville ou département
               </label>
               <input id="argus-location" type="text"
-                     class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 focus:border-white/30 outline-none text-sm"
+                     class="w-full px-3 py-2 rounded-lg bg-surface border border-border-strong focus:border-accent outline-none text-sm"
                      placeholder="Lyon, 75, Bordeaux…">
             </div>
 
@@ -172,7 +174,7 @@ const Argus = {
                 Plafond d'emails par source
               </label>
               <input id="argus-max" type="number" min="1" max="5000" value="200"
-                     class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 focus:border-white/30 outline-none text-sm">
+                     class="w-full px-3 py-2 rounded-lg bg-surface border border-border-strong focus:border-accent outline-none text-sm">
             </div>
 
             <div class="space-y-2">
@@ -191,66 +193,67 @@ const Argus = {
                 Sites web supplémentaires (un par ligne, optionnel)
               </label>
               <textarea id="argus-seed-urls" rows="3"
-                        class="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 focus:border-white/30 outline-none text-sm font-mono"></textarea>
+                        class="w-full px-3 py-2 rounded-lg bg-surface border border-border-strong focus:border-accent outline-none text-sm font-mono"></textarea>
             </div>
 
             <div>
-              <label class="block text-xs font-semibold tracking-wider uppercase opacity-70 mb-1">
+              <label for="argus-ref-file" class="block text-xs font-semibold tracking-wider uppercase opacity-70 mb-1">
                 Fichier Excel précédent (emails à exclure)
               </label>
               <input id="argus-ref-file" type="file" accept=".xlsx"
-                     class="text-xs file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-white/10 file:cursor-pointer">
-              <div id="argus-ref-count" class="text-xs opacity-60 mt-1"></div>
+                     class="text-xs file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-text/10 file:text-text file:cursor-pointer">
+              <div id="argus-ref-count" class="text-xs text-text-muted mt-1">Aucune adresse exclue.</div>
             </div>
 
             <div class="flex flex-wrap gap-2 pt-2">
-              <button id="argus-btn-start" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium">
+              <button id="argus-btn-start" class="px-4 py-2 rounded-lg bg-accent-strong hover:bg-[hsl(var(--accent-strong-hover))] text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
                 ▶ Lancer
               </button>
-              <button id="argus-btn-pause" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-sm font-medium" disabled>
+              <button id="argus-btn-pause" class="px-4 py-2 rounded-lg bg-text/10 hover:bg-text/15 text-text text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                 ⏸ Pause
               </button>
-              <button id="argus-btn-stop" class="px-4 py-2 rounded-lg bg-red-700/80 hover:bg-red-600 text-white text-sm font-medium" disabled>
+              <button id="argus-btn-stop" class="px-4 py-2 rounded-lg bg-danger/15 hover:bg-danger/25 text-danger-text border border-danger/30 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                 ⏹ Stop
               </button>
             </div>
 
-            <button id="argus-btn-export" class="w-full px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium" disabled>
+            <button id="argus-btn-export" class="w-full px-4 py-2 rounded-lg bg-warning/15 hover:bg-warning/25 text-warning-text border border-warning/30 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>
               ⬇ Télécharger Excel
             </button>
 
-            <button id="argus-btn-push" class="w-full px-4 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-              📥 Envoyer dans le fichier prospect
+            <button id="argus-btn-push" class="w-full px-4 py-2 rounded-lg bg-accent-strong hover:bg-[hsl(var(--accent-strong-hover))] text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+              📥 Ajouter à mes prospects
             </button>
             <p id="argus-push-feedback" class="text-[11px] leading-relaxed hidden"></p>
 
-            <p class="text-[11px] opacity-50 leading-relaxed">
-              Tous les mails affichés sont extraits du HTML de pages réellement
+            <p class="text-[11px] text-text-muted leading-relaxed">
+              Tous les mails affichés sont extraits de pages réellement
               visitées. Aucune adresse n'est devinée.
             </p>
           </aside>
 
           <!-- Colonne droite : progression + journal -->
           <div class="space-y-5 min-w-0">
-            <div class="rounded-2xl border border-white/5 bg-card-soft p-5">
+            <div class="card p-5">
               <div class="flex items-center justify-between mb-4">
                 <h2 class="text-sm font-semibold tracking-wide uppercase opacity-80">
                   Progression par source
                 </h2>
-                <div id="argus-counter" class="text-sm font-medium px-3 py-1 rounded-full bg-white/5">
-                  <span id="argus-total">0</span> email(s) trouvé(s)
+                <div id="argus-counter" class="text-sm font-medium px-3 py-1 rounded-full bg-bg">
+                  <span id="argus-total">0</span> <span id="argus-total-label">email trouvé</span>
                 </div>
               </div>
               <div id="argus-sources" class="space-y-2 text-sm">
-                <div class="opacity-50 italic">Aucun scraping en cours.</div>
+                <div class="text-text-muted italic">Aucune collecte en cours.</div>
               </div>
             </div>
 
-            <div class="rounded-2xl border border-white/5 bg-card-soft p-5">
+            <div class="card p-5">
               <h2 class="text-sm font-semibold tracking-wide uppercase opacity-80 mb-3">
                 Journal d'activité
               </h2>
-              <div id="argus-journal" class="bg-black/40 rounded-lg p-3 font-mono text-xs overflow-y-auto max-h-[420px] min-h-[200px] space-y-0.5">
+              <div id="argus-journal" class="bg-bg border border-border rounded-lg p-3 font-mono text-xs overflow-y-auto max-h-[420px] min-h-[200px] space-y-0.5">
+                <div class="text-text-muted italic">Le journal s'affichera ici pendant la collecte.</div>
               </div>
             </div>
           </div>
@@ -278,9 +281,30 @@ const Argus = {
     this._applyForm();
     this._bindFormPersist();
 
-    // Affiche l'état actuel + démarre le polling si un run tourne déjà.
+    // Le DOM vient d'être recréé : on repart d'un compteur d'exclusions à 0
+    // (le vrai compte revient avec le premier statut serveur).
+    this.state.referenceCount = 0;
+    // L'ancien minuteur a été nettoyé par App au changement de vue :
+    // on oublie son identifiant pour que le polling puisse redémarrer.
+    this.state.statusPollTimer = null;
+
+    // Affiche l'état actuel ; _refreshStatus relance le polling tout seul
+    // si une collecte tourne déjà (et l'arrête sinon).
     await this._refreshStatus();
-    this._startPolling();
+  },
+
+  // ---- Erreurs serveur (jamais de message technique brut à l'écran) ----
+
+  _serverError(err, fallback) {
+    const raw = err == null ? '' : String(err);
+    const looksTechnical = !raw || raw.length > 180
+      || /traceback|exception|errno|\.py\b|<class /i.test(raw);
+    if (looksTechnical) {
+      Toast.friendlyError(raw || new Error(fallback), fallback);
+      return;
+    }
+    // Message serveur déjà en français : on le montre, en gommant le jargon.
+    Toast.error(raw.replace(/scraping/gi, 'collecte'));
   },
 
   // ---- Actions ----
@@ -288,12 +312,17 @@ const Argus = {
   async _start() {
     const sources = [...document.querySelectorAll('.argus-source:checked')].map(c => c.value);
     if (sources.length === 0) {
-      alert('Sélectionne au moins une source.');
+      Toast.error('Sélectionne au moins une source.');
+      return;
+    }
+    const query = document.getElementById('argus-query').value.trim();
+    if (!query) {
+      Toast.error('Indique un secteur ou un mot-clé (ex : plombier) avant de lancer.');
       return;
     }
     const payload = {
       sources,
-      query: document.getElementById('argus-query').value,
+      query,
       location: document.getElementById('argus-location').value,
       max_emails: parseInt(document.getElementById('argus-max').value || '200', 10),
       include_personal: document.getElementById('argus-include-personal').checked,
@@ -301,41 +330,71 @@ const Argus = {
       seed_urls: document.getElementById('argus-seed-urls').value || '',
     };
 
-    // On vide l'affichage avant le run.
+    // Anti double-clic pendant l'appel serveur.
+    const startBtn = document.getElementById('argus-btn-start');
+    if (startBtn) startBtn.disabled = true;
+
+    // On vide l'affichage avant la collecte.
     document.getElementById('argus-sources').innerHTML =
-      '<div class="opacity-50 italic">Démarrage…</div>';
+      '<div class="text-text-muted italic">Démarrage…</div>';
     document.getElementById('argus-journal').innerHTML = '';
-    document.getElementById('argus-total').textContent = '0';
+    const totalEl = document.getElementById('argus-total');
+    if (totalEl) totalEl.textContent = '0';
 
     const res = await this._api('start', payload);
     if (!res || !res.ok) {
-      alert('Impossible de démarrer : ' + (res?.error || 'erreur inconnue'));
+      if (startBtn) startBtn.disabled = false;
+      // On remet les zones vidées dans leur état de repos.
+      document.getElementById('argus-sources').innerHTML =
+        '<div class="text-text-muted italic">Aucune collecte en cours.</div>';
+      document.getElementById('argus-journal').innerHTML =
+        '<div class="text-text-muted italic">Le journal s’affichera ici pendant la collecte.</div>';
+      this._serverError(res && res.error, 'Impossible de démarrer la collecte. Réessaie dans un instant.');
       return;
     }
+    Toast.success('Collecte lancée. Ça tourne en fond.');
     this._setControls({ running: true, paused: false });
     this._startPolling();
   },
 
   async _togglePause() {
-    const btn = document.getElementById('argus-btn-pause');
-    const isPaused = btn.textContent.includes('Reprendre');
+    // On se base sur le DERNIER état renvoyé par le serveur,
+    // pas sur le texte du bouton (qui peut être désynchronisé).
+    const isPaused = !!this.state.lastPaused;
     const res = await this._api(isPaused ? 'resume' : 'pause');
-    if (!res || !res.ok) return;
-    btn.textContent = isPaused ? '⏸ Pause' : '▶ Reprendre';
+    if (!res || !res.ok) {
+      this._serverError(res && res.error, isPaused
+        ? 'Impossible de reprendre la collecte.'
+        : 'Impossible de mettre la collecte en pause.');
+      return;
+    }
+    this.state.lastPaused = !isPaused;
+    const btn = document.getElementById('argus-btn-pause');
+    if (btn) btn.textContent = this.state.lastPaused ? '▶ Reprendre' : '⏸ Pause';
+    Toast.info(this.state.lastPaused ? 'Collecte mise en pause.' : 'Collecte reprise.');
   },
 
   async _stop() {
-    if (!confirm('Arrêter le scraping en cours ?')) return;
-    await this._api('stop');
+    const ok = await Dialog.confirm(
+      'Arrêter la collecte en cours ? Les emails déjà trouvés restent disponibles.',
+      { title: 'Arrêter la collecte', okLabel: 'Arrêter', cancelLabel: 'Continuer', danger: true }
+    );
+    if (!ok) return;
+    const res = await this._api('stop');
+    if (!res || !res.ok) {
+      this._serverError(res && res.error, 'Impossible d’arrêter la collecte. Réessaie dans un instant.');
+      return;
+    }
+    Toast.success('Collecte arrêtée. Les emails trouvés restent disponibles.');
   },
 
   async _export() {
     const res = await this._api('download_xlsx');
     if (!res || !res.ok) {
-      alert('Export impossible : ' + (res?.error || 'rien à exporter'));
+      this._serverError(res && res.error, 'Export impossible : rien à exporter pour l’instant.');
       return;
     }
-    // Décode le base64 et déclenche un download navigateur.
+    // Décode le base64 et déclenche un téléchargement navigateur.
     try {
       const bin = atob(res.content_b64);
       const bytes = new Uint8Array(bin.length);
@@ -351,8 +410,10 @@ const Argus = {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
+      Toast.success(`Excel exporté${res.rows ? ` — ${res.rows} ligne${res.rows > 1 ? 's' : ''}` : ''}.`);
     } catch (e) {
-      alert('Erreur de téléchargement : ' + e.message);
+      console.warn('argus export:', e);
+      Toast.error('Téléchargement bloqué par le navigateur.');
     }
   },
 
@@ -364,22 +425,21 @@ const Argus = {
   async _pushToProspects() {
     const total = this._lastTotalEmails || 0;
     if (total === 0) {
-      alert('Aucun email à envoyer.');
+      Toast.warn('Aucun email à ajouter pour l’instant.');
       return;
     }
-    const msg =
-      'Envoyer ' + total + ' email(s) collecté(s) par Argus dans le ' +
-      'fichier prospect ?\n\n' +
-      'Les emails déjà connus seront fusionnés (pas de doublons), ' +
-      'les nouveaux seront créés avec le tag "argus".\n\n' +
-      'Continuer ?';
-    if (!confirm(msg)) return;
+    const ok = await Dialog.confirm(
+      `Ajouter ${total} email${total > 1 ? 's' : ''} trouvé${total > 1 ? 's' : ''} par Argus ` +
+      `à « Tous les prospects » ? Les adresses déjà connues seront fusionnées (pas de doublon).`,
+      { title: 'Ajouter à mes prospects', okLabel: 'Ajouter', cancelLabel: 'Annuler' }
+    );
+    if (!ok) return;
 
     const btn = document.getElementById('argus-btn-push');
     const feedback = document.getElementById('argus-push-feedback');
     if (btn) {
       btn.disabled = true;
-      btn.textContent = '⏳ Envoi en cours…';
+      btn.textContent = '⏳ Ajout en cours…';
     }
     if (feedback) {
       feedback.classList.add('hidden');
@@ -395,17 +455,15 @@ const Argus = {
 
     if (btn) {
       btn.disabled = false;
-      btn.textContent = '📥 Envoyer dans le fichier prospect';
+      btn.textContent = '📥 Ajouter à mes prospects';
     }
 
     if (!res || !res.ok) {
-      const err = res?.error || 'erreur inconnue';
+      this._serverError(res && res.error, 'Ajout impossible. Réessaie dans un instant.');
       if (feedback) {
         feedback.classList.remove('hidden');
-        feedback.className = 'text-[11px] leading-relaxed text-red-400';
-        feedback.textContent = '❌ Envoi échoué : ' + err;
-      } else {
-        alert('Envoi échoué : ' + err);
+        feedback.className = 'text-[11px] leading-relaxed text-danger-text';
+        feedback.textContent = '❌ Ajout échoué. Détail dans le petit message en haut à droite.';
       }
       return;
     }
@@ -415,17 +473,16 @@ const Argus = {
     const skipped = res.skipped || 0;
     const pushed = res.pushed || 0;
     const parts = [];
-    parts.push('✅ ' + pushed + ' email(s) envoyé(s)');
-    parts.push(created + ' nouveau(x), ' + merged + ' déjà connu(s)');
-    if (skipped > 0) parts.push(skipped + ' ignoré(s) (format invalide)');
-    if (res.backend === 'local') parts.push('(stockage local, pas en ligne)');
+    parts.push(`✅ ${pushed} email${pushed > 1 ? 's' : ''} ajouté${pushed > 1 ? 's' : ''}`);
+    parts.push(`${created} ${created > 1 ? 'nouveaux' : 'nouveau'}, ${merged} déjà ${merged > 1 ? 'connus' : 'connu'}`);
+    if (skipped > 0) parts.push(`${skipped} ignoré${skipped > 1 ? 's' : ''} (format invalide)`);
+    if (res.backend === 'local') parts.push('(enregistrés sur cet ordinateur, pas en ligne)');
 
+    Toast.success(parts.join(' · '));
     if (feedback) {
       feedback.classList.remove('hidden');
-      feedback.className = 'text-[11px] leading-relaxed text-emerald-400';
+      feedback.className = 'text-[11px] leading-relaxed text-success-text';
       feedback.textContent = parts.join(' · ');
-    } else {
-      alert(parts.join('\n'));
     }
   },
 
@@ -440,21 +497,53 @@ const Argus = {
       const b64 = btoa(bin);
       const res = await this._api('set_reference', { content_b64: b64 });
       if (res && res.ok) {
-        document.getElementById('argus-ref-count').textContent =
-          `${res.count} email(s) exclus du prochain run.`;
+        Toast.success(`${res.count} adresse${res.count > 1 ? 's' : ''} à exclure chargée${res.count > 1 ? 's' : ''}.`);
+        this._renderRefCount(res.count);
       } else {
-        alert('Lecture impossible : ' + (res?.error || ''));
+        this._serverError(res && res.error, 'Lecture du fichier impossible. Vérifie que c’est bien un fichier Excel (.xlsx).');
       }
     } catch (e) {
-      alert('Erreur upload : ' + e.message);
+      console.warn('argus reference:', e);
+      Toast.error('Lecture du fichier impossible. Vérifie que c’est bien un fichier Excel (.xlsx).');
     }
+  },
+
+  /* Affiche en permanence l'état des exclusions + bouton pour les retirer. */
+  _renderRefCount(count) {
+    const el = document.getElementById('argus-ref-count');
+    if (!el) return;
+    const n = Number(count) || 0;
+    this.state.referenceCount = n;
+    if (!n) {
+      el.textContent = 'Aucune adresse exclue.';
+      return;
+    }
+    el.innerHTML =
+      `${n} adresse${n > 1 ? 's' : ''} exclue${n > 1 ? 's' : ''} de la prochaine collecte. ` +
+      `<button id="argus-ref-clear" type="button" class="text-accent-text hover:underline">Retirer</button>`;
+    const btn = el.querySelector('#argus-ref-clear');
+    if (btn) btn.onclick = () => this._clearReference();
+  },
+
+  async _clearReference() {
+    const res = await this._api('set_reference', { emails: [] });
+    if (!res || !res.ok) {
+      this._serverError(res && res.error, 'Impossible de retirer la liste d’exclusion.');
+      return;
+    }
+    Toast.success('Liste d’exclusion retirée.');
+    const input = document.getElementById('argus-ref-file');
+    if (input) input.value = '';
+    this._renderRefCount(0);
   },
 
   // ---- Polling de l'état ----
 
   _startPolling() {
-    if (this.state.statusPollTimer) clearInterval(this.state.statusPollTimer);
-    this.state.statusPollTimer = setInterval(() => this._refreshStatus(), 2000);
+    this._stopPolling();
+    this.state.pollFails = 0;
+    // App.viewInterval : nettoyé automatiquement quand on quitte la vue.
+    this.state.statusPollTimer = App.viewInterval(() => this._refreshStatus(), 2000);
   },
 
   _stopPolling() {
@@ -465,16 +554,37 @@ const Argus = {
   },
 
   async _refreshStatus() {
-    // Si la vue a changé entre-temps, on arrête.
+    // Si la vue a changé entre-temps, on arrête (double sécurité,
+    // App.viewInterval nettoie déjà au changement de vue).
     if (App.currentView !== 'argus') {
       this._stopPolling();
       return;
     }
     const s = await this._api('status', { log_tail: 200 });
-    if (!s || !s.ok) return;
+    if (!s || !s.ok) {
+      // 3 échecs d'affilée → on arrête de marteler le serveur et on explique.
+      this.state.pollFails = (this.state.pollFails || 0) + 1;
+      if (this.state.pollFails >= 3 && this.state.statusPollTimer) {
+        this._stopPolling();
+        Toast.warn('Le suivi en direct est suspendu : le serveur ne répond plus. Reviens sur cet écran pour réessayer.');
+      }
+      return;
+    }
+    this.state.pollFails = 0;
 
-    document.getElementById('argus-total').textContent = s.total_emails || 0;
-    this._lastTotalEmails = s.total_emails || 0;
+    const totalEl = document.getElementById('argus-total');
+    if (!totalEl) return; // la vue n'est plus affichée
+    const total = s.total_emails || 0;
+    totalEl.textContent = total;
+    const totalLabel = document.getElementById('argus-total-label');
+    if (totalLabel) totalLabel.textContent = total > 1 ? 'emails trouvés' : 'email trouvé';
+    this._lastTotalEmails = total;
+    this.state.lastPaused = !!s.is_paused;
+
+    // Exclusions (état permanent, avec bouton « Retirer »)
+    if (s.reference_count != null && Number(s.reference_count) !== this.state.referenceCount) {
+      this._renderRefCount(s.reference_count);
+    }
 
     // Sources
     const sourcesEl = document.getElementById('argus-sources');
@@ -482,7 +592,7 @@ const Argus = {
       const names = Object.keys(s.sources || {});
       if (names.length === 0) {
         sourcesEl.innerHTML =
-          '<div class="opacity-50 italic">Aucun scraping en cours.</div>';
+          '<div class="text-text-muted italic">Aucune collecte en cours.</div>';
       } else {
         sourcesEl.innerHTML = names.map(name => this._renderSource(name, s.sources[name], s.params)).join('');
       }
@@ -491,24 +601,31 @@ const Argus = {
     // Journal
     const journalEl = document.getElementById('argus-journal');
     if (journalEl && Array.isArray(s.logs)) {
-      const wasAtBottom =
-        journalEl.scrollHeight - journalEl.scrollTop - journalEl.clientHeight < 50;
-      journalEl.innerHTML = s.logs.map(l => this._renderLog(l)).join('');
-      if (wasAtBottom) journalEl.scrollTop = journalEl.scrollHeight;
+      if (s.logs.length === 0) {
+        journalEl.innerHTML =
+          '<div class="text-text-muted italic">Le journal s’affichera ici pendant la collecte.</div>';
+      } else {
+        const wasAtBottom =
+          journalEl.scrollHeight - journalEl.scrollTop - journalEl.clientHeight < 50;
+        journalEl.innerHTML = s.logs.map(l => this._renderLog(l)).join('');
+        if (wasAtBottom) journalEl.scrollTop = journalEl.scrollHeight;
+      }
     }
 
     // Contrôles boutons
     this._setControls({
       running: !!s.is_running,
       paused: !!s.is_paused,
-      hasEmails: (s.total_emails || 0) > 0,
+      hasEmails: total > 0,
     });
 
-    // Quand le run se termine, on arrête le polling (on garde un dernier ping
-    // d'aimable courtoisie au cas où).
-    if (!s.is_running) {
-      // Garde le polling actif jusqu'à 5s après la fin, le temps que l'UI
-      // soit cohérente.
+    // Le polling ne tourne que pendant une collecte : démarré si une
+    // collecte est active, arrêté dès qu'elle est finie (l'état affiché
+    // vient d'être mis à jour une dernière fois juste au-dessus).
+    if (s.is_running && !this.state.statusPollTimer) {
+      this._startPolling();
+    } else if (!s.is_running && this.state.statusPollTimer) {
+      this._stopPolling();
     }
   },
 
@@ -521,11 +638,11 @@ const Argus = {
       websites: 'Sites web',
     };
     const statusColors = {
-      pending: 'bg-white/10 text-white/70',
-      running: 'bg-sky-500/20 text-sky-300',
-      done:    'bg-emerald-500/20 text-emerald-300',
-      error:   'bg-red-500/20 text-red-300',
-      stopped: 'bg-amber-500/20 text-amber-300',
+      pending: 'bg-text-muted/15 text-text-muted',
+      running: 'bg-info/15 text-info-text',
+      done:    'bg-success/15 text-success-text',
+      error:   'bg-danger/15 text-danger-text',
+      stopped: 'bg-warning/15 text-warning-text',
     };
     const statusLabel = {
       pending: 'EN ATTENTE',
@@ -540,18 +657,18 @@ const Argus = {
     const label = statusLabel[sp.status] || sp.status;
 
     return `
-      <div class="rounded-lg border border-white/5 p-3">
+      <div class="rounded-lg border border-border p-3">
         <div class="flex items-center justify-between gap-2 mb-1">
           <span class="font-medium">${labels[name] || name}</span>
-          <span class="text-[10px] font-bold tracking-widest px-2 py-0.5 rounded ${colorClass}">${label}</span>
+          <span class="text-[11px] font-bold tracking-widest px-2 py-0.5 rounded ${colorClass}">${label}</span>
         </div>
-        <div class="text-xs opacity-70 flex flex-wrap gap-x-3">
+        <div class="text-xs text-text-secondary flex flex-wrap gap-x-3">
           <span>📄 ${sp.visited_pages || 0} pages</span>
           <span>📧 ${sp.found || 0} emails</span>
-          ${sp.message ? `<span class="opacity-80 italic">— ${this._escape(sp.message)}</span>` : ''}
+          ${sp.message ? `<span class="text-text-muted italic">— ${this._escape(sp.message)}</span>` : ''}
         </div>
-        <div class="h-1 mt-2 bg-white/5 rounded-full overflow-hidden">
-          <div class="h-full bg-gradient-to-r from-sky-500 to-blue-500" style="width:${pct}%"></div>
+        <div class="h-1 mt-2 bg-bg rounded-full overflow-hidden">
+          <div class="h-full bg-accent" style="width:${pct}%"></div>
         </div>
       </div>
     `;
@@ -559,15 +676,15 @@ const Argus = {
 
   _renderLog(l) {
     const levelClass = {
-      info: 'text-white/80',
-      warn: 'text-amber-300',
-      error: 'text-red-300',
-      success: 'text-emerald-300',
-    }[l.level] || 'text-white/80';
+      info: 'text-text-secondary',
+      warn: 'text-warning-text',
+      error: 'text-danger-text',
+      success: 'text-success-text',
+    }[l.level] || 'text-text-secondary';
     const t = this._escape(l.time || '');
     const src = this._escape(l.source || '');
     const msg = this._escape(l.message || '');
-    return `<div><span class="text-white/40">[${t}]</span> <span class="text-fuchsia-300">[${src}]</span> <span class="${levelClass}">${msg}</span></div>`;
+    return `<div><span class="text-text-muted">[${t}]</span> <span class="text-accent-text">[${src}]</span> <span class="${levelClass}">${msg}</span></div>`;
   },
 
   _setControls({ running, paused, hasEmails }) {

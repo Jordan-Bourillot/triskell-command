@@ -38,9 +38,12 @@ const Brain = {
         <div class="card p-3 mb-5 b-quickadd">
           <textarea id="b-quick" rows="1" placeholder="Tape une idée ici et appuie sur Entrée…"
                     class="w-full px-2 py-1.5 text-sm bg-transparent border-0 focus:outline-none resize-none font-sans leading-relaxed"></textarea>
-          <div class="flex items-center justify-between mt-1 text-[11px] text-text-muted">
+          <div class="flex items-center justify-between gap-2 mt-1 text-[11px] text-text-muted">
             <span id="b-quick-hint">Entrée = envoyer · Maj+Entrée = saut de ligne</span>
-            <span id="b-quick-status"></span>
+            <span class="flex items-center gap-2">
+              <span id="b-quick-status"></span>
+              <button id="b-quick-send" class="btn btn-secondary text-xs" style="padding:4px 12px;">Envoyer</button>
+            </span>
           </div>
         </div>
 
@@ -55,10 +58,9 @@ const Brain = {
         <div class="flex items-center justify-between flex-wrap gap-2 mb-3 mt-6">
           <h2 class="text-sm font-bold uppercase tracking-wider text-text-muted">Toutes les notes</h2>
           <div class="flex flex-wrap gap-2 items-center text-[11px]">
-            <select id="b-author-filter" class="px-2 py-1 rounded-lg bg-bg border border-border">
+            <select id="b-author-filter" class="px-2 py-1 rounded-lg bg-bg border border-border" aria-label="Filtrer par auteur">
               <option value="">Tous auteurs</option>
-              <option value="jordan">Moi (Jordan)</option>
-              <option value="thomas">Thomas</option>
+              ${this._authorOptions()}
             </select>
             <select id="b-sort" class="px-2 py-1 rounded-lg bg-bg border border-border">
               <option value="date_desc">Récentes d'abord</option>
@@ -100,6 +102,9 @@ const Brain = {
         this._quickSubmit();
       }
     });
+    // Bouton Envoyer visible (indispensable sur mobile, où Entrée
+    // fait un saut de ligne sur certains claviers)
+    document.getElementById('b-quick-send').onclick = () => this._quickSubmit();
     // Auto-grow textarea
     quick.addEventListener('input', () => {
       quick.style.height = 'auto';
@@ -108,12 +113,34 @@ const Brain = {
     await this._load();
   },
 
+  // Libellés du filtre auteurs : « Moi (<prénom>) » pour l'utilisateur
+  // connecté (App.currentUser), au lieu d'un « Moi (Jordan) » figé qui
+  // était faux sur le poste de Thomas.
+  _authorOptions() {
+    const first = ((App.currentUser || {}).first_name || '').trim();
+    const meKey = first.toLowerCase();
+    const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+    const authors = ['jordan', 'thomas'];
+    // L'utilisateur connecté apparaît en premier
+    if (authors.includes(meKey)) {
+      authors.splice(authors.indexOf(meKey), 1);
+      authors.unshift(meKey);
+    }
+    const selected = this.state.authorFilter || '';
+    return authors.map(a => {
+      const label = (a === meKey && first) ? `Moi (${cap(first)})` : cap(a);
+      return `<option value="${a}" ${selected === a ? 'selected' : ''}>${this._escape(label)}</option>`;
+    }).join('');
+  },
+
   async _quickSubmit() {
     const ta = document.getElementById('b-quick');
     const status = document.getElementById('b-quick-status');
+    const sendBtn = document.getElementById('b-quick-send');
     const content = (ta.value || '').trim();
     if (!content) return;
     ta.disabled = true;
+    if (sendBtn) sendBtn.disabled = true;
     status.textContent = 'Claude analyse…';
     status.className = 'text-text-muted';
     try {
@@ -121,19 +148,22 @@ const Brain = {
       if (r && r.ok) {
         ta.value = '';
         ta.style.height = 'auto';
-        status.textContent = `✓ Ajouté · ${r.note.category || 'classé'}`;
+        status.textContent = `✓ Ajouté · ${(r.note && r.note.category) || 'classé'}`;
         status.className = 'text-success';
         setTimeout(() => { status.textContent = ''; }, 1500);
         this._load();
       } else {
-        status.textContent = '✗ ' + ((r && r.error) || 'erreur');
+        status.textContent = '✗ Ajout impossible, réessaie';
         status.className = 'text-danger';
+        console.warn('brain_add:', r && r.error);
       }
     } catch (e) {
-      status.textContent = '✗ ' + e;
+      status.textContent = '✗ Ajout impossible, réessaie';
       status.className = 'text-danger';
+      console.warn('brain_add:', e);
     } finally {
       ta.disabled = false;
+      if (sendBtn) sendBtn.disabled = false;
       ta.focus();
     }
   },
@@ -172,7 +202,7 @@ const Brain = {
       .b-tag { display: inline-block; padding: 1px 7px; border-radius: 999px;
                font-size: 10px; font-weight: 600;
                background: hsl(var(--accent) / 0.12); color: hsl(var(--accent)); }
-      .b-author { font-size: 9px; font-weight: 700; padding: 1px 5px;
+      .b-author { font-size: 10px; font-weight: 700; padding: 1px 5px;
                   border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
       .b-author.jordan { background: hsl(var(--accent) / 0.15); color: hsl(var(--accent)); }
       .b-author.thomas { background: hsl(var(--success) / 0.15); color: hsl(var(--success)); }
@@ -235,7 +265,13 @@ const Brain = {
     try {
       const r = await App.api.brain_list({ status: filter, limit: 300 });
       if (!r || !r.ok) {
-        root.innerHTML = `<div class="card p-6 text-danger">${(r && r.error) || 'Erreur'}</div>`;
+        console.warn('brain_list:', r && r.error);
+        root.innerHTML = `
+          <div class="card p-6 text-center">
+            <p class="text-text font-semibold mb-1">Impossible de charger les notes.</p>
+            <p class="text-text-muted text-sm mb-3">Réessaie dans un instant.</p>
+            <button class="btn btn-secondary" onclick="Brain._load()">Réessayer</button>
+          </div>`;
         return;
       }
       const allNotes = r.notes || [];
@@ -244,6 +280,14 @@ const Brain = {
       this._renderStats(allNotes, showHead);
       this._renderPriorityBlock(showHead ? allNotes : []);
       this._renderRemindersBlock(showHead ? allNotes : []);
+      // Filtre auteur actif : on explique pourquoi les stats/rappels
+      // ont disparu (avant, ils s'évaporaient sans un mot).
+      if (filter === 'open' && this.state.authorFilter) {
+        const statsEl = document.getElementById('b-stats');
+        if (statsEl) {
+          statsEl.innerHTML = `<div class="col-span-2 sm:col-span-4 text-[11px] text-text-muted py-1">Stats et rappels masqués pendant le filtrage par auteur.</div>`;
+        }
+      }
 
       const notes = this._applyAuthorAndSort(allNotes);
       if (filter === 'open' && !this.state.authorFilter
@@ -262,8 +306,19 @@ const Brain = {
       } else {
         this._renderFlat(notes);
       }
+      // Plafond d'affichage : on le dit au lieu de tronquer en silence
+      if (allNotes.length >= 300) {
+        root.insertAdjacentHTML('beforeend',
+          `<p class="text-[11px] text-text-muted text-center mt-4">300 notes max affichées — les plus anciennes ne sont pas listées ici.</p>`);
+      }
     } catch (e) {
-      root.innerHTML = `<div class="card p-6 text-danger">Erreur : ${e}</div>`;
+      console.warn('brain_list:', e);
+      root.innerHTML = `
+        <div class="card p-6 text-center">
+          <p class="text-text font-semibold mb-1">Impossible de charger les notes.</p>
+          <p class="text-text-muted text-sm mb-3">Vérifie ta connexion, puis réessaie.</p>
+          <button class="btn btn-secondary" onclick="Brain._load()">Réessayer</button>
+        </div>`;
     }
   },
 
@@ -276,10 +331,12 @@ const Brain = {
     const now = Date.now();
     const day = 24 * 3600 * 1000;
     const rappels = notes.filter(n => n.remind_at && !n.reminded_at).length;
+    // « Sous 24h » : uniquement les rappels À VENIR (les passés gonflaient
+    // le compteur pour rien)
     const aujourdhui = notes.filter(n => {
       if (!n.remind_at) return false;
       const t = new Date(n.remind_at).getTime();
-      return t >= now - day && t <= now + day;
+      return t >= now && t <= now + day;
     }).length;
     const stat = (label, value, accent) => `
       <div class="b-stat ${accent || ''}">
@@ -314,11 +371,9 @@ const Brain = {
       </div>
     `;
     el.querySelectorAll('[data-bnote]').forEach(card => {
-      card.onclick = async () => {
-        const id = card.dataset.bnote;
-        let n = notes.find(x => x.id === id);
-        if (n) this._openDetail(n);
-      };
+      const n = notes.find(x => x.id === card.dataset.bnote);
+      if (!n) return;
+      this._makeClickable(card, () => this._openDetail(n));
     });
   },
 
@@ -365,11 +420,9 @@ const Brain = {
       </div>
     `;
     el.querySelectorAll('[data-bnote]').forEach(row => {
-      row.onclick = async () => {
-        const id = row.dataset.bnote;
-        let n = notes.find(x => x.id === id);
-        if (n) this._openDetail(n);
-      };
+      const n = notes.find(x => x.id === row.dataset.bnote);
+      if (!n) return;
+      this._makeClickable(row, () => this._openDetail(n));
     });
   },
 
@@ -399,7 +452,7 @@ const Brain = {
         </div>
       </div>
     `).join('');
-    this._bindCards();
+    this._bindCards(this.state.groups.flatMap(g => g.notes));
   },
 
   _renderFlat(notes) {
@@ -409,7 +462,7 @@ const Brain = {
       return;
     }
     root.innerHTML = `<div class="space-y-2">${notes.map(n => this._renderNoteCard(n)).join('')}</div>`;
-    this._bindCards();
+    this._bindCards(notes);
   },
 
   _renderNoteCard(n) {
@@ -459,11 +512,11 @@ const Brain = {
   async _uploadFile(file) {
     if (!file) return null;
     if (!file.type || !file.type.startsWith('image/')) {
-      alert("Seules les images sont acceptées pour le moment.");
+      Toast.warn('Seules les images sont acceptées pour le moment.');
       return null;
     }
     if (file.size > 10 * 1024 * 1024) {
-      alert("Image trop lourde (max 10 Mo).");
+      Toast.warn('Image trop lourde (10 Mo maximum).');
       return null;
     }
     const data = await new Promise((res, rej) => {
@@ -477,7 +530,8 @@ const Brain = {
       content_type: file.type,
     });
     if (!r || !r.ok) {
-      alert("Upload échoué : " + ((r && r.error) || 'inconnu'));
+      console.warn('brain_upload:', r && r.error);
+      Toast.error('Envoi de l’image impossible. Réessaie dans un instant.');
       return null;
     }
     return r.url;
@@ -531,8 +585,12 @@ const Brain = {
       const arr = Array.from(files || []);
       for (const f of arr) {
         statusEl.textContent = `Envoi de ${f.name}…`;
-        const url = await this._uploadFile(f);
-        if (url) { state.urls.push(url); renderPreviews(); }
+        try {
+          const url = await this._uploadFile(f);
+          if (url) { state.urls.push(url); renderPreviews(); }
+        } catch (e) {
+          Toast.friendlyError(e, 'Envoi de l’image impossible. Réessaie dans un instant.');
+        }
       }
       statusEl.textContent = state.urls.length
         ? `${state.urls.length} image${state.urls.length > 1 ? 's' : ''} prête${state.urls.length > 1 ? 's' : ''}.`
@@ -567,20 +625,28 @@ const Brain = {
     };
   },
 
-  _bindCards() {
-    document.querySelectorAll('[data-bnote]').forEach(el => {
-      el.onclick = async () => {
-        const id = el.dataset.bnote;
-        const allNotes = this.state.groups.flatMap(g => g.notes);
-        let n = allNotes.find(x => x.id === id);
-        if (!n) {
-          // re-fetch si pas en mémoire
-          const r = await App.api.brain_list({ limit: 200 });
-          if (r && r.ok) n = (r.notes || []).find(x => x.id === id);
-        }
-        if (n) this._openDetail(n);
-      };
+  // Lie les cartes du RENDU COURANT à leur note. On passe la liste
+  // vraiment affichée (avant : recherche dans state.groups — vide pour
+  // les filtres Fait/Archivé — puis re-fetch tronqué à 200 sans statut,
+  // d'où des clics morts sur les notes anciennes).
+  _bindCards(list) {
+    const root = document.getElementById('b-content');
+    if (!root) return;
+    root.querySelectorAll('[data-bnote]').forEach(el => {
+      const n = (list || []).find(x => x.id === el.dataset.bnote);
+      if (!n) return;
+      this._makeClickable(el, () => this._openDetail(n));
     });
+  },
+
+  // Rend un div cliquable accessible au clavier (Entrée / Espace)
+  _makeClickable(el, fn) {
+    el.onclick = fn;
+    el.setAttribute('role', 'button');
+    el.setAttribute('tabindex', '0');
+    el.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); }
+    };
   },
 
   // ----------------------------------------------------------------------
@@ -603,7 +669,7 @@ const Brain = {
                     placeholder="Ex: Demander à Thomas son retour sur la nouvelle landing. Lui répondre lundi.&#10;Ex: Idée produit : extension Chrome qui résume les vidéos YouTube."
                     class="w-full px-3 py-3 text-sm rounded-lg bg-bg border border-border focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans leading-relaxed resize-y transition"></textarea>
           ${this._attachmentsComposerHTML('bn')}
-          <div id="bn-status" class="mt-2 text-xs text-text-muted">⌘+Entrée pour envoyer</div>
+          <div id="bn-status" class="mt-2 text-xs text-text-muted">Ctrl+Entrée pour envoyer</div>
         </div>
         <div class="px-6 py-3 border-t border-border bg-surface-elevated flex justify-end gap-2">
           <button id="bn-cancel" class="btn btn-secondary">Annuler</button>
@@ -612,11 +678,30 @@ const Brain = {
       </div>
     `;
     document.body.appendChild(overlay);
-    const close = () => overlay.remove();
+    // close() retire TOUJOURS l'écouteur Échap (avant : il fuyait si la
+    // fenêtre se fermait autrement que par Échap)
+    const close = () => {
+      document.removeEventListener('keydown', escListener);
+      overlay.remove();
+    };
+    // Garde anti-perte de saisie sur clic-dehors / Échap
+    const isDirty = () => {
+      const ta = overlay.querySelector('#bn-content');
+      return !!((ta && ta.value.trim()) || composer.getUrls().length);
+    };
+    const closeGuarded = async () => {
+      if (isDirty()) {
+        const sure = await Dialog.confirm(
+          'Ta note n’est pas enregistrée. Fermer quand même ?',
+          { title: 'Note en cours', okLabel: 'Fermer sans garder', cancelLabel: 'Continuer la saisie', danger: true });
+        if (!sure) return;
+      }
+      close();
+    };
     overlay.querySelector('#bn-cancel').onclick = close;
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeGuarded(); });
     const escListener = (e) => {
-      if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escListener); }
+      if (e.key === 'Escape') closeGuarded();
     };
     document.addEventListener('keydown', escListener);
 
@@ -639,7 +724,7 @@ const Brain = {
           analyze_images: composer.getAnalyzeImages(),
         });
         if (r && r.ok) {
-          status.textContent = `✓ Ajouté · catégorie : ${r.note.category || 'auto'}`;
+          status.textContent = `✓ Ajouté · catégorie : ${(r.note && r.note.category) || 'auto'}`;
           status.className = 'mt-2 text-xs text-success';
           setTimeout(() => { close(); this._load(); }, 800);
         } else {
@@ -749,23 +834,72 @@ const Brain = {
       </div>
     `;
     document.body.appendChild(overlay);
-    const close = () => overlay.remove();
+    // close() retire TOUJOURS l'écouteur Échap
+    const close = () => {
+      document.removeEventListener('keydown', escListener);
+      overlay.remove();
+    };
+    // Garde anti-perte de saisie : réponse en cours ou édition modifiée
+    const isDirty = () => {
+      const reply = overlay.querySelector('#bd-reply');
+      if (reply && reply.value.trim()) return true;
+      const zone = overlay.querySelector('#bd-edit-zone');
+      if (zone && !zone.classList.contains('hidden')) {
+        const area = overlay.querySelector('#bd-edit-content');
+        const txtChanged = area && area.value.trim() !== (n.content || '').trim();
+        const attChanged = JSON.stringify(editComposer.getUrls()) !== JSON.stringify(n.attachments || []);
+        if (txtChanged || attChanged) return true;
+      }
+      return false;
+    };
+    const closeGuarded = async () => {
+      if (isDirty()) {
+        const sure = await Dialog.confirm(
+          'Tu as du texte non envoyé dans cette note. Fermer quand même ?',
+          { title: 'Saisie en cours', okLabel: 'Fermer sans garder', cancelLabel: 'Continuer la saisie', danger: true });
+        if (!sure) return;
+      }
+      close();
+    };
+    const escListener = (e) => {
+      if (e.key !== 'Escape') return;
+      // Si la visionneuse d'image est ouverte, Échap ne ferme qu'elle
+      if (document.getElementById('b-lightbox')) return;
+      closeGuarded();
+    };
+    document.addEventListener('keydown', escListener);
     overlay.querySelector('#bd-close').onclick = close;
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeGuarded(); });
 
     const setStatus = async (status) => {
-      const r = await App.api.brain_update({ id: n.id, status });
-      if (r && r.ok) { close(); this._load(); }
-      else alert('Échec : ' + (r && r.error || 'inconnu'));
+      try {
+        const r = await App.api.brain_update({ id: n.id, status });
+        if (r && r.ok) { close(); this._load(); }
+        else {
+          console.warn('brain_update:', r && r.error);
+          Toast.error('Impossible de changer le statut de la note. Réessaie dans un instant.');
+        }
+      } catch (e) {
+        Toast.friendlyError(e, 'Impossible de changer le statut de la note.');
+      }
     };
     overlay.querySelector('#bd-archive')?.addEventListener('click', () => setStatus('archived'));
     overlay.querySelector('#bd-done')?.addEventListener('click', () => setStatus('done'));
     overlay.querySelector('#bd-reopen')?.addEventListener('click', () => setStatus('open'));
     overlay.querySelector('#bd-delete').onclick = async () => {
-      if (!confirm('Supprimer cette note ?')) return;
-      const r = await App.api.brain_delete({ id: n.id });
-      if (r && r.ok) { close(); this._load(); }
-      else alert('Échec : ' + (r && r.error || 'inconnu'));
+      const sure = await Dialog.confirm('Supprimer cette note ?',
+        { title: 'Supprimer', okLabel: 'Supprimer', danger: true });
+      if (!sure) return;
+      try {
+        const r = await App.api.brain_delete({ id: n.id });
+        if (r && r.ok) { close(); this._load(); }
+        else {
+          console.warn('brain_delete:', r && r.error);
+          Toast.error('Suppression impossible. Réessaie dans un instant.');
+        }
+      } catch (e) {
+        Toast.friendlyError(e, 'Suppression impossible.');
+      }
     };
 
     // ---- Lightbox plein écran sur les images attachées (vue lecture) ----
@@ -827,7 +961,11 @@ const Brain = {
       status.textContent = 'Envoi…';
       const r = await App.api.brain_reply({ id: n.id, content });
       if (r && r.ok) { close(); this._load(); }
-      else { status.textContent = '✗ ' + (r && r.error || 'erreur'); replySend.disabled = false; }
+      else {
+        console.warn('brain_reply:', r && r.error);
+        status.textContent = '✗ Envoi impossible, réessaie';
+        replySend.disabled = false;
+      }
     };
     replySend.onclick = sendReply;
     overlay.addEventListener('keydown', e => {
@@ -849,6 +987,7 @@ const Brain = {
   // ----------------------------------------------------------------------
   _openLightbox(url) {
     const lb = document.createElement('div');
+    lb.id = 'b-lightbox'; // repéré par l'Échap de la modale détail
     lb.className = 'fixed inset-0 z-[300] flex items-center justify-center p-4 cursor-zoom-out';
     lb.style.background = 'rgba(0,0,0,0.92)';
     lb.innerHTML = `<img src="${this._escape(url)}" alt="" class="max-w-full max-h-full object-contain rounded-lg shadow-hero">`;

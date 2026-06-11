@@ -23,11 +23,13 @@ window.PipelinesActivity = {
     pixelpros: 'Pixel Pros',
   },
 
+  // Couleurs par pipeline via les tokens du thème (pas de hex en dur) :
+  // elles suivent le mode clair/sombre automatiquement.
   COLORS: {
-    lagriffe:  '#a855f7',
-    rankus:    '#22c55e',
-    wow:       '#06b6d4',
-    pixelpros: '#facc15',
+    lagriffe:  'hsl(var(--accent))',
+    rankus:    'hsl(var(--success))',
+    wow:       'hsl(var(--info))',
+    pixelpros: 'hsl(var(--gold))',
   },
 
   _state: {},          // { prefix: {recent:[], unseenCount, latestUnseenAt} }
@@ -85,6 +87,10 @@ window.PipelinesActivity = {
     for (const prefix of this.PREFIXES) {
       const block = pipes[prefix] || {};
       const recent = block.recent || [];
+      // Si l'utilisateur a CETTE vue sous les yeux, tout est considéré vu :
+      // on rafraîchit la "dernière visite" à chaque poll (avant, le badge
+      // se remplissait pendant qu'il regardait l'écran concerné).
+      if (window.App && App.currentView === prefix) this._setSeen(prefix);
       const seen = this._getSeen(prefix);
       const unseen = seen ? recent.filter(r => (r.at || '') > seen) : recent.slice();
       this._state[prefix] = {
@@ -138,6 +144,15 @@ window.PipelinesActivity = {
                     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   },
 
+  // Statut brut (anglais) → libellé français. Réutilise la table exposée
+  // par pipeline_view.js (window.PipelineView.STATUS_LABELS_FR).
+  _statusLabel(prefix, status) {
+    if (!status) return '';
+    if (prefix === 'pixelpros' && status === 'paid') return 'Payé';
+    const table = (window.PipelineView && window.PipelineView.STATUS_LABELS_FR) || {};
+    return table[status] || status;
+  },
+
   // ---------- Rendu du panneau Cockpit ----------
   renderCockpitPanel(slot) {
     if (!slot) return;
@@ -151,17 +166,17 @@ window.PipelinesActivity = {
 
     const total = this.totalUnseen();
     const headline = total === 1
-      ? '1 mouvement dans tes pipelines depuis ta dernière visite'
-      : `${total} mouvements dans tes pipelines depuis ta dernière visite`;
+      ? '1 mouvement dans tes chaînes de fabrication depuis ta dernière visite'
+      : `${total} mouvements dans tes chaînes de fabrication depuis ta dernière visite`;
 
     const blocksHtml = blocks.map(b => {
-      const color = this.COLORS[b.prefix] || '#6366f1';
+      const color = this.COLORS[b.prefix] || 'hsl(var(--accent))';
       const label = this.LABELS[b.prefix] || b.prefix;
       const items = (b.unseenItems || []).slice(0, 4).map(it => `
         <li class="cockpit-pa-row">
           <span class="cockpit-pa-dot" style="background:${color}"></span>
           <span class="cockpit-pa-name">${this._esc(it.name)}</span>
-          <span class="cockpit-pa-status">${this._esc(it.status)}</span>
+          <span class="cockpit-pa-status">${this._esc(this._statusLabel(b.prefix, it.status))}</span>
           <span class="cockpit-pa-when">${this._esc(this._relTime(it.at))}</span>
         </li>
       `).join('');
@@ -172,7 +187,7 @@ window.PipelinesActivity = {
         <div class="cockpit-pa-block">
           <div class="cockpit-pa-head">
             <span class="cockpit-pa-pill" style="--pa-color:${color}">${label}</span>
-            <span class="cockpit-pa-count">${b.unseenCount} chgt${b.unseenCount > 1 ? 's' : ''}</span>
+            <span class="cockpit-pa-count">${b.unseenCount} mouvement${b.unseenCount > 1 ? 's' : ''}</span>
             <button class="cockpit-pa-open" data-prefix="${b.prefix}">Ouvrir →</button>
           </div>
           <ul class="cockpit-pa-list">${items}${extra}</ul>
@@ -184,7 +199,7 @@ window.PipelinesActivity = {
       <div class="cockpit-pa-card">
         <div class="cockpit-pa-card-head">
           <div>
-            <div class="cockpit-pa-kicker">PIPELINES</div>
+            <div class="cockpit-pa-kicker">CHAÎNES DE FABRICATION</div>
             <h3 class="cockpit-pa-title">${headline}</h3>
           </div>
         </div>
@@ -216,10 +231,11 @@ window.PipelinesActivity = {
         border-radius: 14px;
         background: hsl(var(--surface));
         border: 1px solid hsl(var(--border));
-        box-shadow: var(--shadow-soft, 0 1px 2px rgba(15,23,42,0.04));
+        /* même ombre que .card (main.css) — var(--shadow-soft) n'existe pas */
+        box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.04);
       }
       .cockpit-pa-card-head { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 10px; gap:12px; flex-wrap:wrap; }
-      .cockpit-pa-kicker { font-size: 10px; font-weight: 800; letter-spacing: 1.5px; color: hsl(var(--accent)); margin-bottom: 4px; }
+      .cockpit-pa-kicker { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: hsl(var(--accent)); margin-bottom: 4px; }
       .cockpit-pa-title { font-size: 17px; font-weight: 700; color: hsl(var(--text)); line-height: 1.3; text-wrap: balance; }
       .cockpit-pa-blocks { display: grid; grid-template-columns: 1fr; gap: 10px; }
       @media (min-width: 900px) { .cockpit-pa-blocks { grid-template-columns: 1fr 1fr; } }
@@ -247,7 +263,7 @@ window.PipelinesActivity = {
       .cockpit-pa-dot { width: 8px; height: 8px; border-radius: 50%; }
       .cockpit-pa-name { color: hsl(var(--text)); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .cockpit-pa-status {
-        font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+        font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
         background: hsl(var(--surface-elevated)); color: hsl(var(--text-muted));
         text-transform: uppercase; letter-spacing: 0.4px;
       }
@@ -261,12 +277,18 @@ window.PipelinesActivity = {
   start() {
     if (this._pollTimer) return;
     const tick = () => this.checkAll();
-    // 1er tick après que App.api soit prêt
+    // 1er tick après que App.api soit prêt — au plus ~60 tentatives (18 s) :
+    // si l'app ne démarre jamais (page de connexion, écran cassé…), on
+    // abandonne au lieu de sonder pour toujours.
+    let tries = 0;
     const wait = setInterval(() => {
+      tries += 1;
       if (window.App && App.api) {
         clearInterval(wait);
         tick();
         this._pollTimer = setInterval(tick, this.POLL_MS);
+      } else if (tries >= 60) {
+        clearInterval(wait);
       }
     }, 300);
   },

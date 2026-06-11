@@ -62,7 +62,7 @@ function makePipelineView(config) {
           <div class="flex gap-2 mb-6 border-b border-border">
             <button data-pv-tab="plomberie" class="pv-tab">Pipeline</button>
             <button data-pv-tab="dashboard" class="pv-tab">Demandes</button>
-            <button data-pv-tab="logs"      class="pv-tab">Logs d'une demande</button>
+            <button data-pv-tab="logs"      class="pv-tab">Historique d'une demande</button>
           </div>
 
           <div id="pv-content-${this.config.apiPrefix}"></div>
@@ -135,6 +135,14 @@ function makePipelineView(config) {
           position: absolute; left: 11px; top: 24px; bottom: 0;
           width: 2px; background: hsl(var(--border));
         }
+        /* Pipelines à 8 étapes (Lagriffe) : wrap autorisé jusqu'à 1100px,
+           flèches visibles seulement quand tout tient sur une ligne. */
+        .pv-flow-wide { flex-wrap: wrap; }
+        .pv-arrow-wide { display: none; }
+        @media (min-width: 1100px) {
+          .pv-flow-wide { flex-wrap: nowrap; }
+          .pv-arrow-wide { display: flex; }
+        }
       `;
       document.head.appendChild(s);
     },
@@ -198,7 +206,15 @@ function makePipelineView(config) {
         limit: 100,
       });
       if (!resp || !resp.ok) {
-        listEl.innerHTML = `<div class="card p-6 text-danger">${(resp && resp.error) || 'Erreur API'}</div>`;
+        console.warn(`[pipeline-view] ${this.config.apiPrefix} list_intakes:`, resp && resp.error);
+        listEl.innerHTML = `
+          <div class="card p-6 text-center">
+            <p class="text-sm text-danger mb-3">Impossible de charger les demandes.</p>
+            <button id="pv-list-retry" class="btn btn-secondary">Réessayer</button>
+          </div>
+        `;
+        const retry = document.getElementById('pv-list-retry');
+        if (retry) retry.onclick = () => this._loadIntakes();
         return;
       }
       this.state.intakes = resp.intakes || [];
@@ -206,23 +222,55 @@ function makePipelineView(config) {
       statusEl.textContent = `${this.state.intakes.length} demande(s) · ${label}`;
 
       if (this.state.intakes.length === 0) {
+        // Le filtre par défaut (« À valider ») peut donner une liste vide
+        // alors que d'autres demandes existent → proposer d'élargir.
+        const isFiltered = !!this.state.statusFilter;
         listEl.innerHTML = `
           <div class="card p-10 text-center">
             <div class="text-3xl mb-3 opacity-60">∅</div>
             <p class="text-text-muted">Aucune demande dans ce filtre.</p>
+            ${isFiltered ? `<button id="pv-show-all" class="btn btn-secondary mt-4">Afficher tous les statuts</button>` : ''}
           </div>
         `;
+        const showAll = document.getElementById('pv-show-all');
+        if (showAll) showAll.onclick = () => {
+          this.state.statusFilter = '';
+          const filterSel = document.getElementById('pv-status-filter');
+          if (filterSel) filterSel.value = '';
+          this._loadIntakes();
+        };
         this._renderActionsPane();
         return;
       }
       listEl.innerHTML = this.state.intakes.map(i => this._intakeCard(i)).join('');
-      listEl.querySelectorAll('[data-intake-id]').forEach(el => {
-        // Clic simple = sélection (panneau actions à droite)
-        el.addEventListener('click', () => {
-          this.state.selectedId = el.dataset.intakeId;
-          this._loadIntakes();
+      // Sélection LOCALE : on bascule juste les classes + le panneau d'actions,
+      // sans re-fetch (avant : chaque clic rechargeait toute la liste → flash).
+      const selectCard = (el) => {
+        this.state.selectedId = el.dataset.intakeId;
+        listEl.querySelectorAll('[data-intake-id]').forEach(other => {
+          const isSel = other.dataset.intakeId === this.state.selectedId;
+          other.classList.toggle('is-selected', isSel);
+          other.setAttribute('aria-pressed', isSel ? 'true' : 'false');
+          const wrap = other.querySelector('[data-pv-card-detail-wrap]');
+          if (wrap) wrap.classList.toggle('hidden', !isSel);
         });
-        // Double-clic = ouvre la modale détail complète
+        this._renderActionsPane();
+      };
+      listEl.querySelectorAll('[data-intake-id]').forEach(el => {
+        // Clic simple (ou Entrée/Espace) = sélection (panneau actions à droite)
+        el.addEventListener('click', () => selectCard(el));
+        el.addEventListener('keydown', (e) => {
+          if (e.target !== el) return; // laisser vivre le bouton « Détail »
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectCard(el); }
+        });
+        // Bouton « Détail » visible sur la carte sélectionnée
+        const detailBtn = el.querySelector('[data-pv-card-detail]');
+        if (detailBtn) detailBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const intake = this.state.intakes.find(i => i.id === el.dataset.intakeId);
+          if (intake) this._openIntakeDetail(intake);
+        });
+        // Double-clic = raccourci bonus vers la modale détail
         el.addEventListener('dblclick', () => {
           const intake = this.state.intakes.find(i => i.id === el.dataset.intakeId);
           if (intake) this._openIntakeDetail(intake);
@@ -257,13 +305,14 @@ function makePipelineView(config) {
       }
 
       return `
-        <div class="card pv-card-intake p-4 ${isSel ? 'is-selected' : ''}" data-intake-id="${intake.id}">
+        <div class="card pv-card-intake p-4 ${isSel ? 'is-selected' : ''}" data-intake-id="${this._escape(intake.id)}"
+             role="button" tabindex="0" aria-pressed="${isSel ? 'true' : 'false'}">
           <div class="flex items-start justify-between gap-3 mb-2">
             <div class="flex-1 min-w-0">
               <div class="text-sm font-bold truncate">${this._escape(fullName)} · ${this._escape(company)}</div>
               <div class="text-[11px] text-text-muted truncate">${this._escape(email)} · ${this._fmtDate(intake.created_at)}</div>
             </div>
-            <span class="text-[10px] font-bold uppercase px-2 py-1 rounded shrink-0"
+            <span class="text-[11px] font-bold uppercase px-2 py-1 rounded shrink-0"
                   style="background: hsl(var(--${statusColor}) / 0.15); color: hsl(var(--${statusColor}));">
               ${this._escape(statusLabel)}
             </span>
@@ -271,7 +320,10 @@ function makePipelineView(config) {
           ${metaBits.length ? `<div class="text-[11px] text-text-secondary mb-1">${metaBits.join(' · ')}</div>` : ''}
           ${domLine ? `<div class="text-[11px] text-text-muted mb-2">${domLine}</div>` : ''}
           <div class="text-xs text-text leading-snug line-clamp-3">${this._escape(intake.description || '(pas de brief)')}</div>
-          ${payload.nda_souhaite ? `<div class="text-[10px] mt-2 font-bold text-warning">NDA demandé avant premier échange</div>` : ''}
+          ${payload.nda_souhaite ? `<div class="text-[11px] mt-2 font-bold text-warning">NDA demandé avant premier échange</div>` : ''}
+          <div data-pv-card-detail-wrap class="mt-3 ${isSel ? '' : 'hidden'}">
+            <button type="button" class="btn btn-secondary text-xs" data-pv-card-detail>Détail</button>
+          </div>
         </div>
       `;
     },
@@ -294,29 +346,36 @@ function makePipelineView(config) {
       const TERMINAL_STATUSES = ['rejected', 'failed', 'final_failed', 'live'];
       const canAbandon = !TERMINAL_STATUSES.includes(status);
 
+      // Un SEUL bouton principal par panneau : l'action qui fait avancer la
+      // demande. Tout le reste (détail, historique, refus) est secondaire.
       const buttons = [];
       if (status === 'pending_validation') {
-        buttons.push({ id: 'pv-act-approve', label: 'Approuver (≈15 € en tokens)', cls: 'btn-primary' });
+        buttons.push({ id: 'pv-act-approve', label: `Approuver (≈15 € de frais d'IA)`, cls: 'btn-primary' });
       }
       if (status === 'approved') {
         buttons.push({ id: 'pv-act-dispatch', label: 'Forcer le lancement maintenant', cls: 'btn-primary' });
+      }
+      // Mêmes pouvoirs que le panneau d'attente du Pipeline : la finalisation
+      // manuelle d'une demande payée (Lagriffe uniquement, cf. _stageActionsFor).
+      if (status === 'paid' && this.config.apiPrefix === 'lagriffe') {
+        buttons.push({ id: 'pv-act-finalize', label: 'Lancer la finalisation', cls: 'btn-primary' });
       }
       // Actions spécifiques à l'offre (ex: Lagriffe approve_final si final_ready_review)
       if (typeof this.config.extraActions === 'function') {
         this.config.extraActions(sel).forEach(a => buttons.push(a));
       }
-      buttons.push({ id: 'pv-act-detail', label: 'Ouvrir le détail complet', cls: 'btn-primary' });
-      buttons.push({ id: 'pv-act-logs', label: 'Voir les logs de cette demande', cls: 'btn-secondary' });
+      buttons.push({ id: 'pv-act-detail', label: 'Ouvrir le détail complet', cls: 'btn-secondary' });
+      buttons.push({ id: 'pv-act-logs', label: `Voir l'historique de cette demande`, cls: 'btn-secondary' });
 
       // Bouton « Abandonner » — toujours visible sauf demandes déjà terminales.
       // Pour pending_validation on garde le mot « Refuser » (sens commercial),
-      // pour les autres étapes c'est un retrait du pipeline.
+      // pour les autres étapes c'est un retrait de la chaîne de fabrication.
       if (canAbandon) {
         buttons.push({
           id: 'pv-act-reject',
           label: status === 'pending_validation'
             ? 'Refuser cette demande'
-            : 'Abandonner / Sortir du pipeline',
+            : 'Abandonner / Sortir de la chaîne',
           cls: 'btn-secondary',
           style: 'color: hsl(var(--danger)); border-color: hsl(var(--danger) / 0.45); margin-top: 8px;',
         });
@@ -324,7 +383,7 @@ function makePipelineView(config) {
 
       pane.innerHTML = `
         <div class="card p-5">
-          <div class="text-[10px] font-bold tracking-widest text-accent mb-1">DEMANDE SÉLECTIONNÉE</div>
+          <div class="text-[11px] font-bold tracking-widest text-accent mb-1">DEMANDE SÉLECTIONNÉE</div>
           <div class="text-base font-bold mb-1">${this._escape(fullName)}</div>
           <div class="text-xs text-text-muted mb-4">${this._escape(sel.company_name || '')}</div>
           <div class="flex flex-col gap-2">
@@ -343,51 +402,80 @@ function makePipelineView(config) {
       };
 
       const approveBtn = document.getElementById('pv-act-approve');
-      if (approveBtn) approveBtn.onclick = async () => {
-        if (!confirm(`Approuver et lancer la preview pour :\n\n${fullName} · ${sel.company_name}\n\nCoût ≈ 15 € HT. Non réversible.`)) return;
+      if (approveBtn) approveBtn.onclick = () => this._withBusy(approveBtn, async () => {
+        if (!await this._confirmApprove(sel)) return;
         setMsg('Approbation…');
         const r = await this._call('approve_intake', { id: sel.id });
-        if (!r || !r.ok) { setMsg(`Échec : ${r && r.error || 'inconnu'}`, true); return; }
+        if (!r || !r.ok) {
+          setMsg(`Échec de l'approbation.`, true);
+          Toast.friendlyError(r && r.error, `L'approbation n'a pas abouti — la demande n'a pas bougé.`);
+          return;
+        }
         setMsg('Approuvé. Déclenchement immédiat…');
         const d = await this._call('dispatch_now', { id: sel.id });
-        if (d && d.ok) setMsg(`Lancement OK : ${d.message || ''}`);
-        else setMsg(`Approuvé. Cron Netlify reprendra dans 5 min.`);
+        if (d && d.ok) {
+          setMsg(`Lancement OK : ${d.message || ''}`);
+          Toast.success('Demande approuvée — fabrication lancée.');
+        } else {
+          setMsg('Approuvé. La fabrication reprendra sous 5 min.');
+          Toast.success('Demande approuvée — la fabrication reprendra sous 5 min.');
+        }
         await this._loadIntakes();
-      };
+      });
 
       const rejectBtn = document.getElementById('pv-act-reject');
-      if (rejectBtn) rejectBtn.onclick = async () => {
-        const isAbandon = status !== 'pending_validation';
-        const verb = isAbandon ? 'Abandonner' : 'Refuser';
-        const warn = isAbandon
-          ? `\n\nLa demande sortira du pipeline (statut « refusé »). Aucun mail ne part. Réversible uniquement en base.`
-          : '';
-        if (!confirm(`${verb} cette demande ?\n\n${fullName} · ${sel.company_name || ''}${warn}`)) return;
-        const reason = prompt(`Motif de l'${verb.toLowerCase()} (optionnel) :`) ?? '';
-        setMsg(`${verb}…`);
-        const r = await this._call('reject_intake', { id: sel.id, reason });
-        if (r && r.ok) {
-          setMsg(isAbandon ? 'Demande abandonnée.' : 'Demande refusée.');
+      if (rejectBtn) rejectBtn.onclick = () => this._withBusy(rejectBtn, async () => {
+        const done = await this._rejectFlow(sel);
+        if (done) {
           this.state.selectedId = null;
           await this._loadIntakes();
         }
-        else setMsg(`Échec : ${r && r.error || 'inconnu'}`, true);
-      };
+      });
 
       const dispatchBtn = document.getElementById('pv-act-dispatch');
-      if (dispatchBtn) dispatchBtn.onclick = async () => {
-        if (!confirm(`Forcer le lancement immédiat ?\n\n${fullName} · ${sel.company_name}`)) return;
+      if (dispatchBtn) dispatchBtn.onclick = () => this._withBusy(dispatchBtn, async () => {
+        const okC = await Dialog.confirm(
+          `Forcer le lancement immédiat ?\n${fullName} · ${sel.company_name || ''}`,
+          { title: 'Lancer la fabrication', okLabel: 'Lancer', cancelLabel: 'Annuler' }
+        );
+        if (!okC) return;
         setMsg('Déclenchement…');
         const r = await this._call('dispatch_now', { id: sel.id });
-        if (r && r.ok) { setMsg(`OK : ${r.message || ''}`); await this._loadIntakes(); }
-        else setMsg(`Échec : ${r && r.error || 'inconnu'}`, true);
-      };
+        if (r && r.ok) {
+          setMsg(`OK : ${r.message || ''}`);
+          Toast.success('Fabrication lancée.');
+          await this._loadIntakes();
+        } else {
+          setMsg('Échec du lancement.', true);
+          Toast.friendlyError(r && r.error, `Le lancement n'a pas abouti.`);
+        }
+      });
+
+      const finalizeBtn = document.getElementById('pv-act-finalize');
+      if (finalizeBtn) finalizeBtn.onclick = () => this._withBusy(finalizeBtn, async () => {
+        const okC = await Dialog.confirm(
+          `Lancer la finalisation du site ?\n${fullName} · ${sel.company_name || ''}`,
+          { title: 'Lancer la finalisation', okLabel: 'Lancer', cancelLabel: 'Annuler' }
+        );
+        if (!okC) return;
+        setMsg('Finalisation…');
+        const r = await this._call('finalize_now', { id: sel.id });
+        if (r && r.ok) {
+          setMsg(`OK : ${r.message || ''}`);
+          Toast.success('Finalisation lancée.');
+          await this._loadIntakes();
+        } else {
+          setMsg('Échec de la finalisation.', true);
+          Toast.friendlyError(r && r.error, `La finalisation n'a pas abouti.`);
+        }
+      });
 
       // Bind les actions custom si elles ont fourni un onClick callback
       buttons.forEach(b => {
         if (b.onClick) {
           const el = document.getElementById(b.id);
-          if (el) el.onclick = () => b.onClick({ intake: sel, setMsg, call: this._call.bind(this), reload: () => this._loadIntakes() });
+          if (el) el.onclick = () => this._withBusy(el, () =>
+            b.onClick({ intake: sel, setMsg, call: this._call.bind(this), reload: () => this._loadIntakes() }));
         }
       });
 
@@ -409,7 +497,7 @@ function makePipelineView(config) {
 
       const overlay = document.createElement('div');
       overlay.className = 'fixed inset-0 z-[200] flex items-center justify-center p-4';
-      overlay.style.background = 'rgba(15,23,42,0.7)';
+      overlay.style.background = 'hsl(var(--bg) / 0.7)';
       overlay.style.backdropFilter = 'blur(8px)';
       const dom = payload.domain || {};
       const domLine = dom.option === 'deja' && dom.existing
@@ -426,11 +514,11 @@ function makePipelineView(config) {
               <h3 class="text-base font-bold">${this._escape(fullName)} · ${this._escape(intake.company_name || '')}</h3>
             </div>
             <div class="flex items-center gap-3">
-              <span class="text-[10px] font-bold uppercase px-3 py-1.5 rounded"
+              <span class="text-[11px] font-bold uppercase px-3 py-1.5 rounded"
                     style="background: hsl(var(--${statusColor}) / 0.15); color: hsl(var(--${statusColor}));">
                 ${this._escape(statusLabel)}
               </span>
-              <button id="pvd-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none">×</button>
+              <button id="pvd-close" title="Fermer" aria-label="Fermer" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none">×</button>
             </div>
           </div>
 
@@ -531,7 +619,14 @@ function makePipelineView(config) {
         </div>
       `;
       document.body.appendChild(overlay);
-      const close = () => overlay.remove();
+      // L'écouteur Échap est retiré dans close() : quelle que soit la façon
+      // de fermer (×, Fermer, clic à côté, Échap), il ne reste pas en vie.
+      const onEsc = (e) => { if (e.key === 'Escape') close(); };
+      const close = () => {
+        document.removeEventListener('keydown', onEsc);
+        overlay.remove();
+      };
+      document.addEventListener('keydown', onEsc);
       overlay.querySelector('#pvd-close').onclick = close;
       overlay.querySelector('#pvd-close-2').onclick = close;
       overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
@@ -541,25 +636,12 @@ function makePipelineView(config) {
         this.switchTab('logs');
       };
       const abandonBtn = overlay.querySelector('#pvd-abandon');
-      if (abandonBtn) abandonBtn.onclick = async () => {
-        const isAbandon = intake.status !== 'pending_validation';
-        const verb = isAbandon ? 'Abandonner' : 'Refuser';
-        const warn = isAbandon
-          ? `\n\nLa demande sortira du pipeline (statut « refusé »). Aucun mail ne part.`
-          : '';
-        if (!confirm(`${verb} cette demande ?\n\n${fullName} · ${intake.company_name || ''}${warn}`)) return;
-        const reason = prompt(`Motif (optionnel) :`) ?? '';
-        const r = await this._call('reject_intake', { id: intake.id, reason });
-        if (r && r.ok) {
+      if (abandonBtn) abandonBtn.onclick = () => this._withBusy(abandonBtn, async () => {
+        const done = await this._rejectFlow(intake);
+        if (done) {
           close();
-          this._toast(isAbandon ? '✓ Demande abandonnée' : '✓ Demande refusée');
           this.refresh();
-        } else {
-          this._toast(`Échec : ${(r && r.error) || 'inconnu'}`, 'error');
         }
-      };
-      document.addEventListener('keydown', function esc(e) {
-        if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
       });
     },
 
@@ -575,18 +657,24 @@ function makePipelineView(config) {
     // Onglet 2 : Plomberie
     // ------------------------------------------------------------------
     async _renderPlomberie() {
+      // Coupe un éventuel polling encore vivant (revisite de l'onglet,
+      // re-render…) AVANT d'en relancer un — sinon ils s'empilent.
+      if (this.state.pollHandle) {
+        clearInterval(this.state.pollHandle);
+        this.state.pollHandle = null;
+      }
       this._root.innerHTML = `
         <div class="card p-6 mb-5">
           <div class="flex items-center justify-between mb-1">
             <div>
-              <div class="hero-kicker mb-1">PIPELINE</div>
+              <div class="hero-kicker mb-1">CHAÎNE DE FABRICATION</div>
               <h2 class="text-xl font-bold">Le parcours d'une demande, étage par étage.</h2>
             </div>
             <div class="text-[11px] text-text-muted" id="pv-pipe-clock">Mise à jour : —</div>
           </div>
           <p class="text-text-muted text-sm mb-3">
             🤖 <b>Auto</b> = la demande avance toute seule. ✋ <b>Manuel</b> = tu valides à la main.
-            Bascule le toggle sur les étapes où tu veux garder le contrôle.
+            Bascule l'interrupteur sur les étapes où tu veux garder le contrôle.
           </p>
           <!-- Légende code couleur -->
           <div class="flex items-center gap-4 mb-5 text-[11px] text-text-muted flex-wrap">
@@ -603,8 +691,8 @@ function makePipelineView(config) {
               <span class="font-semibold" style="color: hsl(var(--warning));">attend ton action</span>
             </div>
           </div>
-          <div id="pv-pipe-flow" class="flex items-stretch gap-1.5 flex-wrap md:flex-nowrap"></div>
-          <div class="mt-6 grid grid-cols-3 gap-3" id="pv-pipe-deadends"></div>
+          <div id="pv-pipe-flow" class="flex items-stretch gap-1.5 flex-wrap ${this.config.stages.length >= 8 ? 'pv-flow-wide' : 'md:flex-nowrap'}"></div>
+          <div class="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3" id="pv-pipe-deadends"></div>
         </div>
 
         <!-- Panneau : demandes qui attendent ton action manuelle (visible si toggles actifs) -->
@@ -627,8 +715,10 @@ function makePipelineView(config) {
       await this._syncModesFromBackend();
       await this._loadPipeline();
       // Polling toutes les 30s (vue qui change rarement, on évite le flash visuel).
+      // App.viewInterval = auto-nettoyé au changement de vue ; le handle local
+      // sert au nettoyage quand on change d'ONGLET dans la même vue.
       // Le bouton "Rafraîchir" en header force un refresh immédiat si besoin.
-      this.state.pollHandle = setInterval(() => this._loadPipeline(true), 30000);
+      this.state.pollHandle = App.viewInterval(() => this._loadPipeline(true), 30000);
     },
 
     // ─── Préférences AUTO / MANUEL persistées en Supabase ─────────────────
@@ -646,19 +736,33 @@ function makePipelineView(config) {
     async _saveMode(stageKey, mode) {
       // 1. Optimistic update localStorage (UI réactive)
       const modes = this._loadModes();
+      const previous = modes[stageKey]; // mémorisé pour le rollback si le serveur refuse
       modes[stageKey] = mode;
       try { localStorage.setItem(this._modesKey(), JSON.stringify(modes)); } catch {}
+      if (this.state.pipeline) this._renderPipelineFlow(this.state.pipeline);
       // 2. Persistance backend (Triskell Command → Supabase via pipeline-settings-api Lagriffe)
-      if (App.api && typeof App.api.pipeline_settings_write === 'function') {
-        try {
-          await App.api.pipeline_settings_write({
-            product: this.config.apiPrefix,
-            stage: stageKey,
-            mode,
-          });
-        } catch (e) {
-          console.warn(`[pipeline-view] persistance backend failed pour ${stageKey}=${mode}:`, e);
-        }
+      //    ⚠ Garde-fou : si le serveur refuse, l'UI ne doit JAMAIS mentir →
+      //    on remet l'interrupteur comme avant (localStorage + affichage) et on prévient.
+      if (!App.api || typeof App.api.pipeline_settings_write !== 'function') return;
+      let r = null;
+      try {
+        r = await App.api.pipeline_settings_write({
+          product: this.config.apiPrefix,
+          stage: stageKey,
+          mode,
+        });
+      } catch (e) {
+        r = { ok: false, error: e };
+      }
+      if (!r || !r.ok) {
+        console.warn(`[pipeline-view] persistance backend failed pour ${stageKey}=${mode}:`, r && r.error);
+        const rollback = this._loadModes();
+        if (previous === undefined) delete rollback[stageKey];
+        else rollback[stageKey] = previous;
+        try { localStorage.setItem(this._modesKey(), JSON.stringify(rollback)); } catch {}
+        if (this.state.pipeline) this._renderPipelineFlow(this.state.pipeline);
+        Toast.friendlyError(r && r.error,
+          'Impossible d’enregistrer le réglage Auto/Manuel — l’interrupteur est revenu comme avant.');
       }
     },
     _isManual(stageKey) {
@@ -668,13 +772,41 @@ function makePipelineView(config) {
       if (modes[stageKey] !== undefined) return modes[stageKey] === 'manual';
       return stageKey === 'final_ready_review';
     },
+    // Étapes où le toggle Auto/Manuel a du sens pour CE pipeline.
+    // ⚠ Le déblocage manuel de l'étape « Payé » (finalize_now) n'existe que
+    // côté Lagriffe : pour WoW et RankUs on ne propose PAS de bloquer cette
+    // étape, sinon les demandes payées resteraient coincées sans issue.
+    _toggleableStages() {
+      const base = this.config.toggleableStages || ['approved', 'paid', 'final_ready_review'];
+      const allowed = this.config.apiPrefix === 'lagriffe'
+        ? base
+        : base.filter(k => k !== 'paid');
+      return new Set(allowed);
+    },
     // Charge les settings depuis Supabase au démarrage, met à jour le cache localStorage.
     async _syncModesFromBackend() {
       if (!App.api || typeof App.api.pipeline_settings_read !== 'function') return;
       try {
         const r = await App.api.pipeline_settings_read({ product: this.config.apiPrefix });
         if (r && r.ok && r.settings) {
-          try { localStorage.setItem(this._modesKey(), JSON.stringify(r.settings)); } catch {}
+          const settings = { ...r.settings };
+          // Auto-réparation : pour WoW/RankUs, l'étape « Payé » ne doit JAMAIS
+          // rester en MANUEL (aucun déblocage manuel n'existe pour elles →
+          // demandes payées coincées à vie). Si un ancien réglage traîne en
+          // base, on le remet en AUTO — l'interrupteur n'est plus proposé.
+          if (this.config.apiPrefix !== 'lagriffe' && settings.paid === 'manual') {
+            settings.paid = 'auto';
+            if (typeof App.api.pipeline_settings_write === 'function') {
+              try {
+                await App.api.pipeline_settings_write({
+                  product: this.config.apiPrefix, stage: 'paid', mode: 'auto',
+                });
+              } catch (e) {
+                console.warn('[pipeline-view] auto-réparation paid=auto échouée:', e);
+              }
+            }
+          }
+          try { localStorage.setItem(this._modesKey(), JSON.stringify(settings)); } catch {}
         }
       } catch (e) {
         console.warn('[pipeline-view] sync modes failed:', e);
@@ -688,9 +820,26 @@ function makePipelineView(config) {
         return;
       }
       const r = await this._call('pipeline_state');
-      // Si la réponse est KO ou vide, on garde l'affichage actuel (évite
-      // le flash "tous les compteurs à 0" pendant une erreur API passagère).
-      if (!r || !r.ok) return;
+      if (!r || !r.ok) {
+        console.warn(`[pipeline-view] ${this.config.apiPrefix} pipeline_state:`, r && r.error);
+        // Premier chargement raté → état d'erreur explicite + bouton Réessayer
+        // (avant : zone vide muette). En polling, on garde l'affichage actuel
+        // (évite le flash "tous les compteurs à 0" sur une erreur passagère).
+        if (!this.state.pipeline) {
+          const flow = document.getElementById('pv-pipe-flow');
+          if (flow) {
+            flow.innerHTML = `
+              <div class="card p-6 w-full text-center">
+                <p class="text-sm text-danger mb-3">Impossible de charger l'état de la chaîne de fabrication.</p>
+                <button id="pv-pipe-retry" class="btn btn-secondary">Réessayer</button>
+              </div>
+            `;
+            const retry = document.getElementById('pv-pipe-retry');
+            if (retry) retry.onclick = () => this._loadPipeline();
+          }
+        }
+        return;
+      }
       // Diff : si les données sont identiques à la dernière, on skip le
       // re-render complet (cas habituel en polling silencieux). Ça empêche
       // le clignotement et préserve les états visuels (hover, focus).
@@ -723,12 +872,9 @@ function makePipelineView(config) {
       const counts = state.counts || {};
       // Étapes pour lesquelles un toggle Auto/Manuel a du sens
       // (avant chaque étape se trouve un automatisme backend qu'on peut
-      // choisir de bloquer pour valider à la main).
-      const toggleable = new Set(this.config.toggleableStages || [
-        'approved',            // bloquer le auto-dispatch (validation brief)
-        'paid',                // bloquer le auto-finalize (relecture perso avant fabrication)
-        'final_ready_review',  // bloquer l'auto-envoi mail final (defaut MANUEL)
-      ]);
+      // choisir de bloquer pour valider à la main). Filtré par pipeline
+      // dans _toggleableStages (« paid » réservé à Lagriffe).
+      const toggleable = this._toggleableStages();
       const html = [];
       this.config.stages.forEach((st, idx) => {
         const n = counts[st.key] || 0;
@@ -747,27 +893,35 @@ function makePipelineView(config) {
         const counterClass = empty ? 'text-text-muted opacity-40'
                            : `text-${color}`;
         const toggleHtml = isToggleable ? `
-          <button class="pv-mode-toggle mt-2 w-full text-[10px] font-bold uppercase tracking-wider px-2 py-1.5 rounded transition-colors"
+          <button class="pv-mode-toggle mt-2 w-full text-[11px] font-bold uppercase tracking-wider px-2 py-1.5 rounded transition-colors"
                   data-pv-toggle="${this._escape(st.key)}"
                   data-pv-current="${isManual ? 'manual' : 'auto'}"
+                  aria-pressed="${isManual ? 'true' : 'false'}"
                   style="border: 1px solid hsl(var(--${isManual ? 'warning' : 'accent'}) / 0.4);
                          background: hsl(var(--${isManual ? 'warning' : 'accent'}) / 0.08);
                          color: hsl(var(--${isManual ? 'warning' : 'accent'}));"
                   title="Cliquer pour basculer entre Auto et Manuel sur cette étape">
             ${isManual ? '✋ Manuel' : '🤖 Auto'}
           </button>` : '';
-        // Mapping étape → clé template mail (4 mails clients dans le pipeline)
+        // Mapping étape → clé template mail (4 mails clients du circuit).
+        // ⚠ Ces mails sont ceux de LAGRIFFE (lagriffe_mail_templates_*) :
+        // on n'affiche l'icône ✉️ que sur ce pipeline, sinon on laisserait
+        // croire qu'on édite les mails WoW/RankUs alors qu'on toucherait
+        // en silence ceux de Lagriffe.
         const STAGE_TO_MAIL_TEMPLATE = {
           pending_validation: 'brief_received',
           sent:               'preview_ready',
           paid:               'payment_confirmed',
           live:               'site_delivered',
         };
-        const mailTplKey = STAGE_TO_MAIL_TEMPLATE[st.key];
+        const mailTplKey = this.config.apiPrefix === 'lagriffe'
+          ? STAGE_TO_MAIL_TEMPLATE[st.key]
+          : null;
         const mailIconHtml = mailTplKey ? `
           <button class="pv-mail-icon absolute top-2 right-2 text-[14px] leading-none p-1 rounded hover:bg-accent/10 transition-colors"
                   data-pv-mail-template="${this._escape(mailTplKey)}"
                   title="Éditer le mail envoyé à cette étape"
+                  aria-label="Éditer le mail envoyé à cette étape"
                   style="color: hsl(var(--accent)); z-index: 2;">
             ✉️
           </button>` : '';
@@ -777,18 +931,18 @@ function makePipelineView(config) {
                data-pv-stage-key="${this._escape(st.key)}">
             ${mailIconHtml}
             <div class="flex items-baseline justify-between mb-1 ${mailTplKey ? 'pr-6' : ''}">
-              <div class="text-[9px] font-bold tracking-widest text-text-muted">ÉTAPE ${idx + 1}</div>
+              <div class="text-[11px] font-bold tracking-widest text-text-muted">ÉTAPE ${idx + 1}</div>
               <div class="text-2xl font-bold ${counterClass}">${n}</div>
             </div>
             <div class="text-sm font-semibold leading-tight">${this._escape(st.label)}</div>
             <div class="text-[11px] text-text-muted mt-1 leading-tight">${this._escape(st.sub || '')}</div>
             ${needsIntervention ? `
-              <div class="text-[10px] font-bold uppercase tracking-widest mt-2 flex items-center gap-1" style="color: hsl(var(--warning));">
+              <div class="text-[11px] font-bold uppercase tracking-widest mt-2 flex items-center gap-1" style="color: hsl(var(--warning));">
                 <span>● Attend ton action</span>
               </div>` : ''}
             ${toggleHtml}
             ${(!empty && !isToggleable) ? `
-              <div class="absolute bottom-2 right-2 text-[10px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity"
+              <div class="absolute bottom-2 right-2 text-[11px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity"
                    style="color: hsl(var(--${color}));">
                 Voir →
               </div>` : ''}
@@ -797,8 +951,11 @@ function makePipelineView(config) {
         if (idx < this.config.stages.length - 1) {
           const flowActive = (counts[this.config.stages[idx + 1].key] || 0) > 0 || !empty;
           // Flèches cachées en wrap (mobile) pour éviter l'effet bizarre quand
-          // une étape passe à la ligne. Visibles dès md (≥768px).
-          html.push(`<div class="pv-pipe-arrow hidden md:flex ${flowActive ? 'is-active' : ''}"></div>`);
+          // une étape passe à la ligne. Visibles dès md (≥768px) — sauf pour
+          // les pipelines à 8 étapes (Lagriffe) où le wrap reste autorisé
+          // jusqu'à 1100px : les flèches n'apparaissent qu'à partir de là.
+          const arrowVisibility = this.config.stages.length >= 8 ? 'pv-arrow-wide' : 'hidden md:flex';
+          html.push(`<div class="pv-pipe-arrow ${arrowVisibility} ${flowActive ? 'is-active' : ''}"></div>`);
         }
       });
       flow.innerHTML = html.join('');
@@ -810,13 +967,10 @@ function makePipelineView(config) {
           const key = btn.dataset.pvToggle;
           const current = btn.dataset.pvCurrent;
           const next = current === 'manual' ? 'auto' : 'manual';
+          // _saveMode fait le re-render optimiste immédiat (localStorage),
+          // puis vérifie la réponse serveur et REVIENT EN ARRIÈRE (UI +
+          // localStorage + message) si l'enregistrement a échoué.
           this._saveMode(key, next);
-          // Re-render direct : _renderPipelineFlow lit le mode depuis
-          // localStorage (mis à jour synchrone par _saveMode). Pas besoin
-          // d'attendre un round-trip API. Et surtout on contourne le
-          // diff-de-signature de _loadPipeline qui ignore les changements
-          // de mode si les counts n'ont pas bougé (= toggle invisible).
-          if (this.state.pipeline) this._renderPipelineFlow(this.state.pipeline);
         });
       });
 
@@ -840,14 +994,23 @@ function makePipelineView(config) {
         if (n === 0) {
           el.style.cursor = 'default';
           el.removeAttribute('title');
+          el.removeAttribute('role');
+          el.removeAttribute('tabindex');
           return;
         }
         el.style.cursor = 'pointer';
         el.title = 'Cliquer pour voir les demandes à cette étape';
-        el.addEventListener('click', () => {
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
+        const go = () => {
           this.state.statusFilter = status;
           this.state.selectedId = null;
           this.switchTab('dashboard');
+        };
+        el.addEventListener('click', go);
+        el.addEventListener('keydown', (e) => {
+          if (e.target !== el) return; // ne pas intercepter le toggle / l'icône mail
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
         });
       });
 
@@ -863,7 +1026,7 @@ function makePipelineView(config) {
         return `
           <div class="card p-3 flex items-center justify-between" style="opacity: ${n > 0 ? 1 : 0.4};">
             <div>
-              <div class="text-[10px] font-bold tracking-widest text-text-muted">VOIE SANS ISSUE</div>
+              <div class="text-[11px] font-bold tracking-widest text-text-muted">VOIE SANS ISSUE</div>
               <div class="text-sm font-semibold">${this._escape(d.label)}</div>
             </div>
             <div class="text-2xl font-bold" style="color: hsl(var(--${d.color}));">${n}</div>
@@ -880,10 +1043,7 @@ function makePipelineView(config) {
       const countEl = document.getElementById('pv-pipe-pending-count');
       if (!panel || !list) return;
 
-      const toggleable = new Set(this.config.toggleableStages || [
-        'approved', 'paid', 'final_ready_review',
-      ]);
-      const manualStages = [...toggleable].filter(k => this._isManual(k));
+      const manualStages = [...this._toggleableStages()].filter(k => this._isManual(k));
       const counts = state.counts || {};
       const totalPending = manualStages.reduce((sum, k) => sum + (counts[k] || 0), 0);
 
@@ -896,7 +1056,9 @@ function makePipelineView(config) {
       // Filtre dans state.recent les intakes sur étapes manuelles
       const recent = state.recent || [];
       const pending = recent.filter(i => manualStages.includes(i.status));
-      countEl.textContent = `${totalPending} demande(s) coincée(s) — ${pending.length} affichée(s)`;
+      countEl.textContent = pending.length >= totalPending
+        ? `${totalPending} demande(s)`
+        : `${totalPending} demande(s) au total — les ${pending.length} plus récentes ci-dessous`;
 
       if (pending.length === 0) {
         list.innerHTML = `
@@ -924,20 +1086,20 @@ function makePipelineView(config) {
               <div class="text-[11px] text-text-muted">${this._escape(statusLabel)} · ${this._fmtDate(i.created_at)}</div>
             </div>
             <div class="flex gap-2 shrink-0">
-              ${stageActions.map(a => `<button class="btn btn-${a.cls} text-xs" data-pv-pending-act="${a.id}" data-pv-intake="${i.id}">${this._escape(a.label)}</button>`).join('')}
+              ${stageActions.map(a => `<button class="btn btn-${a.cls} text-xs" data-pv-pending-act="${this._escape(a.id)}" data-pv-intake="${this._escape(i.id)}">${this._escape(a.label)}</button>`).join('')}
             </div>
           </div>
         `;
       }).join('');
 
-      // Bind les actions directes
+      // Bind les actions directes (bouton occupé pendant l'appel = anti double-clic)
       list.querySelectorAll('[data-pv-pending-act]').forEach(btn => {
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', () => {
           const intakeId = btn.dataset.pvIntake;
           const actId = btn.dataset.pvPendingAct;
           const intake = pending.find(i => i.id === intakeId);
           if (!intake) return;
-          await this._runQuickAction(actId, intake);
+          this._withBusy(btn, () => this._runQuickAction(actId, intake));
         });
       });
     },
@@ -952,7 +1114,9 @@ function makePipelineView(config) {
       if (intake.status === 'approved') {
         acts.push({ id: 'dispatch', label: 'Lancer fabrication', cls: 'primary' });
       }
-      if (intake.status === 'paid') {
+      // finalize_now n'existe que côté Lagriffe (cf. _toggleableStages) :
+      // pour WoW/RankUs ce bouton appellerait un endpoint inexistant.
+      if (intake.status === 'paid' && this.config.apiPrefix === 'lagriffe') {
         acts.push({ id: 'finalize', label: 'Lancer finalisation', cls: 'primary' });
       }
       if (intake.status === 'final_ready_review') {
@@ -970,21 +1134,60 @@ function makePipelineView(config) {
       return acts;
     },
 
+    // Anti double-clic : désactive le bouton le temps de l'action.
+    // (Si un re-render a remplacé le bouton entre-temps, le `finally`
+    // retombe sur un nœud détaché — sans effet, sans erreur.)
+    async _withBusy(btn, fn) {
+      if (!btn || btn.disabled) return;
+      btn.disabled = true;
+      try { await fn(); }
+      finally { btn.disabled = false; }
+    },
+
+    // Confirmation d'approbation — LA MÊME fenêtre partout (panneau
+    // d'attente du Pipeline ET onglet Demandes) : coût annoncé, pas de
+    // chemin qui contourne l'avertissement.
+    async _confirmApprove(intake) {
+      const fullName = `${intake.client_first_name || ''} ${intake.client_last_name || ''}`.trim() || '(anonyme)';
+      return Dialog.confirm(
+        `Approuver et lancer la fabrication de l'aperçu pour :\n${fullName} · ${intake.company_name || ''}\n\nCoût ≈ 15 € de frais d'IA. Cette action est définitive.`,
+        { title: 'Approuver cette demande', okLabel: 'Approuver (≈15 €)', cancelLabel: 'Annuler' }
+      );
+    },
+
+    // Refus / abandon — flux unique pour les 3 endroits (panneau d'actions,
+    // modale détail, panneau d'attente). Annuler dans la fenêtre du motif
+    // annule VRAIMENT (avant : le refus partait quand même).
+    // Renvoie true si la demande a bien été refusée/abandonnée.
+    async _rejectFlow(intake) {
+      const fullName = `${intake.client_first_name || ''} ${intake.client_last_name || ''}`.trim() || '(anonyme)';
+      const isAbandon = intake.status !== 'pending_validation';
+      const verb = isAbandon ? 'Abandonner' : 'Refuser';
+      const warn = isAbandon
+        ? `\n\nLa demande sortira de la chaîne de fabrication (statut « refusé »). Aucun mail ne part. Cette action est définitive.`
+        : '';
+      const okConfirm = await Dialog.confirm(
+        `${verb} cette demande ?\n${fullName} · ${intake.company_name || ''}${warn}`,
+        { title: `${verb} la demande`, okLabel: verb, cancelLabel: 'Annuler', danger: true }
+      );
+      if (!okConfirm) return false;
+      const reason = prompt('Motif (laisser vide si aucun) :');
+      if (reason === null) return false; // Annuler ici = on ne fait rien
+      const r = await this._call('reject_intake', { id: intake.id, reason });
+      if (r && r.ok) {
+        Toast.success(isAbandon ? 'Demande abandonnée.' : 'Demande refusée.');
+        return true;
+      }
+      Toast.friendlyError(r && r.error, `Le ${isAbandon ? 'retrait' : 'refus'} n'a pas abouti — la demande n'a pas bougé.`);
+      return false;
+    },
+
     async _runQuickAction(actId, intake) {
       const fullName = `${intake.client_first_name || ''} ${intake.client_last_name || ''}`.trim();
       if (actId === 'detail') return this._openIntakeDetail(intake);
       if (actId === 'reject') {
-        const isAbandon = intake.status !== 'pending_validation';
-        const verb = isAbandon ? 'Abandonner' : 'Refuser';
-        const warn = isAbandon
-          ? `\n\nLa demande sortira du pipeline (statut « refusé »). Aucun mail ne part.`
-          : '';
-        if (!confirm(`${verb} cette demande ?\n\n${fullName} · ${intake.company_name || ''}${warn}`)) return;
-        const reason = prompt(`Motif (optionnel) :`) ?? '';
-        const r = await this._call('reject_intake', { id: intake.id, reason });
-        if (r && r.ok) this._toast(isAbandon ? '✓ Demande abandonnée' : '✓ Demande refusée');
-        else this._toast(`Échec : ${(r && r.error) || 'inconnu'}`, 'error');
-        await this._loadPipeline();
+        const done = await this._rejectFlow(intake);
+        if (done) await this._loadPipeline();
         return;
       }
       const labels = {
@@ -993,17 +1196,40 @@ function makePipelineView(config) {
         finalize: 'Lancer la finalisation',
         approve_final: 'Valider et envoyer le mail au client',
       };
+      const successMsgs = {
+        approve: 'Demande approuvée — fabrication lancée.',
+        dispatch: 'Fabrication lancée.',
+        finalize: 'Finalisation lancée.',
+        approve_final: 'Site validé — mail envoyé au client.',
+      };
       const methods = {
         approve: 'approve_intake',
         dispatch: 'dispatch_now',
         finalize: 'finalize_now',
         approve_final: 'approve_final',
       };
-      if (!confirm(`${labels[actId]} pour :\n\n${fullName} · ${intake.company_name || ''}`)) return;
+      // Approuver = même confirmation (avec le coût) que dans l'onglet Demandes.
+      const okConfirm = actId === 'approve'
+        ? await this._confirmApprove(intake)
+        : await Dialog.confirm(
+            `${labels[actId]} pour :\n${fullName} · ${intake.company_name || ''}`,
+            { title: labels[actId], okLabel: 'Confirmer', cancelLabel: 'Annuler' }
+          );
+      if (!okConfirm) return;
       const r = await this._call(methods[actId], { id: intake.id });
-      if (r && r.ok && actId === 'approve') {
-        // Enchaîne approve + dispatch
-        await this._call('dispatch_now', { id: intake.id });
+      if (r && r.ok) {
+        if (actId === 'approve') {
+          // Enchaîne approve + dispatch — sans mentir si le déclenchement
+          // immédiat échoue (le passage auto reprendra dans les 5 min).
+          const d = await this._call('dispatch_now', { id: intake.id });
+          Toast.success((d && d.ok)
+            ? successMsgs.approve
+            : 'Demande approuvée — la fabrication reprendra sous 5 min.');
+        } else {
+          Toast.success(successMsgs[actId]);
+        }
+      } else {
+        Toast.friendlyError(r && r.error, `« ${labels[actId]} » n'a pas abouti.`);
       }
       await this._loadPipeline();
     },
@@ -1021,12 +1247,13 @@ function makePipelineView(config) {
         const statusLabel = this.config.statusLabels[i.status] || i.status;
         return `
           <div class="flex items-center justify-between gap-3 py-2 border-b border-border last:border-0 cursor-pointer hover:bg-bg rounded px-2"
-               data-recent-id="${i.id}">
+               data-recent-id="${this._escape(i.id)}" role="button" tabindex="0"
+               title="Voir l'historique de cette demande">
             <div class="min-w-0">
               <div class="text-sm font-semibold truncate">${this._escape(fullName)} · ${this._escape(i.company_name || '')}</div>
               <div class="text-[11px] text-text-muted">${this._fmtDate(i.created_at)}</div>
             </div>
-            <span class="text-[10px] font-bold uppercase px-2 py-1 rounded shrink-0"
+            <span class="text-[11px] font-bold uppercase px-2 py-1 rounded shrink-0"
                   style="background: hsl(var(--${statusColor}) / 0.15); color: hsl(var(--${statusColor}));">
               ${this._escape(statusLabel)}
             </span>
@@ -1034,9 +1261,14 @@ function makePipelineView(config) {
         `;
       }).join('');
       el.querySelectorAll('[data-recent-id]').forEach(row => {
-        row.addEventListener('click', () => {
+        const go = () => {
           this.state.selectedId = row.dataset.recentId;
           this.switchTab('logs');
+        };
+        row.addEventListener('click', go);
+        row.addEventListener('keydown', (e) => {
+          if (e.target !== row) return;
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
         });
       });
     },
@@ -1050,7 +1282,7 @@ function makePipelineView(config) {
           <div class="card p-10 text-center">
             <div class="text-3xl mb-3 opacity-60">→</div>
             <h2 class="text-xl font-bold mb-2">Aucune demande sélectionnée.</h2>
-            <p class="text-text-muted mb-5">Va dans l'onglet <b>Demandes</b> ou <b>Plomberie</b>, clique sur une carte, puis reviens ici.</p>
+            <p class="text-text-muted mb-5">Va dans l'onglet <b>Demandes</b> ou <b>Pipeline</b>, clique sur une carte, puis reviens ici.</p>
             <button id="pv-go-dashboard" class="btn btn-primary">Aller voir les demandes</button>
           </div>
         `;
@@ -1072,8 +1304,13 @@ function makePipelineView(config) {
       }
       const r = await this._call('get_intake', { id: this.state.selectedId });
       if (!r || !r.ok) {
-        document.getElementById('pv-logs-timeline').innerHTML =
-          `<div class="text-danger">${(r && r.error) || 'Erreur API'}</div>`;
+        console.warn(`[pipeline-view] ${this.config.apiPrefix} get_intake:`, r && r.error);
+        document.getElementById('pv-logs-timeline').innerHTML = `
+          <div class="text-sm text-danger mb-3">Impossible de charger l'historique de cette demande.</div>
+          <button id="pv-logs-retry" class="btn btn-secondary">Réessayer</button>
+        `;
+        const retry = document.getElementById('pv-logs-retry');
+        if (retry) retry.onclick = () => this._renderLogs();
         return;
       }
       this._renderLogsHead(r.intake);
@@ -1094,7 +1331,7 @@ function makePipelineView(config) {
             <div class="text-xs text-text-muted">${this._escape(intake.client_email || '')}</div>
           </div>
           <div class="text-right">
-            <span class="text-[10px] font-bold uppercase px-3 py-1.5 rounded"
+            <span class="text-[11px] font-bold uppercase px-3 py-1.5 rounded"
                   style="background: hsl(var(--${statusColor}) / 0.15); color: hsl(var(--${statusColor}));">
               ${this._escape(statusLabel)}
             </span>
@@ -1125,7 +1362,7 @@ function makePipelineView(config) {
           return `
             <div class="relative pb-5 last:pb-0">
               <div class="absolute -left-8 top-0 w-6 h-6 rounded-full flex items-center justify-center"
-                   style="background: hsl(var(--${c})); color: white; font-size: 11px; font-weight: bold;">
+                   style="background: hsl(var(--${c})); color: hsl(var(--surface)); font-size: 11px; font-weight: bold;">
                 ${idx + 1}
               </div>
               <div class="text-[11px] text-text-muted">${this._fmtDateLong(ev.ts)}</div>
@@ -1143,8 +1380,8 @@ function makePipelineView(config) {
       return `
         <div class="card p-8 text-center">
           <div class="text-3xl mb-3 opacity-60">⏻</div>
-          <h2 class="text-lg font-bold mb-2">Backend pywebview non disponible.</h2>
-          <p class="text-text-muted text-sm">Lance Triskell Command via <code class="text-xs px-1.5 py-0.5 rounded bg-bg">python run_web.py</code> pour voir les vraies données.</p>
+          <h2 class="text-lg font-bold mb-2">Connexion au serveur impossible.</h2>
+          <p class="text-text-muted text-sm">Recharge la page pour réessayer.</p>
         </div>
       `;
     },
@@ -1155,10 +1392,10 @@ function makePipelineView(config) {
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     },
 
-    // ─── Éditeur de templates de mail (icônes ✉️ du pipeline) ────────────
+    // ─── Éditeur de templates de mail (icônes ✉️ — Lagriffe uniquement) ──
     async _openMailTemplateEditor(tplKey) {
       if (!App.api || typeof App.api.lagriffe_mail_templates_list !== 'function') {
-        this._toast('API indisponible', 'error');
+        Toast.error('Connexion au serveur impossible — recharge la page.');
         return;
       }
       let templates = [];
@@ -1166,11 +1403,11 @@ function makePipelineView(config) {
         const r = await App.api.lagriffe_mail_templates_list();
         if (r && r.ok) templates = r.templates || [];
       } catch (e) {
-        this._toast('Erreur de chargement : ' + e, 'error');
+        Toast.friendlyError(e, 'Impossible de charger ce mail.');
         return;
       }
       const tpl = templates.find(t => t.key === tplKey);
-      if (!tpl) { this._toast('Template introuvable', 'error'); return; }
+      if (!tpl) { Toast.error('Modèle de mail introuvable.'); return; }
       this._renderMailEditorModal(tpl);
     },
 
@@ -1200,11 +1437,11 @@ function makePipelineView(config) {
                 <input type="text" name="subject" required value="${esc(tpl.subject || '')}" class="phare-input">
               </div>
               <div>
-                <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">Aperçu en boîte de réception (preheader)</label>
+                <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">Texte d'aperçu en boîte de réception</label>
                 <input type="text" name="preheader" value="${esc(tpl.preheader || '')}" placeholder="Texte court qui apparaît dans la liste des mails" class="phare-input">
               </div>
               <div>
-                <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">Petit badge (eyebrow)</label>
+                <label class="text-xs font-semibold text-text-muted uppercase tracking-wider">Petit badge</label>
                 <input type="text" name="eyebrow" value="${esc(tpl.eyebrow || '')}" placeholder="ex : Paiement validé" class="phare-input">
               </div>
               <div>
@@ -1222,7 +1459,7 @@ function makePipelineView(config) {
                 </div>
               </div>
               <div class="text-xs text-text-muted pt-2">
-                Le corps détaillé du mail (paragraphes, blocs colorés…) reste géré dans le code Netlify pour l'instant. Tu peux régler ici les éléments les plus visibles : sujet, titre, badge, bouton.
+                Le reste du contenu du mail (paragraphes, blocs colorés…) n'est pas modifiable ici pour l'instant. Tu peux régler les éléments les plus visibles : sujet, titre, badge, bouton.
                 ${tpl.updated_at ? `<div class="mt-1">Dernière modif : ${esc(this._fmtDate(tpl.updated_at))}${tpl.updated_by ? ' par ' + esc(tpl.updated_by) : ''}</div>` : ''}
               </div>
             </form>
@@ -1234,9 +1471,24 @@ function makePipelineView(config) {
         </div>
       `;
       document.body.appendChild(dlg);
+      // Garde anti-perte de saisie : fermer avec du texte modifié demande
+      // confirmation (Annuler, clic à côté). Enregistrer ferme directement.
+      let dirty = false;
+      dlg.querySelector('#pv-mail-form').addEventListener('input', () => { dirty = true; });
       const close = () => dlg.remove();
-      dlg.querySelectorAll('[data-close]').forEach(el => el.onclick = close);
-      dlg.querySelector('[data-save]').onclick = async () => {
+      const requestClose = async () => {
+        if (dirty) {
+          const okClose = await Dialog.confirm(
+            'Tes modifications ne sont pas enregistrées et seront perdues. Fermer quand même ?',
+            { title: 'Modifications non enregistrées', okLabel: 'Fermer sans enregistrer', cancelLabel: 'Rester', danger: true }
+          );
+          if (!okClose) return;
+        }
+        close();
+      };
+      dlg.querySelectorAll('[data-close]').forEach(el => el.onclick = requestClose);
+      const saveBtn = dlg.querySelector('[data-save]');
+      saveBtn.onclick = async () => {
         const fd = new FormData(dlg.querySelector('#pv-mail-form'));
         const payload = {
           key: tpl.key,
@@ -1248,29 +1500,32 @@ function makePipelineView(config) {
           cta_url:   (fd.get('cta_url') || '').toString().trim(),
         };
         if (!payload.subject || !payload.title) {
-          this._toast('Sujet et titre sont obligatoires.', 'error');
+          Toast.error('Sujet et titre sont obligatoires.');
           return;
         }
+        saveBtn.disabled = true;
         try {
           const r = await App.api.lagriffe_mail_template_save(payload);
           if (r && r.ok) {
-            this._toast('✓ Mail enregistré');
+            Toast.success('Mail enregistré.');
             close();
           } else {
-            this._toast('Erreur : ' + (r?.error || 'inconnue'), 'error');
+            Toast.friendlyError(r && r.error, `L'enregistrement du mail n'a pas abouti.`);
           }
-        } catch (e) { this._toast('Erreur : ' + e, 'error'); }
+        } catch (e) {
+          Toast.friendlyError(e, `L'enregistrement du mail n'a pas abouti.`);
+        } finally {
+          saveBtn.disabled = false;
+        }
       };
       setTimeout(() => dlg.querySelector('input[name="subject"]').focus(), 50);
     },
 
+    // Délégué au système commun (toast.js) — signature conservée pour
+    // les appels historiques de cette vue.
     _toast(msg, kind = 'success') {
-      const t = document.createElement('div');
-      t.textContent = msg;
-      const bg = kind === 'error' ? 'hsl(var(--danger))' : 'hsl(var(--success))';
-      t.style.cssText = `position:fixed;bottom:32px;right:32px;background:${bg};color:white;padding:12px 20px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.18);z-index:9999;font-weight:600;font-size:14px;`;
-      document.body.appendChild(t);
-      setTimeout(() => t.remove(), 3500);
+      if (kind === 'error') Toast.error(msg);
+      else Toast.success(msg);
     },
 
     _fmtDate(iso) {
@@ -1296,7 +1551,7 @@ function makePipelineView(config) {
 // Constantes partagées (statuts communs aux 3 offres)
 const PIPELINE_BASE_STATUS_LABELS = {
   pending_validation: 'À valider',
-  approved: 'Approuvé · attente cron',
+  approved: 'Approuvé · démarre sous 5 min',
   processing: 'Génération en cours',
   sent: 'Preview envoyée',
   paid: 'Payé · à finaliser',
@@ -1321,11 +1576,22 @@ const PIPELINE_BASE_STATUS_COLORS = {
 };
 
 const PIPELINE_BASE_STAGES = [
-  { key: 'pending_validation', label: 'Brief reçu',         sub: 'En attente de validation humaine' },
-  { key: 'approved',           label: 'Approuvé',           sub: 'Cron Netlify · 5 min max' },
-  { key: 'processing',         label: 'Claude Code génère', sub: 'GitHub Actions en route' },
-  { key: 'sent',               label: 'Preview envoyée',    sub: 'Client a reçu le mail' },
-  { key: 'paid',               label: 'Payé',               sub: 'Stripe a confirmé' },
-  { key: 'finalizing',         label: 'Finalisation',       sub: 'Toutes les pages, visuels' },
-  { key: 'live',               label: 'En ligne',           sub: 'Site final livré' },
+  { key: 'pending_validation', label: 'Brief reçu',           sub: 'En attente de validation humaine' },
+  { key: 'approved',           label: 'Approuvé',             sub: 'Démarrage auto sous 5 min' },
+  { key: 'processing',         label: `L'IA fabrique le site`, sub: 'Fabrication en cours' },
+  { key: 'sent',               label: 'Preview envoyée',      sub: 'Client a reçu le mail' },
+  { key: 'paid',               label: 'Payé',                 sub: 'Paiement confirmé' },
+  { key: 'finalizing',         label: 'Finalisation',         sub: 'Toutes les pages, visuels' },
+  { key: 'live',               label: 'En ligne',             sub: 'Site final livré' },
 ];
+
+// Table de libellés français exposée pour les autres scripts (le panneau
+// « mouvements » du Cockpit, pipelines_activity.js, l'utilise pour traduire
+// les statuts bruts). Complétée avec les statuts hors socle commun.
+window.PipelineView = window.PipelineView || {};
+window.PipelineView.STATUS_LABELS_FR = {
+  ...PIPELINE_BASE_STATUS_LABELS,
+  final_ready_review: 'Final à valider',   // Lagriffe
+  draft: 'Brouillon reçu',                 // Pixel Pros
+  building: 'Fabrication en cours',        // Pixel Pros
+};

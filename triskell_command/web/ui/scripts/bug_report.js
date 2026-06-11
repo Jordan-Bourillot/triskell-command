@@ -21,7 +21,6 @@ const BugReport = {
     if (this._wired) return;
     this._wired = true;
     this._injectStyles();
-    this._injectButton();
   },
 
   _injectStyles() {
@@ -70,11 +69,6 @@ const BugReport = {
       #br-screenshot-remove:hover { background: rgba(0,0,0,0.8); }
     `;
     document.head.appendChild(s);
-  },
-
-  _injectButton() {
-    // Le bouton vit maintenant dans la barre du bas de la sidebar
-    // (cf. index.html "Tuto · Réglages · Signaler un bug"). Plus de FAB flottant.
   },
 
   // ----- Collecte du contexte automatique -----
@@ -128,7 +122,10 @@ const BugReport = {
       '',
       `--- Soucis API récents (${ctx.health_api_issues.length}) ---`,
       ctx.health_api_issues.length
-        ? ctx.health_api_issues.map(e => `[${e.ts}] ${e.kind} : ${e.method || ''} ${e.status || ''} ${e.elapsed_ms ? '(' + e.elapsed_ms + ' ms)' : ''}`).join('\n')
+        ? ctx.health_api_issues.map(e => {
+            const extra = [e.detail, e.msg].filter(Boolean).join(' · ');
+            return `[${e.ts}] ${e.kind} : ${e.method || ''} ${e.status || ''} ${e.elapsed_ms ? '(' + e.elapsed_ms + ' ms)' : ''}${extra ? ' — ' + extra : ''}`;
+          }).join('\n')
         : '(aucun)',
       '',
       '=== Fin du signalement ===',
@@ -150,11 +147,11 @@ const BugReport = {
       <div class="bg-surface rounded-2xl shadow-hero w-full max-w-2xl border border-border animate-slide-up flex flex-col overflow-hidden max-h-[88vh]">
         <div class="px-6 pt-5 pb-3 flex items-start justify-between border-b border-border bg-surface-elevated">
           <div>
-            <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">SIGNALER UN BUG</div>
+            <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-0.5">SIGNALER UN BUG</div>
             <h3 class="text-lg font-bold">Que se passe-t-il ?</h3>
             <p class="text-xs text-text-muted mt-1">Décris ce qui ne va pas. Le contexte technique est joint automatiquement (vue, erreurs JS, état des appels API).</p>
           </div>
-          <button id="br-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
+          <button id="br-close" title="Fermer" aria-label="Fermer" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
         </div>
 
         <div class="p-5 overflow-y-auto space-y-4">
@@ -238,14 +235,14 @@ const BugReport = {
       if (!file || !file.type.startsWith('image/')) return;
       // Limite douce : 8 Mo (data URL fait ~33 % de plus en taille)
       if (file.size > 8 * 1024 * 1024) {
-        alert('Image trop lourde (max 8 Mo).');
+        Toast.warn('Image trop lourde (8 Mo maximum).');
         return;
       }
       try {
         const dataUrl = await readFileAsDataUrl(file);
         setScreenshot(dataUrl);
       } catch (e) {
-        alert('Lecture du fichier impossible.');
+        Toast.friendlyError(e, 'Lecture du fichier impossible.');
       }
     };
 
@@ -289,11 +286,24 @@ const BugReport = {
       ov.removeEventListener('paste', pasteListener);
       ov.remove();
     };
-    const escListener = (e) => { if (e.key === 'Escape') close(); };
+    // Garde de saisie : ne jamais perdre une description ou une capture
+    // sur un Échap ou un clic à côté de la fenêtre.
+    const requestClose = async () => {
+      const hasInput = msgInput.value.trim() !== '' || !!screenshotDataUrl;
+      if (hasInput) {
+        const ok = await Dialog.confirm(
+          'Fermer sans envoyer ?\n\nTa description (et la capture) seront perdues.',
+          { title: 'Signaler un bug', okLabel: 'Fermer', cancelLabel: 'Continuer', danger: true }
+        );
+        if (!ok) return;
+      }
+      close();
+    };
+    const escListener = (e) => { if (e.key === 'Escape') requestClose(); };
     document.addEventListener('keydown', escListener);
-    ov.querySelector('#br-close').onclick = close;
-    ov.querySelector('#br-cancel').onclick = close;
-    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+    ov.querySelector('#br-close').onclick = requestClose;
+    ov.querySelector('#br-cancel').onclick = requestClose;
+    ov.addEventListener('click', (e) => { if (e.target === ov) requestClose(); });
 
     // Copier le rapport dans le presse-papier
     ov.querySelector('#br-copy').onclick = async () => {
@@ -304,7 +314,7 @@ const BugReport = {
         status.textContent = '✓ Rapport copié dans le presse-papier — colle-le où tu veux';
         status.className = 'text-xs text-success min-h-[1rem]';
       } catch (e) {
-        alert('Copie impossible. Sélectionne le texte ci-dessus manuellement.');
+        Toast.friendlyError(e, 'Copie impossible. Ouvre « Voir le contexte technique » et sélectionne le texte à la main.');
       }
     };
 
@@ -325,20 +335,22 @@ const BugReport = {
             screenshot: screenshotDataUrl || null,
           });
           if (r && r.ok) {
-            status.textContent = '✓ Rapport envoyé. Merci !';
+            status.textContent = '✓ Rapport enregistré — Claude le verra.';
             status.className = 'text-xs text-success min-h-[1rem]';
-            setTimeout(close, 1200);
+            setTimeout(close, 1400);
             return;
           }
           throw new Error((r && r.error) || 'Erreur serveur');
         }
-        // Fallback : si pas d'endpoint serveur, on copie + on rappelle à l'utilisateur
+        // Repli : si le serveur ne sait pas recevoir les rapports,
+        // on copie le rapport pour que rien ne soit perdu.
         await navigator.clipboard.writeText(text);
-        status.textContent = '✓ Rapport copié dans le presse-papier (l\'endpoint serveur n\'est pas encore branché). Envoie-le à Jordan.';
+        status.textContent = '✓ Rapport copié dans le presse-papier (l’envoi automatique n’est pas disponible ici). Colle-le à Claude pour qu’il s’en occupe.';
         status.className = 'text-xs text-success min-h-[1rem]';
         setTimeout(close, 2500);
       } catch (e) {
-        status.textContent = `✗ ${e.message || e}. Utilise "Copier le rapport" en bas à gauche.`;
+        console.warn('Envoi du rapport de bug :', e);
+        status.textContent = '✗ L’envoi a échoué. Utilise « Copier le rapport » en bas à gauche, rien n’est perdu.';
         status.className = 'text-xs text-danger min-h-[1rem]';
         sendBtn.disabled = false;
         sendBtn.textContent = 'Envoyer le rapport';

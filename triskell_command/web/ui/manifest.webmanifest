@@ -17,7 +17,7 @@
     { "src": "/assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "Matinale", "url": "/?view=morning",  "icons": [{"src": "/assets/icon-192.png", "sizes": "192x192"}] },
+    { "name": "Cockpit", "url": "/?view=morning",  "icons": [{"src": "/assets/icon-192.png", "sizes": "192x192"}] },
     { "name": "Brouillons", "url": "/?view=drafts", "icons": [{"src": "/assets/icon-192.png", "sizes": "192x192"}] },
     { "name": "Réponses",  "url": "/?view=replies","icons": [{"src": "/assets/icon-192.png", "sizes": "192x192"}] }
   ]

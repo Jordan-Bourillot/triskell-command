@@ -47,6 +47,7 @@
     svg.setAttribute('stroke-width', '2.5');
     svg.setAttribute('stroke-linecap', 'round');
     svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
     svg.classList.add('nav-section-chevron');
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
     path.setAttribute('points', '6 9 12 15 18 9');
@@ -66,7 +67,12 @@
     Array.from(nav.children).forEach((section) => {
       if (!(section instanceof HTMLElement)) return;
       const title = section.querySelector(':scope > .tracking-widest');
-      const items = Array.from(section.querySelectorAll(':scope > .nav-item'));
+      // Tout ce que la section contient doit se replier avec elle :
+      // les boutons d'écran, mais AUSSI les groupes repliables internes
+      // (ex. « Outils de recherche » dans PROSPECTION : tête + items).
+      const items = Array.from(section.querySelectorAll(
+        ':scope > .nav-item, :scope > .nav-group-head, :scope > .nav-group-items, :scope > .nav-hint-wrap'
+      ));
       // Pas de titre OU pas d'items à replier → on laisse tel quel.
       if (!title || items.length === 0) return;
 
@@ -112,6 +118,22 @@
         if (nowCollapsed) collapsed.add(slug);
         else collapsed.delete(slug);
         saveCollapsed(collapsed);
+      });
+
+      // Navigation vers un écran de cette section alors qu'elle est
+      // repliée (Guide, recherche globale, lanceur, Cockpit…) : on
+      // déplie automatiquement pour montrer l'élément actif — même
+      // mécanique que le groupe « Outils de recherche ».
+      new MutationObserver(() => {
+        if (wrap.hidden && wrap.querySelector('.nav-item.active')) {
+          apply(false);
+          collapsed.delete(slug);
+          saveCollapsed(collapsed);
+        }
+      }).observe(wrap, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class'],
       });
     });
   }

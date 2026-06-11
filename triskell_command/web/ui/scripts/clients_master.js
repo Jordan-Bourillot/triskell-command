@@ -4,13 +4,15 @@
    Différent de `clients.js` qui gère le kanban des projets en cours. */
 
 const ClientsMaster = {
+  // `chip` = triplet HSL du thème (jamais de couleur en dur : lisible
+  // dans les 3 thèmes). À utiliser via hsl(${chip}) ou hsl(${chip} / alpha).
   STATUSES: {
-    '':         { label: 'Tous',        chip: 'hsl(var(--text-muted))' },
-    'lead':     { label: 'Lead',        chip: '#64748b' },
-    'prospect': { label: 'Prospect',    chip: '#0ea5e9' },
-    'client':   { label: 'Client',      chip: '#10b981' },
-    'inactive': { label: 'Inactif',     chip: '#a16207' },
-    'churned':  { label: 'Churn',       chip: '#dc2626' },
+    '':         { label: 'Tous',        chip: 'var(--text-muted)' },
+    'lead':     { label: 'Lead',        chip: 'var(--text-muted)' },
+    'prospect': { label: 'Prospect',    chip: 'var(--info-text)' },
+    'client':   { label: 'Client',      chip: 'var(--success-text)' },
+    'inactive': { label: 'Inactif',     chip: 'var(--warning-text)' },
+    'churned':  { label: 'Churn',       chip: 'var(--danger-text)' },
   },
 
   EVENT_ICONS: {
@@ -67,7 +69,7 @@ const ClientsMaster = {
           <!-- Colonne liste -->
           <div class="card flex flex-col overflow-hidden" style="background: hsl(var(--surface) / 0.6);">
             <header class="px-5 py-3 border-b border-border flex items-center justify-between">
-              <div class="text-[10px] font-bold tracking-widest text-text-muted">
+              <div class="text-[11px] font-bold tracking-widest text-text-muted">
                 CLIENTS <span id="cm-count" class="text-accent ml-1">·</span>
               </div>
             </header>
@@ -118,8 +120,8 @@ const ClientsMaster = {
   _chipStyle(active, color) {
     if (active) {
       return `padding: 6px 14px; border-radius: 999px; font-size: 12.5px;
-              font-weight: 600; background: ${color}; color: white;
-              border: 0; cursor: pointer; transition: all 160ms;`;
+              font-weight: 700; background: hsl(${color} / 0.16); color: hsl(${color});
+              border: 1px solid hsl(${color} / 0.55); cursor: pointer; transition: all 160ms;`;
     }
     return `padding: 6px 14px; border-radius: 999px; font-size: 12.5px;
             font-weight: 500; background: transparent;
@@ -135,7 +137,7 @@ const ClientsMaster = {
     const list = document.getElementById('cm-list');
     list.innerHTML = `<div class="p-8 text-center text-text-muted text-sm">Chargement…</div>`;
     if (!App.api) {
-      list.innerHTML = this._errorBox('Pas de connexion à l’API.');
+      list.innerHTML = this._errorBox('L’app n’est pas connectée au serveur.');
       return;
     }
     this._loading = true;
@@ -143,15 +145,15 @@ const ClientsMaster = {
     try {
       data = await App.api.get_clients_master({ status: this._status, limit: 500 });
     } catch (e) {
-      list.innerHTML = this._errorBox('Erreur : ' + e);
+      console.error('[ClientsMaster] chargement', e);
+      list.innerHTML = this._errorBox('Impossible de charger le fichier clients. Vérifie ta connexion, puis réessaie.');
       this._loading = false;
       return;
     }
     this._loading = false;
     if (!data || !data.ok) {
-      list.innerHTML = this._errorBox(
-        (data && data.error) || 'Connexion à la base partagée impossible.'
-      );
+      if (data && data.error) console.warn('[ClientsMaster] chargement', data.error);
+      list.innerHTML = this._errorBox('Connexion à la base partagée impossible. Réessaie dans un instant.');
       document.getElementById('cm-count').textContent = '·';
       return;
     }
@@ -176,15 +178,27 @@ const ClientsMaster = {
       list.innerHTML = `
         <div class="p-10 text-center text-text-muted">
           <div class="text-3xl mb-3 opacity-60">∅</div>
-          <div class="text-sm">${this._clients.length === 0
-            ? 'Aucun client enregistré pour l’instant.'
-            : 'Rien ne correspond à ta recherche.'}</div>
+          ${this._clients.length === 0 ? `
+            <div class="text-sm font-semibold text-text mb-1">Aucune fiche pour l’instant.</div>
+            <div class="text-sm">Les fiches arrivent ici toutes seules : prospects devenus clients,
+            demandes envoyées depuis tes sites, factures, mails envoyés et projets livrés.</div>
+          ` : `
+            <div class="text-sm">Rien ne correspond à ta recherche.</div>
+          `}
         </div>
       `;
       return;
     }
 
-    list.innerHTML = filtered.map(c => this._listRow(c)).join('');
+    // La liste est plafonnée à 500 fiches côté serveur : si on atteint ce
+    // plafond, on le DIT (avant : coupure silencieuse, fiches "disparues").
+    const capNote = this._clients.length >= 500 ? `
+      <div class="px-4 py-3 text-[11px] text-text-muted text-center border-t border-border">
+        500 premières fiches affichées — affine ta recherche ou filtre par statut pour voir les autres.
+      </div>
+    ` : '';
+
+    list.innerHTML = filtered.map(c => this._listRow(c)).join('') + capNote;
     list.querySelectorAll('[data-cid]').forEach(row => {
       row.onclick = () => this._select(row.dataset.cid);
     });
@@ -208,15 +222,15 @@ const ClientsMaster = {
         class="cm-row w-full text-left px-4 py-3 border-b border-border
                hover:bg-bg transition-colors flex items-start gap-3">
         <div class="w-9 h-9 rounded-full flex items-center justify-center shrink-0
-                    text-white text-sm font-bold"
-             style="background: ${meta.chip};">
+                    text-sm font-bold"
+             style="background: hsl(${meta.chip} / 0.16); color: hsl(${meta.chip});">
           ${this._esc(this._initials(name))}
         </div>
         <div class="min-w-0 flex-1">
           <div class="flex items-baseline gap-2">
             <div class="font-semibold text-sm truncate">${this._esc(name)}</div>
-            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
-                  style="background: ${meta.chip}22; color: ${meta.chip};">
+            <span class="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0"
+                  style="background: hsl(${meta.chip} / 0.13); color: hsl(${meta.chip});">
               ${meta.label.toUpperCase()}
             </span>
           </div>
@@ -229,11 +243,12 @@ const ClientsMaster = {
     `;
   },
 
-  _errorBox(msg) {
+  _errorBox(msg, retryJs) {
     return `
       <div class="p-8 text-center">
         <div class="text-3xl mb-3">🔌</div>
-        <div class="text-sm text-danger">${this._esc(msg)}</div>
+        <div class="text-sm text-danger-text mb-4">${this._esc(msg)}</div>
+        <button class="btn btn-secondary" onclick="${this._esc(retryJs || 'ClientsMaster.refresh()')}">Réessayer</button>
       </div>
     `;
   },
@@ -250,14 +265,17 @@ const ClientsMaster = {
     const detail = document.getElementById('cm-detail');
     detail.innerHTML = `<div class="p-8 text-text-muted text-sm">Chargement de la fiche…</div>`;
     if (!App.api) return;
+    const retryJs = `ClientsMaster._select('${String(id).replace(/[^a-zA-Z0-9_-]/g, '')}')`;
     let data;
     try { data = await App.api.get_client_master({ id }); }
     catch (e) {
-      detail.innerHTML = this._errorBox('Erreur : ' + e);
+      console.error('[ClientsMaster] fiche', e);
+      detail.innerHTML = this._errorBox('Impossible de charger cette fiche. Réessaie dans un instant.', retryJs);
       return;
     }
     if (!data || !data.ok) {
-      detail.innerHTML = this._errorBox((data && data.error) || 'Fiche introuvable.');
+      if (data && data.error) console.warn('[ClientsMaster] fiche', data.error);
+      detail.innerHTML = this._errorBox('Fiche introuvable ou serveur indisponible.', retryJs);
       return;
     }
     this._detail = data;
@@ -289,15 +307,15 @@ const ClientsMaster = {
       <!-- Header fiche -->
       <header class="px-6 py-5 border-b border-border flex items-start gap-4">
         <div class="w-14 h-14 rounded-full flex items-center justify-center shrink-0
-                    text-white text-lg font-bold"
-             style="background: ${meta.chip};">
+                    text-lg font-bold"
+             style="background: hsl(${meta.chip} / 0.16); color: hsl(${meta.chip});">
           ${this._esc(this._initials(name))}
         </div>
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2 flex-wrap mb-1">
             <h2 class="font-display text-xl font-bold truncate">${this._esc(name)}</h2>
-            <span class="text-[10px] font-bold px-2 py-0.5 rounded"
-                  style="background: ${meta.chip}22; color: ${meta.chip};">
+            <span class="text-[11px] font-bold px-2 py-0.5 rounded"
+                  style="background: hsl(${meta.chip} / 0.13); color: hsl(${meta.chip});">
               ${meta.label.toUpperCase()}
             </span>
           </div>
@@ -311,9 +329,9 @@ const ClientsMaster = {
       <div class="flex-1 overflow-y-auto p-6 space-y-6">
         <!-- Coordonnées -->
         <section>
-          <h3 class="text-[10px] font-bold tracking-widest text-text-muted mb-3">COORDONNÉES</h3>
+          <h3 class="text-[11px] font-bold tracking-widest text-text-muted mb-3">COORDONNÉES</h3>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            ${this._field('Email', c.email, 'mailto:' + c.email)}
+            ${this._emailField(c.email)}
             ${this._field('Téléphone', c.phone, c.phone ? 'tel:' + c.phone.replace(/\s/g, '') : null)}
             ${this._field('Prénom', c.first_name)}
             ${this._field('Nom', c.last_name)}
@@ -323,7 +341,7 @@ const ClientsMaster = {
         <!-- Société (si pro) -->
         ${(c.is_pro || c.company_name || c.siret) ? `
         <section>
-          <h3 class="text-[10px] font-bold tracking-widest text-text-muted mb-3">SOCIÉTÉ</h3>
+          <h3 class="text-[11px] font-bold tracking-widest text-text-muted mb-3">SOCIÉTÉ</h3>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             ${this._field('Entreprise', c.company_name)}
             ${this._field('SIRET', c.siret)}
@@ -334,7 +352,7 @@ const ClientsMaster = {
         <!-- Adresse -->
         ${(c.address_line1 || c.address_city) ? `
         <section>
-          <h3 class="text-[10px] font-bold tracking-widest text-text-muted mb-3">ADRESSE</h3>
+          <h3 class="text-[11px] font-bold tracking-widest text-text-muted mb-3">ADRESSE</h3>
           <div class="text-sm leading-relaxed">
             ${c.address_line1 ? `<div>${this._esc(c.address_line1)}</div>` : ''}
             ${(c.address_zip || c.address_city) ? `
@@ -348,7 +366,7 @@ const ClientsMaster = {
 
         <!-- Stats -->
         <section>
-          <h3 class="text-[10px] font-bold tracking-widest text-text-muted mb-3">ACTIVITÉ</h3>
+          <h3 class="text-[11px] font-bold tracking-widest text-text-muted mb-3">ACTIVITÉ</h3>
           <div class="grid grid-cols-3 sm:grid-cols-6 gap-2">
             ${this._stat('Lagriffe', c.lagriffe_count)}
             ${this._stat('RankUs', c.rankus_count)}
@@ -360,14 +378,14 @@ const ClientsMaster = {
           ${c.total_paid_cents ? `
             <div class="mt-3 text-sm">
               <span class="text-text-muted">Total payé : </span>
-              <span class="font-bold text-success">${Math.round(c.total_paid_cents / 100)} €</span>
+              <span class="font-bold text-success-text">${Math.round(c.total_paid_cents / 100)} €</span>
             </div>
           ` : ''}
         </section>
 
         <!-- Tags -->
         <section>
-          <h3 class="text-[10px] font-bold tracking-widest text-text-muted mb-3">TAGS</h3>
+          <h3 class="text-[11px] font-bold tracking-widest text-text-muted mb-3">TAGS</h3>
           <div class="flex flex-wrap gap-2 items-center" id="cm-tags">
             ${(c.tags && c.tags.length) ? c.tags.map(t => `
               <span class="text-[11px] font-semibold px-2 py-1 rounded-full
@@ -383,7 +401,7 @@ const ClientsMaster = {
 
         <!-- Notes -->
         <section>
-          <h3 class="text-[10px] font-bold tracking-widest text-text-muted mb-3">NOTES</h3>
+          <h3 class="text-[11px] font-bold tracking-widest text-text-muted mb-3">NOTES</h3>
           ${c.notes ? `
             <div class="text-sm whitespace-pre-wrap p-3 rounded-lg bg-bg border border-border">
               ${this._esc(c.notes)}
@@ -393,7 +411,7 @@ const ClientsMaster = {
 
         <!-- Timeline -->
         <section>
-          <h3 class="text-[10px] font-bold tracking-widest text-text-muted mb-3">
+          <h3 class="text-[11px] font-bold tracking-widest text-text-muted mb-3">
             HISTORIQUE <span class="text-text-muted ml-1">(${timeline.length})</span>
           </h3>
           ${timeline.length === 0 ? `
@@ -409,6 +427,29 @@ const ClientsMaster = {
 
     detail.querySelector('#cm-edit').onclick = () => this._openEditDialog();
     detail.querySelector('#cm-add-tag').onclick = () => this._addTag();
+    const composeBtn = detail.querySelector('#cm-compose');
+    if (composeBtn) composeBtn.onclick = () => {
+      Mails._openComposer({ prefilledTo: c.email });
+    };
+  },
+
+  // Champ Email du détail : lien mailto classique + « Écrire depuis l'app »
+  // (ouvre le composeur interne avec l'adresse pré-remplie) quand Mails est là.
+  _emailField(email) {
+    const v = (email || '').toString().trim();
+    if (!v) return this._field('Email', '');
+    const canCompose = !!(App.api && window.Mails && typeof Mails._openComposer === 'function');
+    return `
+      <div>
+        <div class="text-[11px] font-bold tracking-widest text-text-muted mb-1">EMAIL</div>
+        <a href="mailto:${this._esc(v)}" class="text-sm text-accent hover:underline break-all">${this._esc(v)}</a>
+        ${canCompose ? `
+          <button id="cm-compose" class="block text-[11px] text-text-muted hover:text-accent underline mt-1">
+            ✉️ Écrire depuis l’app
+          </button>
+        ` : ''}
+      </div>
+    `;
   },
 
   _field(label, value, href) {
@@ -416,7 +457,7 @@ const ClientsMaster = {
     if (!v) {
       return `
         <div>
-          <div class="text-[10px] font-bold tracking-widest text-text-muted mb-1">${this._esc(label)}</div>
+          <div class="text-[11px] font-bold tracking-widest text-text-muted mb-1">${this._esc(label)}</div>
           <div class="text-sm text-text-muted italic">—</div>
         </div>
       `;
@@ -426,7 +467,7 @@ const ClientsMaster = {
       : `<div class="text-sm">${this._esc(v)}</div>`;
     return `
       <div>
-        <div class="text-[10px] font-bold tracking-widest text-text-muted mb-1">${this._esc(label)}</div>
+        <div class="text-[11px] font-bold tracking-widest text-text-muted mb-1">${this._esc(label)}</div>
         ${content}
       </div>
     `;
@@ -438,7 +479,7 @@ const ClientsMaster = {
     return `
       <div class="text-center p-2 rounded-lg bg-bg border border-border ${dim}">
         <div class="font-bold text-lg leading-none">${n}</div>
-        <div class="text-[10px] text-text-muted mt-1">${this._esc(label)}</div>
+        <div class="text-[11px] text-text-muted mt-1">${this._esc(label)}</div>
       </div>
     `;
   },
@@ -462,23 +503,32 @@ const ClientsMaster = {
   // Édition
   // ────────────────────────────────────────────────────────────────
   async _addTag() {
-    const tag = (prompt('Nouveau tag :') || '').trim();
+    const raw = prompt('Nouveau tag :');
+    if (raw === null) return; // Annuler = on ne fait rien
+    const tag = raw.trim();
     if (!tag || !this._selectedId) return;
     try {
-      await App.api.client_master_add_tag({ id: this._selectedId, tag });
-      await this._select(this._selectedId);
-    } catch (e) { alert('Erreur : ' + e); }
+      const r = await App.api.client_master_add_tag({ id: this._selectedId, tag });
+      if (r && r.ok) {
+        Toast.success(`Tag « ${tag} » ajouté.`);
+        await this._select(this._selectedId);
+      } else {
+        Toast.friendlyError(r, 'Impossible d’ajouter ce tag.');
+      }
+    } catch (e) {
+      Toast.friendlyError(e, 'Impossible d’ajouter ce tag.');
+    }
   },
 
   _openEditDialog() {
     const c = this._detail.client;
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center p-6';
-    overlay.style.background = 'rgba(15,23,42,0.45)';
+    overlay.style.background = 'hsl(var(--bg) / 0.55)';
     overlay.style.backdropFilter = 'blur(6px)';
     const field = (id, label, val, type = 'text') => `
       <label class="block">
-        <div class="text-[10px] font-bold tracking-widest text-text-muted mb-1">${label}</div>
+        <div class="text-[11px] font-bold tracking-widest text-text-muted mb-1">${label}</div>
         <input id="${id}" type="${type}" value="${this._esc(val || '')}"
                class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border
                       focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent" />
@@ -493,7 +543,7 @@ const ClientsMaster = {
         </header>
         <div class="px-7 py-5 overflow-y-auto space-y-5">
           <div>
-            <div class="text-[10px] font-bold tracking-widest text-text-muted mb-2">STATUT</div>
+            <div class="text-[11px] font-bold tracking-widest text-text-muted mb-2">STATUT</div>
             <select id="cmd-status"
                     class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border
                            focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent">
@@ -518,7 +568,7 @@ const ClientsMaster = {
             ${field('cmd-country', 'Pays', c.address_country || 'France')}
           </div>
           <label class="block">
-            <div class="text-[10px] font-bold tracking-widest text-text-muted mb-1">NOTES</div>
+            <div class="text-[11px] font-bold tracking-widest text-text-muted mb-1">NOTES</div>
             <textarea id="cmd-notes" rows="4"
                       class="w-full px-3 py-2 text-sm rounded-lg bg-bg border border-border
                              focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent
@@ -532,10 +582,41 @@ const ClientsMaster = {
       </div>
     `;
     document.body.appendChild(overlay);
-    const close = () => overlay.remove();
-    overlay.querySelector('#cmd-cancel').onclick = close;
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-    overlay.querySelector('#cmd-save').onclick = async () => {
+
+    // Photo des 13 champs à l'ouverture : avant de fermer (clic à côté /
+    // Échap), on vérifie qu'aucune saisie ne serait perdue.
+    const FIELD_IDS = ['#cmd-status', '#cmd-first', '#cmd-last', '#cmd-phone',
+      '#cmd-company', '#cmd-siret', '#cmd-vat', '#cmd-addr1', '#cmd-addr2',
+      '#cmd-zip', '#cmd-city', '#cmd-country', '#cmd-notes'];
+    const snapshot = () => FIELD_IDS
+      .map(sel => { const el = overlay.querySelector(sel); return el ? el.value : ''; })
+      .join(' ');
+    const initialSnapshot = snapshot();
+
+    const close = () => {
+      document.removeEventListener('keydown', onEsc);
+      overlay.remove();
+    };
+    const requestClose = async () => {
+      if (snapshot() !== initialSnapshot) {
+        const ok = await Dialog.confirm(
+          'Fermer sans enregistrer ? Tes modifications seront perdues.',
+          { title: 'Fiche client', okLabel: 'Fermer', danger: true }
+        );
+        if (!ok) return;
+      }
+      close();
+    };
+    const onEsc = (e) => { if (e.key === 'Escape') requestClose(); };
+    document.addEventListener('keydown', onEsc);
+    // Si on change d'écran avec la modale ouverte, on la retire proprement
+    App.onViewCleanup(() => { if (document.body.contains(overlay)) close(); });
+
+    overlay.querySelector('#cmd-cancel').onclick = () => close();
+    overlay.addEventListener('click', e => { if (e.target === overlay) requestClose(); });
+
+    const saveBtn = overlay.querySelector('#cmd-save');
+    saveBtn.onclick = async () => {
       const patch = {
         first_name: overlay.querySelector('#cmd-first').value.trim(),
         last_name:  overlay.querySelector('#cmd-last').value.trim(),
@@ -552,17 +633,24 @@ const ClientsMaster = {
         notes:  overlay.querySelector('#cmd-notes').value,
       };
       patch.is_pro = !!(patch.company_name || patch.siret);
+      saveBtn.disabled = true;
+      const saveLabel = saveBtn.textContent;
+      saveBtn.textContent = 'Enregistrement…';
+      const fail = (errOrRes) => {
+        // Échec → la modale RESTE ouverte, la saisie est conservée
+        Toast.friendlyError(errOrRes, 'Enregistrement impossible. Ta saisie est conservée, réessaie.');
+        saveBtn.disabled = false;
+        saveBtn.textContent = saveLabel;
+      };
       try {
         const r = await App.api.client_master_update({ id: c.id, patch });
-        if (!r || !r.ok) {
-          alert('Sauvegarde impossible : ' + ((r && r.error) || 'erreur inconnue'));
-          return;
-        }
+        if (!r || !r.ok) { fail(r); return; }
+        Toast.success('Fiche enregistrée.');
         close();
         await this.refresh();
         await this._select(c.id);
       } catch (e) {
-        alert('Erreur : ' + e);
+        fail(e);
       }
     };
   },

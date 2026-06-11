@@ -1,10 +1,15 @@
 /* Teddy Mail bridge — pont JS depuis Triskell Command vers Teddy Mail.
  *
  * 3 entrées :
- *   Teddy.open()                           → lance l'app desktop
+ *   Teddy.open()                           → lance l'app desktop (pywebview uniquement)
  *   Teddy.compose({to,subject,body,cc,bcc}) → fenêtre composition pré-remplie
  *                                            via mailto: (client mail défaut)
  *   Teddy.button(opts)                     → renvoie le HTML d'un bouton réutilisable
+ *
+ * En mode web (App.apiMode === 'http'), open()/compose() ne passent PAS par
+ * le serveur (lancer un .exe / un mailto: sur le serveur Linux n'ouvrirait
+ * rien chez l'utilisateur) : le mailto: est construit côté navigateur, et
+ * open() explique que Teddy Mail est une application du PC.
  *
  * Roadmap : quand Teddy Mail v0.6 exposera un endpoint IPC (custom URL
  * scheme `teddy://compose?…` ou serveur HTTP local sur 127.0.0.1), on
@@ -13,59 +18,47 @@
  */
 
 const Teddy = {
-  // Petit toast feedback (utilise la même classe que les autres toasts si présente)
+  // Petits messages : on délègue au système commun (toast.js) — plus de
+  // mini-système de toasts maison (doublon, et sans aria).
   _toast(msg, kind = 'info') {
-    let host = document.getElementById('teddy-toast-host');
-    if (!host) {
-      host = document.createElement('div');
-      host.id = 'teddy-toast-host';
-      host.className = 'fixed bottom-6 right-6 z-[300] flex flex-col gap-2';
-      document.body.appendChild(host);
+    if (typeof Toast !== 'undefined') {
+      if (kind === 'error') Toast.error(msg);
+      else Toast.info(msg);
+      return;
     }
-    const t = document.createElement('div');
-    const bg = kind === 'error'
-      ? 'bg-danger/95 text-white'
-      : 'bg-surface-elevated text-text border border-border';
-    t.className = `${bg} rounded-xl shadow-soft px-4 py-3 text-sm font-medium
-                   transition-all duration-200 opacity-0 translate-y-2`;
-    t.textContent = msg;
-    host.appendChild(t);
-    requestAnimationFrame(() => {
-      t.style.opacity = '1';
-      t.style.transform = 'translateY(0)';
-    });
-    setTimeout(() => {
-      t.style.opacity = '0';
-      t.style.transform = 'translateY(8px)';
-      setTimeout(() => t.remove(), 220);
-    }, 2400);
+    console.info('[Teddy]', msg);
   },
 
   // ---- Lance Teddy Mail (app desktop) ----
   async open() {
-    if (!App.api) {
-      this._toast('Mode aperçu : impossible de lancer Teddy Mail.', 'error');
+    // En mode web (navigateur), Teddy Mail est une application du PC :
+    // demander au serveur de la lancer n'ouvrirait rien ici.
+    if (!App.api || App.apiMode === 'http') {
+      this._toast('Teddy Mail est une application du PC — impossible de l’ouvrir depuis le site.', 'error');
       return false;
     }
     try {
       const r = await App.api.open_teddy_mail();
       if (r && r.ok) {
-        this._toast('Teddy Mail s\'ouvre…');
+        this._toast('Teddy Mail s’ouvre…');
         return true;
       }
       this._toast(r && r.error ? r.error : 'Teddy Mail introuvable.', 'error');
       return false;
     } catch (e) {
       console.warn('Teddy.open:', e);
-      this._toast('Erreur lancement Teddy Mail.', 'error');
+      this._toast('Impossible de lancer Teddy Mail.', 'error');
       return false;
     }
   },
 
-  // ---- Composer un mail (mailto: → client par défaut Windows) ----
+  // ---- Composer un mail (mailto: → client mail par défaut) ----
   async compose({ to = '', subject = '', body = '', cc = '', bcc = '' } = {}) {
-    if (!App.api) {
-      // Fallback preview : ouvre directement le mailto: dans le navigateur
+    // En mode web : le lien mailto: se construit CÔTÉ NAVIGATEUR — la fenêtre
+    // de composition s'ouvre dans le client mail de l'appareil de l'utilisateur.
+    // Pas de toast de succès ici : on ne peut pas savoir si un client mail
+    // est bien installé (un « ouvert ! » serait un mensonge).
+    if (!App.api || App.apiMode === 'http') {
       const url = this._buildMailto({ to, subject, body, cc, bcc });
       window.location.href = url;
       return true;
@@ -76,11 +69,11 @@ const Teddy = {
         this._toast('Composition ouverte dans ton client mail.');
         return true;
       }
-      this._toast(r && r.error ? r.error : 'Impossible d\'ouvrir la composition.', 'error');
+      this._toast(r && r.error ? r.error : 'Impossible d’ouvrir la composition.', 'error');
       return false;
     } catch (e) {
       console.warn('Teddy.compose:', e);
-      this._toast('Erreur ouverture composition.', 'error');
+      this._toast('Impossible d’ouvrir la fenêtre de composition.', 'error');
       return false;
     }
   },
@@ -117,7 +110,7 @@ const Teddy = {
 
     // Icône Teddy = petit ours stylisé (≃ 14px)
     const iconSvg = icon ? `
-      <svg viewBox="0 0 24 24" class="w-3.5 h-3.5 shrink-0" fill="none"
+      <svg viewBox="0 0 24 24" class="w-3.5 h-3.5 shrink-0" fill="none" aria-hidden="true"
            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="6.5" cy="6.5" r="2.5"/>
         <circle cx="17.5" cy="6.5" r="2.5"/>
@@ -131,10 +124,11 @@ const Teddy = {
       .replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
     return `
-      <button class="teddy-btn inline-flex items-center gap-1.5 rounded-lg
+      <button type="button" class="teddy-btn inline-flex items-center gap-1.5 rounded-lg
                      bg-surface-elevated hover:bg-bg border border-border
                      hover:border-accent transition-colors font-medium
                      text-text-secondary hover:text-text ${sizeCls}"
+              title="${enc(label)}" aria-label="${enc(label)}"
               data-teddy-action="${enc(action)}"
               data-teddy-to="${enc(to)}"
               data-teddy-subject="${enc(subject)}"

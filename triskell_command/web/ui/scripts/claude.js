@@ -1,7 +1,10 @@
-/* Claude — FAB + dialog Allô Claude
+/* Allô Claude — l'assistant conseil (modal + voix).
  *
- * Le FAB est dans index.html (animation tailwind 'breathe').
- * On gère ici l'attention (dot rouge + pulse rapide) et le dialog.
+ * S'ouvre via Ctrl+Espace, le bouton de la quickbar du Cockpit, ou le
+ * volet copilote (copilot.js) qui est la porte d'entrée par défaut.
+ * La veille proactive (checkPending, appelée toutes les 60 s par app.js)
+ * affiche les conseils en toast et les garde pour la prochaine ouverture.
+ * Deux modes voix : dictée (🎤) et conversation continue (📞).
  */
 
 // Injecte les styles du bouton micro et de l'état "écoute"
@@ -28,18 +31,18 @@
     }
     .claude-mic-btn:active { transform: translateY(1px); }
     .claude-mic-btn.is-listening {
-      background:#ef4444;
-      border-color:#dc2626;
+      background: hsl(var(--danger));
+      border-color: hsl(var(--danger));
       color:#fff;
       animation: claude-mic-pulse 1.2s ease-in-out infinite;
     }
     .claude-mic-btn:disabled { opacity:.4; cursor:not-allowed; }
     @keyframes claude-mic-pulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.45); }
-      50% { box-shadow: 0 0 0 10px rgba(239,68,68,0); }
+      0%, 100% { box-shadow: 0 0 0 0 hsl(var(--danger) / .45); }
+      50% { box-shadow: 0 0 0 10px hsl(var(--danger) / 0); }
     }
     .claude-voice-hint {
-      font-size: 11px; color: #ef4444; font-weight:600;
+      font-size: 11px; color: hsl(var(--danger-text)); font-weight:600;
       margin-top: 6px; display: none;
     }
     .claude-voice-hint.is-active { display:block; }
@@ -59,7 +62,7 @@
       color: hsl(var(--accent));
     }
     .claude-speak-btn.is-speaking {
-      background:#22c55e; border-color:#16a34a; color:#fff;
+      background: hsl(var(--success)); border-color: hsl(var(--success)); color:#fff;
     }
     /* ─── Mode Conversation : écran d'appel téléphonique ─── */
     .claude-convo-screen {
@@ -95,22 +98,25 @@
       border: 2px solid hsl(var(--accent) / 0.5);
       opacity: 0;
     }
+    /* Dégradés à 3 nuances gardés en dur : couleurs SÉMANTIQUES d'état
+       (rouge = j'enregistre, ambre = je réfléchis, vert = je parle) que
+       les tokens mono-teinte ne savent pas reproduire. Halos en tokens. */
     .claude-convo-orb[data-state="listening"] .orb-core {
       background: radial-gradient(circle at 35% 35%, #ef4444 0%, #dc2626 60%, #991b1b 100%);
-      box-shadow: 0 12px 50px rgba(239,68,68,0.5);
+      box-shadow: 0 12px 50px hsl(var(--danger) / 0.5);
     }
     .claude-convo-orb[data-state="listening"] .orb-pulse {
       animation: claude-orb-pulse 1.4s ease-out infinite;
-      border-color: rgba(239,68,68,0.6);
+      border-color: hsl(var(--danger) / 0.6);
     }
     .claude-convo-orb[data-state="thinking"] .orb-core {
       background: radial-gradient(circle at 35% 35%, #fbbf24 0%, #f59e0b 60%, #b45309 100%);
-      box-shadow: 0 12px 50px rgba(251,191,36,0.5);
+      box-shadow: 0 12px 50px hsl(var(--warning) / 0.5);
       animation: claude-orb-breathe 1.4s ease-in-out infinite;
     }
     .claude-convo-orb[data-state="speaking"] .orb-core {
       background: radial-gradient(circle at 35% 35%, #22c55e 0%, #16a34a 60%, #14532d 100%);
-      box-shadow: 0 12px 50px rgba(34,197,94,0.5);
+      box-shadow: 0 12px 50px hsl(var(--success) / 0.5);
       animation: claude-orb-wave 0.6s ease-in-out infinite;
     }
     @keyframes claude-orb-pulse {
@@ -150,14 +156,14 @@
       display: inline-flex; align-items: center; gap: 8px;
       padding: 14px 28px;
       border-radius: 999px;
-      background: #ef4444; color: white;
+      background: hsl(var(--danger)); color: #fff;
       border: 0; cursor: pointer;
       font-size: 14px; font-weight: 700;
       letter-spacing: 0.5px;
-      box-shadow: 0 6px 20px rgba(239,68,68,0.4);
+      box-shadow: 0 6px 20px hsl(var(--danger) / 0.4);
       transition: transform 100ms, box-shadow 200ms;
     }
-    .claude-convo-stop:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(239,68,68,0.55); }
+    .claude-convo-stop:hover { transform: translateY(-1px); box-shadow: 0 8px 24px hsl(var(--danger) / 0.55); }
     .claude-convo-stop:active { transform: translateY(0); }
   `;
   document.head.appendChild(s);
@@ -168,28 +174,14 @@ const Claude = {
   pendingAdvice: null,
   _recognition: null,
   _listening: false,
+  _adviceCache: null,          // dernier conseil d'ouverture { advice, ts }
+  ADVICE_CACHE_MS: 5 * 60 * 1000,
 
   setAttention(on) {
     this.isAttention = !!on;
-    const fab = document.getElementById('claude-fab');
-    const dot = document.getElementById('claude-fab-dot');
-    const menuDot = document.getElementById('claude-menu-dot');
-    if (on) {
-      if (fab) {
-        fab.classList.remove('animate-breathe');
-        fab.classList.add('animate-pulse-fast');
-      }
-      if (dot) dot.classList.remove('hidden');
-      if (menuDot) menuDot.classList.remove('hidden');
-    } else {
-      if (fab) {
-        fab.classList.add('animate-breathe');
-        fab.classList.remove('animate-pulse-fast');
-      }
-      if (dot) dot.classList.add('hidden');
-      if (menuDot) menuDot.classList.add('hidden');
-    }
-    // Répercute sur la pastille du copilote (bouton 💬 de la barre-guide)
+    // Les anciennes pastilles (#claude-fab, #claude-fab-dot, #claude-menu-dot)
+    // n'existent plus : l'attention vit sur la pastille du copilote
+    // (bouton 💬 de la barre-guide).
     if (typeof Copilot !== 'undefined' && Copilot.setBadge) {
       try { Copilot.setBadge(this.isAttention && !Copilot.isOpen()); } catch (e) {}
     }
@@ -206,10 +198,17 @@ const Claude = {
         this.setAttention(true);
         // Volet copilote déjà ouvert → le conseil s’affiche tout de suite
         if (typeof Copilot !== 'undefined' && Copilot.isOpen && Copilot.isOpen()) {
-          try { Copilot._consumePendingAdvice(); } catch (e) {}
+          try { Copilot._consumePendingAdvice(); return; } catch (e) {}
+        }
+        // Sinon, on le montre TOUT DE SUITE en toast : le serveur vient de
+        // le consommer, sans ça il serait perdu. Il reste aussi en mémoire
+        // (pendingAdvice) pour s’afficher en tête à la prochaine ouverture.
+        if (typeof Toast !== 'undefined' && Toast.show) {
+          const texte = [advice.headline, advice.advice].filter(Boolean).join(' — ');
+          Toast.show(texte, { type: 'info', title: '💡 Allô Claude', duration: 12000 });
         }
       }
-    } catch (e) { /* silent */ }
+    } catch (e) { /* silencieux : la veille réessaiera dans 60 s */ }
   },
 
   async open() {
@@ -225,25 +224,31 @@ const Claude = {
     document.body.appendChild(overlay);
     overlay.querySelector('.modal-card').classList.add('animate-slide-up');
 
-    // Charge le conseil (soit pré-rempli par la veille, soit nouvel appel)
+    // Charge le conseil : pré-rempli par la veille, sinon cache récent
+    // (5 min — rouvrir le modal dans la foulée ne rappelle pas l'IA),
+    // sinon nouvel appel.
     if (this.pendingAdvice) {
       this._renderAdvice(overlay, this.pendingAdvice);
       this.pendingAdvice = null;
+    } else if (this._adviceCache &&
+               (Date.now() - this._adviceCache.ts) < this.ADVICE_CACHE_MS) {
+      this._renderAdvice(overlay, this._adviceCache.advice);
     } else {
       this._renderLoading(overlay);
       if (App.api) {
         try {
           const advice = await App.api.claude_ask({});
+          if (advice && advice.ok) this._adviceCache = { advice, ts: Date.now() };
           this._renderAdvice(overlay, advice);
         } catch (e) {
-          this._renderError(overlay, String(e));
+          this._renderError(overlay, e);
         }
       } else {
         // Mode preview
         setTimeout(() => this._renderAdvice(overlay, {
           ok: true,
           urgency: 'medium',
-          headline: 'Tu as 2 prospects intéressés à recontacter aujourd\'hui',
+          headline: 'Tu as 2 prospects intéressés à recontacter aujourd’hui',
           advice: "C'est ta priorité absolue. Ouvre la vue Réponses, lis ce qu'ils ont écrit, et envoie-leur le brouillon que l'app a préparé en l'adaptant si besoin. Pas plus de 2 heures avant de répondre — au-delà ils refroidissent.",
           suggested_view: 'replies',
           suggested_action_label: 'Voir les réponses',
@@ -256,13 +261,18 @@ const Claude = {
     if (!overlay) return;
     // Sort proprement du mode conversation si actif
     this._convoMode = false;
-    // Coupe la dictée et la synthèse vocale si elles tournent
+    // Coupe la dictée et la synthèse vocale (même en attente de lecture)
     if (this._recognition) {
       try { this._recognition.abort(); } catch (e) {}
       this._recognition = null;
     }
-    if (window.speechSynthesis && window.speechSynthesis.speaking) {
+    if (window.speechSynthesis) {
       try { window.speechSynthesis.cancel(); } catch (e) {}
+    }
+    // Retire l'écouteur Échap posé à la construction du modal
+    if (overlay._claudeOnKeydown) {
+      document.removeEventListener('keydown', overlay._claudeOnKeydown);
+      overlay._claudeOnKeydown = null;
     }
     overlay.style.opacity = '0';
     setTimeout(() => overlay.remove(), 200);
@@ -279,6 +289,7 @@ const Claude = {
     overlay.innerHTML = `
       <div class="modal-card relative bg-surface sm:rounded-3xl shadow-hero
                   w-full sm:max-w-2xl h-full sm:h-auto sm:max-h-[85vh] overflow-hidden flex flex-col"
+           role="dialog" aria-modal="true" aria-label="Allô Claude"
            style="border: 1px solid hsl(var(--border));">
         <!-- Header -->
         <div class="px-5 pt-5 pb-3 sm:px-8 sm:pt-8 sm:pb-4 flex items-center gap-3 sm:gap-4 border-b border-border">
@@ -295,7 +306,8 @@ const Claude = {
             <div class="hero-kicker mb-1">ALLÔ CLAUDE</div>
             <div class="font-sans text-base sm:text-xl font-bold leading-tight tracking-tight">Quelle est ma prochaine action&nbsp;?</div>
           </div>
-          <button class="text-text-muted hover:text-text text-2xl leading-none w-8 h-8 shrink-0" id="claude-close">×</button>
+          <button class="text-text-muted hover:text-text text-2xl leading-none w-8 h-8 shrink-0" id="claude-close"
+                  title="Fermer" aria-label="Fermer la fenêtre Allô Claude">×</button>
         </div>
 
         <!-- Body -->
@@ -317,7 +329,7 @@ const Claude = {
                    placeholder="ex: comment booster mes réponses cette semaine ?" />
             <button id="claude-ask-free" class="btn btn-primary w-full sm:w-auto justify-center shrink-0">Demander</button>
           </div>
-          <div id="claude-voice-hint" class="claude-voice-hint">🔴 J'écoute… (parle, ou clique sur ⏹ pour arrêter)</div>
+          <div id="claude-voice-hint" class="claude-voice-hint">🔴 J’écoute… (parle, puis clique sur ⏹ pour arrêter et envoyer)</div>
         </div>
       </div>
     `;
@@ -326,16 +338,46 @@ const Claude = {
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) this.close(overlay);
     });
+
+    // Fermeture par Échap. En plein appel vocal, Échap raccroche d'abord ;
+    // un 2e Échap ferme. L'écouteur est retiré dans close(), et en secours
+    // au prochain changement de vue (App.onViewCleanup).
+    const onKeydown = (e) => {
+      if (e.key !== 'Escape') return;
+      if (this._convoMode) this._stopConversation(overlay);
+      else this.close(overlay);
+    };
+    document.addEventListener('keydown', onKeydown);
+    overlay._claudeOnKeydown = onKeydown;
+    if (typeof App !== 'undefined' && App.onViewCleanup) {
+      App.onViewCleanup(() => {
+        // Pas pendant un appel vocal : la navigation en cours d'appel est
+        // voulue (l'assistant ouvre un écran pendant qu'il parle).
+        if (!this._convoMode && document.body.contains(overlay)) this.close(overlay);
+      });
+    }
+
+    // Historique du mode texte : 10 tours max, le temps de la session du
+    // modal (même mécanique que le mode vocal).
+    this._askHistory = [];
     overlay.querySelector('#claude-ask-free').onclick = async () => {
       const q = overlay.querySelector('#claude-question').value.trim();
       if (!q) return;
-      this._renderLoading(overlay);
-      if (App.api) {
-        try {
-          const advice = await App.api.claude_ask({ question: q });
-          this._renderAdvice(overlay, advice);
-        } catch (e) { this._renderError(overlay, String(e)); }
+      if (!App.api) {
+        this._renderError(overlay, 'La connexion au serveur n’est pas prête — recharge la page et réessaie.');
+        return;
       }
+      this._renderLoading(overlay);
+      try {
+        const advice = await App.api.claude_ask({ question: q, history: this._askHistory });
+        if (advice && advice.ok) {
+          const answer = [advice.headline, advice.advice].filter(Boolean).join('. ');
+          this._askHistory.push({ role: 'user', content: q });
+          if (answer) this._askHistory.push({ role: 'assistant', content: answer });
+          if (this._askHistory.length > 10) this._askHistory = this._askHistory.slice(-10);
+        }
+        this._renderAdvice(overlay, advice);
+      } catch (e) { this._renderError(overlay, e); }
     };
     overlay.querySelector('#claude-question').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') overlay.querySelector('#claude-ask-free').click();
@@ -461,7 +503,8 @@ const Claude = {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { this._stopConversation(overlay); return; }
 
-    this._setConvoState(overlay, 'listening', 'Je t\'écoute…');
+    this._setConvoState(overlay, 'listening', 'Je t’écoute…');
+    this._micBlocked = false;
 
     const rec = new SR();
     rec.lang = 'fr-FR';
@@ -481,13 +524,27 @@ const Claude = {
       this._setConvoTranscript(overlay, (finalText + interim).trim());
     };
     rec.onerror = (e) => {
-      // 'no-speech' = silence prolongé, c'est normal en conversation
+      // 'no-speech' = silence prolongé, c'est normal en conversation.
+      // Micro refusé ou introuvable, en revanche : on doit SORTIR de la
+      // boucle, sinon « Je t'écoute… » tourne pour toujours en silence.
+      const code = (e && e.error) || '';
+      if (code === 'not-allowed' || code === 'audio-capture' || code === 'service-not-allowed') {
+        this._micBlocked = true;
+      }
       try { rec.stop(); } catch (err) {}
     };
     rec.onend = () => {
       this._recognition = null;
       const q = finalText.trim();
       if (!this._convoMode) return;
+      if (this._micBlocked) {
+        this._micBlocked = false;
+        if (typeof Toast !== 'undefined' && Toast.warn) {
+          Toast.warn('Ton micro est bloqué — autorise-le via l’icône caméra/micro de la barre d’adresse, puis relance l’appel.', 'Micro inaccessible');
+        }
+        this._stopConversation(overlay);
+        return;
+      }
       if (!q) {
         // Rien dit → on relance l'écoute après une courte pause
         setTimeout(() => this._convoListen(overlay), 400);
@@ -525,8 +582,10 @@ const Claude = {
       speakable = reply.text;
       // L'assistant a pu AGIR (lancer une prospection, ouvrir un écran…) :
       // si le serveur renvoie une navigation, on l'exécute en arrière-plan
-      // pendant qu'il parle — effet « il l'a fait pour moi ».
-      if (reply.navigate && typeof App !== 'undefined' && App.show) {
+      // pendant qu'il parle — effet « il l'a fait pour moi ». Uniquement
+      // vers une vue connue du routeur (liste blanche).
+      if (reply.navigate && typeof App !== 'undefined' && App.show &&
+          Array.isArray(App.KNOWN_VIEWS) && App.KNOWN_VIEWS.includes(reply.navigate)) {
         try { App.show(reply.navigate); } catch (e) { /* jamais bloquant */ }
       }
       // On nourrit l'historique pour les tours suivants
@@ -583,6 +642,33 @@ const Claude = {
     return fr[0];
   },
 
+  /** Lance la lecture d'une phrase avec la meilleure voix française.
+   *  Gère le cas (Chrome surtout) où getVoices() est vide au premier
+   *  appel : la liste arrive plus tard via l'événement voiceschanged —
+   *  on attend (1 s max), puis on parle. Utilisé par le mode conversation
+   *  ET le bouton « Écouter » (même voix partout). */
+  _speakUtterance(u) {
+    if (!window.speechSynthesis) return;
+    const speakNow = () => {
+      const best = this._pickBestFrenchVoice();
+      if (best) u.voice = best;
+      window.speechSynthesis.speak(u);
+    };
+    const voices = window.speechSynthesis.getVoices();
+    if (voices && voices.length) { speakNow(); return; }
+    let done = false;
+    const onVoices = () => {
+      if (done) return;
+      done = true;
+      try { window.speechSynthesis.removeEventListener('voiceschanged', onVoices); } catch (e) {}
+      speakNow();
+    };
+    try { window.speechSynthesis.addEventListener('voiceschanged', onVoices); } catch (e) {}
+    // Filet : certains navigateurs n'émettent jamais voiceschanged →
+    // on parle quand même avec la voix par défaut.
+    setTimeout(onVoices, 1000);
+  },
+
   _convoSpeak(overlay, text) {
     if (!this._convoMode) return;
     const clean = this._stripMarkdown(text);
@@ -599,12 +685,6 @@ const Claude = {
     u.rate = 1.02;   // légèrement plus rapide que 1 → moins traînant
     u.pitch = 1.0;
     u.volume = 1.0;
-    const best = this._pickBestFrenchVoice();
-    if (best) u.voice = best;
-    u.onend = () => {
-      if (this._convoMode) this._convoListen(overlay);
-    };
-    u.onerror = u.onend;
     // Sécurité : si onend ne se déclenche jamais (bug Chrome), on relance après
     // un timeout proportionnel au texte (~0.06s par caractère + 1s de marge)
     const failSafe = setTimeout(() => {
@@ -614,7 +694,8 @@ const Claude = {
       clearTimeout(failSafe);
       if (this._convoMode) this._convoListen(overlay);
     };
-    window.speechSynthesis.speak(u);
+    u.onerror = u.onend;
+    this._speakUtterance(u);
   },
 
   _supportsVoiceInput() {
@@ -661,7 +742,14 @@ const Claude = {
       }
       input.value = (finalText + interim).trim();
     };
-    rec.onerror = () => { try { rec.stop(); } catch (e) {} };
+    let micBlocked = false;
+    rec.onerror = (e) => {
+      const code = (e && e.error) || '';
+      if (code === 'not-allowed' || code === 'audio-capture' || code === 'service-not-allowed') {
+        micBlocked = true;
+      }
+      try { rec.stop(); } catch (err) {}
+    };
     rec.onend = () => {
       this._listening = false;
       this._recognition = null;
@@ -669,6 +757,12 @@ const Claude = {
       micBtn.textContent = '🎤';
       micBtn.title = "Parler à Claude (dictée vocale)";
       hint.classList.remove('is-active');
+      if (micBlocked) {
+        if (typeof Toast !== 'undefined' && Toast.warn) {
+          Toast.warn('Ton micro est bloqué — autorise-le via l’icône caméra/micro de la barre d’adresse.', 'Micro inaccessible');
+        }
+        return;
+      }
       // Auto-submit si on a quelque chose
       if (input.value.trim()) {
         overlay.querySelector('#claude-ask-free').click();
@@ -683,7 +777,9 @@ const Claude = {
       micBtn.classList.remove('is-listening');
       micBtn.textContent = '🎤';
       hint.classList.remove('is-active');
-      alert("Impossible de démarrer l'écoute. Vérifie que tu as autorisé le micro pour cette page.");
+      if (typeof Toast !== 'undefined' && Toast.warn) {
+        Toast.warn('Impossible de démarrer l’écoute. Vérifie que tu as autorisé le micro pour cette page.', 'Micro inaccessible');
+      }
     }
   },
 
@@ -702,10 +798,6 @@ const Claude = {
     u.lang = 'fr-FR';
     u.rate = 1.0;
     u.pitch = 1.0;
-    // Essaye de choisir une voix française
-    const voices = window.speechSynthesis.getVoices();
-    const fr = voices.find(v => v.lang && v.lang.startsWith('fr'));
-    if (fr) u.voice = fr;
     u.onend = () => {
       if (btn) {
         btn.classList.remove('is-speaking');
@@ -715,9 +807,10 @@ const Claude = {
     u.onerror = u.onend;
     if (btn) {
       btn.classList.add('is-speaking');
-      btn.innerHTML = '⏹ Stop';
+      btn.innerHTML = '⏹ Arrêter';
     }
-    window.speechSynthesis.speak(u);
+    // Même choix de voix que le mode conversation (+ liste de voix vide gérée)
+    this._speakUtterance(u);
   },
 
   _renderLoading(overlay) {
@@ -732,10 +825,18 @@ const Claude = {
 
   _renderError(overlay, err) {
     const body = overlay.querySelector('#claude-body');
+    if (!body) return;
+    const detail = this._esc(String((err && err.message) || err || ''));
     body.innerHTML = `
       <div class="text-center py-8">
-        <p class="text-danger font-semibold mb-2">Claude n'a pas pu répondre</p>
-        <p class="text-sm text-text-muted">${err}</p>
+        <p class="text-danger font-semibold mb-2">Claude n’a pas pu répondre</p>
+        <p class="text-sm text-text-muted mb-4">Réessaie dans un instant. Si ça se reproduit, vérifie ta connexion internet.</p>
+        ${detail ? `
+          <details class="text-left max-w-md mx-auto">
+            <summary class="text-[11px] text-text-muted cursor-pointer select-none">Détail technique</summary>
+            <pre class="text-[11px] text-text-muted whitespace-pre-wrap break-words mt-2 p-3 rounded-lg bg-bg border border-border">${detail}</pre>
+          </details>
+        ` : ''}
       </div>
     `;
   },
@@ -748,7 +849,8 @@ const Claude = {
     const body = overlay.querySelector('#claude-body');
     const labels = { low: 'tranquille', medium: 'à faire dans la journée', high: 'urgent' };
     const colors = { low: 'text-text-muted', medium: 'text-warning', high: 'text-danger' };
-    const u = advice.urgency || 'low';
+    // Urgence inconnue du serveur → on retombe sur 'low' (anti-plantage)
+    const u = labels[advice.urgency] ? advice.urgency : 'low';
 
     const speakable = [advice.headline, advice.advice].filter(Boolean).join('. ');
     const canSpeak = this._supportsVoiceOutput() && speakable;
@@ -756,7 +858,7 @@ const Claude = {
     body.innerHTML = `
       <div class="animate-fade-in">
         <div class="flex items-center gap-2 mb-5">
-          <span class="inline-block px-3 py-1 rounded-full text-[10px] font-bold tracking-widest
+          <span class="inline-block px-3 py-1 rounded-full text-[11px] font-bold tracking-widest
                        bg-bg ${colors[u]}">
             NIVEAU : ${labels[u].toUpperCase()}
           </span>
@@ -765,8 +867,7 @@ const Claude = {
         ${advice.headline ? `<h3 class="font-sans text-2xl font-bold mb-4 leading-snug tracking-tight">${this._esc(advice.headline)}</h3>` : ''}
         ${advice.advice ? `<div class="text-text-secondary leading-relaxed whitespace-pre-line mb-6">${this._esc(advice.advice)}</div>` : ''}
         ${advice.suggested_view ? `
-          <button class="btn btn-primary"
-                  onclick="App.show('${advice.suggested_view}'); document.querySelector('.fixed.inset-0.z-\\[100\\]').remove();">
+          <button id="claude-go-btn" class="btn btn-primary">
             ${this._esc(advice.suggested_action_label || 'Y aller')} →
           </button>
         ` : ''}
@@ -776,6 +877,29 @@ const Claude = {
     if (canSpeak) {
       const speakBtn = body.querySelector('#claude-speak-btn');
       if (speakBtn) speakBtn.onclick = () => this._toggleSpeak(speakable, speakBtn);
+    }
+
+    // « Y aller » : on ferme CE modal (référence directe, pas de chasse au
+    // premier overlay z-100 du DOM), on coupe la voix, et on ne navigue que
+    // vers une vue connue du routeur.
+    const goBtn = body.querySelector('#claude-go-btn');
+    if (goBtn) {
+      goBtn.onclick = () => {
+        const target = advice.suggested_view;
+        if (window.speechSynthesis) {
+          try { window.speechSynthesis.cancel(); } catch (e) {}
+        }
+        const known = typeof App !== 'undefined' && App.show &&
+          Array.isArray(App.KNOWN_VIEWS) && App.KNOWN_VIEWS.includes(target);
+        if (!known) {
+          if (typeof Toast !== 'undefined' && Toast.warn) {
+            Toast.warn('Cet écran n’existe pas (ou plus) dans l’app — ouvre-le depuis le menu de gauche.');
+          }
+          return;
+        }
+        this.close(overlay);
+        App.show(target);
+      };
     }
   },
 

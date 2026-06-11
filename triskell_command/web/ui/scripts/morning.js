@@ -65,17 +65,17 @@ const Morning = {
         </div>
         <div class="cockpit-quickbar">
           <button id="m-refresh" class="btn btn-secondary" title="Rafraîchir les chiffres">
-            <svg class="w-4 h-4" style="color:#3b82f6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0114-7.4M21 12a9 9 0 01-14 7.4"/><path d="M21 4v5h-5M3 20v-5h5"/></svg>
+            <svg class="w-4 h-4 text-info" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0114-7.4M21 12a9 9 0 01-14 7.4"/><path d="M21 4v5h-5M3 20v-5h5"/></svg>
             Rafraîchir
           </button>
           <button id="m-ecosysteme" class="btn btn-secondary" title="Vue d'ensemble de l'écosystème Triskell (interne)">
-            <svg class="w-4 h-4" style="color:#facc15" fill="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 text-warning-text" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 2l2.4 6.4L21 9.3l-5 4.5L17.6 21 12 17.5 6.4 21 8 13.8 3 9.3l6.6-.9L12 2z"/>
             </svg>
             Écosystème
           </button>
           <button id="m-compose-mail" class="btn btn-secondary" title="Rédiger (Ctrl+Shift+M)">
-            <svg class="w-4 h-4" style="color:#f59e0b" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+            <svg class="w-4 h-4 text-warning-text" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/>
             </svg>
             Rédiger
@@ -96,7 +96,7 @@ const Morning = {
             Allô Claude
           </button>
           <button id="m-focus" class="btn btn-secondary" title="Mode Concentration">
-            <svg class="w-4 h-4" style="color:#ef4444" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+            <svg class="w-4 h-4 text-danger-text" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
             </svg>
             Concentration
@@ -110,7 +110,7 @@ const Morning = {
             Musique
           </button>
           <button id="m-chat-thomas" class="btn btn-secondary" title="Chat avec Thomas">
-            <svg class="w-4 h-4" style="color:#10b981" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <svg class="w-4 h-4 text-success-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
             </svg>
             Chat
@@ -124,10 +124,10 @@ const Morning = {
              Les outils de recherche individuels (dont les 3 bêta) vivent
              dans le menu Prospection → Outils de recherche. -->
         <div class="cockpit-launch mt-5">
-          <div class="text-[10px] font-bold tracking-widest text-text-muted mb-2">
+          <div class="text-[11px] font-bold tracking-widest text-text-muted mb-2">
             PROSPECTION
           </div>
-          <div class="flex flex-wrap items-center gap-2">
+          <div class="cl-row">
             <button id="m-prospection" class="btn btn-primary"
                     title="Une commande = toute la chaîne : recherche → base → rédaction → envoi">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
@@ -159,7 +159,16 @@ const Morning = {
     `;
 
     // Bindings boutons quickbar
-    document.getElementById('m-refresh').onclick = () => this.render(container);
+    // Rafraîchir = rafraîchissement DOUX : on recharge les chiffres et les
+    // blocs de données sans reconstruire la quickbar ni l'horloge (avant :
+    // re-render complet qui faisait clignoter tout l'écran).
+    document.getElementById('m-refresh').onclick = () => {
+      this._softRefresh();
+      this._loadSetup();
+      this._loadObeliskNotifs();
+      this._loadModes();
+      this._loadLinkedinActions();
+    };
     // Rampe de lancement prospection
     const prospectionBtn = document.getElementById('m-prospection');
     if (prospectionBtn) prospectionBtn.onclick = () => App.show('prospection');
@@ -325,61 +334,16 @@ const Morning = {
       document.head.appendChild(s);
     }
 
-    // Styles spécifiques aux boutons bêta (orange) — injectés une seule fois
-    if (!document.getElementById('m-beta-tools-styles')) {
-      const s = document.createElement('style');
-      s.id = 'm-beta-tools-styles';
-      s.textContent = `
-        .btn-beta-orange {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          padding: 9px 16px;
-          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-          color: white;
-          border: 1px solid #c2410c;
-          border-radius: 10px;
-          font-size: 13px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: transform 120ms, box-shadow 120ms, filter 120ms;
-          box-shadow: 0 1px 2px rgba(234, 88, 12, 0.20);
-        }
-        .btn-beta-orange:hover {
-          transform: translateY(-1px);
-          filter: brightness(1.06);
-          box-shadow: 0 4px 12px rgba(234, 88, 12, 0.30);
-        }
-        .btn-beta-orange:active {
-          transform: translateY(0);
-          filter: brightness(0.96);
-        }
-        .btn-beta-orange-tag {
-          font-size: 10.5px;
-          font-weight: 500;
-          opacity: 0.85;
-          margin-left: 2px;
-        }
-      `;
-      document.head.appendChild(s);
-    }
     document.getElementById('m-brain').onclick = () => {
       if (typeof Brain !== 'undefined' && Brain._openNew) Brain._openNew();
     };
-    document.getElementById('m-allo-claude').onclick = () => Claude.open();
+    document.getElementById('m-allo-claude').onclick = () => {
+      if (typeof Claude !== 'undefined' && Claude.open) Claude.open();
+    };
     document.getElementById('m-compose-mail').onclick = () => this._openComposeChoice();
-    document.getElementById('m-ecosysteme').onclick = async () => {
-      const url = 'https://triskell-ecosysteme.netlify.app';
-      try {
-        if (window.app && window.app.api && window.app.api.open_url) {
-          await window.app.api.open_url({ url });
-        } else {
-          window.open(url, '_blank');
-        }
-      } catch (e) {
-        console.warn('open ecosysteme:', e);
-        window.open(url, '_blank');
-      }
+    document.getElementById('m-ecosysteme').onclick = () => {
+      // Version web : on ouvre simplement la page dans un nouvel onglet.
+      window.open('https://triskell-ecosysteme.netlify.app', '_blank');
     };
     const focusBtn = document.getElementById('m-focus');
     if (focusBtn) {
@@ -458,7 +422,7 @@ const Morning = {
               Connecte-toi à la base partagée Triskell depuis les Réglages pour
               que ce poste de contrôle se remplisse en temps réel.
             </p>
-            <button class="btn btn-primary" onclick="App.show('config')">Aller dans Réglages →</button>
+            <button class="btn btn-primary" onclick="App.show('config', {tab:'account'})">Aller dans Réglages →</button>
           </div>
         </div>
       `;
@@ -478,12 +442,14 @@ const Morning = {
                    + `<div id="m-pipelines-slot"></div>`
                    + `<div id="m-obelisk-slot"></div>`
                    + this._renderKpiGrid(digest)
+                   + `<div id="m-modes-slot"></div>`
                    + this._renderAlert(digest)
                    + `<div id="m-linkedin-slot"></div>`;
 
     this._loadSetup();
     this._loadPipelinesActivity();
     this._loadObeliskNotifs();
+    this._loadModes();
     this._loadLinkedinActions();
 
     // Démarre le rafraîchissement automatique des chiffres
@@ -637,6 +603,25 @@ const Morning = {
       this._setSystemLed('alert', `SYSTÈME · ${alerts} ALERTE${alerts > 1 ? 'S' : ''}`);
     } else {
       this._setSystemLed('ok', 'SYSTÈME · OPÉRATIONNEL');
+    }
+
+    // L'écran avait raté son premier chargement (carte « hors ligne ») et
+    // la connexion est revenue : on reconstruit le contenu complet.
+    if (!slot.querySelector('.cockpit-hero')) {
+      slot.innerHTML = `<div id="m-setup-slot"></div>`
+                     + this._renderHero(digest)
+                     + `<div id="m-pipelines-slot"></div>`
+                     + `<div id="m-obelisk-slot"></div>`
+                     + this._renderKpiGrid(digest)
+                     + `<div id="m-modes-slot"></div>`
+                     + this._renderAlert(digest)
+                     + `<div id="m-linkedin-slot"></div>`;
+      this._loadSetup();
+      this._loadPipelinesActivity();
+      this._loadObeliskNotifs();
+      this._loadModes();
+      this._loadLinkedinActions();
+      return;
     }
 
     // Reconstitue uniquement les blocs d'affichage (hero, KPI, alerte).
@@ -813,8 +798,11 @@ const Morning = {
           const target = btn.dataset.mode;
           if (card.dataset.current === target) return;
           if (target === 'direct') {
-            const confirmMsg = "Passer en envoi DIRECT pour les réponses ?\n\nL'IA répondra toute seule aux mails reçus. Tu peux revenir à « Je valide » à tout moment.";
-            if (!confirm(confirmMsg)) return;
+            const ok = await Dialog.confirm(
+              "L’IA répondra toute seule aux mails reçus, sans te demander. Tu peux revenir à « Je valide » à tout moment.",
+              { title: 'Passer en envoi direct ?', okLabel: 'Oui, envoi direct',
+                cancelLabel: 'Annuler', danger: true });
+            if (!ok) return;
           }
           card.querySelectorAll('.cockpit-mode-opt').forEach(b => {
             b.classList.remove('active', 'danger', 'off');
@@ -826,11 +814,18 @@ const Morning = {
           try {
             const r = await App.api.set_simple_mode({ kind, mode: target });
             if (!r || !r.ok) {
-              alert("Bascule impossible : " + ((r && r.error) || 'erreur'));
+              if (r && r.error) console.warn('set_simple_mode:', r.error);
+              Toast.error('La bascule n’a pas été prise en compte. Réessaie dans un instant.');
               this._loadModes();
+            } else {
+              Toast.success(target === 'direct'
+                ? 'Envoi direct activé pour les réponses.'
+                : target === 'off'
+                  ? 'Réponses automatiques désactivées.'
+                  : 'Les réponses repassent par ta validation.');
             }
           } catch (e) {
-            alert("Bascule impossible : " + e);
+            Toast.friendlyError(e, 'La bascule n’a pas été prise en compte.');
             this._loadModes();
           }
         };
@@ -1001,11 +996,30 @@ const Morning = {
         const stopBtn = slot.querySelector('[data-db-stop]');
         if (stopBtn) stopBtn.onclick = async (ev) => {
           ev.stopPropagation();
-          if (App.api.drafts_send_all_stop) {
-            try { await App.api.drafts_send_all_stop({}); } catch (e) {}
+          if (this._dbStopRequested) return;
+          if (!App.api.drafts_send_all_stop) return;
+          const ok = await Dialog.confirm(
+            'Les mails déjà partis le restent ; les suivants ne partiront pas.',
+            { title: 'Arrêter l’envoi en série ?', okLabel: 'Arrêter',
+              cancelLabel: 'Continuer l’envoi', danger: true });
+          if (!ok) return;
+          // L'état « arrêt en cours » survit aux re-rendus du poll : on le
+          // garde dans un drapeau, relâché quand le serveur dit "fini".
+          this._dbStopRequested = true;
+          stopBtn.disabled = true;
+          stopBtn.textContent = 'Arrêt en cours…';
+          try {
+            await App.api.drafts_send_all_stop({});
+          } catch (e) {
+            this._dbStopRequested = false;
+            Toast.friendlyError(e, 'L’arrêt n’a pas été pris en compte.');
           }
         };
       } else {
+        if (this._dbStopRequested) {
+          this._dbStopRequested = false;
+          Toast.success('Envoi en série arrêté.');
+        }
         slot.innerHTML = '';
         slot.classList.add('hidden');
       }
@@ -1067,9 +1081,9 @@ const Morning = {
                     style="border-color: hsl(var(--accent) / 0.4); color: hsl(var(--accent));">
               Voir →
             </button>
-            <button data-db-stop class="btn btn-secondary"
-                    style="border-color: hsl(var(--danger) / 0.5); color: hsl(var(--danger));">
-              Arrêter
+            <button data-db-stop class="btn btn-secondary" ${this._dbStopRequested ? 'disabled' : ''}
+                    style="border-color: hsl(var(--danger) / 0.5); color: hsl(var(--danger-text));">
+              ${this._dbStopRequested ? 'Arrêt en cours…' : 'Arrêter'}
             </button>
           </div>
         </div>
@@ -1100,8 +1114,8 @@ const Morning = {
     if (nReview > 0) {
       kicker = '⚠ MAILS BLOQUÉS — À VÉRIFIER';
       title  = nReview === 1
-        ? '1 mail bloqué (variable non remplie)'
-        : `${nReview} mails bloqués (variables non remplies)`;
+        ? '1 mail bloqué (info manquante, ex. prénom)'
+        : `${nReview} mails bloqués (infos manquantes, ex. prénom)`;
       body   = "Le système a refusé d'envoyer ces mails parce qu'il manquait des infos (genre prénom). Ouvre-les pour les compléter ou les supprimer.";
       cta    = 'Voir les mails bloqués →';
       target = 'drafts';
@@ -1137,8 +1151,8 @@ const Morning = {
       kicker = 'TOUT EST À JOUR';
       title  = "Le terrain est dégagé.";
       body   = "Aucune réponse à traiter, aucun brouillon en attente. Lance une nouvelle vague — c'est le bon moment.";
-      cta    = "Lancer l'auto-pilote →";
-      target = 'autopilot';
+      cta    = 'Lancer une prospection →';
+      target = 'prospection';
       state  = 'accent';
     }
 
@@ -1169,7 +1183,7 @@ const Morning = {
     return `
       <div class="cockpit-grid">
         ${this._kpi({
-          label: 'Envoyés aujourd\'hui',
+          label: 'Envoyés aujourd’hui',
           value: sentT,
           tag: sentT > 0 ? 'LIVE' : null,
           delta: `<strong>${sentY}</strong> hier · <strong>${sentW}</strong> sur 7 jours`,
@@ -1178,7 +1192,7 @@ const Morning = {
           hint: 'Voir les messages envoyés',
         })}
         ${this._kpi({
-          label: 'Réponses aujourd\'hui',
+          label: 'Réponses aujourd’hui',
           value: repT,
           tag: repT > 0 ? 'LIVE' : null,
           delta: `<strong>${repY}</strong> hier · taux ${sentY ? Math.round(100*repY/sentY) : 0} %`,
@@ -1197,7 +1211,7 @@ const Morning = {
         ${this._kpi({
           label: 'Brouillons à valider',
           value: nDrafts,
-          delta: nDrafts === 0 ? 'inbox vide' : 'prêts à approuver',
+          delta: nDrafts === 0 ? 'rien en attente' : 'prêts à approuver',
           tone: nDrafts > 0 ? 'accent' : '',
           onClick: `App.show('drafts')`,
           hint: 'Voir les brouillons',
@@ -1252,9 +1266,8 @@ const Morning = {
           <h3 class="text-base font-bold mb-1">${total === 1 ? '1 mail non parti' : `${total} mails non partis`}</h3>
           <p class="text-sm text-text-secondary mb-3">
             Un problème de configuration mail ou de destinataire bloque la diffusion.
-            Ouvre l'écran d'import pour voir le détail.
           </p>
-          <button class="btn btn-secondary" onclick="App.show('convoy')">Voir le détail →</button>
+          <button class="btn btn-secondary" onclick="App.show('convoy')">Voir dans Le Convoi →</button>
         </div>
       </div>
     `;
@@ -1308,22 +1321,28 @@ const Morning = {
     if (!btn) return;
     btn.onclick = async () => {
       if (!App.api) return;
-      if (!confirm("Envoyer toutes les relances LinkedIn pending au Phantom configuré ?\n\n" +
-                    "Phantombuster va les distribuer sur LinkedIn (rate-limité ~25/jour pour éviter le ban).\n" +
-                    "Si tu n'as pas configuré Phantombuster, va dans Réglages d'abord.")) return;
+      const ok = await Dialog.confirm(
+        "Toutes les relances en attente partiront via Phantombuster, "
+        + "à raison d’environ 25 par jour pour protéger ton compte LinkedIn.\n\n"
+        + "Si Phantombuster n’est pas encore branché, passe d’abord par Réglages.",
+        { title: 'Envoyer toutes les relances LinkedIn ?',
+          okLabel: 'Tout envoyer', cancelLabel: 'Annuler' });
+      if (!ok) return;
       btn.disabled = true; btn.textContent = 'Envoi…';
       try {
         const r = await App.api.multichannel_dispatch_phantombuster();
         if (r && r.ok) {
           btn.textContent = `✓ ${r.launched} envoyés`;
-          if (r.note) alert(r.note);
+          Toast.success(`${r.launched} relance(s) confiée(s) à Phantombuster.`);
+          if (r.note) Toast.info(r.note);
         } else {
-          alert('Échec : ' + ((r && r.error) || 'erreur'));
+          if (r && r.error) console.warn('dispatch phantombuster:', r.error);
+          Toast.error('Les relances ne sont pas parties. Vérifie Phantombuster dans Réglages.');
           btn.disabled = false;
           btn.textContent = '⚡ Tout envoyer via Phantombuster';
         }
       } catch (e) {
-        alert('Erreur : ' + e);
+        Toast.friendlyError(e, 'Les relances ne sont pas parties.');
         btn.disabled = false;
         btn.textContent = '⚡ Tout envoyer via Phantombuster';
       }
@@ -1349,10 +1368,11 @@ const Morning = {
         <div class="flex flex-wrap gap-2">
           <button class="text-xs px-2.5 py-1.5 rounded-lg bg-accent/10 text-accent border border-accent/30 hover:bg-accent/20"
                   data-li-copy>📋 Copier le message</button>
-          <a href="${this._escAttr(a.search_url || '#')}" target="_blank"
+          ${a.search_url ? `
+          <a href="${this._escAttr(a.search_url)}" target="_blank"
              class="text-xs px-2.5 py-1.5 rounded-lg bg-surface-elevated border border-border hover:border-accent text-text-secondary hover:text-text">
             🔍 Trouver son LinkedIn
-          </a>
+          </a>` : ''}
           ${a.platform_url ? `
             <a href="${this._escAttr(a.platform_url)}" target="_blank"
                class="text-xs px-2.5 py-1.5 rounded-lg bg-surface-elevated border border-border hover:border-accent text-text-secondary hover:text-text">
@@ -1373,23 +1393,54 @@ const Morning = {
       const doneBtn = card.querySelector('[data-li-done]');
       const discardBtn = card.querySelector('[data-li-discard]');
       if (copyBtn) copyBtn.onclick = () => {
-        const txt = card.querySelector('pre').textContent || '';
+        const pre = card.querySelector('pre');
+        const txt = (pre && pre.textContent) || '';
         navigator.clipboard.writeText(txt).then(() => {
           copyBtn.textContent = '✓ Copié';
           setTimeout(() => copyBtn.innerHTML = '📋 Copier le message', 1400);
-        }).catch(() => alert('Impossible de copier — fais Ctrl+C manuellement'));
+        }).catch(() => {
+          // Copie auto refusée par le navigateur : on sélectionne le texte
+          // pour que Ctrl+C marche du premier coup.
+          try {
+            const range = document.createRange();
+            range.selectNodeContents(pre);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            Toast.info('Le message est sélectionné — fais Ctrl+C pour le copier.');
+          } catch (e2) {
+            Toast.error('Impossible de copier ce message.');
+          }
+        });
       };
       if (doneBtn) doneBtn.onclick = async () => {
         if (!App.api) return;
-        await App.api.multichannel_mark_done({ id });
-        card.style.opacity = '0';
-        setTimeout(() => this._loadLinkedinActions(), 250);
+        doneBtn.disabled = true;
+        try {
+          await App.api.multichannel_mark_done({ id });
+          card.style.opacity = '0';
+          setTimeout(() => this._loadLinkedinActions(), 250);
+        } catch (e) {
+          doneBtn.disabled = false;
+          Toast.friendlyError(e, 'Impossible de marquer cette relance comme faite.');
+        }
       };
       if (discardBtn) discardBtn.onclick = async () => {
         if (!App.api) return;
-        await App.api.multichannel_discard({ id });
-        card.style.opacity = '0';
-        setTimeout(() => this._loadLinkedinActions(), 250);
+        const ok = await Dialog.confirm(
+          'Cette suggestion de relance disparaîtra de la liste.',
+          { title: 'Supprimer cette suggestion ?', okLabel: 'Supprimer',
+            cancelLabel: 'Garder', danger: true });
+        if (!ok) return;
+        discardBtn.disabled = true;
+        try {
+          await App.api.multichannel_discard({ id });
+          card.style.opacity = '0';
+          setTimeout(() => this._loadLinkedinActions(), 250);
+        } catch (e) {
+          discardBtn.disabled = false;
+          Toast.friendlyError(e, 'Impossible de supprimer cette suggestion.');
+        }
       };
     });
   },
@@ -1401,14 +1452,16 @@ const Morning = {
     ov.style.background = 'rgba(15,23,42,0.78)';
     ov.style.backdropFilter = 'blur(10px)';
     ov.innerHTML = `
-      <div class="bg-surface rounded-2xl shadow-hero w-full max-w-lg border border-border animate-slide-up overflow-hidden">
+      <div class="bg-surface rounded-2xl shadow-hero w-full max-w-lg border border-border animate-slide-up overflow-hidden"
+           role="dialog" aria-modal="true" aria-labelledby="cc-title">
         <div class="px-6 pt-5 pb-4 flex items-start justify-between border-b border-border bg-surface-elevated">
           <div>
-            <div class="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-0.5">COMPOSER UN MAIL</div>
-            <h3 class="text-lg font-bold">Que veux-tu écrire ?</h3>
+            <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-0.5">COMPOSER UN MAIL</div>
+            <h3 id="cc-title" class="text-lg font-bold">Que veux-tu écrire ?</h3>
             <p class="text-xs text-text-muted mt-1">Mail classique, ou présentation d'un site déjà réalisé pour la cible.</p>
           </div>
-          <button id="cc-close" class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
+          <button id="cc-close" title="Fermer" aria-label="Fermer"
+                  class="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg text-xl leading-none shrink-0">×</button>
         </div>
         <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button data-cc="new"
@@ -1442,10 +1495,26 @@ const Morning = {
     ov.querySelector('#cc-close').onclick = close;
     ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
 
+    // Bascule vers la messagerie puis ouvre le composeur quand il est
+    // VRAIMENT prêt (avant : pari sur un délai fixe de 200 ms, qui ratait
+    // sur connexion lente). On réessaie ~2 s max, puis on prévient.
     const goMails = (cb) => {
       close();
-      if (App.currentView === 'mails') cb();
-      else { App.show('mails'); setTimeout(cb, 200); }
+      const ready = () => typeof Mails !== 'undefined'
+        && typeof Mails._openComposer === 'function'
+        && !!document.querySelector('[data-mtab]');
+      if (App.currentView === 'mails' && ready()) { cb(); return; }
+      App.show('mails');
+      const t0 = Date.now();
+      const attempt = () => {
+        if (ready()) { cb(); return; }
+        if (Date.now() - t0 >= 2000) {
+          Toast.error('La messagerie met du temps à s’ouvrir — réessaie dans un instant.');
+          return;
+        }
+        App.viewTimeout(attempt, 120);
+      };
+      attempt();
     };
     ov.querySelector('[data-cc="new"]').onclick = () => goMails(() => Mails._openComposer({}));
     ov.querySelector('[data-cc="prospect"]').onclick = () => goMails(() => Mails._openProspectFlow());
