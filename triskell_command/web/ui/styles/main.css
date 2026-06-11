@@ -1065,6 +1065,20 @@ html {
   font-family: 'Inter', -apple-system, system-ui, sans-serif;
 }
 
+/* Salutation + citation du jour : à partir de 1280px elles partagent la
+   même ligne (titre à gauche, citation à droite — xl:flex-nowrap posé par
+   morning.js). Le titre garde la priorité et ne se compresse jamais ; la
+   citation peut se resserrer jusqu'à 220px. Le titre se réduit légèrement
+   (44px → ~41px) sur les fenêtres tout juste assez larges, pour que le
+   duo tienne sans jamais déborder. Sous 1280px : citation sous le titre. */
+@media (min-width: 1280px) {
+  .cockpit-greeting .hero-title {
+    font-size: clamp(38px, 3.2vw, 44px);
+    flex-shrink: 0;
+  }
+  .cockpit-greeting .daily-quote { min-width: 220px; }
+}
+
 /* Bandeau STATUT en haut — type tableau de bord avionique */
 .cockpit-status-bar {
   display: flex;

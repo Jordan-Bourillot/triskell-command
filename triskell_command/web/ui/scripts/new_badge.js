@@ -9,6 +9,9 @@
  * Usage :
  *   NewBadge.attach(elem, 'unique-id');                    // pastille en absolute, coin haut-droit
  *   NewBadge.attach(elem, 'unique-id', {inline: true});    // pastille insérée juste après l'élément
+ *   NewBadge.attach(elem, 'unique-id', {nav: true});       // pastille DANS un bouton de sidebar,
+ *                                                          // alignée à droite (comme la pastille bêta),
+ *                                                          // jamais de débordement coupé
  */
 const NewBadge = {
   _styleInjected: false,
@@ -73,7 +76,13 @@ const NewBadge = {
         margin-left: 6px;
         vertical-align: middle;
       }
-      .new-badge button {
+      /* Dans un bouton de sidebar (flex) : rangée à droite dans la ligne,
+         comme la pastille bêta — rien ne déborde, rien n'est coupé. */
+      .new-badge-nav {
+        margin-left: auto;
+        flex-shrink: 0;
+      }
+      .new-badge .new-badge-x {
         appearance: none;
         background: transparent;
         border: 0;
@@ -84,7 +93,7 @@ const NewBadge = {
         margin-left: 1px;
         cursor: pointer;
       }
-      .new-badge button:hover { color: hsl(var(--on-accent)); }
+      .new-badge .new-badge-x:hover { color: hsl(var(--on-accent)); }
       /* Variante verte discrète — pour les nouveautés récentes */
       .new-badge.is-green {
         background: hsl(var(--success));
@@ -96,8 +105,8 @@ const NewBadge = {
         opacity: 0.92;
       }
       .new-badge.is-green:hover { opacity: 1; }
-      .new-badge.is-green button { color: hsl(var(--on-success) / 0.85); }
-      .new-badge.is-green button:hover { color: hsl(var(--on-success)); }
+      .new-badge.is-green .new-badge-x { color: hsl(var(--on-success) / 0.85); }
+      .new-badge.is-green .new-badge-x:hover { color: hsl(var(--on-success)); }
       /* Variante rouge "gros" — pour signaler une nouveauté majeure dans la sidebar */
       .new-badge.is-red-big {
         font-size: 10.5px;
@@ -107,7 +116,7 @@ const NewBadge = {
         box-shadow: 0 2px 6px hsl(var(--danger) / 0.55);
         animation: newBadgePulse 1.8s ease-in-out infinite;
       }
-      .new-badge.is-red-big button {
+      .new-badge.is-red-big .new-badge-x {
         font-size: 12px;
         padding-left: 4px;
       }
@@ -140,8 +149,14 @@ const NewBadge = {
     const variantCls = options.variant === 'green'   ? ' is-green'
                      : options.variant === 'red-big' ? ' is-red-big'
                      : '';
-    badge.className = 'new-badge ' + (options.inline ? 'new-badge-inline' : 'new-badge-abs') + variantCls;
-    badge.innerHTML = `<span>NEW</span><button type="button" title="Marquer comme vu" aria-label="Marquer comme vu">×</button>`;
+    const placeCls = options.nav    ? 'new-badge-nav'
+                   : options.inline ? 'new-badge-inline'
+                   : 'new-badge-abs';
+    badge.className = 'new-badge ' + placeCls + variantCls;
+    // Croix = <span role="button"> et PAS un <button> : le badge vit souvent
+    // DANS un bouton (sidebar), et un bouton dans un bouton est du HTML
+    // invalide qui casse le focus clavier (même règle que nav_hints.js).
+    badge.innerHTML = `<span>NEW</span><span class="new-badge-x" role="button" tabindex="0" title="Marquer comme vu" aria-label="Marquer comme vu">×</span>`;
     badge.dataset.newBadge = id;
     if (options.title) badge.title = options.title;
 
@@ -149,6 +164,8 @@ const NewBadge = {
       if (targetEl.parentNode) {
         targetEl.parentNode.insertBefore(badge, targetEl.nextSibling);
       }
+    } else if (options.nav) {
+      targetEl.appendChild(badge);
     } else {
       const cs = window.getComputedStyle(targetEl);
       if (cs.position === 'static') {
@@ -157,11 +174,16 @@ const NewBadge = {
       targetEl.appendChild(badge);
     }
 
-    badge.querySelector('button').onclick = (e) => {
+    const closeBtn = badge.querySelector('.new-badge-x');
+    const close = (e) => {
       e.stopPropagation();
       e.preventDefault();
       this.dismiss(id);
       badge.remove();
+    };
+    closeBtn.onclick = close;
+    closeBtn.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') close(e);
     };
 
     return badge;
@@ -185,10 +207,12 @@ const NewFeaturesSinceYesterday = {
     // Sidebar — "Lancer une prospection" : toute la chaîne en un clic
     { selector: '[data-view="prospection"]',
       id: 'prospection-launcher-v2',
+      nav: true,
       title: 'Nouveau : toute la chaîne en un clic' },
     // Sidebar — Mails : nouvel onglet Programmés
     { selector: '[data-view="mails"][data-tab="sent"]',
       id: 'mails-programmes-v1',
+      nav: true,
       title: 'Nouveau : onglet Programmés' },
   ],
 
@@ -202,6 +226,7 @@ const NewFeaturesSinceYesterday = {
       if (el) NewBadge.attach(el, f.id, {
         variant: f.variant || 'green',
         inline: !!f.inline,
+        nav: !!f.nav,
         title: f.title || '',
       });
     });

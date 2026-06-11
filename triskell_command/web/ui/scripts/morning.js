@@ -58,8 +58,11 @@ const Morning = {
           ${Help.button('morning')}
         </div>
 
-        <!-- Salutation discrète + citation du jour + quickbar -->
-        <div class="mt-5 flex items-end justify-between gap-6 flex-wrap">
+        <!-- Salutation discrète + citation du jour + quickbar.
+             ≥1280px : titre à GAUCHE, citation à DROITE sur la même ligne
+             (la citation se resserre, voir .cockpit-greeting dans main.css) ;
+             en dessous, la citation repasse sous le titre. -->
+        <div class="cockpit-greeting mt-5 flex items-end justify-between gap-6 flex-wrap xl:flex-nowrap">
           <h1 class="hero-title">${userName ? `${greeting} ${nameWithCrown}.` : `${greeting}.`}</h1>
           ${typeof DailyQuote !== 'undefined' ? DailyQuote.renderHTML() : ''}
         </div>
