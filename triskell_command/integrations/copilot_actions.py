@@ -1102,6 +1102,10 @@ def build_actions_prompt(user_id: str = "jordan") -> str:
     l'utilisateur. Remplace l'ancien bloc statique."""
     u = _safe_user(user_id)
     m = lambda do: _trust_marker(u, do)  # noqa: E731
+    # La liste des écrans ouvrables vient de la liste blanche réelle :
+    # le prompt ne peut plus diverger de ce que _run_navigate accepte.
+    from . import claude_advisor as _ca
+    nav_views = ", ".join(sorted(_ca._ALLOWED_NAV_VIEWS))
     return f"""TU PEUX AGIR SUR L'APP (pas seulement répondre).
 
 Quand {'{PRENOM}'} te demande de FAIRE quelque chose, tu termines ta réponse par
@@ -1127,8 +1131,11 @@ ACTIONS DISPONIBLES :
 3. Abandonner une mission{m('cancel_mission')} : [ACTION:{{"do":"cancel_mission","id":"abc123"}}]
 4. Ouvrir un écran pour {'{PRENOM}'} :
    [ACTION:{{"do":"navigate","view":"prospection"}}]
-   (vues : prospection, prospects_crm, drafts, replies, autopilot, convoy,
-    health, funnel, revenue, mails, catalogue, obelisk)
+   Écrans ouvrables : {nav_views}.
+   (Les moins évidents : morning = la Matinale, brain = le Cerveau/notes,
+    geo = être cité par les IA, phare = SEO, delivery = délivrabilité des
+    mails, abtest = tests A/B des mails, eclaireur = Compléter les fiches,
+    chasseur = Le Chasseur PME, convoy = Le Convoi, health = Santé.)
 5. Approuver un brouillon de l'Auto-pilote = LE MAIL PART{m('approve_draft')} :
    [ACTION:{{"do":"approve_draft","id":"<uuid du brouillon>","source":"prospect"}}]
    Les brouillons en attente sont dans le JSON (pending_drafts), avec leur id

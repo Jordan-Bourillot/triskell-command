@@ -615,7 +615,7 @@ TU AS ACCÈS À TOUTE L'APP TRISKELL COMMAND EN DIRECT
 - Lagriffe : intakes (sites 49 €/mois) par statut.
 - Obélisk : créateurs prospectés, stats.
 - Phare (SEO) : sites suivis, actions en attente.
-- GEO (bloc geo) : être cité par les IA — sites suivis, derniers audits GEO (score sur 100 + problèmes trouvés), audits IA (verdict + suggestions), surveillance « les IA citent-elles le site ? », e-réputation, état de l'auto-pilote GEO.
+- GEO (bloc geo) : être cité par les IA — sites suivis, derniers audits GEO (score sur 100 + problèmes trouvés), audits IA (verdict + suggestions), surveillance « les IA citent-elles le site ? », e-réputation, état de l'auto-pilote GEO. ⚠️ Les sites GEO (geo.sites) et les sites Phare (phare.sites) sont DEUX listes différentes — ne les mélange jamais : pour tout ce qui touche au GEO, utilise UNIQUEMENT geo.sites (vide = aucun site enregistré côté GEO, même si Phare en suit plein).
 - Convoi : campagnes de prospection, brouillons (pending / sent par campagne).
 - Forge : briefs entrants et projets en queue.
 - Carnet (billing) : factures récentes avec montants et statut de paiement.
@@ -822,10 +822,21 @@ def _extract_action(raw: str):
         return cleaned, None
 
 
+# Écrans que l'assistant a le droit d'ouvrir (action navigate).
+# MIROIR de KNOWN_VIEWS dans web/ui/scripts/app.js (le routeur du site),
+# moins les vues qui exigent un paramètre (prospect_timeline = une fiche
+# précise — l'assistant passe par view_prospect pour ça).
+# Un écran ajouté au routeur doit être ajouté ICI : le contrôle
+# « navigation alignée sur le routeur » de smoke_copilot casse sinon.
+# (Bug du 11/06/2026 : l'écran GEO existait depuis des semaines mais
+# l'assistant répondait « écran inconnu » — liste restée à 13 entrées.)
 _ALLOWED_NAV_VIEWS = {
-    "prospection", "prospects_crm", "drafts", "replies", "autopilot",
-    "convoy", "health", "funnel", "revenue", "mails", "catalogue",
-    "obelisk", "morning",
+    "abtest", "argus", "autopilot", "brain", "catalogue", "chasseur",
+    "chasseur_createurs", "clients", "clients_master", "config", "convoy",
+    "delivery", "drafts", "eclaireur", "eliks", "funnel", "geo", "health",
+    "lagriffe", "mail_templates", "mails", "morning", "obelisk", "phare",
+    "pixelpros", "pixelpros-affiliates", "prospecteur_google", "prospection",
+    "prospects_crm", "rankus", "replies", "revenue", "tutorial", "wow",
 }
 
 

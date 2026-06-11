@@ -912,6 +912,40 @@ def main() -> int:
         check("navigation non tracée (le journal = les vrais actes)",
               len(j["entries"]) == 1)
 
+        print("— Navigation : tous les écrans du site —")
+
+        # 61bis. L'écran GEO est ouvrable (bug du 11/06/2026 : « écran
+        # inconnu » alors que l'écran existe depuis des semaines).
+        r = copilot_actions.execute_action({"do": "navigate", "view": "geo"},
+                                           user_id="jordan")
+        check("navigate geo : accepté",
+              r.get("ok") is True and r.get("navigate") == "geo", repr(r))
+        r = copilot_actions.execute_action({"do": "navigate",
+                                            "view": "piscine"},
+                                           user_id="jordan")
+        check("navigate vue fantaisiste : refusé",
+              r.get("ok") is False and "inconnu" in (r.get("summary") or ""))
+
+        # 61ter. Anti-divergence : la liste blanche Python reflète EXACTEMENT
+        # le routeur du site (KNOWN_VIEWS dans app.js), sauf les vues à
+        # paramètre obligatoire. Un écran ajouté au site sans mise à jour
+        # de la liste → ce contrôle casse, exprès.
+        import re as _re
+        app_js = (Path(__file__).resolve().parents[1] / "triskell_command"
+                  / "web" / "ui" / "scripts" / "app.js").read_text(
+                      encoding="utf-8")
+        m_views = _re.search(r"const KNOWN_VIEWS = \[(.*?)\];", app_js,
+                             _re.DOTALL)
+        known = set(_re.findall(r"'([^']+)'", m_views.group(1) if m_views
+                                else ""))
+        attendu = claude_advisor._ALLOWED_NAV_VIEWS | {"prospect_timeline"}
+        check("navigation alignée sur le routeur du site",
+              bool(known) and known == attendu,
+              f"site-seulement={sorted(known - attendu)} "
+              f"python-seulement={sorted(attendu - known)}")
+        check("prompt : l'écran geo est annoncé comme ouvrable",
+              "geo" in copilot_actions.build_actions_prompt("jordan"))
+
         print("— Étape 4 : garde-fous métier —")
 
         # 62. le garde-fou « envoi AUTO ne s'allume pas d'ici » est INTACT
