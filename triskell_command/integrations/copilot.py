@@ -62,8 +62,9 @@ _LOCAL_PREFS_FILE = Path.home() / ".triskell-command" / "copilot_prefs.json"
 PREFS_SETTING_PREFIX = "copilot_prefs_"
 INITIATIVE_LEVELS = ("off", "discret", "normal", "bavard")
 DEFAULT_INITIATIVE = "normal"
-# kinds connus (sinon: message normal). proposal = carte Confirmer/Annuler.
-MESSAGE_KINDS = ("event", "briefing", "proposal")
+# kinds connus (sinon: message normal). proposal = carte Confirmer/Annuler,
+# habit = carte 💡 « une habitude ? » (étape 5).
+MESSAGE_KINDS = ("event", "briefing", "proposal", "habit")
 
 _CTX_CACHE: dict[str, Any] = {"at": 0.0, "text": ""}
 _CTX_LOCK = threading.Lock()
@@ -129,6 +130,10 @@ def _clean_message(msg: Any) -> Optional[dict]:
     pid = str(msg.get("pid") or "").strip().lower()
     if pid and len(pid) <= 16 and all(c in "0123456789abcdef" for c in pid):
         out["pid"] = pid
+    # hid : l'identifiant du motif d'habitude lié (carte 💡)
+    hid = str(msg.get("hid") or "").strip().lower()
+    if hid and len(hid) <= 16 and all(c in "0123456789abcdef" for c in hid):
+        out["hid"] = hid
     return out
 
 
@@ -521,6 +526,27 @@ def deposit_event_message(user_id: str, text: str, nav: str = "") -> bool:
         return False
 
 
+def deposit_habit_message(user_id: str, motif: dict) -> bool:
+    """Dépose la carte 💡 « une habitude ? » dans le fil (étape 5).
+    Pas de pastille : elle apparaît à l'ouverture du volet, l'utilisateur
+    est déjà là. Jamais d'exception."""
+    try:
+        motif = motif or {}
+        hid = str(motif.get("id") or "").strip()
+        label = str(motif.get("label") or "").strip()
+        if not hid or not label:
+            return False
+        added = append_messages(user_id, [{
+            "role": "assistant",
+            "content": ("💡 Une habitude ? " + label)[:600],
+            "kind": "habit", "hid": hid,
+        }])
+        return bool(added)
+    except Exception as exc:
+        logger.debug("copilot deposit habit: %s", exc)
+        return False
+
+
 def deposit_proposal_message(user_id: str, prop: dict,
                              bump: bool = True) -> bool:
     """Dépose la carte « à confirmer » d'une proposition dans le fil.
@@ -565,20 +591,45 @@ def briefing_due(user_id: str) -> bool:
 def thread_for_ui(user_id: str) -> dict:
     """Le fil prêt à afficher dans le volet (+ signale si un point du
     jour est dû — le front le déclenche alors en streaming).
-    Embarque aussi les propositions (cartes Confirmer/Annuler) et le
-    curseur de confiance, pour que le volet peigne l'état réel."""
-    from . import copilot_actions
+    Embarque aussi les propositions (cartes Confirmer/Annuler), le
+    curseur de confiance, les raccourcis (barre ⚡) et l'état des cartes
+    💡 habitude, pour que le volet peigne l'état réel."""
+    from . import copilot_actions, copilot_habits
     user_id = user_id or "jordan"
     prefs = get_prefs(user_id)
+
+    # Étape 5 : si une habitude est mûre, sa carte 💡 rejoint le fil
+    # MAINTENANT (à l'ouverture du volet — le bon moment, sans pastille).
+    try:
+        ripe = copilot_habits.ripe_motif(user_id)
+        if ripe and deposit_habit_message(user_id, ripe):
+            copilot_habits.mark_proposed(user_id, ripe["id"])
+    except Exception as exc:
+        logger.debug("copilot habit suggest: %s", exc)
+
+    messages = load_thread(user_id)[-60:]
+
+    # L'état des cartes 💡 encore visibles dans le fil (rendu des boutons)
+    habits: dict[str, dict] = {}
+    try:
+        for m in messages:
+            hid = m.get("hid")
+            if hid and hid not in habits:
+                habits[hid] = copilot_habits.habit_card_state(user_id, hid)
+    except Exception as exc:
+        logger.debug("copilot habit states: %s", exc)
+
     out = {
         "ok": True,
         "user": user_id,
         "display_name": _display_name(user_id),
-        "messages": load_thread(user_id)[-60:],
+        "messages": messages,
         "briefing_due": briefing_due(user_id),
         "initiative": prefs["initiative"],
         "trust": prefs["trust"],
         "proposals": copilot_actions.list_proposals(user_id),
+        "shortcuts": copilot_habits.list_shortcuts(user_id),
+        "habits": habits,
     }
     # Volet ouvert : tout est vu → la pastille s'éteint.
     save_state(user_id, last_seen_at=datetime.now().isoformat(
@@ -1013,6 +1064,15 @@ def stream_reply(app_state, user_id: str, question: str,
 
     final = _finalize_reply(raw, user_id=user_id)
     append_turn(user_id, question, final["text"])
+
+    # Étape 5 : une question d'information répétée (sans action derrière)
+    # nourrit le compteur d'habitudes → bouton d'un clic proposé un jour.
+    if final.get("action_done") is None and not final.get("proposed"):
+        try:
+            from . import copilot_habits
+            copilot_habits.record_question(user_id, question)
+        except Exception as exc:
+            logger.debug("copilot habit question: %s", exc)
 
     done: dict[str, Any] = {"type": "done", "text": final["text"]}
     prop = final.get("proposed")

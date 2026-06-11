@@ -81,12 +81,15 @@ const Copilot = {
     box.innerHTML = '';
     this._proposals = (data && data.proposals && typeof data.proposals === 'object')
       ? data.proposals : {};
+    this._habits = (data && data.habits && typeof data.habits === 'object')
+      ? data.habits : {};
+    this._shortcuts = (data && Array.isArray(data.shortcuts)) ? data.shortcuts : [];
     const msgs = (data && data.ok && Array.isArray(data.messages)) ? data.messages : [];
     if (!msgs.length) {
       this._renderWelcome(box);
     } else {
       msgs.forEach((m) => this._appendBubble(m.role, m.content,
-        { md: true, kind: m.kind, nav: m.nav, pid: m.pid }));
+        { md: true, kind: m.kind, nav: m.nav, pid: m.pid, hid: m.hid }));
     }
     this._initiative = (data && data.initiative) || 'normal';
     this._trust = (data && data.trust) || null;
@@ -136,14 +139,29 @@ const Copilot = {
     this._scrollDown();
   },
 
-  /** Raccourcis contextuels au-dessus du champ (ex : récap du soir). */
+  /** Raccourcis au-dessus du champ : les boutons ⚡ de l'utilisateur
+   *  (étape 5 — les plus utilisés d'abord) + le récap du soir. */
   _renderQuickChips() {
     const bar = document.getElementById('copilot-quick');
     if (!bar) return;
-    const h = new Date().getHours();
-    const evening = (h >= 17 || h < 4);
     bar.innerHTML = '';
-    if (evening) {
+
+    const shortcuts = (this._shortcuts || []).slice()
+      .sort((a, b) => (b.runs || 0) - (a.runs || 0)
+                      || String(b.last_run_at || '').localeCompare(String(a.last_run_at || '')))
+      .slice(0, 6);
+    shortcuts.forEach((sc) => {
+      const b = document.createElement('button');
+      b.className = 'cop-chip cop-chip-shortcut';
+      b.textContent = '⚡ ' + sc.label + (sc.schedule_label ? ' 📅' : '');
+      b.title = sc.schedule_label
+        ? `Raccourci + rendez-vous (${sc.schedule_label})` : 'Raccourci';
+      b.onclick = () => this._runShortcut(sc, b);
+      bar.appendChild(b);
+    });
+
+    const h = new Date().getHours();
+    if (h >= 17 || h < 4) {
       const b = document.createElement('button');
       b.className = 'cop-chip';
       b.textContent = '🌙 Récap du jour';
@@ -151,6 +169,38 @@ const Copilot = {
       bar.appendChild(b);
     }
     bar.style.display = bar.children.length ? 'flex' : 'none';
+  },
+
+  /** Clic sur un bouton ⚡ : question → envoyée au fil ; action → le
+   *  serveur rejoue l'action STOCKÉE via le curseur de confiance. */
+  async _runShortcut(sc, btn) {
+    if (this._busy) return;
+    if (sc.kind === 'question') {
+      this.send(sc.question || sc.label);
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.style.opacity = '.6'; }
+    let r = null;
+    try {
+      r = await App.api.copilot_shortcut_run({ id: sc.id });
+    } catch (e) { /* rendu d’échec ci-dessous */ }
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+    const wel = document.querySelector('#copilot-messages .cop-welcome');
+    if (wel) wel.remove();
+    if (r && r.proposed && r.proposed.id) {
+      if (!this._proposals) this._proposals = {};
+      this._proposals[r.proposed.id] = r.proposed;
+      this._appendProposalCard(r.proposed);
+    } else if (r && r.ok && r.summary) {
+      this._appendBubble('assistant', '⚡ ' + sc.label + ' : ' + r.summary,
+        { md: true, kind: 'event' });
+    } else if (r && !r.ok) {
+      this._appendBubble('assistant',
+        '⚡ ' + sc.label + ' : ' + (r.summary || 'ça n’a pas marché — réessaie.'),
+        { md: true, kind: 'event' });
+    }
+    if (r && r.navigate) this._navigate(r.navigate);
+    this._scrollDown(true);
   },
 
   _renderWelcome(box) {
@@ -337,6 +387,12 @@ const Copilot = {
       return this._appendProposalCard(prop || { id: opts.pid, title: content,
                                                 status: 'expired' });
     }
+    // Message « habitude » → carte 💡 avec ses boutons (état réel serveur)
+    if (opts.kind === 'habit' && opts.hid) {
+      const habit = (this._habits && this._habits[opts.hid]) || null;
+      return this._appendHabitCard(habit || { id: opts.hid, label: content,
+                                              status: 'gone' });
+    }
     const el = document.createElement('div');
     el.className = 'cop-msg ' + (role === 'user' ? 'cop-user' : 'cop-assistant');
     if (opts.kind === 'event') el.classList.add('cop-event');
@@ -465,6 +521,86 @@ const Copilot = {
     }
   },
 
+  /** La carte 💡 « une habitude ? » : il a remarqué une répétition et
+   *  propose un raccourci. Une seule fois — refuser = silence définitif. */
+  _appendHabitCard(habit) {
+    const box = document.getElementById('copilot-messages');
+    if (!box) return document.createElement('div');
+    const el = document.createElement('div');
+    el.className = 'cop-msg cop-assistant cop-habit';
+    el.dataset.hid = (habit && habit.id) || '';
+    this._renderHabitInner(el, habit || {});
+    box.appendChild(el);
+    return el;
+  },
+
+  _renderHabitInner(el, habit) {
+    const status = habit.status || 'pending';
+    const count = habit.count || 0;
+    let html = '<div class="cop-habit-kicker">💡 Une habitude ?</div>';
+    html += `<div class="cop-prop-title">${this._esc(habit.label || '')}</div>`;
+    if (status === 'pending') {
+      html += `<div class="cop-habit-sub">${count} fois ce mois-ci — je t’en fais un raccourci ?</div>`;
+      html += '<div class="cop-prop-actions">';
+      html += '<button class="cop-prop-confirm" data-mode="button">⚡ Oui, un bouton</button>';
+      if (habit.schedule_suggestion && habit.schedule_label) {
+        html += `<button class="cop-prop-confirm cop-habit-sched" data-mode="schedule">📅 Et ${this._esc(habit.schedule_label)}</button>`;
+      }
+      html += '<button class="cop-prop-dismiss">Non merci</button></div>';
+    } else {
+      const states = {
+        accepted: '✅ Raccourci créé — il est au-dessus du champ',
+        dismissed: '✋ Non merci — je n’en reparlerai plus',
+        gone: '⏰ Suggestion expirée',
+      };
+      html += `<div class="cop-prop-state">${this._esc(states[status] || status)}</div>`;
+    }
+    el.innerHTML = html;
+
+    const btns = Array.from(el.querySelectorAll('.cop-prop-confirm'));
+    const dismiss = el.querySelector('.cop-prop-dismiss');
+    const lock = () => {
+      btns.forEach((b) => { b.disabled = true; });
+      if (dismiss) dismiss.disabled = true;
+    };
+    btns.forEach((b) => {
+      b.onclick = async () => {
+        lock();
+        let r = null;
+        try {
+          r = await App.api.copilot_habit_accept({
+            id: el.dataset.hid,
+            with_schedule: b.dataset.mode === 'schedule',
+          });
+        } catch (e) { /* rendu d’échec ci-dessous */ }
+        if (r && r.ok) {
+          if (r.shortcut) {
+            this._shortcuts = (this._shortcuts || []).concat([r.shortcut]);
+            this._renderQuickChips();
+          }
+          const next = { ...habit, status: 'accepted' };
+          if (this._habits) this._habits[habit.id] = next;
+          this._renderHabitInner(el, next);
+          if (typeof Guide !== 'undefined' && Guide.say) {
+            try { Guide.say('✓ Raccourci créé.'); } catch (e) {}
+          }
+        } else {
+          this._renderHabitInner(el, { ...habit, status: 'gone' });
+        }
+      };
+    });
+    if (dismiss) {
+      dismiss.onclick = async () => {
+        lock();
+        try { await App.api.copilot_habit_dismiss({ id: el.dataset.hid }); }
+        catch (e) { /* au pire la carte restera */ }
+        const next = { ...habit, status: 'dismissed' };
+        if (this._habits) this._habits[habit.id] = next;
+        this._renderHabitInner(el, next);
+      };
+    }
+  },
+
   _finishBubble(bubble, evt) {
     bubble.classList.remove('cop-streaming');
     const textEl = bubble.querySelector('.cop-text');
@@ -522,7 +658,8 @@ const Copilot = {
     const turns = [];
     document.querySelectorAll('#copilot-messages .cop-msg').forEach((el) => {
       if (el.classList.contains('cop-advice') || el.classList.contains('cop-error')
-          || el.classList.contains('cop-proposal')) return;
+          || el.classList.contains('cop-proposal')
+          || el.classList.contains('cop-habit')) return;
       const role = el.classList.contains('cop-user') ? 'user' : 'assistant';
       const t = el.querySelector('.cop-text');
       const content = t ? (t.innerText || '').trim() : '';
@@ -692,6 +829,21 @@ const Copilot = {
         <span>Famille par famille : je fais seul, je te demande d’abord, ou jamais</span>
         <div id="copilot-trust-rows"></div>
         <div class="cop-trust-note">✉️ Un mail ne part JAMAIS sans ton accord : pour les envois, « je fais seul » n’existe pas.</div>
+      </div>
+      <div class="cop-init cop-shortcuts">
+        <b>⚡ Mes raccourcis</b>
+        <span>Les boutons au-dessus du champ — et leurs rendez-vous (📅 = il prépare, tu confirmes)</span>
+        <div id="copilot-sc-list"></div>
+        <div class="cop-mem-add">
+          <input id="copilot-sc-label" type="text" maxlength="40"
+                 placeholder="Nom du bouton (ex : Le point chasse)">
+        </div>
+        <div class="cop-mem-add">
+          <input id="copilot-sc-question" type="text" maxlength="200"
+                 placeholder="La question qu’il me posera…">
+          <button id="copilot-sc-add-btn" title="Créer le bouton">＋</button>
+        </div>
+        <div class="cop-trust-note">💬 Pour un raccourci qui AGIT (lancer une prospection…) ou un rendez-vous : demande-le-moi dans la discussion, je le fabrique.</div>
       </div>`;
     const list = mem.querySelector('.cop-mem-list');
     if (!notes.length) {
@@ -788,6 +940,76 @@ const Copilot = {
       });
     };
     paintTrust(this._trust);
+
+    // Mes raccourcis : liste + pause + suppression + création (question)
+    const scList = mem.querySelector('#copilot-sc-list');
+    const paintShortcuts = (items) => {
+      this._shortcuts = items || [];
+      scList.innerHTML = '';
+      if (!this._shortcuts.length) {
+        scList.innerHTML = '<div class="cop-mem-empty">Aucun raccourci pour l’instant. Je t’en proposerai quand je remarquerai tes habitudes — ou crée le tien ci-dessous.</div>';
+      }
+      this._shortcuts.forEach((sc) => {
+        const row = document.createElement('div');
+        row.className = 'cop-mem-note cop-sc-row' + (sc.paused ? ' cop-sc-paused' : '');
+        const sched = sc.schedule_label
+          ? `<div class="cop-sc-when">📅 ${this._esc(sc.schedule_label)}${sc.paused ? ' — en pause' : ''}</div>` : '';
+        row.innerHTML = `
+          <span>⚡ ${this._esc(sc.label)}${sched}</span>
+          ${sc.schedule_label ? `<button class="cop-sc-pause" title="${sc.paused ? 'Réveiller le rendez-vous' : 'Mettre le rendez-vous en pause'}">${sc.paused ? '▶' : '⏸'}</button>` : ''}
+          <button class="cop-sc-del" title="Supprimer ce raccourci">🗑</button>`;
+        const pauseBtn = row.querySelector('.cop-sc-pause');
+        if (pauseBtn) {
+          pauseBtn.onclick = async () => {
+            try {
+              const r = await App.api.copilot_shortcut_pause({ id: sc.id, paused: !sc.paused });
+              if (r && r.ok) refreshShortcuts();
+            } catch (e) { /* inchangé */ }
+          };
+        }
+        row.querySelector('.cop-sc-del').onclick = async () => {
+          try {
+            const r = await App.api.copilot_shortcut_delete({ id: sc.id });
+            if (r && r.ok) { row.remove(); refreshShortcuts(); }
+          } catch (e) { /* le raccourci restera */ }
+        };
+        scList.appendChild(row);
+      });
+      this._renderQuickChips();
+    };
+    const refreshShortcuts = async () => {
+      try {
+        const r = await App.api.copilot_shortcuts({});
+        if (r && r.ok) paintShortcuts(r.shortcuts || []);
+      } catch (e) { /* on garde la liste connue */ }
+    };
+    paintShortcuts(this._shortcuts || []);
+    refreshShortcuts();
+
+    const scLabel = mem.querySelector('#copilot-sc-label');
+    const scQuestion = mem.querySelector('#copilot-sc-question');
+    const scAdd = mem.querySelector('#copilot-sc-add-btn');
+    const doAddShortcut = async () => {
+      const label = (scLabel.value || '').trim();
+      const question = (scQuestion.value || '').trim();
+      if (!label || !question) return;
+      try {
+        const r = await App.api.copilot_shortcut_create({ label, question });
+        if (r && r.ok) {
+          scLabel.value = ''; scQuestion.value = '';
+          refreshShortcuts();
+          if (typeof Guide !== 'undefined' && Guide.say) {
+            try { Guide.say('✓ Raccourci créé.'); } catch (e) {}
+          }
+        } else if (r && r.error && typeof Toast !== 'undefined' && Toast.show) {
+          try { Toast.show(r.error); } catch (e) {}
+        }
+      } catch (e) { /* tant pis pour cette fois */ }
+    };
+    scAdd.onclick = doAddShortcut;
+    scQuestion.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); doAddShortcut(); }
+    });
 
     try {
       const p = await App.api.copilot_prefs({});
@@ -1128,6 +1350,33 @@ const Copilot = {
       .cop-prop-state-done { color: hsl(150 60% 35%); }
       .cop-prop-state-failed { color: hsl(0 60% 45%); }
       .cop-prop-state span { font-weight: 500; }
+      .cop-habit {
+        max-width: 96%; width: 96%;
+        border-left: 3px solid hsl(258 70% 58%);
+        background: hsl(258 70% 58% / .06);
+      }
+      .cop-habit-kicker {
+        font-size: 10px; font-weight: 800; letter-spacing: .8px;
+        text-transform: uppercase; color: hsl(258 55% 48%); margin-bottom: 4px;
+      }
+      .cop-habit-sub {
+        font-size: 12px; color: hsl(var(--text-secondary)); margin: 2px 0 4px;
+      }
+      .cop-habit .cop-prop-confirm { background: hsl(258 60% 52%); }
+      .cop-habit .cop-habit-sched { background: hsl(258 45% 42%); }
+      .cop-chip-shortcut {
+        border-color: hsl(258 60% 52% / .4);
+        background: hsl(258 60% 52% / .08); color: hsl(258 55% 48%);
+      }
+      .cop-chip-shortcut:hover { background: hsl(258 60% 52% / .16); }
+      .cop-sc-row { align-items: center; }
+      .cop-sc-row.cop-sc-paused { opacity: .6; }
+      .cop-sc-when { font-size: 11px; color: hsl(var(--text-muted)); margin-top: 2px; }
+      .cop-sc-pause {
+        border: 0; background: transparent; cursor: pointer;
+        font-size: 12px; opacity: .6; flex-shrink: 0; padding: 0 2px;
+      }
+      .cop-sc-pause:hover { opacity: 1; }
       .cop-j-list { flex: 1; overflow-y: auto; display: flex;
                     flex-direction: column; gap: 6px; }
       .cop-j-entry {

@@ -349,6 +349,12 @@ def confirm_proposal(user_id: str, pid: str) -> dict:
     _set_prop_status(user_id, pid, "done" if ok else "failed", summary)
     add_journal_entry(user_id, do=do, label=prop.get("title") or "",
                       origin="confirme", ok=ok, summary=summary)
+    if ok:
+        try:
+            from . import copilot_habits
+            copilot_habits.record_action(user_id, action)
+        except Exception as exc:
+            logger.debug("copilot habit record (confirm): %s", exc)
     out = {"ok": ok, "status": "done" if ok else "failed",
            "summary": summary}
     if result.get("navigate"):
@@ -786,6 +792,35 @@ def _run_update_prospect(action: dict) -> dict:
                 "summary": f"La fiche n'a pas pu être modifiée : {exc}"}
 
 
+def _run_create_shortcut(action: dict) -> dict:
+    """Crée un raccourci (bouton du volet, planifiable) — étape 5.
+    L'utilisateur visé est posé par le routeur (champ interne _user)."""
+    from . import copilot_habits
+    user_id = str(action.get("_user") or "jordan")
+    inner = action.get("action") if isinstance(action.get("action"),
+                                               dict) else None
+    res = copilot_habits.create_shortcut(
+        user_id,
+        label=str(action.get("label") or ""),
+        action=inner,
+        question=str(action.get("question") or "") or None,
+        schedule=action.get("schedule"),
+        source="copilote",
+    )
+    if not res.get("ok"):
+        return {"ok": False, "summary": res.get("error") or "Échec."}
+    sc = res.get("shortcut") or {}
+    when = sc.get("schedule_label") or ""
+    if when:
+        return {"ok": True,
+                "summary": f"Raccourci « {sc.get('label')} » créé — et je "
+                           f"te le préparerai {when} (carte à confirmer, "
+                           "rien ne part sans toi)."}
+    return {"ok": True,
+            "summary": f"Raccourci « {sc.get('label')} » créé — tu le "
+                       "trouveras au-dessus du champ de discussion."}
+
+
 def _run_view_prospect(action: dict) -> dict:
     """Lecture : montre la fiche d'un prospect (par mail ou par nom)."""
     query = str(action.get("query") or action.get("email")
@@ -922,6 +957,13 @@ ACTIONS: dict[str, dict[str, Any]] = {
         "title": lambda a, pv: "Compléter la fiche de "
                                + str(a.get("name") or a.get("email") or "?"),
     },
+    "create_shortcut": {
+        "family": "notes", "risk": "reversible", "sends_mail": False,
+        "label": "Créer un raccourci",
+        "run": _run_create_shortcut, "preview": None,
+        "title": lambda a, pv: "Créer le raccourci « "
+                               + str(a.get("label") or "?") + " »",
+    },
     # --- famille mails (PLAFONNÉE : jamais « il fait seul ») --------------
     "approve_draft": {
         "family": "mails", "risk": "sensible", "sends_mail": True,
@@ -982,6 +1024,10 @@ def execute_action(action: dict, *, user_id: str = "jordan",
         return {"ok": False, "summary": "(action inconnue, rien fait)"}
 
     user_id = _safe_user(user_id)
+    # L'utilisateur visé voyage avec l'action (toujours posé par le
+    # serveur — jamais par l'IA ni le navigateur).
+    action = dict(action or {})
+    action["_user"] = user_id
     trust = effective_trust(user_id, do)
 
     if trust == "never":
@@ -1027,6 +1073,14 @@ def execute_action(action: dict, *, user_id: str = "jordan",
             origin=("vocal" if channel == "vocal" else "direct"),
             ok=bool(result.get("ok")),
             summary=(result.get("summary") or "")[:300])
+    if result.get("ok"):
+        # Étape 5 : les exécutions réussies nourrissent le compteur
+        # d'habitudes (seules les actions rejouables comptent).
+        try:
+            from . import copilot_habits
+            copilot_habits.record_action(user_id, action)
+        except Exception as exc:
+            logger.debug("copilot habit record: %s", exc)
     return result
 
 
@@ -1102,6 +1156,20 @@ ACTIONS DISPONIBLES :
      unsubscribed, bounced — n'envoie que ce qui change)
 12. Consulter une fiche prospect (lecture seule) :
     [ACTION:{{"do":"view_prospect","query":"nom ou email"}}]
+13. Créer un raccourci (bouton d'un clic au-dessus du champ de discussion,
+    avec rendez-vous planifié possible){m('create_shortcut')} :
+    [ACTION:{{"do":"create_shortcut","label":"Prospection plombiers 56","action":{{"do":"start_prospection","source":"pme","params":{{"metier":"plombier","departement":"56","volume":30}},"dry_run":false}},"schedule":{{"days":[0],"hour":9,"minute":0}}}}]
+    ou pour une question d'information :
+    [ACTION:{{"do":"create_shortcut","label":"Le point chasse","question":"Où en est ma prospection ?"}}]
+    - UNIQUEMENT quand {'{PRENOM}'} demande un raccourci / bouton /
+      rendez-vous récurrent. Jamais de ta propre initiative.
+    - Actions raccourcissables : start_prospection, toggle_autopilot,
+      view_prospect, navigate. Une question marche aussi (sans schedule).
+    - schedule (optionnel, actions seulement) : jours 0=lundi … 6=dimanche.
+      Un rendez-vous PRÉPARE l'action à l'heure dite et dépose une carte
+      à confirmer — rien ne se lance jamais tout seul.
+    - Pour modifier ou supprimer un raccourci : renvoie {'{PRENOM}'} vers
+      l'écran 📌 du volet (toi tu ne peux que créer).
 
 RÈGLES DE PRUDENCE (non négociables) :
 - Une action RÉELLE qui écrit ou lance des machines : tu l'exécutes

@@ -463,6 +463,132 @@ class Api:
             logger.warning("copilot_journal: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def copilot_shortcuts(self, payload: dict | None = None) -> dict:
+        """Les raccourcis de l'utilisateur (barre ⚡ + écran 📌)."""
+        try:
+            from ..integrations import copilot, copilot_habits
+            return {"ok": True, "shortcuts": copilot_habits.list_shortcuts(
+                copilot.current_user_id())}
+        except Exception as exc:
+            logger.warning("copilot_shortcuts: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def copilot_shortcut_create(self, payload: dict) -> dict:
+        """Création MANUELLE d'un raccourci-question (écran 📌).
+        payload = {label, question}. Les raccourcis d'action se créent en
+        discutant avec le copilote (il construit l'action lui-même)."""
+        try:
+            from ..integrations import copilot, copilot_habits
+            p = payload or {}
+            return copilot_habits.create_shortcut(
+                copilot.current_user_id(),
+                label=str(p.get("label") or ""),
+                question=str(p.get("question") or ""),
+                source="manuel")
+        except Exception as exc:
+            logger.warning("copilot_shortcut_create: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def copilot_shortcut_delete(self, payload: dict) -> dict:
+        try:
+            from ..integrations import copilot, copilot_habits
+            return copilot_habits.delete_shortcut(
+                copilot.current_user_id(),
+                str((payload or {}).get("id") or ""))
+        except Exception as exc:
+            logger.warning("copilot_shortcut_delete: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def copilot_shortcut_pause(self, payload: dict) -> dict:
+        """Met un rendez-vous en pause / le réveille. payload={id, paused}."""
+        try:
+            from ..integrations import copilot, copilot_habits
+            p = payload or {}
+            return copilot_habits.set_paused(
+                copilot.current_user_id(),
+                str(p.get("id") or ""), bool(p.get("paused")))
+        except Exception as exc:
+            logger.warning("copilot_shortcut_pause: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def copilot_shortcut_run(self, payload: dict) -> dict:
+        """Clic sur un bouton ⚡ : rejoue l'action STOCKÉE côté serveur
+        (jamais celle du navigateur), via le curseur de confiance — une
+        action « à confirmer » renvoie sa carte, comme d'habitude.
+        payload = {id}."""
+        try:
+            from ..integrations import copilot, copilot_actions, \
+                copilot_habits
+            user_id = copilot.current_user_id()
+            sc = copilot_habits.get_shortcut(user_id,
+                                             str((payload or {}).get("id")
+                                                 or ""))
+            if sc is None:
+                return {"ok": False, "summary": "Raccourci introuvable."}
+            if sc.get("kind") != "action":
+                return {"ok": False,
+                        "summary": "Ce raccourci est une question — le "
+                                   "volet l'envoie directement."}
+            result = copilot_actions.execute_action(
+                sc.get("action") or {}, user_id=user_id, channel="copilot")
+            prop = result.get("proposed")
+            if prop:
+                copilot.deposit_proposal_message(user_id, prop, bump=False)
+                copilot_habits.record_run(user_id, sc.get("id"))
+                return {"ok": True, "proposed": {
+                    "id": prop.get("id") or "",
+                    "do": prop.get("do") or "",
+                    "title": prop.get("title") or "",
+                    "preview": prop.get("preview"),
+                    "status": "pending",
+                    "created_at": prop.get("created_at") or "",
+                    "result_summary": "",
+                }}
+            if result.get("ok"):
+                copilot_habits.record_run(user_id, sc.get("id"))
+                summary = (result.get("summary") or "").strip()
+                if summary:
+                    # La trace vit dans le fil (sans pastille : on y est).
+                    copilot.append_messages(user_id, [{
+                        "role": "assistant",
+                        "content": ("⚡ " + (sc.get("label") or "")
+                                    + " : " + summary)[:600],
+                        "kind": "event",
+                    }])
+            out = {"ok": bool(result.get("ok")),
+                   "summary": result.get("summary") or ""}
+            if result.get("navigate"):
+                out["navigate"] = result["navigate"]
+            return out
+        except Exception as exc:
+            logger.warning("copilot_shortcut_run: %s", exc)
+            return {"ok": False, "summary": "Le raccourci a échoué — "
+                                            "réessaie dans un instant."}
+
+    def copilot_habit_accept(self, payload: dict) -> dict:
+        """Carte 💡 : « oui, fais-en un raccourci ».
+        payload = {id, with_schedule?}."""
+        try:
+            from ..integrations import copilot, copilot_habits
+            p = payload or {}
+            return copilot_habits.accept_habit(
+                copilot.current_user_id(), str(p.get("id") or ""),
+                with_schedule=bool(p.get("with_schedule")))
+        except Exception as exc:
+            logger.warning("copilot_habit_accept: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def copilot_habit_dismiss(self, payload: dict) -> dict:
+        """Carte 💡 : « non merci » — silence définitif sur ce motif."""
+        try:
+            from ..integrations import copilot, copilot_habits
+            return copilot_habits.dismiss_habit(
+                copilot.current_user_id(),
+                str((payload or {}).get("id") or ""))
+        except Exception as exc:
+            logger.warning("copilot_habit_dismiss: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def set_active_view(self, payload: dict) -> dict:
         """Mémorise l'écran que l'utilisateur regarde (le front l'envoie à
         chaque navigation). Avant le 10/06/2026, la version web ne le

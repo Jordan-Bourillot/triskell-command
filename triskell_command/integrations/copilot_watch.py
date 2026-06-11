@@ -302,6 +302,60 @@ def deposit(events: list[dict], state: dict, *,
 
 
 # ---------------------------------------------------------------------------
+# Les rendez-vous planifiés (étape 5) : préparer, jamais lancer
+# ---------------------------------------------------------------------------
+def fire_scheduled(state: dict, *, users: tuple = USERS,
+                   now: Optional[datetime] = None,
+                   push_fn: Optional[Callable] = None,
+                   now_ts: Optional[float] = None) -> dict:
+    """Les raccourcis planifiés dus PRÉPARENT leur action : une carte
+    Confirmer/Annuler dans le fil (+ pastille), et une notification si le
+    niveau d'initiative le permet. RIEN n'est exécuté ici — décision de
+    Jordan (11/06/2026) : un rendez-vous attend toujours son clic."""
+    from . import copilot_actions, copilot_habits
+    push_fn = push_fn or _send_push_default
+    now = now or datetime.now()
+    fired = pushed = 0
+    for user in users:
+        try:
+            due = copilot_habits.due_scheduled(user, now)
+        except Exception as exc:
+            logger.debug("copilot_watch due: %s", exc)
+            continue
+        for sc in due:
+            try:
+                # L'anti-double se pose AVANT tout dépôt : même si la
+                # suite échoue, pas de seconde carte aujourd'hui.
+                copilot_habits.mark_scheduled_fired(user, sc.get("id"), now)
+                when = copilot_habits.schedule_label(sc.get("schedule"))
+                label = sc.get("label") or "Rendez-vous"
+                prop = copilot_actions.create_proposal(
+                    user, sc.get("action") or {},
+                    title="📅 " + label,
+                    preview={"info": ("Ton rendez-vous"
+                                      + (f" ({when})" if when else "")
+                                      + " — tout est prêt : confirme et "
+                                        "je lance.")},
+                )
+                copilot.deposit_proposal_message(user, prop, bump=True)
+                fired += 1
+                try:
+                    level = copilot.get_prefs(user)["initiative"]
+                except Exception:
+                    level = copilot.DEFAULT_INITIATIVE
+                if (level in ("normal", "bavard")
+                        and _push_allowed(state, now_ts)):
+                    if push_fn(user, f"📅 C'est l'heure : « {label} » est "
+                                     "prêt — confirme dans le volet.", ""):
+                        pushed += 1
+                        state["pushes"].append(
+                            now_ts if now_ts is not None else time.time())
+            except Exception as exc:
+                logger.warning("copilot_watch rendez-vous: %s", exc)
+    return {"fired": fired, "pushed": pushed}
+
+
+# ---------------------------------------------------------------------------
 # Le cycle
 # ---------------------------------------------------------------------------
 def run_cycle_once() -> dict:
@@ -315,9 +369,12 @@ def run_cycle_once() -> dict:
     events = detect_events(state.get("prev"), cur)
     events += daily_checks(cur, state["daily"])
     res = deposit(events, state)
+    rdv = fire_scheduled(state)
     state["prev"] = cur
     _save_state(state)
     _LAST_RUN_RESULT = {"events": len(events), **res}
+    if rdv.get("fired"):
+        _LAST_RUN_RESULT["rdv"] = rdv["fired"]
     return _LAST_RUN_RESULT
 
 

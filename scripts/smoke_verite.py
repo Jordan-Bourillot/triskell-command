@@ -80,15 +80,19 @@ from triskell_command.integrations.claude_advisor import (  # noqa: E402
 )
 from triskell_command.integrations import copilot_actions as _ca  # noqa: E402
 
-# Hermétique depuis l'étape 4 du copilote : on force le curseur de
+# Hermétique depuis les étapes 4-5 du copilote : on force le curseur de
 # confiance par défaut (les réglages perso de Jordan en base ne doivent
-# pas changer le résultat de ces tests) et on coupe le journal des actes
-# (un run local de cette batterie ne doit JAMAIS écrire dans le vrai
-# journal du copilote en base partagée).
+# pas changer le résultat de ces tests), on coupe le journal des actes ET
+# le compteur d'habitudes (un run local de cette batterie ne doit JAMAIS
+# écrire dans la base partagée du copilote).
+from triskell_command.integrations import copilot_habits as _ch  # noqa: E402
+
 _orig_get_trust = _ca.get_trust
 _orig_journal = _ca.add_journal_entry
+_orig_habit = _ch.record_action
 _ca.get_trust = lambda user_id: dict(_ca.DEFAULT_TRUST)
 _ca.add_journal_entry = lambda *a, **k: None
+_ch.record_action = lambda *a, **k: None
 
 # Extraction du tag
 t, a = _extract_action(
@@ -140,6 +144,7 @@ check("envoi en brouillons → allumage vocal accepté (config sauvée)",
 
 _ca.get_trust = _orig_get_trust
 _ca.add_journal_entry = _orig_journal
+_ch.record_action = _orig_habit
 
 print("3) Cohérence de l'interface après rationalisation…")
 ui = HERE / "triskell_command/web/ui"

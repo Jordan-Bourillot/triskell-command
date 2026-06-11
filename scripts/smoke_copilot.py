@@ -23,7 +23,8 @@ except Exception:
     pass
 
 from triskell_command.integrations import (claude_advisor, copilot,
-                                           copilot_actions, copilot_watch)
+                                           copilot_actions, copilot_habits,
+                                           copilot_watch)
 
 PASS = 0
 FAIL = 0
@@ -119,6 +120,10 @@ def main() -> int:
     orig_journal_file = copilot_actions._LOCAL_JOURNAL_FILE
     copilot_actions._LOCAL_PROPS_FILE = Path(tmpdir) / "props.json"
     copilot_actions._LOCAL_JOURNAL_FILE = Path(tmpdir) / "journal.json"
+    orig_habits_file = copilot_habits._LOCAL_HABITS_FILE
+    orig_sc_file = copilot_habits._LOCAL_SHORTCUTS_FILE
+    copilot_habits._LOCAL_HABITS_FILE = Path(tmpdir) / "habits.json"
+    copilot_habits._LOCAL_SHORTCUTS_FILE = Path(tmpdir) / "shortcuts.json"
     try:
         # 6. append + load
         copilot.clear_thread("jordan")
@@ -611,8 +616,8 @@ def main() -> int:
                                           "mails")
                or not s.get("label") or not callable(s.get("run"))
                or not callable(s.get("title"))]
-        check("registre : 12 actions complètes",
-              len(copilot_actions.ACTIONS) == 12 and not bad, str(bad))
+        check("registre : 13 actions complètes",
+              len(copilot_actions.ACTIONS) == 13 and not bad, str(bad))
         historiques = {"navigate", "start_prospection", "toggle_autopilot",
                        "cancel_mission"}
         check("les 4 actions historiques sont au registre",
@@ -878,7 +883,7 @@ def main() -> int:
         check("prompt : les envois portent le marqueur confirmation",
               "LE MAIL PART" in pr and "✋" in pr
               and '"do":"approve_draft"' in pr)
-        check("prompt : les 12 actions documentées",
+        check("prompt : toutes les actions du registre documentées",
               all(f'"do":"{do}"' in pr
                   for do in copilot_actions.ACTIONS))
         copilot.set_prefs("jordan", trust={"prospection": "never"})
@@ -962,9 +967,296 @@ def main() -> int:
             copilot._context_block = orig_ctx
             claude_advisor._resolve_ai = orig_resolve
 
+        print("— Étape 5 : motifs et normalisation —")
+
+        from datetime import datetime as _dt5, timedelta as _td5
+
+        # 71. clés de motifs : rejouable vs cible unique, insensible à la casse
+        k1 = copilot_habits.action_key({"do": "start_prospection",
+                                        "source": "pme",
+                                        "params": {"metier": "Plombier",
+                                                   "departement": "56"}})
+        k2 = copilot_habits.action_key({"do": "start_prospection",
+                                        "source": "pme",
+                                        "params": {"departement": "56",
+                                                   "metier": "plombier "}})
+        check("même prospection (casse/ordre) → même motif",
+              k1 is not None and k1 == k2, f"{k1} vs {k2}")
+        check("action à cible unique → jamais un motif",
+              copilot_habits.action_key({"do": "approve_draft",
+                                         "id": "x"}) is None)
+        check("question normalisée (casse, ponctuation)",
+              copilot_habits.normalize_question("  Où en est MA chasse ?? ")
+              == "où en est ma chasse")
+        check("question trop longue écartée",
+              copilot_habits.normalize_question("x" * 200) is None)
+        check("libellé auto parlant",
+              copilot_habits.auto_label(
+                  {"do": "start_prospection",
+                   "params": {"metier": "plombier", "departement": "56"}})
+              == "Prospection plombier (56)")
+
+        print("— Étape 5 : comptage et proposition sobre —")
+
+        # 72. 2 fois = silence ; 3 fois = mûr
+        ACT = {"do": "start_prospection", "source": "pme",
+               "params": {"metier": "plombier", "departement": "56"},
+               "dry_run": False}
+        copilot_habits._doc_write(copilot_habits.HABITS_SETTING_PREFIX,
+                                  copilot_habits._LOCAL_HABITS_FILE,
+                                  "jordan", {})
+        copilot_habits._doc_write(copilot_habits.SHORTCUTS_SETTING_PREFIX,
+                                  copilot_habits._LOCAL_SHORTCUTS_FILE,
+                                  "jordan", {})
+        copilot_habits.record_action("jordan", ACT)
+        copilot_habits.record_action("jordan", ACT)
+        check("2 répétitions → pas encore de suggestion",
+              copilot_habits.ripe_motif("jordan") is None)
+        copilot_habits.record_action("jordan", ACT)
+        ripe = copilot_habits.ripe_motif("jordan")
+        check("3 répétitions → suggestion mûre",
+              ripe is not None and ripe["count"] == 3
+              and "plombier" in ripe["label"])
+
+        # 73. les vieux passages sortent de la fenêtre de 30 jours
+        with copilot_habits._HABITS_LOCK:
+            motifs = copilot_habits._load_motifs("jordan")
+            old = (_dt5.now() - _td5(days=45)).isoformat(timespec="seconds")
+            motifs[0]["times"] = [old, old, old]
+            copilot_habits._save_motifs("jordan", motifs)
+        check("3 passages trop vieux → plus de suggestion",
+              copilot_habits.ripe_motif("jordan") is None)
+
+        # 74. une fois proposée : plus jamais (et 1 proposition max/24 h)
+        for _ in range(3):
+            copilot_habits.record_action("jordan", ACT)
+        ripe = copilot_habits.ripe_motif("jordan")
+        copilot_habits.mark_proposed("jordan", ripe["id"])
+        check("motif proposé → silence définitif sur ce motif",
+              copilot_habits.ripe_motif("jordan") is None)
+        OTHER = {"do": "view_prospect", "query": "boulangerie martin"}
+        for _ in range(3):
+            copilot_habits.record_action("jordan", OTHER)
+        check("autre motif mûr MAIS moins de 24 h depuis la dernière "
+              "proposition → il attend",
+              copilot_habits.ripe_motif("jordan") is None)
+
+        # 75. refus définitif + carte d'état
+        st = copilot_habits.habit_card_state("jordan", ripe["id"])
+        check("carte 💡 : état pending tant que pas tranché",
+              st["status"] == "pending" and st["label"] == ripe["label"])
+        copilot_habits.dismiss_habit("jordan", ripe["id"])
+        check("« non merci » → motif refusé pour toujours",
+              copilot_habits.habit_card_state("jordan",
+                                              ripe["id"])["status"]
+              == "dismissed")
+
+        # 76. le rythme hebdo : 3 lundis → rendez-vous suggéré
+        lundi = _dt5(2026, 6, 1, 9, 12)   # un lundi
+        times = [(lundi + _td5(days=7 * i)).isoformat(timespec="seconds")
+                 for i in range(3)]
+        r = copilot_habits.weekly_rhythm(times)
+        check("3 lundis matin → rendez-vous « chaque lundi à 9 h »",
+              r == {"days": [0], "hour": 9, "minute": 0}
+              and copilot_habits.schedule_label(r) == "chaque lundi à 9 h")
+        check("3 jours différents → pas de rythme",
+              copilot_habits.weekly_rhythm(
+                  [_dt5(2026, 6, 1).isoformat(),
+                   _dt5(2026, 6, 2).isoformat(),
+                   _dt5(2026, 6, 3).isoformat()]) is None)
+
+        print("— Étape 5 : les raccourcis —")
+
+        # 77. création : validations en français
+        r = copilot_habits.create_shortcut("jordan", label="",
+                                           question="q")
+        check("raccourci sans nom refusé", r["ok"] is False)
+        r = copilot_habits.create_shortcut(
+            "jordan", label="Brouillon X",
+            action={"do": "approve_draft", "id": "x"})
+        check("action à cible unique refusée en raccourci",
+              r["ok"] is False and "cible unique" in r["error"])
+        r = copilot_habits.create_shortcut(
+            "jordan", label="Question planifiée", question="quoi de neuf",
+            schedule={"days": [0], "hour": 9})
+        check("rendez-vous sur une question refusé",
+              r["ok"] is False and "question" in r["error"])
+        r = copilot_habits.create_shortcut(
+            "jordan", label="Prospection lundi", action=dict(ACT),
+            schedule={"days": [0], "hour": 9, "minute": 0})
+        check("raccourci d'action planifié créé",
+              r["ok"] and r["shortcut"]["schedule_label"]
+              == "chaque lundi à 9 h")
+        sid = r["shortcut"]["id"]
+        r2 = copilot_habits.create_shortcut(
+            "jordan", label="Doublon", action=dict(ACT))
+        check("raccourci équivalent refusé (même motif)",
+              r2["ok"] is False and "existe déjà" in r2["error"])
+        r3 = copilot_habits.create_shortcut(
+            "jordan", label="Le point", question="Où en est ma chasse ?")
+        check("raccourci-question créé",
+              r3["ok"] and r3["shortcut"]["kind"] == "question")
+
+        # 78. pause / reprise / suppression / usage
+        copilot_habits.record_run("jordan", sid)
+        copilot_habits.record_run("jordan", sid)
+        sc = [s for s in copilot_habits.list_shortcuts("jordan")
+              if s["id"] == sid][0]
+        check("usage compté (tri de la barre)", sc["runs"] == 2)
+        check("pause posée et relue",
+              copilot_habits.set_paused("jordan", sid, True)["ok"]
+              and copilot_habits.list_shortcuts("jordan")[0]["paused"])
+        copilot_habits.set_paused("jordan", sid, False)
+        check("suppression d'un raccourci",
+              copilot_habits.delete_shortcut("jordan", r3["shortcut"]["id"])
+              ["ok"] and len(copilot_habits.list_shortcuts("jordan")) == 1)
+
+        # 79. accepter une habitude → raccourci créé depuis le motif
+        copilot_habits._doc_write(copilot_habits.HABITS_SETTING_PREFIX,
+                                  copilot_habits._LOCAL_HABITS_FILE,
+                                  "jordan", {})
+        ACT2 = {"do": "view_prospect", "query": "garage dupont"}
+        for _ in range(3):
+            copilot_habits.record_action("jordan", ACT2)
+        ripe2 = copilot_habits.ripe_motif("jordan")
+        res = copilot_habits.accept_habit("jordan", ripe2["id"])
+        check("habitude acceptée → raccourci au nom du motif",
+              res["ok"] and "garage dupont" in res["shortcut"]["label"]
+              and copilot_habits.habit_card_state(
+                  "jordan", ripe2["id"])["status"] == "accepted")
+
+        print("— Étape 5 : les rendez-vous (préparer, jamais lancer) —")
+
+        # 80. dû au bon moment seulement
+        lundi_9h05 = _dt5(2026, 6, 1, 9, 5)
+        due = copilot_habits.due_scheduled("jordan", lundi_9h05)
+        check("rendez-vous dû le lundi 9 h 05",
+              len(due) == 1 and due[0]["id"] == sid)
+        check("pas dû un mardi",
+              copilot_habits.due_scheduled("jordan",
+                                           _dt5(2026, 6, 2, 9, 5)) == [])
+        check("pas dû une heure après (fenêtre de grâce passée)",
+              copilot_habits.due_scheduled("jordan",
+                                           _dt5(2026, 6, 1, 10, 5)) == [])
+        copilot_habits.mark_scheduled_fired("jordan", sid, lundi_9h05)
+        check("déjà déclenché aujourd'hui → plus dû",
+              copilot_habits.due_scheduled("jordan", lundi_9h05) == [])
+        copilot_habits.set_paused("jordan", sid, True)
+        check("en pause → jamais dû",
+              copilot_habits.due_scheduled(
+                  "jordan", _dt5(2026, 6, 8, 9, 5)) == [])
+        copilot_habits.set_paused("jordan", sid, False)
+
+        # 81. le guetteur prépare la carte (et pousse selon le niveau)
+        copilot.clear_thread("jordan")
+        copilot.set_prefs("jordan", "normal")
+        copilot.set_prefs("thomas", "off")
+        pushes = []
+        st_watch = {"pushes": []}
+        res = copilot_watch.fire_scheduled(
+            st_watch, now=_dt5(2026, 6, 8, 9, 5),
+            push_fn=lambda u, t, n: pushes.append((u, t)) or True,
+            now_ts=3000.0)
+        th = copilot.load_thread("jordan")
+        props = copilot_actions.list_proposals("jordan")
+        prop_msg = next((m for m in th if m.get("kind") == "proposal"), None)
+        check("rendez-vous dû → carte Confirmer/Annuler dans le fil",
+              res["fired"] == 1 and prop_msg is not None
+              and prop_msg.get("pid") in props
+              and props[prop_msg["pid"]]["status"] == "pending")
+        check("rien n'est exécuté : c'est une proposition",
+              props[prop_msg["pid"]]["title"].startswith("📅"))
+        check("notification envoyée (niveau normal)",
+              res["pushed"] == 1 and pushes
+              and "prêt" in pushes[0][1])
+        check("pastille allumée pour le rendez-vous",
+              copilot.get_unseen("jordan") == 1)
+        res2 = copilot_watch.fire_scheduled(
+            st_watch, now=_dt5(2026, 6, 8, 9, 6),
+            push_fn=lambda u, t, n: True, now_ts=3001.0)
+        check("anti-double : pas de seconde carte le même jour",
+              res2["fired"] == 0)
+        copilot.set_prefs("thomas", "normal")
+
+        print("— Étape 5 : intégration aux canaux —")
+
+        # 82. une exécution réussie nourrit le compteur (via le registre)
+        copilot_habits._doc_write(copilot_habits.HABITS_SETTING_PREFIX,
+                                  copilot_habits._LOCAL_HABITS_FILE,
+                                  "jordan", {})
+        orig_run5 = copilot_actions.ACTIONS["start_prospection"]["run"]
+        copilot_actions.ACTIONS["start_prospection"]["run"] = (
+            lambda a: {"ok": True, "summary": "Mission lancée."})
+        try:
+            copilot_actions.execute_action(dict(ACT), user_id="jordan")
+        finally:
+            copilot_actions.ACTIONS["start_prospection"]["run"] = orig_run5
+        with copilot_habits._HABITS_LOCK:
+            motifs = copilot_habits._load_motifs("jordan")
+        check("exécution réussie comptée comme habitude (sans champ "
+              "interne)",
+              len(motifs) == 1 and len(motifs[0]["times"]) == 1
+              and "_user" not in (motifs[0].get("action") or {}))
+
+        # 83. create_shortcut via le protocole d'action (famille notes →
+        # exécution directe) + le prompt le documente
+        r = copilot_actions.execute_action(
+            {"do": "create_shortcut", "label": "Fiche Garage",
+             "action": {"do": "view_prospect", "query": "garage dupont 2"}},
+            user_id="jordan")
+        check("le copilote crée un raccourci par le tag",
+              r.get("ok") is True and "Raccourci" in r.get("summary", ""))
+        pr5 = copilot_actions.build_actions_prompt("jordan")
+        check("prompt : create_shortcut documenté avec ses limites",
+              '"do":"create_shortcut"' in pr5
+              and "0=lundi" in pr5 and "rien ne se lance jamais" in pr5)
+
+        # 84. une question répétée (sans action) est comptée au fil des
+        # tours streamés
+        claude_advisor._resolve_ai = lambda s: {"provider": "anthropic",
+                                                "model": "claude-test",
+                                                "api_key": "sk-test"}
+        orig_stream5 = copilot._stream_anthropic
+        copilot._stream_anthropic = (
+            lambda p, m, k: iter(["Tout roule, 2 réponses."]))
+        orig_ctx5 = copilot._context_block
+        copilot._context_block = lambda app_state: "ÉTAT (test)"
+        try:
+            copilot.clear_thread("jordan")
+            for _ in range(3):
+                list(copilot.stream_reply(FakeState(), "jordan",
+                                          "Combien de réponses cette semaine ?"))
+        finally:
+            copilot._stream_anthropic = orig_stream5
+            copilot._context_block = orig_ctx5
+            claude_advisor._resolve_ai = orig_resolve
+        with copilot_habits._HABITS_LOCK:
+            motifs = copilot_habits._load_motifs("jordan")
+        qmotif = next((m for m in motifs if m.get("kind") == "question"),
+                      None)
+        check("question posée 3 fois → motif mûr",
+              qmotif is not None and len(qmotif["times"]) == 3)
+
+        # 85. l'ouverture du volet dépose la carte 💡 (une seule fois) et
+        # sert raccourcis + états
+        copilot_habits._set_last_proposed_at("jordan", "")
+        ui5 = copilot.thread_for_ui("jordan")
+        hmsg = next((m for m in ui5["messages"]
+                     if m.get("kind") == "habit"), None)
+        check("volet ouvert → carte 💡 déposée avec son état pending",
+              hmsg is not None and hmsg.get("hid") in ui5["habits"]
+              and ui5["habits"][hmsg["hid"]]["status"] == "pending")
+        check("volet : raccourcis servis pour la barre ⚡",
+              isinstance(ui5.get("shortcuts"), list)
+              and len(ui5["shortcuts"]) >= 1)
+        ui6 = copilot.thread_for_ui("jordan")
+        check("pas de seconde carte 💡 à la réouverture",
+              sum(1 for m in ui6["messages"]
+                  if m.get("kind") == "habit") == 1)
+
         print("— Surface API web —")
 
-        # 70. les méthodes existent sur la classe Api (sans l'instancier)
+        # 86. les méthodes existent sur la classe Api (sans l'instancier)
         from triskell_command.web.api import Api
         missing = [m for m in ("copilot_thread", "copilot_send",
                                "copilot_clear", "copilot_append",
@@ -972,6 +1264,11 @@ def main() -> int:
                                "copilot_memory_delete", "copilot_prefs",
                                "copilot_prefs_set", "copilot_action_confirm",
                                "copilot_action_dismiss", "copilot_journal",
+                               "copilot_shortcuts", "copilot_shortcut_create",
+                               "copilot_shortcut_delete",
+                               "copilot_shortcut_pause",
+                               "copilot_shortcut_run", "copilot_habit_accept",
+                               "copilot_habit_dismiss",
                                "_with_copilot_unseen",
                                "set_active_view") if not hasattr(Api, m)]
         check("méthodes copilote exposées", not missing, str(missing))
@@ -984,6 +1281,8 @@ def main() -> int:
         copilot._LOCAL_PREFS_FILE = orig_prefs_file
         copilot_actions._LOCAL_PROPS_FILE = orig_props_file
         copilot_actions._LOCAL_JOURNAL_FILE = orig_journal_file
+        copilot_habits._LOCAL_HABITS_FILE = orig_habits_file
+        copilot_habits._LOCAL_SHORTCUTS_FILE = orig_sc_file
 
     print()
     total = PASS + FAIL
