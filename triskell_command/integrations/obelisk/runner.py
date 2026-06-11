@@ -726,11 +726,18 @@ def _upload_new_locals_to_supabase(*, before_keys: set[str], niche: str,
 
     inserted = 0
     skipped = 0
+    no_email = 0
     errors = 0
     for raw in new_rows:
         row = _local_prospect_to_supabase_row(raw, niche, now_iso)
         if not row.get("name"):
             skipped += 1; continue
+        # Politique du 11/06/2026 : aucun prospect sans adresse mail
+        # n'entre dans le fichier (verrou SQL migration 47 en filet).
+        # Sans mail, ni l'Auto-Pilote ni les campagnes ne peuvent rien
+        # en faire — même règle que les autres outils de chasse.
+        if not any(str(e or "").strip() for e in (row.get("emails") or [])):
+            no_email += 1; continue
         purl = (row.get("platform_url") or "").rstrip("/").lower()
         handle = (row.get("handle") or "").strip().lower()
         sources = row.get("sources") or []
@@ -772,7 +779,9 @@ def _upload_new_locals_to_supabase(*, before_keys: set[str], niche: str,
             logger.warning("upload prospect failed: %s", exc)
             errors += 1
     agg_stats["uploaded_to_supabase"] = inserted
-    log(f"✅ {inserted} prospects uploadés (skip {skipped}, erreurs {errors})")
+    agg_stats["skipped_no_email"] = no_email
+    log(f"✅ {inserted} prospects uploadés (skip {skipped}, "
+        f"sans mail {no_email}, erreurs {errors})")
 
 
 # ---------------------------------------------------------------------------

@@ -5171,7 +5171,7 @@ class Api:
 
         Payload : { filename, data (base64), industry? }
         Réponse : { ok, inserted, skipped, duplicates, already_client,
-                    unsubscribed, total, errors, error? }
+                    unsubscribed, no_email, total, errors, error? }
 
         Le mapping des colonnes est auto-détecté à partir des en-têtes
         (suggest_mapping). Dédup sur (email principal) ou (website) pour
@@ -5181,7 +5181,10 @@ class Api:
         Détail des refus : une ligne dont l'email appartient à un prospect
         désinscrit compte dans `unsubscribed` (jamais recontacté) ; une
         ligne dont l'email est déjà un client compte dans `already_client`
-        (refusée par le verrou SQL `client_email_collision`).
+        (refusée par le verrou SQL `client_email_collision`) ; une ligne
+        SANS adresse mail compte dans `no_email` — politique du 11/06/2026 :
+        aucun prospect sans mail dans le fichier (verrou SQL migration 47
+        en filet pour tous les autres chemins d'entrée).
         """
         import base64
         import tempfile
@@ -5262,6 +5265,7 @@ class Api:
             errors = 0
             already_client = 0
             unsubscribed = 0
+            no_email = 0
 
             for raw_row in rows:
                 try:
@@ -5354,9 +5358,12 @@ class Api:
                     }],
                     "match_keys":  [],
                 }
-                # Garde-fou : au moins un nom OU un email
-                if not row["name"] and not emails and not phones:
-                    skipped += 1
+                # Politique du 11/06/2026 : aucun prospect sans adresse
+                # mail n'entre dans le fichier (l'Auto-pilote n'enrichit
+                # jamais → une fiche muette ne sert à rien). Compté à part
+                # pour que l'écran l'affiche clairement.
+                if not any(str(e or "").strip() for e in emails):
+                    no_email += 1
                     continue
 
                 try:
@@ -5373,6 +5380,10 @@ class Api:
                         already_client += 1
                     elif "prospect_email_duplicate" in msg:
                         duplicates += 1
+                    elif "prospect_sans_email" in msg:
+                        # Verrou SQL migration 47 (filet — le filtre amont
+                        # ci-dessus attrape normalement ce cas avant).
+                        no_email += 1
                     else:
                         logger.warning("obelisk_import_file insert: %s", exc)
                         errors += 1
@@ -5383,6 +5394,7 @@ class Api:
                 "duplicates":     duplicates,
                 "already_client": already_client,
                 "unsubscribed":   unsubscribed,
+                "no_email":       no_email,
                 "skipped":        skipped,
                 "errors":         errors,
                 "total":          len(rows),

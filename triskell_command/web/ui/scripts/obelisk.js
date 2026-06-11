@@ -1337,6 +1337,7 @@ const Obelisk = {
       const merged  = res.duplicates     || 0;
       const clients = res.already_client || 0;
       const unsub   = res.unsubscribed   || 0;
+      const noMail  = res.no_email       || 0;
       const refused = (res.skipped || 0) + (res.errors || 0);
       const totalRead = res.total || 0;
       const parts = [
@@ -1345,6 +1346,7 @@ const Obelisk = {
       ];
       if (clients) parts.push(`${clients} écarté${clients > 1 ? 's' : ''} (déjà client${clients > 1 ? 's' : ''})`);
       if (unsub)   parts.push(`${unsub} écarté${unsub > 1 ? 's' : ''} (désinscrit${unsub > 1 ? 's' : ''})`);
+      if (noMail)  parts.push(`${noMail} ignoré${noMail > 1 ? 's' : ''} (sans adresse mail — le fichier prospects n’accepte que des fiches contactables)`);
       if (refused) parts.push(`${refused} refusé${refused > 1 ? 's' : ''} (lignes vides, incomplètes ou en erreur)`);
       const detail = parts.join(' · ') +
         ` — ${totalRead} ligne${totalRead > 1 ? 's' : ''} lue${totalRead > 1 ? 's' : ''}.`;
