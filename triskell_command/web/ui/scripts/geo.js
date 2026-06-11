@@ -18,7 +18,7 @@ const GEO = {
   _pubBusy: false,        // une seule publication à la fois
   _internalNav: false,    // vrai quand on navigue à l'intérieur du module
   _cyclePolling: false,   // suivi « Tout faire maintenant » déjà en cours
-  _apSitesCount: 0,       // nb de sites connus (pour redessiner la carte auto-pilote)
+  _apSites: [],           // sites connus (pour redessiner la carte auto-pilote)
 
   // ════════════════════════════════════════════════════════════════════
   // ENTRY POINT — un parcours unique : Home → Site → Analyse en 1 clic
@@ -105,7 +105,7 @@ const GEO = {
       if (ar && ar.ok) ap = ar.settings;
     } catch (e) { /* tolère */ }
     const sites = r.sites || [];
-    this._apSitesCount = sites.length;
+    this._apSites = sites;
     const providersInfo = r.providers_count > 0
       ? `<span class="geo-pill geo-pill--ok">${r.providers_count} IA branchée${r.providers_count > 1 ? 's' : ''} : ${r.providers.map(p => p.label).join(', ')}</span>`
       : `<span class="geo-pill geo-pill--warn">Aucune IA branchée — <a href="#" data-go-config>va dans Réglages</a></span>`;
@@ -120,7 +120,7 @@ const GEO = {
         </div>
         <div class="geo-pills mt-3">${providersInfo}</div>
       </div>
-      ${this._renderAutopilotCard(ap, sites.length)}
+      ${this._renderAutopilotCard(ap, sites)}
       <div class="geo-sites-grid mt-6">
         ${sites.length === 0
           ? `<div class="geo-empty"><div class="geo-empty-icon">🌐</div><h3>Aucun site pour l'instant</h3><p>Clique sur « Ajouter un site » pour démarrer.</p></div>`
@@ -465,9 +465,13 @@ const GEO = {
     if (apPub) {
       apPub.onchange = async () => {
         if (apPub.checked) {
+          const linked = (this._apSites || []).filter(s => s && s.repo);
+          const msg = linked.length === 0
+            ? 'Aucun de tes sites n’est branché pour l’instant, donc rien ne partira en ligne tout de suite. L’option marchera dès que tu auras branché un site (clique dessus → ✎ Modifier → « Publication automatique »). Activer quand même ?'
+            : `L’app mettra des pages en ligne toute seule, sans te demander à chaque fois, sur : ${linked.map(s => s.name || s.url).join(', ')}. Activer ?`;
           const ok = await Dialog.confirm(
-            'L’app publiera toute seule du contenu sur tes sites en ligne. Activer ?',
-            { title: 'Publication automatique', danger: true, okLabel: 'Activer', cancelLabel: 'Annuler' }
+            msg,
+            { title: 'Mise en ligne automatique', danger: true, okLabel: 'Activer', cancelLabel: 'Annuler' }
           );
           if (!ok) { apPub.checked = false; return; }
         }
@@ -522,7 +526,7 @@ const GEO = {
       const cur = document.querySelector('.geo-ap-card');
       if (!cur) { clearInterval(timer); this._cyclePolling = false; return; }
       const tmp = document.createElement('div');
-      tmp.innerHTML = this._renderAutopilotCard(ap, this._apSitesCount);
+      tmp.innerHTML = this._renderAutopilotCard(ap, this._apSites || []);
       cur.replaceWith(tmp.firstElementChild);
       this._wireAutopilot(ap);
       if (!ap.running) {
@@ -855,7 +859,7 @@ const GEO = {
       if (r && r.ok) sites = (r.sites || []).filter(s => s.repo);
     } catch (e) { /* tolère */ }
     if (sites.length === 0) {
-      Toast.warn('Aucun site branché à la publication automatique (réglage avancé). Ajoute d’abord un site (bouton « + Ajouter un site »), puis remplis sa section « Publication automatique ».');
+      Toast.warn('Aucun de tes sites n’est branché à la mise en ligne automatique. Ouvre ton site (ou ajoute-le), bouton ✎ Modifier → remplis la section « Publication automatique ».');
       return null;
     }
     return new Promise((resolve) => {
@@ -990,7 +994,7 @@ const GEO = {
     } catch (e) { /* tolère */ }
 
     const sites = r.sites || [];
-    this._apSitesCount = sites.length;
+    this._apSites = sites;
     body.innerHTML = `
       <div class="geo-card">
         <div class="geo-row-between">
@@ -1003,7 +1007,7 @@ const GEO = {
         <div class="geo-pills mt-3">${providersInfo}</div>
       </div>
 
-      ${this._renderAutopilotCard(ap, sites.length)}
+      ${this._renderAutopilotCard(ap, sites)}
 
       <div id="geo-sites-grid" class="geo-sites-grid mt-6">
         ${sites.length === 0
@@ -1055,7 +1059,7 @@ const GEO = {
     this._wireAutopilot(ap);
   },
 
-  _renderAutopilotCard(ap, sitesCount) {
+  _renderAutopilotCard(ap, sites) {
     if (!ap) {
       return `<div class="geo-card mt-6 geo-ap-card">
         <h3 class="geo-card-title">⚡ Auto-pilote GEO</h3>
@@ -1069,6 +1073,34 @@ const GEO = {
     const pub  = !!ap.auto_publish;
     const last = ap.last_run_at;
     const summary = ap.last_run_summary || '';
+    // -- État réel de la mise en ligne automatique : quels sites sont branchés ?
+    const allSites = Array.isArray(sites) ? sites : [];
+    const sitesCount = allSites.length;
+    const linked = allSites.filter(s => s && s.repo);
+    const linkedNames = linked.slice(0, 3).map(s => this._esc(s.name || s.url || 'site')).join(', ')
+      + (linked.length > 3 ? `… (${linked.length} en tout)` : '');
+    const pubAction = pub
+      ? 'chaque page rédigée part en ligne toute seule, sans te demander.'
+      : 'coche pour que chaque page rédigée parte en ligne toute seule.';
+    let pubHelp = '';
+    let pubHelpCls = '';
+    if (!auto) {
+      pubHelpCls = ' is-warn';
+      pubHelp = '⚠ Sans effet pour l’instant : la case « Rédiger automatiquement » au-dessus est décochée, donc aucune page n’est créée.';
+    } else if (sitesCount === 0) {
+      pubHelp = 'Ajoute d’abord un site pour pouvoir t’en servir.';
+    } else if (linked.length === 0) {
+      pubHelpCls = ' is-warn';
+      pubHelp = '⚠ Aucun de tes sites n’est encore branché : les pages rédigées resteront rangées dans l’app (mode avancé → onglet Générateur), à mettre en ligne toi-même. Pour brancher un site : clique dessus → ✎ Modifier → section « Publication automatique ».';
+    } else if (linked.length < sitesCount) {
+      pubHelpCls = ' is-ok';
+      pubHelp = `✓ Prêt pour ${linkedNames} — ${pubAction} Les autres sites ne sont pas branchés : leurs pages resteront dans l’app (clique sur le site → ✎ Modifier → section « Publication automatique » pour les brancher).`;
+    } else {
+      pubHelpCls = ' is-ok';
+      pubHelp = sitesCount === 1
+        ? `✓ ${linkedNames} est branché : ${pubAction}`
+        : `✓ Tes ${sitesCount} sites sont branchés : ${pubAction}`;
+    }
     return `
       <div class="geo-card mt-6 geo-ap-card ${enabled ? 'is-on' : ''}">
         <div class="geo-row-between">
@@ -1077,8 +1109,8 @@ const GEO = {
             <h3 class="geo-card-title">${enabled ? 'L\'app fait tout, toute seule' : 'Active l\'auto-pilote pour tout automatiser'}</h3>
             <p class="geo-card-sub">
               ${enabled
-                ? `Toutes les <strong>${freq} jours</strong>, l'app relance la surveillance sur tous tes sites${auto ? ' et fait <strong>rédiger automatiquement</strong> par l\'IA un contenu pour chaque question où tu n\'es pas cité' : ''}. Tu n'as plus rien à faire.`
-                : 'Une fois activé, l\'app surveille tes sites, refait le tour des IA à la fréquence choisie, et fait rédiger automatiquement des contenus pour les questions où tu n\'es pas cité.'}
+                ? `Toutes les <strong>${freq} jours</strong>, l'app relance la surveillance sur tous tes sites${auto ? ' et fait <strong>rédiger automatiquement</strong> par l\'IA une page pour chaque question où tu n\'es pas cité' : ''}. Tu n'as plus rien à faire.`
+                : 'Une fois activé, l\'app surveille tes sites, refait le tour des IA à la fréquence choisie, et fait rédiger automatiquement des pages pour les questions où tu n\'es pas cité.'}
             </p>
           </div>
           <div class="geo-ap-actions">
@@ -1098,18 +1130,24 @@ const GEO = {
               <option value="30" ${freq === 30 ? 'selected' : ''}>Tous les 30 jours</option>
             </select>
           </label>
-          <label class="geo-ap-field geo-ap-check">
-            <input type="checkbox" id="geo-ap-autogen" ${auto ? 'checked' : ''}/>
-            <span>Rédiger automatiquement les contenus manquants</span>
-          </label>
-          <label class="geo-ap-field geo-ap-check">
-            <input type="checkbox" id="geo-ap-autopub" ${pub ? 'checked' : ''}/>
-            <span>Publier automatiquement sur les sites (nécessite un site branché à la publication automatique — réglage avancé)</span>
-          </label>
           <div class="geo-ap-field">
             <span class="geo-label">Dernier passage</span>
             <div class="geo-ap-last">${last ? this._fmtDate(last) : '—'}</div>
           </div>
+          <label class="geo-ap-field geo-ap-check">
+            <input type="checkbox" id="geo-ap-autogen" ${auto ? 'checked' : ''}/>
+            <span class="geo-ap-check-text">
+              <span class="geo-ap-check-title">Rédiger automatiquement les pages manquantes</span>
+              <small class="geo-ap-check-help">Pour chaque question où ton site n’est pas cité, l’IA écrit une page prête à publier (3 max par site à chaque passage).</small>
+            </span>
+          </label>
+          <label class="geo-ap-field geo-ap-check">
+            <input type="checkbox" id="geo-ap-autopub" ${pub ? 'checked' : ''}/>
+            <span class="geo-ap-check-text">
+              <span class="geo-ap-check-title">Mettre ces pages en ligne automatiquement</span>
+              <small class="geo-ap-check-help${pubHelpCls}">${pubHelp}</small>
+            </span>
+          </label>
         </div>
         ${summary ? `<div class="geo-ap-summary mt-3">${this._esc(summary)}</div>` : ''}
         <div class="geo-ap-bottom mt-4">
@@ -1396,7 +1434,7 @@ const GEO = {
         <details class="geo-advanced mt-4" ${existing?.repo ? 'open' : ''}>
           <summary class="geo-details-sum">⚙️ Publication automatique sur le site (GitHub)</summary>
           <div class="geo-form-col mt-2">
-            <p class="geo-advanced-sub">Si tu remplis ces champs, l'app pourra publier les contenus générés directement sur ton site via GitHub.</p>
+            <p class="geo-advanced-sub">C’est ici qu’on « branche » le site : une fois ces champs remplis, l’app peut créer les pages directement sur ton site, qui se met à jour tout seul. C’est ce qui permet la « mise en ligne automatique » de l’auto-pilote.</p>
             <label class="geo-label mt-2">Dépôt GitHub</label>
             <input id="geo-newsite-repo" type="text" class="geo-input"
                    placeholder="ex : Jordan-Bourillot/lagriffe-studio" value="${this._esc(existing?.repo || '')}" />

@@ -3965,8 +3965,8 @@ html {
 }
 .geo-ap-grid {
   display: grid;
-  grid-template-columns: 1fr 2fr 1fr;
-  gap: 18px;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 18px;
   align-items: end;
 }
 @media (max-width: 768px) {
@@ -3974,8 +3974,9 @@ html {
 }
 .geo-ap-field { display: flex; flex-direction: column; gap: 6px; }
 .geo-ap-check {
+  grid-column: 1 / -1;
   flex-direction: row;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   padding: 10px 12px;
   background: hsl(var(--surface));
@@ -3983,8 +3984,18 @@ html {
   border-radius: 10px;
   cursor: pointer;
 }
-.geo-ap-check input { width: 18px; height: 18px; cursor: pointer; }
+.geo-ap-check input { width: 18px; height: 18px; cursor: pointer; flex: 0 0 auto; margin-top: 1px; }
 .geo-ap-check span  { font-size: 13.5px; color: hsl(var(--text)); }
+.geo-ap-check-text  { display: flex; flex-direction: column; gap: 3px; }
+.geo-ap-check .geo-ap-check-title { font-weight: 600; }
+.geo-ap-check-help {
+  font-size: 12px;
+  line-height: 1.5;
+  color: hsl(var(--text-muted));
+  text-wrap: pretty;
+}
+.geo-ap-check-help.is-ok   { color: hsl(var(--success-text)); }
+.geo-ap-check-help.is-warn { color: hsl(var(--warning-text)); }
 .geo-ap-last {
   font-weight: 700;
   font-size: 14px;
