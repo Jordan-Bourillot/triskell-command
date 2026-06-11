@@ -179,6 +179,80 @@ def main() -> int:
         finally:
             copilot._context_block = orig_ctx
 
+        print("— Le snapshot voit le GEO —")
+
+        # 10bis. Le module GEO (audits « être cité par les IA ») vit dans
+        # l'AppState serveur : le snapshot du copilote doit le refléter,
+        # sinon « j'ai lancé un audit GEO, ça donne quoi ? » → « aucune
+        # trace » alors que l'audit existe (bug du 11/06/2026).
+        class GeoState(FakeState):
+            def __init__(self, geo):
+                super().__init__()
+                self._geo = geo
+
+            def get(self, *path, default=None):
+                if path and path[0] == "geo":
+                    return self._geo
+                return default
+
+        geo_data = {
+            "sites": [{"id": "s1", "name": "Pixel Pros",
+                       "url": "https://pixel-pros.fr", "brand": "Pixel Pros",
+                       "domain": "pixel-pros.fr"}],
+            "questions": {"s1": [{"id": "q1", "text": "Quel presta ?"}]},
+            "audits": [{"id": "a1", "site_id": "s1",
+                        "url": "https://pixel-pros.fr",
+                        "ts": "2026-06-11T14:02:33", "score": 62,
+                        "findings": [
+                            {"status": "fail",
+                             "label": "Pas de données structurées (JSON-LD)",
+                             "advice": "…", "points": 10},
+                            {"status": "warn", "label": "Pas de tableau",
+                             "advice": "…", "points": 4},
+                        ]}],
+            "ai_audits": [{"id": "ia1", "site_id": "s1",
+                           "url": "https://pixel-pros.fr",
+                           "ts": "2026-06-11T14:05:10",
+                           "verdict": "Page correcte mais peu citable",
+                           "score_estimated": 55,
+                           "findings": [{"id": "f1", "title": "Pas de FAQ",
+                                         "fix_title": "Ajouter une FAQ",
+                                         "fix_html": "<section/>"}]}],
+            "surveillance_runs": [{"id": "r1", "site_id": "s1",
+                                   "ts": "2026-06-10T09:00:00", "score": 25,
+                                   "cited": 1, "total": 4, "results": []}],
+            "reputation_runs": [],
+            "generated": [],
+            "autopilot": {"enabled": False, "running": False},
+        }
+        snap = claude_advisor.gather_voice_context(GeoState(geo_data))
+        g = snap.get("geo") or {}
+        a = (g.get("recent_audits") or [{}])[0]
+        check("audit GEO dans le snapshot (site, score, horodatage)",
+              a.get("score_sur_100") == 62
+              and a.get("site") == "Pixel Pros"
+              and a.get("at") == "2026-06-11T14:02", repr(a))
+        check("audit GEO : problèmes et points à améliorer résumés",
+              a.get("problemes") == ["Pas de données structurées (JSON-LD)"]
+              and a.get("a_ameliorer") == ["Pas de tableau"], repr(a))
+        ia = (g.get("recent_ai_audits") or [{}])[0]
+        check("audit IA : verdict et suggestions transmis",
+              ia.get("verdict") == "Page correcte mais peu citable"
+              and ia.get("suggestions") == ["Ajouter une FAQ"], repr(ia))
+        sv = (g.get("recent_surveillance") or [{}])[0]
+        check("surveillance : citations résumées",
+              sv.get("citations") == "1/4"
+              and sv.get("score_citation_pct") == 25, repr(sv))
+        json.dumps(snap, ensure_ascii=False, default=str)
+        g_vide = (claude_advisor.gather_voice_context(FakeState())
+                  .get("geo") or {})
+        check("état GEO vierge : bloc présent, listes vides",
+              g_vide.get("sites") == []
+              and g_vide.get("recent_audits") == [], repr(g_vide))
+        check("prompts système : le GEO est annoncé au copilote",
+              "GEO" in copilot.COPILOT_SYSTEM_PROMPT
+              and "GEO" in claude_advisor.CONVO_SYSTEM_PROMPT)
+
         print("— Refus propres —")
 
         # 11. message vide

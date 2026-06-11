@@ -380,6 +380,91 @@ def gather_voice_context(app_state) -> dict[str, Any]:
     except Exception as exc:
         logger.debug("voice ctx phare: %s", exc)
 
+    # GEO (être cité par les IA) : sites suivis, audits, audits IA,
+    # surveillance, e-réputation, auto-pilote. Tout vit dans l'AppState
+    # serveur — lecture directe, sans rien initialiser ni sauvegarder.
+    try:
+        geo = app_state.get("geo", default=None) or {}
+        g_sites = [s for s in (geo.get("sites") or []) if isinstance(s, dict)]
+        g_questions = geo.get("questions") or {}
+        g_names = {(s.get("id") or ""): (s.get("name") or s.get("domain") or "")
+                   for s in g_sites}
+
+        def _g_site(sid):
+            return g_names.get(sid or "", "") or "(URL hors liste)"
+
+        def _g_labels(findings, status, n):
+            return [f.get("label") or "" for f in (findings or [])
+                    if isinstance(f, dict) and f.get("status") == status][:n]
+
+        g_ap = geo.get("autopilot") or {}
+        ctx["geo"] = {
+            "sites": [
+                {**_safe_pick(s, ["name", "url", "brand"]),
+                 "questions_suivies": len(
+                     g_questions.get(s.get("id") or "") or [])}
+                for s in g_sites[:15]
+            ],
+            "recent_audits": [
+                {
+                    "at": (a.get("ts") or "")[:16],
+                    "site": _g_site(a.get("site_id")),
+                    "url": a.get("url") or "",
+                    "score_sur_100": a.get("score"),
+                    "problemes": _g_labels(a.get("findings"), "fail", 5),
+                    "a_ameliorer": _g_labels(a.get("findings"), "warn", 3),
+                }
+                for a in (geo.get("audits") or [])[:5]
+                if isinstance(a, dict)
+            ],
+            "recent_ai_audits": [
+                {
+                    "at": (a.get("ts") or "")[:16],
+                    "site": _g_site(a.get("site_id")),
+                    "url": a.get("url") or "",
+                    "verdict": a.get("verdict") or "",
+                    "score_estime": a.get("score_estimated"),
+                    "suggestions": [
+                        (f.get("fix_title") or f.get("title") or "")
+                        for f in (a.get("findings") or [])
+                        if isinstance(f, dict)
+                    ][:5],
+                }
+                for a in (geo.get("ai_audits") or [])[:3]
+                if isinstance(a, dict)
+            ],
+            "recent_surveillance": [
+                {
+                    "at": (r.get("ts") or "")[:16],
+                    "site": _g_site(r.get("site_id")),
+                    "score_citation_pct": r.get("score"),
+                    "citations": f"{r.get('cited', 0)}/{r.get('total', 0)}",
+                }
+                for r in (geo.get("surveillance_runs") or [])[:5]
+                if isinstance(r, dict)
+            ],
+            "recent_reputation": [
+                {
+                    "at": (r.get("ts") or "")[:16],
+                    "brand": r.get("brand") or "",
+                    "score": r.get("score"),
+                }
+                for r in (geo.get("reputation_runs") or [])[:3]
+                if isinstance(r, dict)
+            ],
+            "generated_total": len(geo.get("generated") or []),
+            "autopilot": {
+                "enabled": bool(g_ap.get("enabled", False)),
+                "running": bool(g_ap.get("running", False)),
+                "frequency_days": g_ap.get("frequency_days", 14),
+                "last_run_at": (g_ap.get("last_run_at") or "")[:16],
+                "last_run_summary": str(
+                    g_ap.get("last_run_summary") or "")[:300],
+            },
+        }
+    except Exception as exc:
+        logger.debug("voice ctx geo: %s", exc)
+
     # Convoi (campagnes de prospection)
     try:
         from . import convoy_runner
@@ -530,6 +615,7 @@ TU AS ACCÈS À TOUTE L'APP TRISKELL COMMAND EN DIRECT
 - Lagriffe : intakes (sites 49 €/mois) par statut.
 - Obélisk : créateurs prospectés, stats.
 - Phare (SEO) : sites suivis, actions en attente.
+- GEO (bloc geo) : être cité par les IA — sites suivis, derniers audits GEO (score sur 100 + problèmes trouvés), audits IA (verdict + suggestions), surveillance « les IA citent-elles le site ? », e-réputation, état de l'auto-pilote GEO.
 - Convoi : campagnes de prospection, brouillons (pending / sent par campagne).
 - Forge : briefs entrants et projets en queue.
 - Carnet (billing) : factures récentes avec montants et statut de paiement.
