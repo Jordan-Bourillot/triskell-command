@@ -4499,7 +4499,8 @@ body[data-view-color="slate"]    { --page-glow: 148 163 184; }
   #mobile-header,
   #thomas-fab,
   #tc-toast-host,
-  #guide-bar,
+  #perceval-host,
+  #pv-meet,
   #call-overlay,
   #call-incoming {
     display: none !important;
