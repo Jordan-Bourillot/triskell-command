@@ -8123,8 +8123,10 @@ class Api:
         STUN Google (gratuit) suffit pour la plupart des connexions. Pour
         ajouter un relais TURN (utile si la connexion directe échoue sur
         certains réseaux restrictifs), définir côté serveur (Coolify) :
-            TURN_URL        ex: turn:turn.mondomaine.fr:3478
-            TURN_USERNAME   identifiant TURN
+            TURN_URL        une ou PLUSIEURS urls séparées par des virgules
+                            ex: turn:relay.x.fr:80,turns:relay.x.fr:443?transport=tcp
+                            (plusieurs ports/transports = bien plus de réseaux passent)
+            TURN_USERNAME   identifiant TURN (commun à toutes les urls)
             TURN_CREDENTIAL mot de passe TURN
         """
         try:
@@ -8138,7 +8140,8 @@ class Api:
             ]
             turn_url = (os.environ.get("TURN_URL") or "").strip()
             if turn_url:
-                turn: dict = {"urls": [turn_url]}
+                urls = [u.strip() for u in turn_url.split(",") if u.strip()]
+                turn: dict = {"urls": urls}
                 user = (os.environ.get("TURN_USERNAME") or "").strip()
                 cred = (os.environ.get("TURN_CREDENTIAL") or "").strip()
                 if user:
