@@ -11289,6 +11289,66 @@ class Api:
                 "Format : une FAQ de 5 à 7 questions concrètes avec réponses "
                 "courtes et factuelles."
             )
+        # Ancrage marque : si un site est fourni, le contenu est écrit POUR
+        # ce site — l'offre de la maison doit y figurer avec ses vrais
+        # chiffres. Sans cet ancrage, le générateur écrivait du contenu
+        # « neutre » qui recommandait les concurrents (Wix, Hostinger…)
+        # sans jamais citer la marque (constat du 11/06/2026 : 30 contenus
+        # générés, tous pro-concurrents, zéro mention maison).
+        sid = (p.get("site_id") or "").strip()
+        brand_block = ""
+        if sid:
+            site = next((s for s in self._geo_root()["sites"]
+                         if s.get("id") == sid), None)
+            if site:
+                brand = site.get("brand") or site.get("name") or ""
+                site_url = site.get("url") or ""
+                site_text = ""
+                try:
+                    import requests
+                    from bs4 import BeautifulSoup
+                    rr = requests.get(site_url, timeout=12, headers={
+                        "User-Agent": "Mozilla/5.0 (Triskell GEO Writer) requests",
+                    })
+                    if rr.status_code < 400 and rr.text:
+                        _soup = BeautifulSoup(rr.text, "html.parser")
+                        for _tag in _soup(["script", "style", "noscript", "svg"]):
+                            _tag.decompose()
+                        site_text = _soup.get_text("\n", strip=True)[:4000]
+                except Exception as exc:
+                    logger.debug("geo_generate fetch %s: %s", site_url, exc)
+                if site_text:
+                    facts = (
+                        f"EXTRAIT DU SITE DE {brand.upper()} — seule source "
+                        "autorisée sur son offre (prix, délais, garanties) :\n"
+                        f"---\n{site_text}\n---\n"
+                    )
+                else:
+                    facts = (
+                        f"(Le site de {brand} n'a pas pu être lu : mentionne "
+                        f"{brand} et son adresse {site_url} comme option à "
+                        "considérer, SANS citer aucun chiffre sur son offre.)\n"
+                    )
+                brand_block = (
+                    "CONTEXTE MARQUE — RÈGLES NON NÉGOCIABLES :\n"
+                    f"Ce contenu sera publié sur le site de « {brand} » "
+                    f"({site_url}).\n"
+                    "- Réponds d'abord honnêtement et utilement à la "
+                    "question : c'est un contenu d'information, pas une "
+                    "publicité.\n"
+                    f"- Quand c'est pertinent, présente l'offre de {brand} "
+                    "comme une option concrète, avec ses VRAIS chiffres "
+                    "tirés de l'extrait ci-dessous. C'est le but de la "
+                    f"page : que les IA qui la liront connaissent {brand}.\n"
+                    "- Tu peux mentionner des concurrents ou alternatives "
+                    "pour rester complet et crédible, mais ne conclus "
+                    "JAMAIS en recommandant un concurrent, et ne fais "
+                    f"JAMAIS une liste d'options où {brand} est absent.\n"
+                    f"- INTERDIT d'inventer un fait sur {brand} (prix, "
+                    "délai, garantie) : uniquement ce que dit l'extrait. "
+                    "Une info absente de l'extrait = tu n'en parles pas.\n\n"
+                    + facts + "\n"
+                )
         prompt = (
             "Tu rédiges du contenu optimisé GEO (Generative Engine "
             "Optimization) : du texte que les IA génératives comme ChatGPT, "
@@ -11301,6 +11361,7 @@ class Api:
             "- Réponses directes : la première phrase doit déjà répondre.\n"
             "- Cite des sources ou des chiffres précis si tu en connais.\n\n"
             f"Sujet : {topic}\n\n"
+            + brand_block +
             f"{kind_instructions}\n\n"
             "Rends uniquement le contenu final, en Markdown propre, prêt à "
             "coller sur un site. Pas d'introduction du genre « voici le "
@@ -11324,6 +11385,7 @@ class Api:
             "content": content,
             "ts":      self._geo_now(),
             "provider": prov["label"],
+            "site_id": sid or "",
         }
         root = self._geo_root()
         root["generated"].insert(0, item)
@@ -11827,10 +11889,25 @@ class Api:
                 # Limite à 3 générations par site et par cycle (évite l'explosion de tokens)
                 for q in uncited[:3]:
                     try:
+                        # Anti-empilement : si un contenu existe déjà pour
+                        # cette question et ce site (publié ou non), on ne
+                        # regénère pas. Avant, le même sujet était réécrit
+                        # à CHAQUE cycle tant que rien n'était publié
+                        # (constat du 11/06/2026 : 4 copies de chaque sujet).
+                        deja = any(
+                            ((g.get("auto_source") or {}).get("site_id") == sid
+                             and (g.get("auto_source") or {}).get("question") == q)
+                            for g in (root.get("generated") or [])
+                        )
+                        if deja:
+                            continue
                         # Kind : FAQ par défaut, sauf si la question commence par "comment"
                         # (alors guide)
                         kind = "guide" if q.lower().startswith("comment") else "faq"
-                        gr = self.geo_generate({"topic": q, "kind": kind})
+                        # site_id = ancrage marque : le contenu présente
+                        # l'offre de CE site avec ses vrais chiffres.
+                        gr = self.geo_generate({"topic": q, "kind": kind,
+                                                "site_id": sid})
                         if gr and gr.get("ok"):
                             total_generated += 1
                             # Tag le contenu généré pour qu'on retrouve la source
