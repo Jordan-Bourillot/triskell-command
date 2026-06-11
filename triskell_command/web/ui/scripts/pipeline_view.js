@@ -1594,4 +1594,6 @@ window.PipelineView.STATUS_LABELS_FR = {
   final_ready_review: 'Final à valider',   // Lagriffe
   draft: 'Brouillon reçu',                 // Pixel Pros
   building: 'Fabrication en cours',        // Pixel Pros
+  contact: '✉️ Message reçu',              // sites publics (PP / Lagriffe / RankUs)
+  recall: '📞 À rappeler',                 // bouton « Être rappelé » des sites
 };

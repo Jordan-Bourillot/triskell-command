@@ -4317,6 +4317,22 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def rankus_mark_contact_handled(self, payload: dict) -> dict:
+        """Marque un message de contact / demande de rappel venu de
+        rankus-studio.fr comme « traité » (payload : { id, handled?: bool }).
+        Même convention que Pixel Pros : partagé entre appareils."""
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid:
+            return {"ok": False, "error": "id manquant"}
+        handled = (payload or {}).get("handled")
+        handled = True if handled is None else bool(handled)
+        try:
+            from ..integrations.rankus import repo as r
+            ok, msg = r.mark_contact_handled(iid, handled=handled)
+            return {"ok": True, "message": msg} if ok else {"ok": False, "error": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ------------------------------------------------------------------
     # Lagriffe Studio — mêmes endpoints + approve_final_and_send (validation
     # humaine du site final avant envoi du mail au client)
@@ -4404,6 +4420,22 @@ class Api:
             # On appelle directement l'endpoint Netlify finalize-site-build
             ok, msg = r.trigger_finalize(iid)
             return {"ok": bool(ok), "message": msg}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def lagriffe_mark_contact_handled(self, payload: dict) -> dict:
+        """Marque un message de contact / demande de rappel venu de
+        lagriffe-studio.fr comme « traité » (payload : { id, handled?: bool }).
+        Même convention que Pixel Pros : partagé entre appareils."""
+        iid = ((payload or {}).get("id") or "").strip()
+        if not iid:
+            return {"ok": False, "error": "id manquant"}
+        handled = (payload or {}).get("handled")
+        handled = True if handled is None else bool(handled)
+        try:
+            from ..integrations.lagriffe import repo as r
+            ok, msg = r.mark_contact_handled(iid, handled=handled)
+            return {"ok": True, "message": msg} if ok else {"ok": False, "error": msg}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

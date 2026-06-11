@@ -127,6 +127,36 @@ def get_intake(intake_id: str) -> Optional[dict]:
         return None
 
 
+def mark_contact_handled(intake_id: str, *, handled: bool = True) -> tuple[bool, str]:
+    """Marque un message de contact / une demande de rappel (status
+    'contact' ou 'recall', venus du site public) comme « traité » — ou
+    l'inverse avec handled=False. Posé dans payload.handled_at, même
+    convention que Pixel Pros : pas de colonne dédiée, partagé entre
+    appareils."""
+    sb = _sb()
+    if sb is None:
+        return False, "Supabase non configuré."
+    intake = get_intake(intake_id)
+    if intake is None:
+        return False, "Message introuvable."
+    if (intake.get("status") or "") not in ("contact", "recall"):
+        return False, "Cette fiche n'est pas un message de contact."
+    payload = intake.get("payload") or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    if handled:
+        payload["handled_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        payload.pop("handled_at", None)
+    try:
+        sb.table("rankus_intakes").update({"payload": payload}) \
+            .eq("id", intake_id).execute()
+        return True, ("Marqué traité." if handled else "Remis à traiter.")
+    except Exception as exc:
+        logger.warning("rankus.mark_contact_handled: %s", exc)
+        return False, str(exc)
+
+
 def update_intake_status(intake_id: str, new_status: str, *, error_message: str = "") -> bool:
     """Bascule un intake vers un nouveau status (approved | rejected | etc.)."""
     sb = _sb()

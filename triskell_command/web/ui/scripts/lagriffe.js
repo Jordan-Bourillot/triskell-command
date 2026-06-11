@@ -18,15 +18,39 @@ const Lagriffe = makePipelineView({
   statusLabels: {
     ...PIPELINE_BASE_STATUS_LABELS,
     final_ready_review: 'Final à valider',
+    contact: '✉️ Message reçu (site public)',
+    recall:  '📞 À rappeler (site public)',
   },
 
   statusColors: {
     ...PIPELINE_BASE_STATUS_COLORS,
     final_ready_review: 'warning',
+    contact: 'warning',
+    recall:  'warning',
   },
 
-  // Action spécifique Lagriffe : valider le site final et déclencher le mail au client
+  // Actions spécifiques Lagriffe :
+  //  - contact / recall (venus du site public) : marquer traité
+  //  - final_ready_review : valider le site final et envoyer le mail
   extraActions: (intake) => {
+    if (intake.status === 'contact' || intake.status === 'recall') {
+      const done = !!(intake.payload && intake.payload.handled_at);
+      return [{
+        id: 'pv-act-contact-handled',
+        label: done ? 'Remettre à traiter' : 'Marquer traité ✓',
+        cls: done ? 'btn-secondary' : 'btn-primary',
+        onClick: async ({ intake, setMsg, call, reload }) => {
+          const r = await call('mark_contact_handled', { id: intake.id, handled: !done });
+          if (r && r.ok) {
+            Toast.success(r.message || 'C’est noté.');
+            await reload();
+          } else {
+            setMsg('Échec.', true);
+            Toast.friendlyError(r && r.error, 'Impossible de mettre à jour cette demande.');
+          }
+        },
+      }];
+    }
     if (intake.status !== 'final_ready_review') return [];
     return [{
       id: 'pv-act-approve-final',
