@@ -144,8 +144,8 @@ const Prospection = {
       wrap.innerHTML = `
         <div class="pr-grid-3">
           ${this._input('metier', 'Métier', 'ex : plombier, fleuriste')}
-          ${this._input('departement', 'Département', 'ex : 71')}
-          ${this._input('volume', 'Combien ?', '100', 'number')}
+          ${this._input('departement', 'Département (numéro)', 'ex : 71, 35, 29…')}
+          ${this._input('volume', 'Combien ? (nombre de fiches)', '100', 'number')}
         </div>
         <label class="pr-opt">
           <input type="checkbox" id="pr-f-sites_pourris" />
@@ -197,7 +197,7 @@ const Prospection = {
     const span = label.querySelector('span');
     if (span) {
       span.textContent = isCreators
-        ? '🧪 Essai indisponible pour les créateurs : cet outil enregistre pendant sa recherche. Mets un petit « Combien » pour tester.'
+        ? '🧪 Essai indisponible pour les créateurs : cet outil enregistre pendant sa recherche. Pour tester, mets un petit « Combien » (5 ou 10).'
         : '🧪 Faire un essai d’abord (rien n’est enregistré — juste un aperçu)';
     }
     label.title = isCreators ? ''
@@ -666,9 +666,9 @@ const Prospection = {
     wrap.querySelectorAll('[data-cancel-id]').forEach(b => {
       b.onclick = async () => {
         const ok = await Dialog.confirm(
-          'La recherche n’est pas arrêtée : elle continue côté serveur et ses ' +
-          'fiches seront quand même versées dans ta base. Tu ne la verras ' +
-          'simplement plus dans cette liste.',
+          'La recherche n’est pas arrêtée : elle continue en arrière-plan et ' +
+          'les fiches trouvées arriveront quand même dans « Tous les ' +
+          'prospects ». Tu ne la verras simplement plus dans cette liste.',
           { title: 'Ne plus suivre cette recherche ?', okLabel: 'Ne plus suivre',
             cancelLabel: 'Continuer à suivre' });
         if (!ok) return;
@@ -732,10 +732,10 @@ const Prospection = {
       : status === 'error' && counts.found ? 'error' : 'pending';
     const pushDetail = status !== 'handed' ? ''
       : dry
-        ? `${counts.would_push || 0} seraient ajoutés (${counts.would_create || 0} nouveaux, ${counts.would_merge || 0} fusions) — rien d'enregistré`
+        ? `${counts.would_push || 0} seraient ajoutés (${counts.would_create || 0} nouveaux, ${counts.would_merge || 0} déjà connus) — rien d'enregistré`
       : (m.source === 'createurs'
           ? 'rangés dans la base'
-          : `${counts.pushed || 0} rangés (${counts.created || 0} nouveaux, ${counts.merged || 0} fusionnés)`);
+          : `${counts.pushed || 0} rangés (${counts.created || 0} nouveaux, ${counts.merged || 0} déjà connus, regroupés)`);
 
     const ap = m.autopilot || {};
     const apState = status !== 'handed' ? 'pending' : (ap.kicked ? 'done' : 'pending');
@@ -791,7 +791,8 @@ const Prospection = {
     if (!q || !q.total) return '';
     const d = q.dropped || {};
     const labels = { no_email: 'sans email', bad_email: 'email invalide',
-                     placeholder_name: 'nom fantôme', duplicate_in_batch: 'doublon' };
+                     placeholder_name: 'faux nom (test, démo…)',
+                     duplicate_in_batch: 'en double' };
     const parts = Object.entries(d).filter(([, n]) => n > 0)
       .map(([k, n]) => `${n} ${labels[k] || k}`);
     return `

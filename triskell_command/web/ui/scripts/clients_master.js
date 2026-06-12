@@ -41,8 +41,9 @@ const ClientsMaster = {
             <div class="hero-kicker mb-2">FICHIER CLIENTS</div>
             <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Tous tes clients en un seul endroit.</h1>
             <p class="hero-subtitle">
-              Chaque personne qui passe par Triskell — prospect, client, contact d'un formulaire de site —
-              regroupée ici, avec son historique complet.
+              Chaque personne qui passe par Triskell — contact, prospect, client (= a acheté) —
+              regroupée ici, avec son historique complet. Le démarchage, lui, se pilote
+              depuis « Tous les prospects ».
             </p>
           </div>
           <div class="flex flex-wrap gap-2 sm:gap-3">

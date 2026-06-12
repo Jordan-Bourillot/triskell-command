@@ -297,6 +297,12 @@ const Obelisk = {
           </div>
         </header>
 
+        <div class="mb-4 text-[12px] text-text-muted px-3 py-2 rounded-lg bg-accent/5 border border-accent/20" style="text-wrap: pretty">
+          🧭 Outil avancé. Pour le parcours simple (recherche + envoi qui s'enchaînent
+          tout seuls), passe par
+          <button type="button" class="text-accent underline hover:no-underline" onclick="App.show('prospection')">Lancer une prospection</button>.
+        </div>
+
         <nav class="ob-tabs">
           <button data-ob-tab="search"   class="ob-tab is-active">Nouvelle recherche</button>
           <button data-ob-tab="settings" class="ob-tab">Réglages</button>
@@ -329,6 +335,7 @@ const Obelisk = {
           <div class="ob-header-text">
             <div class="hero-kicker">PROSPECTION</div>
             <h1 class="ob-title">Tous tes prospects, peu importe leur source.</h1>
+            <p class="text-xs text-text-muted mt-1" style="text-wrap: pretty">Un <b>prospect</b> = un contact qu'on démarche, pas encore client. Ceux qui ont acheté sont dans « Tous les clients ».</p>
           </div>
           <div class="ob-header-actions">
             <div id="ob-stats-inline" class="ob-stats-inline"></div>

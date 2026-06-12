@@ -515,7 +515,8 @@ const Autopilot = {
             <div class="text-xs text-text-muted" style="text-wrap: pretty">
               Coche les boîtes que l'autopilote a le droit d'utiliser et fixe un plafond
               par boîte sur les dernières 24h. À chaque envoi, l'app tire au hasard parmi
-              les boîtes encore disponibles — ça protège la réputation de chaque adresse.
+              les boîtes encore disponibles — une adresse qui envoie trop d'un coup finit
+              classée en indésirable, répartir protège chacune.
             </div>
           </div>
           <div id="ap-sender-summary" class="text-xs text-text-muted whitespace-nowrap"></div>
@@ -660,7 +661,7 @@ const Autopilot = {
                         bg-warning/10 border border-warning/40 text-[11px]
                         font-semibold text-warning-text" role="alert"
                  style="text-wrap: pretty">
-              ⚠ Des mails peuvent partir sans aucune relecture
+              ⚠ Des mails peuvent partir sans aucune relecture — si l'IA se trompe (ton, contenu), le mail part quand même
             </div>` : ''}
         `}
 
@@ -1873,9 +1874,9 @@ const Autopilot = {
           'send_delay_seconds', String(c.send_delay_seconds ?? 0), 0, 3600)}
         <div class="text-xs text-text-muted -mt-2 mb-3" style="text-wrap: pretty">
           0 = pas d'attente (les mails partent à la chaîne). Mettre 30 à 60
-          secondes pour étaler la cadence et protéger la réputation de tes
-          adresses (anti-spam). S'applique aussi au bouton « Tout envoyer »
-          de la page Brouillons.
+          secondes pour étaler la cadence : une adresse qui envoie en rafale
+          finit classée en indésirable par les boîtes mail. S'applique aussi
+          au bouton « Tout envoyer » de la page Brouillons.
         </div>
         <div class="grid grid-cols-2 gap-3">
           ${this._inputNumber('Heure de début (0-23)', 'send_hour_start',

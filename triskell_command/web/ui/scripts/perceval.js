@@ -166,12 +166,17 @@ const Perceval = {
    *  Perceval.say('✓ Mission lancée')  (alias : Guide.say). */
   say(msg, ms = 6000, opts = {}) {
     this.eventMsg = msg;
+    // opts.choices = [{label, view}] : des boutons sous le message — utilisé
+    // par la main tendue (« tu cherches quelque chose ? ») pour proposer
+    // des destinations cliquables au lieu d'une question ouverte.
+    this.eventChoices = Array.isArray(opts.choices) ? opts.choices : null;
     this._wake();
     this._setMood('parle');
     this._renderBubble();
     if (this.eventTimer) clearTimeout(this.eventTimer);
     this.eventTimer = setTimeout(() => {
       this.eventMsg = null;
+      this.eventChoices = null;
       this._refreshMood();
       this._renderBubble();
     }, ms);
@@ -400,7 +405,13 @@ const Perceval = {
       localStorage.setItem('triskell.perceval.wander.last', String(now));
       localStorage.setItem('triskell.perceval.wander.pending', '1');
     } catch (e) { /* sans stockage, on propose quand même */ }
-    this.say('Tu cherches quelque chose ? Écris-le-moi là, en bas à droite — je t’emmène.', 9000);
+    this.say('Tu cherches quelque chose ? Dis-le-moi — ou choisis :', 16000, {
+      choices: [
+        { label: '🔎 Trouver des clients', view: 'prospection' },
+        { label: '↩ Lire mes réponses',    view: 'replies' },
+        { label: '📊 Voir mes chiffres',   view: 'funnel' },
+      ],
+    });
   },
 
   /** L'utilisateur a saisi la main tendue (il m'a parlé) : on oublie tout. */
@@ -738,6 +749,10 @@ const Perceval = {
     let mid = '';
     if (this.eventMsg) {
       mid = `<div class="pv-event">${this._esc(this.eventMsg)}</div>`;
+      if (Array.isArray(this.eventChoices) && this.eventChoices.length) {
+        mid += `<div class="pv-actions">${this.eventChoices.map((c, i) =>
+          `<button class="pv-chip" data-go-choice="${i}">${this._esc(c.label)} →</button>`).join('')}</div>`;
+      }
     } else if (this._dbDown()) {
       mid = `<div class="pv-status">Connexion à la base impossible — les chiffres reviennent dès qu’elle répond.</div>`;
     } else if (rec && rec.view === this.view && vt.inview) {
@@ -772,6 +787,19 @@ const Perceval = {
       const v = go.dataset.go;
       if (typeof App !== 'undefined' && App.show) App.show(v);
     };
+    // Choix cliquables de la main tendue : cliquer = main saisie.
+    bubble.querySelectorAll('[data-go-choice]').forEach(b => {
+      b.onclick = () => {
+        const c = (this.eventChoices || [])[parseInt(b.dataset.goChoice, 10)];
+        if (!c) return;
+        this._wanderReward();
+        this.eventMsg = null;
+        this.eventChoices = null;
+        if (typeof App !== 'undefined' && App.show) App.show(c.view);
+        this._refreshMood();
+        this._renderBubble();
+      };
+    });
   },
 
   _setCollapsed(v) {

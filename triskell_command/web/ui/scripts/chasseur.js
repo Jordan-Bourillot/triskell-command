@@ -116,10 +116,15 @@ const Chasseur = {
             Choisis un secteur, une zone, un volume. Le Chasseur interroge la
             base officielle des entreprises (data.gouv), retrouve leur site,
             extrait les mails publiés sur leur page contact. À la fin, le bouton
-            <b>« Envoyer à l’Auto-pilote »</b> verse la récolte dans la base
-            commune <b>« Tous les prospects »</b>, prête pour l’envoi.
+            <b>« Ajouter à ma base de prospects »</b> verse la récolte dans
+            <b>« Tous les prospects »</b>, prête pour l’envoi.
           </p>
         </header>
+        <div class="mb-4 text-[12px] text-text-muted px-3 py-2 rounded-lg bg-accent/5 border border-accent/20" style="text-wrap: pretty">
+          🧭 Outil avancé. Pour le parcours simple (recherche + envoi qui s'enchaînent
+          tout seuls), passe par
+          <button type="button" class="text-accent underline hover:no-underline" onclick="App.show('prospection')">Lancer une prospection</button>.
+        </div>
 
         <div class="grid lg:grid-cols-[340px,1fr] gap-5">
           <!-- ============== Colonne gauche : nouvelle chasse + historique ============== -->
@@ -715,12 +720,12 @@ const Chasseur = {
             ${pushedAt ? `
               <span class="text-[11px] font-semibold text-success-text whitespace-nowrap"
                     title="Ces prospects sont déjà dans la base commune « Tous les prospects »${pushedAt.when ? ` (versés le ${pushedAt.when})` : ''}. Re-cliquer ne crée pas de doublon : les fiches identiques fusionnent.">
-                ✓ Déjà envoyé à l’Auto-pilote
+                ✓ Déjà dans ta base de prospects
               </span>` : ''}
             ${isDone && withMail > 0 ? `
               <button id="ch-push" class="btn btn-primary" title="Verse les prospects avec mail dans la base commune « Tous les prospects » : l’Auto-pilote les prendra au prochain passage pour rédiger et envoyer.">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12l14-7-3 14-4-6-7-1z"/></svg>
-                Envoyer à l'Auto-pilote
+                Ajouter à ma base de prospects
               </button>
               <button id="ch-export" class="btn btn-secondary" title="Télécharge un fichier CSV (à glisser dans Le Convoi, par exemple).">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -943,10 +948,10 @@ const Chasseur = {
       return;
     }
     const ok = await Dialog.confirm(
-      `Envoyer ${withMail} prospect${withMail > 1 ? 's' : ''} dans la base commune ` +
+      `Ajouter ${withMail} prospect${withMail > 1 ? 's' : ''} dans ta base ` +
       `« Tous les prospects » ? L’Auto-pilote les prendra au prochain passage pour ` +
       `rédiger et envoyer les mails. Les fiches identiques fusionnent, pas de doublon.`,
-      {title: 'Envoyer à l’Auto-pilote', okLabel: 'Envoyer', cancelLabel: 'Annuler'}
+      {title: 'Ajouter à ta base de prospects', okLabel: 'Ajouter', cancelLabel: 'Annuler'}
     );
     if (!ok) return;
     const btn = document.getElementById('ch-push');

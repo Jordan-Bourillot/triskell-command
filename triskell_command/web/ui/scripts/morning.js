@@ -1197,7 +1197,7 @@ const Morning = {
           delta: `<strong>${sentY}</strong> hier · <strong>${sentW}</strong> sur 7 jours`,
           spark: daily,
           onClick: `App.show('mails', { tab: 'sent' })`,
-          hint: 'Voir les messages envoyés',
+          hint: 'Mails de prospection partis aujourd’hui — clic pour les voir. Le volume normal dépend du plafond réglé dans l’Auto-pilote.',
         })}
         ${this._kpi({
           label: 'Réponses aujourd’hui',
@@ -1206,7 +1206,7 @@ const Morning = {
           delta: `<strong>${repY}</strong> hier · taux ${sentY ? Math.round(100*repY/sentY) : 0} %`,
           tone: repT > 0 ? 'success' : '',
           onClick: `if(window.Replies){Replies.filter='all';} App.show('replies')`,
-          hint: 'Voir toutes les réponses',
+          hint: 'Réponses reçues aujourd’hui — clic pour les lire. Repère : 2 à 5 réponses pour 100 mails, c’est la norme en prospection à froid.',
         })}
         ${this._kpi({
           label: 'Intéressés en file',
@@ -1214,7 +1214,7 @@ const Morning = {
           delta: nInt === 0 ? 'rien à relancer là tout de suite' : 'à recontacter — chaud',
           tone: nInt > 0 ? 'success' : '',
           onClick: `if(window.Replies){Replies.filter='interested';} App.show('replies')`,
-          hint: 'Voir les prospects intéressés',
+          hint: 'Prospects qui ont répondu « intéressé » et attendent TA réponse — à traiter en priorité, dans les 2 h c’est l’idéal.',
         })}
         ${this._kpi({
           label: 'Brouillons à valider',
@@ -1222,7 +1222,7 @@ const Morning = {
           delta: nDrafts === 0 ? 'rien en attente' : 'prêts à approuver',
           tone: nDrafts > 0 ? 'accent' : '',
           onClick: `App.show('drafts')`,
-          hint: 'Voir les brouillons',
+          hint: 'Mails préparés par l’IA qui attendent ton OK avant de partir — clic pour les valider ou les corriger.',
         })}
       </div>
     `;

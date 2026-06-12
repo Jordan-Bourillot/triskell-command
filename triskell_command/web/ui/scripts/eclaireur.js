@@ -90,12 +90,22 @@ const Eclaireur = {
             « Enregistrer » garde ces réglages pour les prochaines fois, sans rien lancer.
             « Lancer la recherche » les enregistre aussi, puis démarre tout de suite.
           </div>
+          <div class="mt-4 text-[12px] text-text-muted px-3 py-2 rounded-lg bg-accent/5 border border-accent/20" style="text-wrap: pretty">
+            🧭 Outil avancé : il complète les fiches DÉJÀ dans ta base. Pour trouver
+            de nouveaux prospects et enchaîner l'envoi, passe par
+            <button type="button" class="text-accent underline hover:no-underline" onclick="App.show('prospection')">Lancer une prospection</button>.
+          </div>
         </div>
 
         <div id="ec-form" class="space-y-8"></div>
 
         <div class="mt-10">
-          <div class="section-label">Journal de la recherche</div>
+          <div class="section-label flex items-center gap-2">Journal de la recherche
+            <span id="ec-running-badge" class="hidden text-[11px] font-semibold text-accent normal-case tracking-normal">
+              <span class="inline-block w-3 h-3 rounded-full border-2 border-accent/40 border-t-accent animate-spin align-[-2px]"></span>
+              recherche en cours — le journal avance tout seul
+            </span>
+          </div>
           <div id="ec-log" data-empty="1" aria-live="polite"
                class="card p-5 font-mono text-xs leading-relaxed
                       text-text-secondary whitespace-pre-wrap
@@ -491,6 +501,9 @@ const Eclaireur = {
       stop.disabled = !!stopRequested;
       stop.textContent = stopRequested ? 'Arrêt en cours…' : '⏹ Arrêter';
     }
+    // Badge « en cours » à côté du journal : c'est là que les yeux sont.
+    const badge = document.getElementById('ec-running-badge');
+    if (badge) badge.classList.toggle('hidden', !running);
   },
 
   _appendLog(line) {

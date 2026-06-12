@@ -479,8 +479,10 @@ const Drafts = {
           .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
       : '';
     // Info-bulle du bouton Approuver : dit clairement ce qui va se passer.
+    // Les deux libellés diffèrent parce que le devenir du mail diffère :
+    // Convoi = il rejoint la file de sa campagne, ailleurs = envoi direct.
     const approveTitle = r.source === 'convoy'
-      ? 'Approuver : le mail part au rythme du Convoi'
+      ? 'Approuver : le mail rejoint la file de sa campagne du Convoi et partira à son rythme (pas immédiatement)'
       : 'Approuver : le mail part après 5 secondes (le temps d’annuler)';
     return `
       <article class="card p-4 sm:p-7"
@@ -791,7 +793,7 @@ const Drafts = {
     const s = String(source || '').toLowerCase();
     const direct = {
       web:           'page contact ou mentions légales du site officiel',
-      web_inferred:  'adresse devinée à partir du domaine du site (non vérifiée)',
+      web_inferred:  'adresse devinée à partir du domaine du site — pas garantie : si elle est fausse, le mail reviendra et la fiche sera marquée, sans gravité',
       sirene:        'annuaire d’entreprises SIRENE',
       maps:          'fiche Google Maps de l’établissement',
       file:          'fichier importé',

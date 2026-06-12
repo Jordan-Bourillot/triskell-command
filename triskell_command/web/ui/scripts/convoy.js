@@ -209,6 +209,11 @@ const Convoy = {
                 Glisse un PDF, Word, Excel ou image avec tes contacts.
                 L'app les extrait, adapte tes offres à chacun, et prépare les mails.
               </p>
+              <p class="text-xs text-text-muted mt-2" style="text-wrap: pretty">
+                🧭 Tu as déjà une liste ? C'est ici. Tu veux que l'app trouve
+                elle-même les contacts ?
+                <button type="button" class="text-accent underline hover:no-underline" onclick="App.show('prospection')">Lancer une prospection</button>.
+              </p>
             </div>
             ${typeof Help !== 'undefined' ? Help.button('convoy') : ''}
           </div>
@@ -669,6 +674,26 @@ const Convoy = {
     };
   },
 
+  // Fichier d'exemple : un petit CSV (BOM UTF-8 + point-virgule → s'ouvre
+  // proprement dans Excel français) avec les colonnes que l'app sait lire.
+  _downloadSampleFile() {
+    const rows = [
+      ['Raison sociale', 'Prénom', 'Email', 'Téléphone', 'Ville', 'Secteur'],
+      ['Boulangerie Martin', 'Paul', 'contact@boulangerie-martin.fr', '02 99 00 00 00', 'Rennes', 'Boulangerie'],
+      ['Garage Dupont', 'Julie', 'julie@garage-dupont.fr', '02 98 00 00 00', 'Brest', 'Garage automobile'],
+      ['Cabinet Le Goff', 'Marc', 'accueil@cabinet-legoff.fr', '02 97 00 00 00', 'Vannes', 'Expertise comptable'],
+    ];
+    const csv = String.fromCharCode(0xFEFF)
+      + rows.map(r => r.map(v => `"${v}"`).join(';')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'exemple-liste-convoi.csv';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) {} }, 500);
+  },
+
   // ---- Étape 1 : Import --------------------------------------------
   _stepImport(c) {
     const has = !!c.source_file;
@@ -692,6 +717,12 @@ const Convoy = {
           </div>
           <input id="cv-file" type="file" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.tsv,.txt,.md,.png,.jpg,.jpeg,.bmp,.tif,.tiff,.webp"
                  class="hidden" />
+        </div>
+        <div class="text-[11px] text-text-muted mt-2 text-center">
+          Pas sûr du format ?
+          <button type="button" class="text-accent underline hover:no-underline"
+                  onclick="Convoy._downloadSampleFile()">Télécharger un fichier d'exemple</button>
+          (à remplir, puis à glisser ici).
         </div>
 
         ${preview ? `

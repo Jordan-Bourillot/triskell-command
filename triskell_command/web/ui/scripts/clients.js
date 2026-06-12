@@ -27,7 +27,7 @@ const Clients = {
             <div class="min-w-0 flex-1">
               <div class="hero-kicker mb-2">CLIENTS</div>
               <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Tes projets clients en cours.</h1>
-              <p class="hero-subtitle">De la commande à la clôture. Tu fais avancer les cartes au fil du travail.</p>
+              <p class="hero-subtitle">De la commande à la clôture. Tu fais avancer les cartes au fil du travail. Un <b>projet</b> = un chantier pour un client, créé depuis une réponse intéressée ou une vente.</p>
             </div>
             ${Help.button('clients')}
           </div>
