@@ -12,7 +12,7 @@
   // Texte par défaut. Calé sur view_id. Pour la boîte mail, on distingue
   // les onglets via data-tab (inbound / sent / reply).
   const DEFAULT_HINTS = {
-    morning: "Ton tableau de bord du jour. Tu y vois l’heure, la mission prioritaire, 4 grands chiffres clés sur 7 jours, les relances LinkedIn à faire et les alertes. Boutons rapides pour composer un mail, ouvrir Brain, appeler Claude ou lancer le mode Concentration.",
+    morning: "Ton tableau de bord du jour. Tu y vois l’heure, la mission prioritaire, 4 grands chiffres clés sur 7 jours, les relances LinkedIn à faire et les alertes. Boutons rapides pour rédiger un mail, prendre une note rapide, ouvrir Perceval (ton copilote, à l’écrit ou à la voix) ou lancer le mode Concentration.",
     mails: "Rédiger un mail : le composeur s’ouvre directement. Tu écris (ou tu pars d’un modèle), tu choisis l’adresse d’envoi, les pièces jointes et la signature, puis tu envoies tout de suite ou tu programmes pour plus tard.",
     'mails:inbound': "Boîte de réception : tous les mails entrants captés par l’app. Pour l’instant ce sont surtout les réponses de prospects (le reste arrivera plus tard).",
     'mails:sent': "Tous les mails envoyés depuis l’app : prospection, suivi après-vente, bienvenue client, notifications internes. Filtrable par adresse expéditrice.",

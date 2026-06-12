@@ -263,6 +263,27 @@
 
       <!-- Écosystème, Brain et Allô Claude déplacés dans la quickbar de la Cockpit. -->
 
+      <!-- Recherche + aide TOUJOURS visibles : l'audit débutant (12/06/2026)
+           a montré que Ctrl+K et le « ? » cachés n'étaient jamais découverts.
+           Câblage dans app.js (GlobalSearch.open / Help.show). -->
+      <div class="px-3 pb-1 flex items-center gap-1.5">
+        <button id="sidebar-search-btn" type="button"
+                class="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 rounded-lg
+                       bg-bg border border-border text-text-muted text-[12px]
+                       hover:border-accent/50 hover:text-text transition-colors"
+                title="Rechercher partout : écrans, clients, mails, notes… (Ctrl+K)">
+          <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <span class="truncate">Rechercher…</span>
+          <kbd class="ml-auto shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-border bg-surface text-text-muted">Ctrl K</kbd>
+        </button>
+        <button id="sidebar-help-btn" type="button"
+                class="w-[34px] h-[34px] shrink-0 flex items-center justify-center rounded-lg
+                       bg-bg border border-border text-text-muted text-sm font-bold
+                       hover:border-accent/50 hover:text-accent transition-colors"
+                title="Aide de l'écran affiché"
+                aria-label="Aide de l'écran affiché">?</button>
+      </div>
+
       <!-- Sections de navigation -->
       <nav class="flex-1 overflow-y-auto px-3 pt-3 pb-4 space-y-6">
         <div>

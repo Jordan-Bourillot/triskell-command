@@ -24,7 +24,7 @@ const ShortcutsHelp = {
     {
       group: 'Assistant & équipe',
       items: [
-        { keys: ['Ctrl', 'Espace'], mac: ['⌃', 'Espace'], desc: 'Ouvrir le copilote (l’assistant qui répond et agit)' },
+        { keys: ['Ctrl', 'Espace'], mac: ['⌃', 'Espace'], desc: 'Ouvrir Perceval (le copilote qui répond et agit)' },
         { keys: ['Ctrl', 'J'], mac: ['⌃', 'J'], desc: 'Ouvrir le chat avec Thomas' },
         { keys: ['Ctrl', 'B'], mac: ['⌃', 'B'], desc: 'Nouvelle note rapide (Boîte à idées)' },
       ],

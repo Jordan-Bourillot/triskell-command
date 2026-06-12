@@ -205,7 +205,7 @@ const Claude = {
         // (pendingAdvice) pour s’afficher en tête à la prochaine ouverture.
         if (typeof Toast !== 'undefined' && Toast.show) {
           const texte = [advice.headline, advice.advice].filter(Boolean).join(' — ');
-          Toast.show(texte, { type: 'info', title: '💡 Allô Claude', duration: 12000 });
+          Toast.show(texte, { type: 'info', title: '💡 Perceval', duration: 12000 });
         }
       }
     } catch (e) { /* silencieux : la veille réessaiera dans 60 s */ }
@@ -289,7 +289,7 @@ const Claude = {
     overlay.innerHTML = `
       <div class="modal-card relative bg-surface sm:rounded-3xl shadow-hero
                   w-full sm:max-w-2xl h-full sm:h-auto sm:max-h-[85vh] overflow-hidden flex flex-col"
-           role="dialog" aria-modal="true" aria-label="Allô Claude"
+           role="dialog" aria-modal="true" aria-label="Perceval"
            style="border: 1px solid hsl(var(--border));">
         <!-- Header -->
         <div class="px-5 pt-5 pb-3 sm:px-8 sm:pt-8 sm:pb-4 flex items-center gap-3 sm:gap-4 border-b border-border">
@@ -303,11 +303,11 @@ const Claude = {
             </svg>
           </div>
           <div class="flex-1 min-w-0">
-            <div class="hero-kicker mb-1">ALLÔ CLAUDE</div>
+            <div class="hero-kicker mb-1">PERCEVAL</div>
             <div class="font-sans text-base sm:text-xl font-bold leading-tight tracking-tight">Quelle est ma prochaine action&nbsp;?</div>
           </div>
           <button class="text-text-muted hover:text-text text-2xl leading-none w-8 h-8 shrink-0" id="claude-close"
-                  title="Fermer" aria-label="Fermer la fenêtre Allô Claude">×</button>
+                  title="Fermer" aria-label="Fermer la fenêtre Perceval">×</button>
         </div>
 
         <!-- Body -->
@@ -318,7 +318,7 @@ const Claude = {
           <div class="hero-kicker mb-2">OU POSE UNE QUESTION LIBRE</div>
           <div class="flex flex-col sm:flex-row gap-2 items-stretch">
             <button id="claude-mic-btn" type="button" class="claude-mic-btn"
-                    title="Parler à Claude (dictée vocale)" aria-label="Dicter ma question">🎤</button>
+                    title="Dicter au lieu de taper" aria-label="Dicter ma question">🎤</button>
             <button id="claude-convo-btn" type="button" class="claude-mic-btn"
                     title="Conversation vocale en continu" aria-label="Démarrer une conversation vocale"
                     style="font-size:16px;">📞</button>

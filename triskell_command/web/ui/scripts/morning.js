@@ -2,7 +2,7 @@
  *
  * Hiérarchie :
  *   1. Bandeau de statut (date, heure live, voyants système)
- *   2. Quickbar (Composer, Brain, Allô Claude, Concentration)
+ *   2. Quickbar (Composer, Note rapide, Perceval, Concentration)
  *   3. HERO — la mission du jour (priorité unique mise en avant)
  *   4. Grille KPIs (4 chiffres clés énormes + sparkline 7 jours)
  *   5. Bloc relances LinkedIn (si il y a des actions à faire)
@@ -85,20 +85,20 @@ const Morning = {
             </svg>
             Rédiger
           </button>
-          <button id="m-brain" class="btn btn-secondary" title="Brain — note rapide (Ctrl+B)">
+          <button id="m-brain" class="btn btn-secondary" title="Note rapide — vide ta tête dans la Boîte à idées (Ctrl+B)">
             <svg class="w-4 h-4" style="color:#a855f7" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
               <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
               <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
             </svg>
-            Brain
+            Note rapide
           </button>
-          <button id="m-allo-claude" class="btn btn-secondary" title="Allô Claude">
-            <svg class="w-4 h-4" style="color:#06b6d4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 12a8 8 0 0 1-11.7 7.1L4 20.5l1.4-5.3A8 8 0 1 1 21 12z"/>
-              <path d="M12 8.5v3M12 12.5v3M8.5 12h3M12.5 12h3" stroke-width="1.6"/>
+          <button id="m-allo-claude" class="btn btn-secondary" title="Perceval — ton copilote : il répond et agit, à l'écrit ou à la voix (Ctrl+Espace)">
+            <svg class="w-4 h-4" style="color:#8b5cf6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2l8 3.5v5.5c0 5-3.4 8.6-8 11-4.6-2.4-8-6-8-11V5.5z"/>
+              <path d="M12 7.5v5M9.5 10h5" stroke-width="1.6"/>
             </svg>
-            Allô Claude
+            Perceval
           </button>
           <button id="m-focus" class="btn btn-secondary" title="Mode Concentration">
             <svg class="w-4 h-4 text-danger-text" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
@@ -390,8 +390,8 @@ const Morning = {
       const brainBtn = document.getElementById('m-brain');
       const alloBtn  = document.getElementById('m-allo-claude');
       const composeBtn = document.getElementById('m-compose-mail');
-      if (brainBtn)   window.NewBadge.attach(brainBtn,   'cockpit-brain-v1');
-      if (alloBtn)    window.NewBadge.attach(alloBtn,    'cockpit-allo-claude-v1');
+      if (brainBtn)   window.NewBadge.attach(brainBtn,   'cockpit-note-rapide-v1');
+      if (alloBtn)    window.NewBadge.attach(alloBtn,    'cockpit-perceval-v1');
       if (composeBtn) window.NewBadge.attach(composeBtn, 'cockpit-compose-choice-v1');
       if (focusBtn)   window.NewBadge.attach(focusBtn,   'cockpit-focus-v1');
     }

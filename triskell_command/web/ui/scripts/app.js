@@ -303,6 +303,25 @@ const App = {
     const launcherBtn = document.getElementById('launcher-trigger');
     if (launcherBtn) launcherBtn.addEventListener('click', () => Launcher.open());
 
+    // Barre « Rechercher » + bouton « ? » du haut de la sidebar : les
+    // versions VISIBLES de Ctrl+K et de l'aide d'écran (audit débutant).
+    const sidebarSearch = document.getElementById('sidebar-search-btn');
+    if (sidebarSearch) sidebarSearch.addEventListener('click', () => {
+      this.closeMobileSidebar();
+      if (typeof GlobalSearch !== 'undefined' && GlobalSearch.open) GlobalSearch.open();
+    });
+    const sidebarHelp = document.getElementById('sidebar-help-btn');
+    if (sidebarHelp) sidebarHelp.addEventListener('click', () => {
+      this.closeMobileSidebar();
+      // Aide de l'écran affiché ; si cet écran n'a pas de fiche d'aide,
+      // on ouvre la visite guidée (personne ne reste devant un bouton mort).
+      if (typeof Help !== 'undefined' && Help.tips && Help.tips[this.currentView]) {
+        Help.show(this.currentView);
+      } else if (typeof Tutorial !== 'undefined' && Tutorial.open) {
+        Tutorial.open();
+      }
+    });
+
     // Bind bouton "Brain" → ouvre direct la modale nouvelle note
     const brainBtn = document.getElementById('brain-trigger');
     if (brainBtn) brainBtn.addEventListener('click', () => {
