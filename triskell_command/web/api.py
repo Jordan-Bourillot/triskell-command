@@ -1473,10 +1473,16 @@ class Api:
                 # (has_recent_send via extra->>to) ne voit pas les envois
                 # qui ne le portent pas. "from" sert aux relances : elles
                 # repartent de la MÊME adresse que le mail initial.
+                # "body_html" : la version riche (boutons/mise en page) reçue
+                # par le prospect — sans elle, l'écran Mails montrait le mail
+                # validé en texte nu alors que l'envoi était beau (remonté par
+                # Jordan le 12/06). Même plafond que email_history_log.
                 "extra": {"to": to,
                           "from": smtp_cfg.get("from_email", ""),
                           "from_draft_id": draft_id,
-                          "approved_from_sas": True},
+                          "approved_from_sas": True,
+                          "has_html": bool(body_html),
+                          "body_html": (body_html or "")[:80_000]},
                 "created_by": client.user_id,
             })).execute()
         except Exception as exc:
