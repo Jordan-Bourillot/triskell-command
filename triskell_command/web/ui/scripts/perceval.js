@@ -609,12 +609,18 @@ const Perceval = {
     host.dataset.mood = this.mood;
     host.innerHTML = `
       <div id="pv-bubble" role="status" aria-live="polite"></div>
-      <form id="pv-ask" autocomplete="off">
-        <input id="pv-ask-input" type="text" maxlength="600"
-               placeholder="Dis-moi ce que tu veux faire…"
-               aria-label="Écrire à ${this.name}"/>
-        <button type="submit" title="Envoyer à ${this.name}" aria-label="Envoyer">➤</button>
-      </form>
+      <div id="pv-askbar">
+        <form id="pv-ask" autocomplete="off">
+          <input id="pv-ask-input" type="text" maxlength="600"
+                 placeholder="Dis-moi ce que tu veux faire…"
+                 aria-label="Écrire à ${this.name}"/>
+          <button type="submit" title="Envoyer à ${this.name}" aria-label="Envoyer">➤</button>
+        </form>
+        <button id="pv-voice-btn" type="button" class="pv-tool-btn"
+                aria-label="Voix de ${this.name}">🔇</button>
+        <button id="pv-min-btn" type="button" class="pv-tool-btn"
+                title="Réduire ${this.name} (il reste en petit)" aria-label="Réduire">▾</button>
+      </div>
       <button id="pv-body" type="button"
               title="${this.name} — ton copilote"
               aria-label="${this.name}, ton copilote">
@@ -622,6 +628,8 @@ const Perceval = {
         <span id="pv-badge" class="hidden" aria-hidden="true"></span>
       </button>`;
     document.body.appendChild(host);
+    document.getElementById('pv-voice-btn').onclick = () => this._setVoice(!this.voiceOn);
+    document.getElementById('pv-min-btn').onclick = () => this._setCollapsed(true);
     document.getElementById('pv-body').onclick = () => {
       if (this.collapsed) { this._setCollapsed(false); return; }
       this._wanderReward();
@@ -651,7 +659,7 @@ const Perceval = {
   // onde vocale sur le plastron, triskell gravé ton sur ton.
   _svgBody() {
     return `
-    <svg id="pv-svg" viewBox="0 0 140 152" aria-hidden="true">
+    <svg id="pv-svg" viewBox="20 0 104 152" aria-hidden="true">
       <g class="pv-float">
         <g class="pv-tilt">
           <path d="M70,22 L70,12" fill="none" stroke="#534AB7" stroke-width="3" stroke-linecap="round"/>
@@ -702,6 +710,13 @@ const Perceval = {
       const attn = (typeof Claude !== 'undefined' && Claude.isAttention);
       badge.classList.toggle('hidden', !(unseen > 0 || attn));
     }
+    // Le bouton voix vit dans la barre (statique) : on rafraîchit son état.
+    const vbtn = document.getElementById('pv-voice-btn');
+    if (vbtn) {
+      vbtn.textContent = this.voiceOn ? '🔊' : '🔇';
+      vbtn.title = this.voiceOn ? 'Couper sa voix'
+        : 'Activer sa voix — il lira ses messages à voix haute';
+    }
 
     if (this.collapsed) {
       host.classList.add('pv-mini');
@@ -716,71 +731,47 @@ const Perceval = {
     if (body) body.title = `${this.name} — clique pour qu’on discute`;
 
     const vt = this.VIEW_TEXTS[this.view] || {};
-    const here = vt.here || 'Triskell Command.';
     const rec = this._recommend();
     const lvl = this.level();
 
-    // Texte principal : confirmation éphémère > base injoignable > statut
-    let mid;
+    // Contenu parlé : confirmation > base injoignable > conseil sur place
+    let mid = '';
     if (this.eventMsg) {
-      mid = `<span class="pv-event">${this._esc(this.eventMsg)}</span>`;
+      mid = `<div class="pv-event">${this._esc(this.eventMsg)}</div>`;
     } else if (this._dbDown()) {
-      mid = `<span class="pv-status">Connexion à la base impossible — les chiffres reviennent dès qu’elle répond.</span>`;
+      mid = `<div class="pv-status">Connexion à la base impossible — les chiffres reviennent dès qu’elle répond.</div>`;
     } else if (rec && rec.view === this.view && vt.inview) {
-      mid = `<span class="pv-status">${this._esc(vt.inview)}</span>`;
-    } else {
-      mid = `<span class="pv-status">${this._esc(here)}</span>`;
+      mid = `<div class="pv-status">${this._esc(vt.inview)}</div>`;
     }
 
     // Chip d'action : seulement si elle mène AILLEURS (sur place, le texte suffit)
     let chip = '';
     if (rec && rec.view !== this.view) {
-      chip = `
+      chip = `<div class="pv-actions">
         <button class="pv-chip ${rec.soft ? 'pv-chip-soft' : ''}"
                 data-go="${this._esc(rec.view)}"
-                title="${this._esc(rec.why || '')}">
-          ${this._esc(rec.label)} →
-        </button>`;
+                title="${this._esc(rec.why || '')}">${this._esc(rec.label)} →</button>
+      </div>`;
     } else if (rec && rec.view === this.view && !this.eventMsg && rec.why) {
-      chip = `<span class="pv-why">${this._esc(rec.why)}</span>`;
+      chip = `<div class="pv-why">${this._esc(rec.why)}</div>`;
     }
 
     const tip = (lvl === 'decouverte' && vt.inview && (!rec || rec.view !== this.view))
       ? `<div class="pv-tipline">💡 ${this._esc(vt.inview)}</div>` : '';
 
+    // Rien à dire → pas de bulle : le perso et la barre suffisent.
+    if (!mid && !chip && !tip) {
+      bubble.classList.remove('pv-show');
+      bubble.innerHTML = '';
+      return;
+    }
     bubble.classList.add('pv-show');
-    bubble.innerHTML = `
-      <div class="pv-row">
-        ${mid}
-        ${chip}
-        <span class="pv-tools">
-          <button class="pv-btn pv-talk" title="Discuter avec ${this.name}"
-                  aria-label="Discuter avec ${this.name}">💬</button>
-          <button class="pv-btn pv-voice" title="${this.voiceOn
-            ? 'Couper sa voix'
-            : 'Activer sa voix — il lira ses messages à voix haute'}"
-                  aria-label="${this.voiceOn ? 'Couper la voix' : 'Activer la voix'}">${this.voiceOn ? '🔊' : '🔇'}</button>
-          <button class="pv-btn pv-min" title="Réduire ${this.name} (il reste en petit)"
-                  aria-label="Réduire">▾</button>
-        </span>
-      </div>
-      ${tip}`;
-
+    bubble.innerHTML = `${mid}${chip}${tip}`;
     const go = bubble.querySelector('.pv-chip[data-go]');
     if (go) go.onclick = () => {
       const v = go.dataset.go;
       if (typeof App !== 'undefined' && App.show) App.show(v);
     };
-    const talk = bubble.querySelector('.pv-talk');
-    if (talk) {
-      if (typeof Copilot !== 'undefined' && Copilot.toggle) {
-        talk.onclick = () => Copilot.toggle();
-      } else {
-        talk.style.display = 'none';
-      }
-    }
-    bubble.querySelector('.pv-voice').onclick = () => this._setVoice(!this.voiceOn);
-    bubble.querySelector('.pv-min').onclick = () => this._setCollapsed(true);
   },
 
   _setCollapsed(v) {
@@ -857,10 +848,10 @@ const Perceval = {
     s.textContent = `
       #perceval-host {
         position: fixed; z-index: 59;
-        right: 14px;
-        bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+        right: 18px;
+        bottom: calc(14px + env(safe-area-inset-bottom, 0px));
         display: flex; flex-direction: column; align-items: flex-end;
-        gap: 6px; pointer-events: none;
+        gap: 8px; pointer-events: none;
       }
       #perceval-host > * { pointer-events: auto; }
 
@@ -872,8 +863,8 @@ const Perceval = {
         transition: transform .15s ease;
       }
       #pv-body:hover { transform: translateY(-2px) scale(1.04); }
-      #pv-svg { width: 76px; height: 82px; }
-      #perceval-host.pv-mini #pv-svg { width: 44px; height: 48px; }
+      #pv-svg { width: 64px; height: 94px; display: block; }
+      #perceval-host.pv-mini #pv-svg { width: 36px; height: 53px; }
       #pv-badge {
         position: absolute; top: 2px; left: 2px;
         width: 11px; height: 11px; border-radius: 50%;
@@ -912,10 +903,11 @@ const Perceval = {
       #perceval-host[data-speaking="1"] .pv-b3 { animation: pvEq .5s ease-in-out .24s infinite; }
       #perceval-host[data-speaking="1"] .pv-b4 { animation: pvEq .5s ease-in-out .36s infinite; }
 
-      /* -- la zone « dis-moi ce que tu veux faire » -- */
+      /* -- la barre : « dis-moi ce que tu veux faire » + voix + réduire -- */
+      #pv-askbar { display: flex; align-items: center; gap: 6px; }
       #pv-ask {
         display: flex; align-items: center; gap: 4px;
-        width: 268px; padding: 4px 4px 4px 12px;
+        width: 240px; padding: 4px 4px 4px 12px;
         background: hsl(var(--surface-elevated, var(--surface)) / .94);
         backdrop-filter: blur(10px);
         border: 1px solid hsl(var(--border-strong));
@@ -929,39 +921,50 @@ const Perceval = {
         outline: none; padding: 5px 0;
       }
       #pv-ask input::placeholder { color: hsl(var(--text-muted)); }
-      #pv-ask button {
+      #pv-ask button[type="submit"] {
         flex-shrink: 0; border: 0; cursor: pointer;
         width: 26px; height: 26px; border-radius: 50%;
         background: hsl(var(--accent)); color: #fff;
         font-size: 12px; line-height: 1;
       }
-      #pv-ask button:hover { transform: scale(1.06); }
-      #perceval-host.pv-mini #pv-ask { display: none; }
+      #pv-ask button[type="submit"]:hover { transform: scale(1.06); }
+      .pv-tool-btn {
+        flex-shrink: 0; border: 1px solid hsl(var(--border-strong));
+        width: 30px; height: 30px; border-radius: 50%;
+        background: hsl(var(--surface-elevated, var(--surface)) / .94);
+        backdrop-filter: blur(10px);
+        cursor: pointer; font-size: 13px; line-height: 1;
+        color: hsl(var(--text-secondary));
+        box-shadow: 0 4px 14px rgba(15,23,42,.14);
+      }
+      .pv-tool-btn:hover { background: hsl(var(--border) / .6); }
+      #perceval-host.pv-mini #pv-askbar { display: none; }
       @media (max-width: 640px) {
-        #pv-ask { display: none; }
+        #pv-askbar { display: none; }
       }
 
-      /* -- la bulle -- */
+      /* -- la bulle : épisodique et compacte, ancrée au-dessus de la barre -- */
       #pv-bubble {
         display: none;
-        max-width: min(420px, calc(100vw - 40px));
+        max-width: min(330px, calc(100vw - 40px));
         background: hsl(var(--surface-elevated, var(--surface)) / .94);
         backdrop-filter: blur(10px);
         border: 1px solid hsl(var(--border-strong));
         border-radius: 14px; border-bottom-right-radius: 4px;
-        padding: 9px 12px;
+        padding: 10px 13px;
         box-shadow: 0 4px 18px rgba(15,23,42,.16);
-        font-size: 12.5px; color: hsl(var(--text-secondary));
+        font-size: 12.5px; line-height: 1.5;
+        color: hsl(var(--text-secondary));
+        text-wrap: pretty;
         animation: pvRise .25s ease-out;
       }
       #pv-bubble.pv-show { display: block; }
-      .pv-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-      .pv-status, .pv-event { min-width: 0; }
       .pv-event { color: hsl(var(--success)); font-weight: 600;
                   animation: pvFade .3s ease-out; }
-      .pv-why { color: hsl(var(--text-muted)); font-size: 12px; }
+      .pv-actions { margin-top: 7px; }
+      .pv-why { margin-top: 5px; color: hsl(var(--text-muted)); font-size: 12px; }
       .pv-chip {
-        flex-shrink: 0; border: 0; cursor: pointer;
+        border: 0; cursor: pointer;
         background: hsl(var(--accent)); color: #fff;
         font-size: 12px; font-weight: 700;
         padding: 5px 12px; border-radius: 999px;
@@ -971,13 +974,6 @@ const Perceval = {
                        box-shadow: 0 4px 12px hsl(var(--accent) / .4); }
       .pv-chip-soft { background: hsl(var(--accent) / .14);
                       color: hsl(var(--accent)); }
-      .pv-tools { display: inline-flex; gap: 2px; margin-left: auto; }
-      .pv-btn {
-        flex-shrink: 0; border: 0; background: transparent; cursor: pointer;
-        color: hsl(var(--text-muted)); font-size: 13px; line-height: 1;
-        padding: 4px 5px; border-radius: 6px;
-      }
-      .pv-btn:hover { background: hsl(var(--border) / .5); }
       .pv-tipline {
         margin-top: 7px; padding-top: 7px;
         border-top: 1px dashed hsl(var(--border));
@@ -1009,7 +1005,7 @@ const Perceval = {
       #pv-meet {
         position: fixed; z-index: 61;
         right: 18px;
-        bottom: calc(104px + env(safe-area-inset-bottom, 0px));
+        bottom: calc(166px + env(safe-area-inset-bottom, 0px));
         width: min(430px, calc(100vw - 32px));
         background: hsl(var(--surface-elevated, var(--surface)));
         border: 1px solid hsl(var(--border-strong));
@@ -1025,10 +1021,10 @@ const Perceval = {
                    color: hsl(var(--text-secondary)); margin-bottom: 12px; }
       .pv-m-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-      /* -- cohabitation : Perceval prend le coin, les voisins remontent -- */
-      #tc-toast-host { bottom: calc(112px + env(safe-area-inset-bottom, 0px)) !important; }
-      #thomas-fab { bottom: calc(118px + env(safe-area-inset-bottom, 0px)) !important; }
-      #perceval-host.pv-mini ~ * #tc-toast-host { bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important; }
+      /* -- cohabitation : Perceval prend le coin droit, Thomas se met
+            à sa gauche (même ligne), les notifications passent au-dessus -- */
+      #tc-toast-host { bottom: calc(160px + env(safe-area-inset-bottom, 0px)) !important; }
+      #thomas-fab { right: 100px; }
 
       /* Quand le volet de discussion est ouvert, Perceval s'efface. */
       @supports selector(:has(*)) {
@@ -1054,7 +1050,7 @@ const Perceval = {
                               to { opacity: 1; transform: translateY(0); } }
 
       @media (max-width: 640px) {
-        #pv-svg { width: 58px; height: 63px; }
+        #pv-svg { width: 50px; height: 73px; }
         .pv-tipline { display: none; }
       }
       @media (prefers-reduced-motion: reduce) {
