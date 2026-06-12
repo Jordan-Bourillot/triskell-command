@@ -2015,6 +2015,37 @@ html {
   border-color: hsl(var(--danger) / 0.6);
   background: hsl(var(--danger) / 0.06);
 }
+/* Cockpit personnalisable : blocs masquables (décision Jordan 12/06).
+   Le × n'apparaît qu'au survol du bloc — zéro bruit au repos. */
+.cockpit-block { position: relative; }
+.cockpit-block-hide {
+  position: absolute; top: 6px; right: 6px; z-index: 5;
+  width: 22px; height: 22px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; line-height: 1;
+  color: hsl(var(--text-muted));
+  background: hsl(var(--surface) / 0.85);
+  border: 1px solid hsl(var(--border));
+  opacity: 0; transition: opacity 140ms;
+  cursor: pointer;
+}
+.cockpit-block:hover .cockpit-block-hide,
+.cockpit-block-hide:focus-visible { opacity: 0.9; }
+.cockpit-block-hide:hover {
+  color: hsl(var(--danger-text));
+  border-color: hsl(var(--danger) / 0.5);
+}
+.cockpit-customize-btn {
+  width: 26px; height: 26px; border-radius: 8px; margin-right: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: hsl(var(--text-muted)); font-size: 14px;
+  border: 1px solid transparent; cursor: pointer;
+  transition: color 140ms, border-color 140ms;
+}
+.cockpit-customize-btn:hover {
+  color: hsl(var(--text));
+  border-color: hsl(var(--border));
+}
 .cockpit-mode-opt-icon {
   font-size: 15px;
   line-height: 1;

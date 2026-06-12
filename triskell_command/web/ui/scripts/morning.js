@@ -55,6 +55,9 @@ const Morning = {
           <span class="cockpit-sep"></span>
           <span class="cockpit-time" id="m-clock">--:--:--</span>
           <span style="flex:1"></span>
+          <button id="m-customize" type="button" class="cockpit-customize-btn"
+                  title="Personnaliser le Cockpit : choisir les blocs affichés"
+                  aria-label="Personnaliser le Cockpit">⚙</button>
           ${Help.button('morning')}
         </div>
 
@@ -66,7 +69,7 @@ const Morning = {
              un écran 1920 ne fait "que" ~1276px aux yeux du site. -->
         <div class="cockpit-greeting mt-5 flex items-end justify-between gap-6 flex-wrap min-[1120px]:flex-nowrap">
           <h1 class="hero-title">${userName ? `${greeting} ${nameWithCrown}.` : `${greeting}.`}</h1>
-          ${typeof DailyQuote !== 'undefined' ? DailyQuote.renderHTML() : ''}
+          ${(typeof DailyQuote !== 'undefined' && !this._hiddenBlocks().has('quote')) ? DailyQuote.renderHTML() : ''}
         </div>
         <div class="cockpit-quickbar">
           <button id="m-refresh" class="btn btn-secondary" title="Rafraîchir les chiffres">
@@ -174,6 +177,9 @@ const Morning = {
       this._loadModes();
       this._loadLinkedinActions();
     };
+    // Personnalisation du Cockpit (blocs affichés)
+    const customizeBtn = document.getElementById('m-customize');
+    if (customizeBtn) customizeBtn.onclick = () => this._openCustomize();
     // Rampe de lancement prospection
     const prospectionBtn = document.getElementById('m-prospection');
     if (prospectionBtn) prospectionBtn.onclick = () => App.show('prospection');
@@ -442,14 +448,8 @@ const Morning = {
       this._setSystemLed('ok', 'SYSTÈME · OPÉRATIONNEL');
     }
 
-    slot.innerHTML = `<div id="m-setup-slot"></div>`
-                   + this._renderHero(digest)
-                   + `<div id="m-pipelines-slot"></div>`
-                   + `<div id="m-obelisk-slot"></div>`
-                   + this._renderKpiGrid(digest)
-                   + `<div id="m-modes-slot"></div>`
-                   + this._renderAlert(digest)
-                   + `<div id="m-linkedin-slot"></div>`;
+    slot.innerHTML = this._digestLayout(digest);
+    this._wireBlockHiders();
 
     this._loadSetup();
     this._loadPipelinesActivity();
@@ -588,6 +588,111 @@ const Morning = {
     }
   },
 
+  // ---- Cockpit personnalisable (décision Jordan 12/06) ----
+  // Chaque bloc optionnel peut être masqué (× au survol, panneau ⚙) ; les
+  // choix sont mémorisés sur l'appareil. La priorité du jour, les alertes
+  // et le bloc configuration restent TOUJOURS visibles (sécurité, repères).
+  COCKPIT_BLOCKS: [
+    { key: 'quote',     label: 'Citation du jour' },
+    { key: 'pipelines', label: 'Mouvements des commandes (sites)' },
+    { key: 'obelisk',   label: 'Prospections terminées' },
+    { key: 'kpis',      label: 'Les 4 chiffres du jour' },
+    { key: 'modes',     label: 'Réponses automatiques (interrupteur)' },
+    { key: 'linkedin',  label: 'Relances LinkedIn' },
+  ],
+  _LS_BLOCKS: 'triskell.cockpit.hidden.v1',
+
+  _hiddenBlocks() {
+    try {
+      const raw = localStorage.getItem(this._LS_BLOCKS);
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch (e) { return new Set(); }
+  },
+
+  _setBlockHidden(key, hidden) {
+    const set = this._hiddenBlocks();
+    if (hidden) set.add(key); else set.delete(key);
+    try { localStorage.setItem(this._LS_BLOCKS, JSON.stringify([...set])); } catch (e) {}
+  },
+
+  // Assemblage du contenu du digest, blocs masqués exclus. Un bloc absent
+  // du DOM = ses chargements se court-circuitent tout seuls (les _loadX
+  // commencent tous par « if (!slot) return »).
+  _digestLayout(digest) {
+    const hidden = this._hiddenBlocks();
+    const wrap = (key, inner) => hidden.has(key) ? '' :
+      `<div class="cockpit-block" data-cockpit-block="${key}">
+         <button type="button" class="cockpit-block-hide" data-hide-block="${key}"
+                 title="Masquer ce bloc (réaffichable via le ⚙ en haut)">×</button>
+         ${inner}
+       </div>`;
+    return `<div id="m-setup-slot"></div>`
+      + this._renderHero(digest)
+      + wrap('pipelines', `<div id="m-pipelines-slot"></div>`)
+      + wrap('obelisk', `<div id="m-obelisk-slot"></div>`)
+      + wrap('kpis', this._renderKpiGrid(digest))
+      + wrap('modes', `<div id="m-modes-slot"></div>`)
+      + this._renderAlert(digest)
+      + wrap('linkedin', `<div id="m-linkedin-slot"></div>`);
+  },
+
+  _wireBlockHiders() {
+    document.querySelectorAll('[data-hide-block]').forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const key = b.dataset.hideBlock;
+        this._setBlockHidden(key, true);
+        const blockEl = b.closest('[data-cockpit-block]');
+        if (blockEl) blockEl.remove();
+        const def = this.COCKPIT_BLOCKS.find(x => x.key === key);
+        Toast.info(`Bloc « ${(def && def.label) || key} » masqué. Le ⚙ en haut du Cockpit le réaffiche quand tu veux.`);
+      };
+    });
+  },
+
+  _openCustomize() {
+    const hidden = this._hiddenBlocks();
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4';
+    let needRerender = false;
+    overlay.innerHTML = `
+      <div class="bg-surface rounded-2xl shadow-lift border border-border w-full max-w-md p-6">
+        <div class="hero-kicker mb-1">PERSONNALISER LE COCKPIT</div>
+        <h2 class="text-lg font-bold mb-1">Choisis ce que tu veux voir.</h2>
+        <p class="text-xs text-text-muted mb-4" style="text-wrap: pretty">
+          La priorité du jour, les alertes et la configuration restent toujours
+          affichées. Tes choix sont mémorisés sur cet appareil.
+        </p>
+        <div class="space-y-2">
+          ${this.COCKPIT_BLOCKS.map(b => `
+            <label class="flex items-center gap-3 p-2.5 rounded-lg bg-bg border border-border cursor-pointer hover:border-accent/40 transition-colors">
+              <input type="checkbox" class="w-4 h-4 accent-accent" data-block-toggle="${b.key}" ${hidden.has(b.key) ? '' : 'checked'}>
+              <span class="text-sm">${b.label}</span>
+            </label>`).join('')}
+        </div>
+        <div class="flex justify-end mt-5">
+          <button type="button" class="btn btn-primary" data-close-customize>Fermer</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => { overlay.remove(); if (needRerender) App.show('morning'); };
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+    overlay.querySelector('[data-close-customize]').onclick = close;
+    overlay.querySelectorAll('[data-block-toggle]').forEach(cb => {
+      cb.onchange = () => {
+        const key = cb.dataset.blockToggle;
+        this._setBlockHidden(key, !cb.checked);
+        if (key === 'quote') { needRerender = true; return; } // la citation vit dans le shell
+        if (cb.checked) {
+          needRerender = true; // bloc à réafficher → re-render à la fermeture
+        } else {
+          const el = document.querySelector(`[data-cockpit-block="${key}"]`);
+          if (el) el.remove();
+        }
+      };
+    });
+  },
+
   async _softRefresh() {
     const slot = document.getElementById('m-content');
     if (!slot) {
@@ -613,14 +718,8 @@ const Morning = {
     // L'écran avait raté son premier chargement (carte « hors ligne ») et
     // la connexion est revenue : on reconstruit le contenu complet.
     if (!slot.querySelector('.cockpit-hero')) {
-      slot.innerHTML = `<div id="m-setup-slot"></div>`
-                     + this._renderHero(digest)
-                     + `<div id="m-pipelines-slot"></div>`
-                     + `<div id="m-obelisk-slot"></div>`
-                     + this._renderKpiGrid(digest)
-                     + `<div id="m-modes-slot"></div>`
-                     + this._renderAlert(digest)
-                     + `<div id="m-linkedin-slot"></div>`;
+      slot.innerHTML = this._digestLayout(digest);
+      this._wireBlockHiders();
       this._loadSetup();
       this._loadPipelinesActivity();
       this._loadObeliskNotifs();
@@ -647,8 +746,10 @@ const Morning = {
     }
 
     // Alerte : peut apparaître / disparaître entre deux refresh.
-    // On la place toujours juste avant le slot LinkedIn pour préserver l'ordre.
-    const linkedinSlot = document.getElementById('m-linkedin-slot');
+    // On la place avant le bloc LinkedIn pour préserver l'ordre — et en fin
+    // de contenu si ce bloc est masqué (Cockpit personnalisable).
+    const linkedinBlock = slot.querySelector('[data-cockpit-block="linkedin"]')
+      || document.getElementById('m-linkedin-slot');
     const existingAlert = slot.querySelector('.cockpit-alert');
     const newAlertHTML = this._renderAlert(digest);
     if (newAlertHTML && newAlertHTML.trim()) {
@@ -657,7 +758,8 @@ const Morning = {
       const fresh = tmp.firstElementChild;
       if (fresh) {
         if (existingAlert) existingAlert.replaceWith(fresh);
-        else if (linkedinSlot) linkedinSlot.parentNode.insertBefore(fresh, linkedinSlot);
+        else if (linkedinBlock) linkedinBlock.parentNode.insertBefore(fresh, linkedinBlock);
+        else slot.appendChild(fresh);
       }
     } else if (existingAlert) {
       existingAlert.remove();
