@@ -708,6 +708,11 @@ Règles ABSOLUES :
    standard est UN canonical self-référentiel posé dans le fichier de la
    page de base (head_insert avec l'URL SANS paramètres). Il couvre la
    page ET toutes ses variantes. Ne réponds pas manual pour ça.
+7. Balisage FAQPage (JSON-LD) : les questions/réponses doivent reprendre
+   MOT POUR MOT un texte réellement affiché sur la page. Ton contexte ne
+   contient PAS le texte des pages (seulement titles/metas/h1) → tu ne
+   peux pas recopier une FAQ existante → réponds mode="manual" pour ce
+   type de demande. Une FAQ reformulée ou inventée = sanction Google.
 
 Types de patch autorisés (page_path = le CHEMIN DE L'URL de la page :
 "/", "/demo", "/configurer" — JAMAIS un nom de fichier comme "/index.html") :
