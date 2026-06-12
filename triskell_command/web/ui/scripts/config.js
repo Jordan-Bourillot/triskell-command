@@ -697,7 +697,7 @@ const Config = {
           <div>
             <div class="flex items-center gap-1 text-[11px] mb-2">
               <button id="se-mode-text" class="px-3 py-1.5 rounded-lg font-semibold bg-accent/15 text-accent">Texte simple</button>
-              <button id="se-mode-html" class="px-3 py-1.5 rounded-lg font-semibold text-text-muted hover:bg-bg">HTML enrichi</button>
+              <button id="se-mode-html" class="px-3 py-1.5 rounded-lg font-semibold text-text-muted hover:bg-bg" title="Mise en forme : gras, couleurs, logo…">Mise en forme</button>
             </div>
 
             <div id="se-text-zone">

@@ -815,6 +815,19 @@ const Mails = {
     bar.outerHTML = this._renderBulkBar();
   },
 
+  // Qui a déclenché un mail envoyé ? 'app' (Auto-pilote, brouillon validé,
+  // Convoi, kits — repérés par leurs marqueurs serveur), 'user' (composeur :
+  // manual_reply / to_all sans marqueur robot), ou null quand on ne sait
+  // pas dire (vieux mails sans marqueur) — dans le doute, pas de badge.
+  _sentOrigin(m) {
+    if (!m || m.kind !== 'email_sent') return null;
+    const x = m.extra || {};
+    if (x.source || x.from_draft_id || x.approved_from_sas
+        || m.template_key || x.template_key) return 'app';
+    if (x.manual_reply || x.to_all) return 'user';
+    return null;
+  },
+
   _mailRow(m) {
     const kind = m.kind || '';
     const isReply  = kind === 'reply_received';
@@ -856,10 +869,14 @@ const Mails = {
     const isRead = this._isRead(idStr, m);
     const isSelected = this.state.selectedIds && this.state.selectedIds.has(idStr);
     const stateClass = `${isRead ? 'is-read' : 'is-unread'}${isSelected ? ' is-selected' : ''}`;
+    // Badge d'origine : qui a déclenché cet envoi (toi ou l'app) ?
+    const origin = this._sentOrigin(m);
+    const originChip = origin === 'app' ? ' · 🤖 par l’app'
+                     : origin === 'user' ? ' · ✋ par toi' : '';
     const fromCellInner = sentFromEmail
       ? `
         <span class="mail-row-from-main">${this._escape(senderName || '—')}</span>
-        <span class="mail-row-from-sub" title="${this._escape(sentFromEmail)}">depuis ${this._escape(sentFromEmail)}</span>`
+        <span class="mail-row-from-sub" title="${this._escape(sentFromEmail)}${origin === 'app' ? ' — envoyé automatiquement par l’app' : origin === 'user' ? ' — envoyé par toi depuis le composeur' : ''}">depuis ${this._escape(sentFromEmail)}${originChip}</span>`
       : this._escape(senderName || '—');
     const fromCellClass = sentFromEmail ? 'mail-row-from is-stacked' : 'mail-row-from';
     return `
@@ -912,9 +929,13 @@ const Mails = {
     const inReplyTo = extra.in_reply_to || '';
     const replySubject = subject.toLowerCase().startsWith('re:') ? subject : 'Re: ' + subject;
 
+    const sentOrigin = this._sentOrigin(m);
     const kindLabel = m.kind === 'reply_received' ? 'Réponse prospect'
                      : m.kind === 'inbox_received' ? 'Mail entrant'
-                     : m.kind === 'email_sent' ? 'Mail envoyé' : m.kind;
+                     : m.kind === 'email_sent'
+                       ? ('Mail envoyé' + (sentOrigin === 'app' ? ' · 🤖 par l’app'
+                                          : sentOrigin === 'user' ? ' · ✋ par toi' : ''))
+                       : m.kind;
     const kindColor = m.kind === 'reply_received' ? 'success'
                      : m.kind === 'email_sent' ? 'accent' : 'gold';
 
@@ -1724,7 +1745,7 @@ const Mails = {
                 </div>
                 <!-- Toggle Texte/HTML -->
                 <button id="cmp-mode-text" class="px-2.5 py-1 rounded-lg font-semibold transition-colors bg-accent/15 text-accent">Texte</button>
-                <button id="cmp-mode-html" class="px-2.5 py-1 rounded-lg font-semibold transition-colors text-text-muted hover:bg-bg">HTML enrichi</button>
+                <button id="cmp-mode-html" class="px-2.5 py-1 rounded-lg font-semibold transition-colors text-text-muted hover:bg-bg" title="Mettre en forme : gras, liens, images, couleurs…">Mise en forme</button>
                 <!-- Bouton Aperçu (visible uniquement en mode HTML enrichi via JS) -->
                 <button id="cmp-preview-top" type="button" class="hidden px-2.5 py-1 rounded-lg font-semibold transition-colors text-text-muted hover:bg-bg" title="Aperçu (rendu réel du mail)">👁 Aperçu</button>
                 <!-- Toggle fond clair / sombre de la zone d'écriture (style Outlook) -->
@@ -1734,31 +1755,38 @@ const Mails = {
               </div>
             </div>
 
-            <!-- Mini barre d'outils HTML (cachée par défaut) -->
+            <!-- Mini barre d'outils de mise en forme (cachée par défaut).
+                 L'essentiel d'abord (gras, italique, souligné, lien, image,
+                 liste) ; le reste derrière « Plus… » — l'audit débutant a
+                 montré que 16 boutons d'un coup faisaient fuir. -->
             <div id="cmp-toolbar" class="hidden flex items-center flex-wrap gap-1 mb-2 p-1.5 rounded-lg bg-bg border border-border">
               <button data-cmd="bold" title="Gras (Ctrl+B)" class="cmp-tb-btn font-bold">B</button>
               <button data-cmd="italic" title="Italique (Ctrl+I)" class="cmp-tb-btn italic">I</button>
               <button data-cmd="underline" title="Souligné (Ctrl+U)" class="cmp-tb-btn underline">U</button>
               <div class="w-px h-5 bg-border mx-1"></div>
-              <button data-cmd="text-color" title="Couleur du texte" class="cmp-tb-btn cmp-color-btn"><span>A</span><span class="cmp-color-bar" id="cmp-text-color-bar"></span></button>
-              <input type="color" id="cmp-text-color-input" class="hidden" value="#1f1f1f">
-              <button data-cmd="bg-color" title="Couleur d'arrière-plan" class="cmp-tb-btn cmp-color-btn cmp-color-bg"><span>A</span><span class="cmp-color-bar" id="cmp-bg-color-bar" style="background:#ffeb3b"></span></button>
-              <input type="color" id="cmp-bg-color-input" class="hidden" value="#ffeb3b">
-              <div class="w-px h-5 bg-border mx-1"></div>
-              <button data-cmd="justifyLeft" title="Aligner à gauche" class="cmp-tb-btn">⇤</button>
-              <button data-cmd="justifyCenter" title="Centrer" class="cmp-tb-btn">↔</button>
-              <button data-cmd="justifyRight" title="Aligner à droite" class="cmp-tb-btn">⇥</button>
-              <div class="w-px h-5 bg-border mx-1"></div>
-              <button data-cmd="insertUnorderedList" title="Liste à puces" class="cmp-tb-btn">•</button>
-              <button data-cmd="insertOrderedList" title="Liste numérotée" class="cmp-tb-btn">1.</button>
-              <div class="w-px h-5 bg-border mx-1"></div>
               <button data-cmd="createLink" title="Lien" class="cmp-tb-btn">🔗</button>
               <button data-cmd="insert-image" title="Insérer une image dans le corps du mail" class="cmp-tb-btn">🖼</button>
-              <button data-cmd="formatBlock-h2" title="Titre" class="cmp-tb-btn font-bold text-sm">H</button>
-              <button data-cmd="formatBlock-blockquote" title="Citation" class="cmp-tb-btn">"</button>
-              <div class="w-px h-5 bg-border mx-1"></div>
-              <button data-cmd="paste-html" title="Coller du HTML brut" class="cmp-tb-btn font-mono">&lt;/&gt;</button>
-              <button data-cmd="removeFormat" title="Effacer la mise en forme" class="cmp-tb-btn text-text-muted">×</button>
+              <button data-cmd="insertUnorderedList" title="Liste à puces" class="cmp-tb-btn">•</button>
+              <span id="cmp-toolbar-more" style="display:none">
+                <div class="w-px h-5 bg-border mx-1"></div>
+                <button data-cmd="text-color" title="Couleur du texte" class="cmp-tb-btn cmp-color-btn"><span>A</span><span class="cmp-color-bar" id="cmp-text-color-bar"></span></button>
+                <input type="color" id="cmp-text-color-input" class="hidden" value="#1f1f1f">
+                <button data-cmd="bg-color" title="Couleur d'arrière-plan" class="cmp-tb-btn cmp-color-btn cmp-color-bg"><span>A</span><span class="cmp-color-bar" id="cmp-bg-color-bar" style="background:#ffeb3b"></span></button>
+                <input type="color" id="cmp-bg-color-input" class="hidden" value="#ffeb3b">
+                <div class="w-px h-5 bg-border mx-1"></div>
+                <button data-cmd="justifyLeft" title="Aligner à gauche" class="cmp-tb-btn">⇤</button>
+                <button data-cmd="justifyCenter" title="Centrer" class="cmp-tb-btn">↔</button>
+                <button data-cmd="justifyRight" title="Aligner à droite" class="cmp-tb-btn">⇥</button>
+                <div class="w-px h-5 bg-border mx-1"></div>
+                <button data-cmd="insertOrderedList" title="Liste numérotée" class="cmp-tb-btn">1.</button>
+                <button data-cmd="formatBlock-h2" title="Titre" class="cmp-tb-btn font-bold text-sm">H</button>
+                <button data-cmd="formatBlock-blockquote" title="Citation" class="cmp-tb-btn">"</button>
+                <div class="w-px h-5 bg-border mx-1"></div>
+                <button data-cmd="paste-html" title="Coller du code HTML (avancé)" class="cmp-tb-btn font-mono">&lt;/&gt;</button>
+                <button data-cmd="removeFormat" title="Effacer la mise en forme" class="cmp-tb-btn text-text-muted">×</button>
+              </span>
+              <button id="cmp-tb-more" type="button" title="Toutes les options : couleurs, alignement, titres…"
+                      class="cmp-tb-btn text-text-muted" style="width:auto;padding:0 8px;font-size:12px;">Plus…</button>
             </div>
 
             <!-- Editor texte simple -->
@@ -2289,6 +2317,17 @@ const Mails = {
     textArea.addEventListener('input', () => { textDirty = true; });
 
     const previewTopBtn = overlay.querySelector('#cmp-preview-top');
+    // « Plus… » de la barre de mise en forme : révèle les options avancées.
+    // display:contents = les boutons s'intègrent au flex du parent.
+    const tbMoreBtn = overlay.querySelector('#cmp-tb-more');
+    const tbMoreWrap = overlay.querySelector('#cmp-toolbar-more');
+    if (tbMoreBtn && tbMoreWrap) {
+      tbMoreBtn.onclick = () => {
+        const open = tbMoreWrap.style.display === 'none';
+        tbMoreWrap.style.display = open ? 'contents' : 'none';
+        tbMoreBtn.textContent = open ? 'Moins' : 'Plus…';
+      };
+    }
     const setMode = (m) => {
       mode = m;
       if (m === 'text') {

@@ -1573,6 +1573,37 @@ const MailTemplates = {
   },
 
   // ---------- Save / delete / duplicate ----------
+  // Garde-fou variables : accolades dépareillées ou variable inconnue = le
+  // destinataire recevrait le code brut ({{prenom}} non rempli) dans son
+  // mail. Retourne la liste des problèmes ; save() avertit sans bloquer.
+  _placeholderProblems(fields) {
+    const text = [fields.subject || '', fields.body_html || '',
+                  fields.body_text || ''].join('\n');
+    const problems = [];
+    const opens = (text.match(/\{\{/g) || []).length;
+    const closes = (text.match(/\}\}/g) || []).length;
+    if (opens !== closes) {
+      problems.push(`accolades dépareillées : ${opens} ouvertures «{{» pour ${closes} fermetures «}}»`);
+    }
+    const known = (fields.placeholders || []).map(p => String(p).toLowerCase());
+    if (known.length) {
+      const used = new Set();
+      const reDouble = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi;
+      let m;
+      while ((m = reDouble.exec(text))) used.add(m[1].toLowerCase());
+      // Variables simples {x} (après-achat) : on retire d'abord les {{x}}.
+      const single = text.replace(/\{\{[^}]*\}\}/g, '');
+      const reSingle = /\{([a-z0-9_]+)\}/gi;
+      while ((m = reSingle.exec(single))) used.add(m[1].toLowerCase());
+      used.forEach(u => {
+        if (!known.includes(u)) {
+          problems.push(`« {${u}} » n’est pas une variable connue de ce modèle — elle partirait telle quelle, en code brut`);
+        }
+      });
+    }
+    return problems;
+  },
+
   async save() {
     const t = this._state.editing;
     if (!t) return;
@@ -1631,6 +1662,18 @@ const MailTemplates = {
     if (isProspection && fields.enabled && !fields.body_html.trim() && !fields.body_text.trim()) {
       Toast.error('Le corps du mail est vide — écris le contenu, ou décoche « Modèle actif » le temps de le finir.');
       return;
+    }
+
+    // Garde-fou variables (audit débutant) : avertit, ne bloque pas.
+    const phProblems = this._placeholderProblems(fields);
+    if (phProblems.length) {
+      const okAnyway = await Dialog.confirm(
+        'Vérifie tes variables avant d’enregistrer :\n\n— '
+        + phProblems.join('\n— ')
+        + '\n\nEn l’état, le destinataire risque de voir le code brut dans son mail.',
+        { title: 'Variables à vérifier', danger: true,
+          okLabel: 'Enregistrer quand même', cancelLabel: 'Corriger' });
+      if (!okAnyway) return;
     }
 
     // En prospection, le produit peut être changé via le select.
