@@ -172,6 +172,7 @@ const Morning = {
     // re-render complet qui faisait clignoter tout l'écran).
     document.getElementById('m-refresh').onclick = () => {
       this._softRefresh();
+      this._loadFirstSteps();
       this._loadSetup();
       this._loadObeliskNotifs();
       this._loadModes();
@@ -451,6 +452,7 @@ const Morning = {
     slot.innerHTML = this._digestLayout(digest);
     this._wireBlockHiders();
 
+    this._loadFirstSteps();
     this._loadSetup();
     this._loadPipelinesActivity();
     this._loadObeliskNotifs();
@@ -459,6 +461,92 @@ const Morning = {
 
     // Démarre le rafraîchissement automatique des chiffres
     this._startAutoRefresh();
+  },
+
+  // -------- Bloc PREMIERS PAS (P4) — le premier jour guidé --------
+  // 4 étapes auto-détectées sur les VRAIES données (pas des cases à
+  // cocher à la main). Dès que tout est fait — ou masqué — un drapeau
+  // local court-circuite tout : le bloc ne coûte plus un seul appel.
+  _FS_DONE: 'triskell.firststeps.done.v1',
+  _FS_TUTO: 'triskell.firststeps.tuto.v1',
+
+  async _loadFirstSteps() {
+    const slot = document.getElementById('m-firststeps-slot');
+    if (!slot || !App.api) return;
+    try { if (localStorage.getItem(this._FS_DONE) === '1') return; } catch (e) {}
+    let accounts = [], missions = [], sentTotal = 0;
+    try {
+      const [acc, mis, fun] = await Promise.all([
+        App.api.mail_accounts_list().catch(() => null),
+        App.api.prospection_missions({ limit: 1 }).catch(() => null),
+        App.api.get_funnel({ period: 'all', segment: 'all' }).catch(() => null),
+      ]);
+      accounts = (acc && acc.ok && acc.accounts) || [];
+      missions = (mis && mis.ok && mis.missions) || [];
+      sentTotal = (fun && fun.ok && fun.stages && fun.stages.sent) || 0;
+    } catch (e) { return; }
+    let tutoSeen = false;
+    try { tutoSeen = localStorage.getItem(this._FS_TUTO) === '1'; } catch (e) {}
+    const steps = [
+      { done: accounts.length > 0, label: 'Brancher ta boîte mail',
+        why: "C'est elle qui enverra tes mails de prospection.",
+        cta: 'Ouvrir les Réglages', view: 'config', tab: 'mails' },
+      { done: missions.length > 0, label: 'Lancer une première recherche',
+        why: 'Choisis une cible — coche « essai à blanc » pour regarder sans rien enregistrer.',
+        cta: 'Lancer une prospection', view: 'prospection' },
+      { done: sentTotal > 0, label: 'Faire partir ton premier mail',
+        why: "L'IA prépare des brouillons : tu lis, tu approuves, ça part.",
+        cta: 'Voir les brouillons', view: 'drafts' },
+      { done: tutoSeen, label: 'Faire le tour du propriétaire (5 min)',
+        why: 'La visite guidée te montre où tout se trouve.',
+        cta: 'Démarrer la visite', view: 'tutorial', markTuto: true },
+    ];
+    if (steps.every(s => s.done)) {
+      try { localStorage.setItem(this._FS_DONE, '1'); } catch (e) {}
+      slot.innerHTML = '';
+      return;
+    }
+    const nDone = steps.filter(s => s.done).length;
+    slot.innerHTML = `
+      <div class="cockpit-setup" data-tone="warning">
+        <div class="cockpit-setup-head">
+          <div>
+            <div class="cockpit-setup-kicker">PREMIERS PAS</div>
+            <h3 class="cockpit-setup-title">Bien démarrer, dans l'ordre.</h3>
+            <div class="cockpit-setup-sub">${nDone} / ${steps.length} fait${nDone > 1 ? 's' : ''} — ce bloc disparaît tout seul à la fin</div>
+          </div>
+          <button class="cockpit-setup-toggle" type="button" data-fs-hide
+                  title="Ne plus afficher ces étapes">Je connais — masquer</button>
+        </div>
+        <ul class="cockpit-setup-list">
+          ${steps.map((s, i) => `
+            <li class="cockpit-setup-item" data-status="${s.done ? 'ok' : 'missing'}">
+              <span class="cockpit-setup-icon">${s.done ? '✓' : (i + 1)}</span>
+              <div class="cockpit-setup-text">
+                <div class="cockpit-setup-label">${s.label}</div>
+                <div class="cockpit-setup-why">${s.why}</div>
+              </div>
+              ${s.done ? '<span class="cockpit-setup-status">Fait</span>'
+                       : `<button class="btn btn-secondary cockpit-setup-cta" type="button"
+                                  data-fs-go="${i}">${s.cta} →</button>`}
+            </li>`).join('')}
+        </ul>
+      </div>`;
+    slot.querySelectorAll('[data-fs-go]').forEach(btn => {
+      btn.onclick = () => {
+        const s = steps[parseInt(btn.dataset.fsGo, 10)];
+        if (!s) return;
+        if (s.markTuto) { try { localStorage.setItem(this._FS_TUTO, '1'); } catch (e) {} }
+        if (s.tab) { try { localStorage.setItem('cfg-active-tab', s.tab); } catch (e) {} }
+        App.show(s.view);
+      };
+    });
+    const hideBtn = slot.querySelector('[data-fs-hide]');
+    if (hideBtn) hideBtn.onclick = () => {
+      try { localStorage.setItem(this._FS_DONE, '1'); } catch (e) {}
+      slot.innerHTML = '';
+      Toast.info('D’accord — les Premiers pas ne s’afficheront plus.');
+    };
   },
 
   // -------- Bloc SETUP — bilan des connexions à brancher --------
@@ -626,7 +714,8 @@ const Morning = {
                  title="Masquer ce bloc (réaffichable via le ⚙ en haut)">×</button>
          ${inner}
        </div>`;
-    return `<div id="m-setup-slot"></div>`
+    return `<div id="m-firststeps-slot"></div>`
+      + `<div id="m-setup-slot"></div>`
       + this._renderHero(digest)
       + wrap('pipelines', `<div id="m-pipelines-slot"></div>`)
       + wrap('obelisk', `<div id="m-obelisk-slot"></div>`)
@@ -720,6 +809,7 @@ const Morning = {
     if (!slot.querySelector('.cockpit-hero')) {
       slot.innerHTML = this._digestLayout(digest);
       this._wireBlockHiders();
+      this._loadFirstSteps();
       this._loadSetup();
       this._loadPipelinesActivity();
       this._loadObeliskNotifs();

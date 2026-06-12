@@ -2046,6 +2046,14 @@ html {
   color: hsl(var(--text));
   border-color: hsl(var(--border));
 }
+/* Menu simplifié (P4) : en mode nav-simple, seules les entrées marquées
+   data-nav-core restent — items, bulles d'aide (.nav-hint-wrap), groupe
+   « Outils de recherche » et sections vides disparaissent ensemble. */
+body.nav-simple #sidebar .nav-item[data-view]:not([data-nav-core]) { display: none; }
+body.nav-simple #sidebar .nav-hint-wrap:not(:has(> .nav-item[data-nav-core])) { display: none; }
+body.nav-simple #sidebar .nav-group-head { display: none; }
+body.nav-simple #sidebar .nav-group-items { display: none !important; }
+body.nav-simple #sidebar nav > div:not(:has(.nav-item[data-nav-core])) { display: none; }
 .cockpit-mode-opt-icon {
   font-size: 15px;
   line-height: 1;

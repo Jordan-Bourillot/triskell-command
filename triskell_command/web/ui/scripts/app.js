@@ -308,6 +308,34 @@ const App = {
     const launcherBtn = document.getElementById('launcher-trigger');
     if (launcherBtn) launcherBtn.addEventListener('click', () => Launcher.open());
 
+    // Menu simplifié (P4 — le premier jour guidé) : par défaut uniquement
+    // si les Premiers pas ne sont pas terminés ET qu'aucun choix n'a été
+    // mémorisé. La recherche (Ctrl+K) et le lanceur gardent accès à tout.
+    const NAV_SIMPLE_KEY = 'triskell.nav.simple.v1';
+    const navSimpleToggle = document.getElementById('nav-simple-toggle');
+    const applyNavMode = () => {
+      let pref = null;
+      try { pref = localStorage.getItem(NAV_SIMPLE_KEY); } catch (e) {}
+      let fsDone = true;
+      try { fsDone = localStorage.getItem('triskell.firststeps.done.v1') === '1'; } catch (e) {}
+      const simple = pref === null ? !fsDone : pref === '1';
+      document.body.classList.toggle('nav-simple', simple);
+      if (navSimpleToggle) {
+        navSimpleToggle.textContent = simple
+          ? '☰ Afficher tout le menu'
+          : '☰ Simplifier le menu';
+        navSimpleToggle.title = simple
+          ? 'Montrer tous les outils (suivi des sites, chiffres, catalogue…)'
+          : 'Ne garder que le parcours essentiel — pratique pour démarrer';
+      }
+    };
+    applyNavMode();
+    if (navSimpleToggle) navSimpleToggle.onclick = () => {
+      const simple = document.body.classList.contains('nav-simple');
+      try { localStorage.setItem(NAV_SIMPLE_KEY, simple ? '0' : '1'); } catch (e) {}
+      applyNavMode();
+    };
+
     // Barre « Rechercher » + bouton « ? » du haut de la sidebar : les
     // versions VISIBLES de Ctrl+K et de l'aide d'écran (audit débutant).
     const sidebarSearch = document.getElementById('sidebar-search-btn');

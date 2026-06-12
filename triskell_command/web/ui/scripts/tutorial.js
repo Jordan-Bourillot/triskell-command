@@ -17,7 +17,7 @@ const Tutorial = {
 
   steps: [
     // ---- Bienvenue ----
-    { icon: '✨', title: 'Bienvenue dans Triskell Command',
+    { icon: '✨', core: true, title: 'Bienvenue dans Triskell Command',
       lead: 'Ton tableau de bord pour piloter tout l’écosystème Triskell.',
       body: "En quelques minutes, tu vas voir comment l’app travaille pour " +
             "toi. Le fil rouge :\n\n" +
@@ -32,7 +32,7 @@ const Tutorial = {
             "arrêté." },
 
     // ---- Le Cockpit ----
-    { icon: '🎛️', title: 'Le Cockpit — ton seul écran à ouvrir',
+    { icon: '🎛️', core: true, title:'Le Cockpit — ton seul écran à ouvrir',
       lead: 'Tout en 5 minutes par jour.', goto: 'morning',
       body: "Tu y vois en un coup d’œil :\n" +
             "• La priorité du jour (calculée par l’app).\n" +
@@ -44,7 +44,7 @@ const Tutorial = {
             "départ de la chaîne — justement, étape suivante." },
 
     // ---- Lancer une prospection ----
-    { icon: '🚀', title: 'Lancer une prospection — une commande, toute la chaîne',
+    { icon: '🚀', core: true, title:'Lancer une prospection — une commande, toute la chaîne',
       lead: 'Tu choisis une cible, l’app enchaîne tout.', goto: 'prospection',
       body: "Premier onglet de la section PROSPECTION. Tu choisis une cible " +
             "(PME, commerces locaux ou créateurs), tu remplis 2-3 champs, " +
@@ -67,7 +67,7 @@ const Tutorial = {
             "côté serveur." },
 
     // ---- Tous les prospects ----
-    { icon: '🗂️', title: 'Tous les prospects — la base commune',
+    { icon: '🗂️', core: true, title:'Tous les prospects — la base commune',
       lead: 'Tout ce que les outils trouvent arrive ici.', goto: 'prospects_crm',
       body: "C’est LE point de passage obligé : chaque outil de recherche " +
             "y verse ses trouvailles, et l’Auto-pilote y pioche.\n\n" +
@@ -79,7 +79,7 @@ const Tutorial = {
             "fichier », Excel ou CSV) : elle passe par les mêmes garde-fous." },
 
     // ---- Auto-pilote ----
-    { icon: '🤖', title: 'L’Auto-pilote — il écrit et il envoie',
+    { icon: '🤖', core: true, title:'L’Auto-pilote — il écrit et il envoie',
       lead: 'Il pioche dans ta base, jamais ailleurs.',
       goto: 'autopilot',
       body: "L’Auto-pilote prend ses prospects UNIQUEMENT dans la base " +
@@ -102,7 +102,7 @@ const Tutorial = {
             "automatique demande toujours une confirmation explicite." },
 
     // ---- Modèles de mails ----
-    { icon: '📝', title: 'Les modèles de mails',
+    { icon: '📝', core: true, title:'Les modèles de mails',
       lead: 'Ce que reçoivent tes prospects, au mot près.',
       goto: 'mail_templates',
       body: "Menu MAILS → deux entrées :\n" +
@@ -131,7 +131,7 @@ const Tutorial = {
             "de départ)." },
 
     // ---- Brouillons ----
-    { icon: '✓', title: 'Brouillons à valider',
+    { icon: '✓', core: true, title:'Brouillons à valider',
       lead: 'Le sas de contrôle de tout ce qui est en attente.',
       goto: 'drafts',
       body: "Tous les mails préparés par l’app en mode validation " +
@@ -144,7 +144,7 @@ const Tutorial = {
             "l’envoi." },
 
     // ---- Réponses ----
-    { icon: '📬', title: 'Les réponses, triées toutes seules',
+    { icon: '📬', core: true, title:'Les réponses, triées toutes seules',
       lead: 'L’app surveille ta boîte mail toutes les 5 minutes.',
       goto: 'replies',
       body: "Quand un prospect répond :\n" +
@@ -155,7 +155,7 @@ const Tutorial = {
             "Tu n’as plus à surveiller ta boîte mail toi-même." },
 
     // ---- Mode d'envoi ----
-    { icon: '⚙️', title: 'Trois niveaux d’automatisation',
+    { icon: '⚙️', core: true, title:'Trois niveaux d’automatisation',
       lead: 'Validation manuelle · Auto après 30 min · Auto immédiat.',
       body: "Pour chaque type de réponse (Intéressé, Pas maintenant…), tu " +
             "décides :\n" +
@@ -166,7 +166,7 @@ const Tutorial = {
             "réponses), puis bascule au cas par cas." },
 
     // ---- Écrire un mail ----
-    { icon: '✉️', title: 'Écrire un mail — la fenêtre d’écriture',
+    { icon: '✉️', core: true, title:'Écrire un mail — la fenêtre d’écriture',
       lead: 'Un vrai client mail intégré, pas besoin d’app externe.',
       goto: 'mails',
       body: "Bouton « Nouveau mail » dans la vue Mails (ou Ctrl+Maj+M " +
@@ -322,7 +322,7 @@ const Tutorial = {
             "vérifiées par jour, avec veto possible le matin)." },
 
     // ---- Santé du système ----
-    { icon: '💚', title: 'Santé du système',
+    { icon: '💚', core: true, title:'Santé du système',
       lead: 'Tous tes robots de fond en temps réel.',
       goto: 'health',
       body: "Pastilles vert/jaune/rouge pour chaque robot, dernière " +
@@ -334,7 +334,7 @@ const Tutorial = {
             "reste muet trop longtemps." },
 
     // ---- Réglages ----
-    { icon: '🎛️', title: 'Réglages — tout configurer une fois',
+    { icon: '🎛️', core: true, title:'Réglages — tout configurer une fois',
       lead: 'Compte 10-15 min la première fois.', goto: 'config',
       body: "1. Te connecter à la base partagée Triskell.\n" +
             "2. Renseigner ton compte mail (l’envoi et la réception).\n" +
@@ -372,7 +372,7 @@ const Tutorial = {
             "sans exposer tes clients." },
 
     // ---- Outro ----
-    { icon: '🎉', title: 'C’est tout pour la visite !',
+    { icon: '🎉', core: true, title:'C’est tout pour la visite !',
       lead: 'La chaîne est bouclée de bout en bout.',
       body: "Le parcours complet : tu lances une prospection → la base " +
             "« Tous les prospects » se remplit → l’Auto-pilote écrit avec " +
@@ -390,15 +390,29 @@ const Tutorial = {
 
   index: 0,
 
+  // Mode « essentiel » (P4) : la visite démarre sur les ~13 étapes clés
+  // (core: true) ; la version complète reste à un clic, dans le pied de
+  // la fenêtre. La reprise mémorise le mode avec l'étape.
+  mode: 'core',
+  MODE_KEY: 'tc-tuto-mode',
+
+  _steps() {
+    return this.mode === 'core'
+      ? this.steps.filter(s => s.core)
+      : this.steps;
+  },
+
   render(container) {
     const saved = this._savedStep();
+    const nCore = this.steps.filter(s => s.core).length;
     container.innerHTML = `
       <div class="text-center py-20">
         <div class="text-5xl mb-4">✨</div>
         <h2 class="hero-title mb-4" style="font-size: 32px;">Visite guidée</h2>
         <p class="text-text-secondary mb-6 max-w-md mx-auto">
-          ${this.steps.length} étapes courtes — de la recherche de prospects
-          jusqu’au suivi de tes clients.
+          L'essentiel en ${nCore} étapes courtes — de la recherche de prospects
+          jusqu'au suivi de tes clients. (La version complète, ${this.steps.length} étapes,
+          est à un clic dans la visite.)
         </p>
         <button class="btn btn-primary" onclick="Tutorial.open()">
           ${saved ? `Reprendre à l’étape ${saved}` : 'Lancer la visite'}
@@ -409,6 +423,11 @@ const Tutorial = {
 
   open() {
     this.index = 0;
+    // Reprise : on repart dans le MÊME mode que la fois d'avant.
+    try {
+      const m = localStorage.getItem(this.MODE_KEY);
+      this.mode = (m === 'full') ? 'full' : 'core';
+    } catch (e) { this.mode = 'core'; }
     const overlay = this._buildOverlay();
     document.body.appendChild(overlay);
     const saved = this._savedStep();
@@ -420,13 +439,16 @@ const Tutorial = {
   _savedStep() {
     try {
       const n = parseInt(localStorage.getItem(this.STORE_KEY), 10);
-      if (Number.isInteger(n) && n >= 1 && n < this.steps.length) return n;
+      if (Number.isInteger(n) && n >= 1 && n < this._steps().length) return n;
     } catch (e) { /* stockage indisponible : pas de reprise, pas grave */ }
     return null;
   },
 
   _saveStep(i) {
-    try { localStorage.setItem(this.STORE_KEY, String(i)); } catch (e) {}
+    try {
+      localStorage.setItem(this.STORE_KEY, String(i));
+      localStorage.setItem(this.MODE_KEY, this.mode);
+    } catch (e) {}
   },
 
   _clearSaved() {
@@ -457,9 +479,14 @@ const Tutorial = {
         <!-- Body -->
         <div class="px-8 py-6 overflow-y-auto flex-1" id="t-body"></div>
         <!-- Footer -->
-        <div class="px-8 py-5 border-t border-border flex items-center justify-between">
-          <button id="t-skip" class="btn btn-secondary">Passer le tuto</button>
-          <div class="flex gap-2">
+        <div class="px-8 py-5 border-t border-border flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <button id="t-skip" class="btn btn-secondary shrink-0">Passer le tuto</button>
+            <button id="t-mode" type="button"
+                    class="text-[11px] text-text-muted hover:text-accent underline underline-offset-2 truncate"
+                    title="Basculer entre la visite essentielle et la visite complète"></button>
+          </div>
+          <div class="flex gap-2 shrink-0">
             <button id="t-prev" class="btn btn-secondary">‹ Précédent</button>
             <button id="t-next" class="btn btn-primary">Suivant ›</button>
           </div>
@@ -504,13 +531,22 @@ const Tutorial = {
     overlay.querySelector('#t-skip').onclick = () => close();
     overlay.querySelector('#t-prev').onclick = () => { this._prev(overlay); };
     overlay.querySelector('#t-next').onclick = () => { this._next(overlay); };
+    // Bascule essentiel ↔ complet : on repart du début dans l'autre mode
+    // (les numéros d'étapes n'ont pas le même sens d'un mode à l'autre).
+    overlay.querySelector('#t-mode').onclick = () => {
+      this.mode = this.mode === 'core' ? 'full' : 'core';
+      try { localStorage.setItem(this.MODE_KEY, this.mode); } catch (e) {}
+      this._clearSaved();
+      this.index = 0;
+      this._renderStep(overlay);
+    };
     return overlay;
   },
 
   // Écran de reprise : on était parti « voir » un écran en cours de visite.
   _renderResume(overlay, saved) {
-    const step = this.steps[saved];
-    const total = this.steps.length;
+    const step = this._steps()[saved];
+    const total = this._steps().length;
     overlay.querySelector('#t-counter').textContent = 'VISITE GUIDÉE';
     overlay.querySelector('#t-progress').style.width = `${(saved / total) * 100}%`;
     const body = overlay.querySelector('#t-body');
@@ -543,8 +579,8 @@ const Tutorial = {
   },
 
   _renderStep(overlay) {
-    const step = this.steps[this.index];
-    const total = this.steps.length;
+    const step = this._steps()[this.index];
+    const total = this._steps().length;
     // Numérotation continue, calculée : l'accueil et la conclusion ne sont
     // pas numérotés, les étapes intermédiaires le sont d'après leur position.
     const isFirst = (this.index === 0);
@@ -584,10 +620,16 @@ const Tutorial = {
     overlay.querySelector('#t-prev').disabled = (this.index === 0);
     overlay.querySelector('#t-prev').style.opacity = (this.index === 0) ? '0.4' : '1';
     overlay.querySelector('#t-next').textContent = isLast ? 'Terminer ✓' : 'Suivant ›';
+    const modeBtn = overlay.querySelector('#t-mode');
+    if (modeBtn) {
+      modeBtn.textContent = this.mode === 'core'
+        ? `Tout voir (${this.steps.length} étapes)`
+        : `Revenir à l’essentiel (${this.steps.filter(s => s.core).length} étapes)`;
+    }
   },
 
   _next(overlay) {
-    if (this.index >= this.steps.length - 1) {
+    if (this.index >= this._steps().length - 1) {
       // Visite terminée : plus de reprise à proposer.
       this._clearSaved();
       if (overlay._tutoClose) overlay._tutoClose(); else overlay.remove();

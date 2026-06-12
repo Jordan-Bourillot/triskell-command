@@ -833,6 +833,8 @@ const Perceval = {
       <div class="pv-m-body">
         Je travaille avec toi : je reste en bas de l’écran, je te dis
         ce qui vient de se passer et <b>le prochain geste utile</b>.
+        Pour bien démarrer, suis la liste <b>« Premiers pas »</b> en haut
+        du Cockpit — 4 étapes, dans l’ordre, et je t’accompagne.
         Clique sur moi quand tu veux qu’on discute. Et si tu actives ma
         voix (bouton 🔊), je te parle.
       </div>
@@ -853,8 +855,13 @@ const Perceval = {
     };
     card.querySelector('#pv-m-go').onclick = () => {
       close();
-      const rec = this._recommend();
+      // Premiers pas non terminés → on emmène au Cockpit, là où vit la
+      // liste. Sinon, la recommandation habituelle.
+      let fsDone = false;
+      try { fsDone = localStorage.getItem('triskell.firststeps.done.v1') === '1'; } catch (e) {}
       if (typeof App !== 'undefined' && App.show) {
+        if (!fsDone) { App.show('morning'); return; }
+        const rec = this._recommend();
         App.show(rec ? rec.view : 'prospection');
       }
     };
