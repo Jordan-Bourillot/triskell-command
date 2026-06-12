@@ -11140,9 +11140,10 @@ class Api:
         brand = (site or {}).get("brand", "")
         prompt = (
             "Tu es un expert GEO (Generative Engine Optimization).\n"
-            "Analyse la page web ci-dessous et identifie 3 à 5 améliorations "
-            "concrètes pour maximiser ses chances d'être citée par les IA "
-            "génératives (ChatGPT, Claude, Perplexity, Gemini).\n\n"
+            "Analyse la page web ci-dessous et identifie les 3 améliorations "
+            "LES PLUS IMPACTANTES pour maximiser ses chances d'être citée "
+            "par les IA génératives (ChatGPT, Claude, Perplexity, Gemini). "
+            "3 maximum — la qualité prime.\n\n"
             f"Adresse : {url}\n"
             f"Marque : {brand or '(non précisée)'}\n"
             f"Titre actuel : {title or '(absent)'}\n"
@@ -11159,7 +11160,7 @@ class Api:
             '      "title": "Titre court du problème (max 60 car)",\n'
             '      "problem": "Pourquoi c\'est un problème pour le GEO (2 phrases)",\n'
             '      "fix_title": "Titre court de la solution (max 50 car)",\n'
-            '      "fix_html": "Bloc HTML PRÊT À COLLER tel quel sur la page : utilise <section>, <h2>, <h3>, <p>, <ul>, <ol>, <table>. PAS de <html>/<body>/<head>. PAS de styles inline. Doit faire 200-500 mots. En français impeccable, factuel, citant des chiffres précis si possible."\n'
+            '      "fix_html": "Bloc HTML PRÊT À COLLER tel quel sur la page : utilise <section>, <h2>, <h3>, <p>, <ul>, <ol>, <table>. PAS de <html>/<body>/<head>. PAS de styles inline. Doit faire 120-250 mots. En français impeccable, factuel, citant des chiffres précis si possible. IMPORTANT : dans le JSON, échappe les sauts de ligne en \\\\n — jamais de retour à la ligne brut dans une chaîne."\n'
             "    }\n"
             "  ]\n"
             "}\n\n"
@@ -11184,20 +11185,48 @@ class Api:
         cleaned = raw.strip()
         cleaned = _re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned,
                           flags=_re.IGNORECASE | _re.MULTILINE)
-        try:
-            data = _json.loads(cleaned)
-        except Exception:
-            # Tentative : extraire le bloc {...} le plus long
+
+        def _try_parse(txt: str):
+            """loads tolérant (strict=False accepte les sauts de ligne bruts
+            dans les chaînes — l'IA en met malgré la consigne)."""
+            try:
+                return _json.loads(txt, strict=False)
+            except Exception:
+                return None
+
+        data = _try_parse(cleaned)
+        if data is None:
             m2 = _re.search(r"\{[\s\S]*\}", cleaned)
             if m2:
-                try:
-                    data = _json.loads(m2.group(0))
-                except Exception:
-                    return {"ok": False, "error":
-                            "L'IA a renvoyé une réponse non exploitable."}
-            else:
-                return {"ok": False, "error":
-                        "L'IA a renvoyé une réponse non exploitable."}
+                data = _try_parse(m2.group(0))
+        if data is None and cleaned.startswith("{"):
+            # Réponse TRONQUÉE en plein JSON (cause n°1 du « non
+            # exploitable » du 13/06 : plafond de sortie atteint) : on
+            # referme ce qui est ouvert — guillemet de chaîne, puis
+            # crochets/accolades dans l'ordre — et on retente. Les
+            # findings complets sont sauvés, le coupé est perdu.
+            repaired = cleaned
+            if (repaired.count('"') - repaired.count('\\"')) % 2 == 1:
+                repaired += '"'
+            stack = []
+            in_str = False
+            prev = ""
+            for ch in repaired:
+                if ch == '"' and prev != "\\":
+                    in_str = not in_str
+                elif not in_str and ch in "{[":
+                    stack.append(ch)
+                elif not in_str and ch in "}]":
+                    if stack:
+                        stack.pop()
+                prev = ch if ch != "\\" or prev != "\\" else ""
+            repaired += "".join("}" if c == "{" else "]" for c in reversed(stack))
+            data = _try_parse(repaired)
+        if data is None:
+            return {"ok": False, "error":
+                    "L'IA a renvoyé une réponse illisible (probablement "
+                    "coupée en route) — relance l'analyse, c'est "
+                    "généralement bon au passage suivant."}
         # Normalise et donne un id à chaque finding
         findings = []
         for i, f in enumerate(data.get("findings") or []):
