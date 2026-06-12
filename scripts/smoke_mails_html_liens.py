@@ -56,7 +56,7 @@ from triskell_command.integrations.pixelpros_pages import (  # noqa: E402
     BASE_URL, KNOWN_SLUGS, pages_for_sector, slug_for_sector,
 )
 
-check("12 pages métier connues", len(KNOWN_SLUGS) == 12,
+check("17 pages métier connues", len(KNOWN_SLUGS) == 17,
       f"-> {len(KNOWN_SLUGS)}")
 
 # Secteurs RÉELS observés dans la base prospects (inventaire 2026-06-12)
@@ -92,6 +92,22 @@ cas_reconnus = {
     "massage bien-être":    "bien-etre",
     "sophrologue":          "bien-etre",
     "spa":                  "bien-etre",
+    # Les 5 pages du 12/06/2026 (plus gros gisements de la base)
+    "plaquiste":            "plaquiste",
+    "plâtrier-plaquiste":   "plaquiste",
+    "pose de placo":        "plaquiste",
+    "peintre":              "peintre",
+    "peintre en bâtiment":  "peintre",
+    "carreleur":            "carreleur",
+    "carrelage et faïence": "carreleur",
+    "maçon":                "macon",
+    "maçonnerie générale":  "macon",
+    "restaurant":           "restaurant",
+    "pizzeria":             "restaurant",
+    "crêperie":             "restaurant",
+    "brasserie":            "restaurant",
+    "bistrot":              "restaurant",
+    "resto":                "restaurant",
 }
 for secteur, attendu in cas_reconnus.items():
     got = slug_for_sector(secteur)
@@ -99,15 +115,16 @@ for secteur, attendu in cas_reconnus.items():
 
 # Secteurs qu'on ne doit PAS mapper (pas de page dédiée → générique).
 # « achat » contient « chat » : le mot court ne doit matcher qu'entier.
-cas_generiques = ["maçon", "plaquiste", "peintre", "carreleur",
-                  "restaurant", "formation", "Immobilier",
+# « restauration de meubles » ne doit PAS tomber sur la page restaurant.
+cas_generiques = ["formation", "Immobilier", "traiteur",
+                  "restauration de meubles anciens",
                   "achat-revente de maisons", "", "   "]
 for secteur in cas_generiques:
     got = slug_for_sector(secteur)
     check(f"'{secteur}' → générique", got == "", f"-> '{got}'")
 
 # Les URLs produites sont toujours valides et complètes
-for secteur, attendu in (("coiffeuse", "beaute"), ("maçon", None)):
+for secteur, attendu in (("coiffeuse", "beaute"), ("formation", None)):
     page, demo = pages_for_sector(secteur)
     if attendu:
         check(f"URLs '{secteur}' ciblées",

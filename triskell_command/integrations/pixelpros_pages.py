@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
 """Pages métier Pixel Pros : secteur du prospect → page de pub ciblée.
 
-pixel-pros.fr a 12 pages de pub métier, chacune avec sa page démo
+pixel-pros.fr a 17 pages de pub métier, chacune avec sa page démo
 (« voilà ce que donnerait VOTRE site ») :
 
-    animalier, beaute, bien-etre, coach, electricien, fleuriste,
-    menuisier, patisserie, paysagiste, photographe, plombier, tatoueur
+    animalier, beaute, bien-etre, carreleur, coach, electricien,
+    fleuriste, macon, menuisier, patisserie, paysagiste, peintre,
+    photographe, plaquiste, plombier, restaurant, tatoueur
+
+(Les 5 du bâtiment/restauration datent du 12/06/2026 — taillées sur
+les plus gros gisements de la base prospects : 37 plaquistes,
+26 peintres, 24 carreleurs, 22 maçons, 22 restaurants.)
 
 Ce module fait UNE chose : deviner, depuis le secteur en texte libre
 d'une fiche prospect (« coiffeuse », « boulangerie », « Artisanat —
@@ -28,9 +33,10 @@ BASE_URL = "https://pixel-pros.fr"
 # demo-<slug>.html chacune). Si une 13e page de pub naît, l'ajouter ici
 # ET dans les règles de correspondance plus bas.
 KNOWN_SLUGS = (
-    "animalier", "beaute", "bien-etre", "coach", "electricien",
-    "fleuriste", "menuisier", "patisserie", "paysagiste",
-    "photographe", "plombier", "tatoueur",
+    "animalier", "beaute", "bien-etre", "carreleur", "coach",
+    "electricien", "fleuriste", "macon", "menuisier", "patisserie",
+    "paysagiste", "peintre", "photographe", "plaquiste", "plombier",
+    "restaurant", "tatoueur",
 )
 
 # Règles « préfixe contenu dans le secteur » (ordre = priorité, premier
@@ -42,6 +48,12 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("menuis",     "menuisier"),
     ("ebenist",    "menuisier"),
     ("charpent",   "menuisier"),     # métier du bois le plus proche
+    ("plaquist",   "plaquiste"),
+    ("platr",      "plaquiste"),     # plâtrier / plâtrerie
+    ("placo",      "plaquiste"),
+    ("peintr",     "peintre"),       # peintre(s) en bâtiment
+    ("carrel",     "carreleur"),     # carreleur / carrelage
+    ("macon",      "macon"),         # maçon / maçonnerie (sans accents)
     ("paysag",     "paysagiste"),
     ("jardin",     "paysagiste"),
     ("fleurist",   "fleuriste"),
@@ -49,6 +61,11 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("boulang",    "patisserie"),    # commerce de bouche le plus proche
     ("chocolat",   "patisserie"),
     ("confis",     "patisserie"),    # confiserie / confiseur
+    ("restaurant", "restaurant"),
+    ("pizzer",     "restaurant"),    # pizzeria / pizzeriste
+    ("creper",     "restaurant"),    # crêperie / crêpier
+    ("brasserie",  "restaurant"),
+    ("bistro",     "restaurant"),    # bistro(t)
     ("coiff",      "beaute"),
     ("barbier",    "beaute"),
     ("beaut",      "beaute"),        # beauté / institut de beauté
@@ -85,6 +102,7 @@ _WORD_RULES: dict[str, str] = {
     "ongle":  "beaute",
     "ongles": "beaute",
     "photo":  "photographe",
+    "resto":  "restaurant",
 }
 
 
