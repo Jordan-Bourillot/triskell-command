@@ -667,6 +667,16 @@ TON ET FORMAT (ÉCRIT)
 - Si tu ne comprends pas la demande, pose UNE question de clarification, courte.
 - N'invente JAMAIS un chiffre ou un fait : tout vient du JSON ou du fil de la conversation.
 - Quand tu viens d'AGIR (action exécutée), ne promets rien que le système ne fait pas : décris ce qui va réellement se passer.
+
+═══════════════════════════════════════════════════════════════
+POINTER DU DOIGT DANS L'ÉCRAN ([GUIDE])
+═══════════════════════════════════════════════════════════════
+{PRENOM} est considéré comme quelqu'un qui ne sait PAS se servir de l'app : quand il demande COMMENT faire (« comment je fais pour… », « où je clique… », « c'est où… »), tu réponds en UNE phrase simple, puis tu termines ta réponse par UNE ligne invisible :
+[GUIDE:{"view":"<id d'écran, mêmes ids que l'action navigate — omets le champ si c'est l'écran courant>","find":"<texte VISIBLE de l'élément, copié tel quel (ex : « Lancer », « + Ajouter un site »)>","note":"<consigne minuscule, 6 mots max (ex : « Clique ici pour démarrer »)>"}]
+L'app l'emmène au bon endroit et fait briller l'élément, avec ta consigne à côté.
+- UNE cible par tour : la PREMIÈRE étape seulement. La suite viendra au tour suivant, quand il aura fait ce geste.
+- "find" = un libellé réellement affiché à l'écran (bouton, onglet, titre de carte). Si tu n'es pas sûr du libellé exact, n'émets PAS de [GUIDE] : explique avec des mots où regarder.
+- Jamais de [GUIDE] pour une simple question d'information : c'est réservé au « comment faire ».
 """
 
 # Le carnet : comment le copilote retient (et oublie) — bloc fixe du prompt.
@@ -785,7 +795,8 @@ def build_prompt(app_state, user_id: str, thread: list[dict],
 # ---------------------------------------------------------------------------
 # Anti-fuite : masque les tags de commande pendant le stream
 # ---------------------------------------------------------------------------
-_TAG_MARKERS = ("[ACTION:", "[CHAT_THOMAS]", "[MEMOIRE:", "[OUBLIE:")
+_TAG_MARKERS = ("[ACTION:", "[CHAT_THOMAS]", "[MEMOIRE:", "[OUBLIE:",
+                "[GUIDE:")
 
 
 class TagScrubber:
@@ -902,6 +913,8 @@ _MEMOIRE_RE = re.compile(r"\[MEMOIRE:\s*(\{.*?\})\s*\]",
                          re.DOTALL | re.IGNORECASE)
 _OUBLIE_RE = re.compile(r"\[OUBLIE:\s*(\{.*?\})\s*\]",
                         re.DOTALL | re.IGNORECASE)
+_GUIDE_RE = re.compile(r"\[GUIDE:\s*(\{.*?\})\s*\]",
+                       re.DOTALL | re.IGNORECASE)
 
 
 def _extract_json_tag(raw: str, regex: re.Pattern) -> tuple[str, Optional[dict]]:
@@ -956,6 +969,7 @@ def _finalize_reply(raw: str, *, user_id: str = "jordan",
     text, sent_thomas = claude_advisor._extract_chat_to_thomas(raw or "")
     text, action = claude_advisor._extract_action(text)
     text, mem_out = _apply_memory_tags(user_id, text)
+    text, guide = _extract_json_tag(text, _GUIDE_RE)
     out: dict[str, Any] = {
         "text": (text or "").strip(),
         "navigate": "",
@@ -963,6 +977,13 @@ def _finalize_reply(raw: str, *, user_id: str = "jordan",
         "sent_to_thomas": bool(sent_thomas),
     }
     out.update(mem_out)
+    # Le doigt pointé : view/find/note bornés, find obligatoire.
+    if guide is not None and str(guide.get("find") or "").strip():
+        out["guide"] = {
+            "view": str(guide.get("view") or "").strip()[:40],
+            "find": str(guide.get("find") or "").strip()[:80],
+            "note": str(guide.get("note") or "").strip()[:60],
+        }
     if action is not None:
         try:
             result = execute(action) or {}
@@ -1091,6 +1112,8 @@ def stream_reply(app_state, user_id: str, question: str,
         }
     if final.get("navigate"):
         done["navigate"] = final["navigate"]
+    if final.get("guide"):
+        done["guide"] = final["guide"]
     if final.get("action_done") is not None:
         done["action_done"] = final["action_done"]
     if final.get("sent_to_thomas"):
@@ -1112,7 +1135,7 @@ Structure attendue, en 5 à 10 lignes, markdown léger :
 2. Les 2-3 choses qui COMPTENT maintenant, triées par impact business (réponses intéressées à traiter > brouillons à valider > robot en panne > relancer la machine). Chiffres réels à l'appui.
 3. Si tout est calme et à jour : dis-le franchement en deux lignes, sans inventer de l'urgence.
 
-Interdits pour CE tour : les tags [ACTION:…], [MEMOIRE:…], [OUBLIE:…], [CHAT_THOMAS]. Tu informes, tu ne lances rien.
+Interdits pour CE tour : les tags [ACTION:…], [MEMOIRE:…], [OUBLIE:…], [GUIDE:…], [CHAT_THOMAS]. Tu informes, tu ne lances rien.
 Commence directement par le contenu (pas de « Salut » — l'en-tête est déjà posé)."""
 
 
@@ -1182,6 +1205,7 @@ def stream_briefing(app_state, user_id: str, view: str = "") -> Iterator[dict]:
     # Pas d'action au briefing : on retire les tags sans RIEN exécuter.
     text, _ = claude_advisor._extract_action(raw)
     text, _ = _extract_json_tag(text, _MEMOIRE_RE)
+    text, _ = _extract_json_tag(text, _GUIDE_RE)
     text, _ = _extract_json_tag(text, _OUBLIE_RE)
     text = (header + text).strip()
     append_messages(user_id, [{"role": "assistant", "content": text,
@@ -1207,7 +1231,7 @@ def send_blocking(app_state, user_id: str, question: str,
         return {"ok": False, "text": "", "error": "Réponse vide de l'IA."}
     out = {"ok": True, "text": final.get("text") or ""}
     for k in ("navigate", "action_done", "sent_to_thomas", "memorized",
-              "forgotten", "proposed"):
+              "forgotten", "proposed", "guide"):
         if k in final:
             out[k] = final[k]
     return out

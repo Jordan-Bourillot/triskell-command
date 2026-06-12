@@ -311,7 +311,7 @@ const Copilot = {
         const r = await this._sendBlocking(text);
         if (r && r.ok) finalEvt = { type: 'done', text: r.text, navigate: r.navigate,
                                     action_done: r.action_done, sent_to_thomas: r.sent_to_thomas,
-                                    proposed: r.proposed };
+                                    proposed: r.proposed, guide: r.guide };
         else errorMsg = (r && r.error) || 'Je n’ai pas réussi à répondre. Réessaie.';
       }
     } catch (e) {
@@ -320,7 +320,7 @@ const Copilot = {
           const r = await this._sendBlocking(text);
           if (r && r.ok) finalEvt = { type: 'done', text: r.text, navigate: r.navigate,
                                       action_done: r.action_done, sent_to_thomas: r.sent_to_thomas,
-                                      proposed: r.proposed };
+                                      proposed: r.proposed, guide: r.guide };
           else errorMsg = (r && r.error) || 'Je n’ai pas réussi à répondre. Réessaie.';
         } catch (e2) {
           errorMsg = 'Le serveur ne répond pas. Réessaie dans un instant.';
@@ -652,6 +652,11 @@ const Copilot = {
     }
 
     if (evt.navigate) this._navigate(evt.navigate);
+
+    // Le doigt pointé : Perceval emmène et fait briller l'élément.
+    if (evt.guide && typeof Perceval !== 'undefined' && Perceval.pointAt) {
+      try { Perceval.pointAt(evt.guide); } catch (e) { /* jamais bloquant */ }
+    }
 
     // Confirmation discrète dans la barre-guide, si elle est là
     if (evt.action_done === true && typeof Guide !== 'undefined' && Guide.say) {

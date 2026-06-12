@@ -151,10 +151,13 @@ const Perceval = {
   onViewChange(viewId) {
     this.view = viewId;
     this._wake();
+    this._clearSpot(); // l'écran change : le doigt pointé n'a plus de cible
     // Il « regarde » ton nouvel écran un court instant.
     this._setMood('reflechit');
     if (this._thinkTimer) clearTimeout(this._thinkTimer);
     this._thinkTimer = setTimeout(() => this._refreshMood(), 900);
+    this._trackWandering(viewId);
+    this._maybeIntroduceView(viewId);
     this._renderBubble();
     this._poll(); // l'état a pu changer suite à une action
   },
@@ -350,6 +353,156 @@ const Perceval = {
     return `${hello} ${info}`;
   },
 
+  // ---------- l'accueil des écrans inconnus (assistance de débutant) ----------
+  // À la PREMIÈRE visite d'un écran d'action, il se présente : à quoi sert
+  // l'écran, et l'invitation à lui parler. Une fois par écran, pour toujours.
+  _maybeIntroduceView(viewId) {
+    if (!this.met || this.collapsed || this.eventMsg) return;
+    const vt = this.VIEW_TEXTS[viewId] || {};
+    if (!vt.here || !vt.inview) return; // réservé aux écrans d'action
+    let seen = {};
+    try { seen = JSON.parse(localStorage.getItem('triskell.perceval.seenviews') || '{}'); } catch (e) {}
+    if (seen[viewId]) return;
+    seen[viewId] = 1;
+    try { localStorage.setItem('triskell.perceval.seenviews', JSON.stringify(seen)); } catch (e) {}
+    this.say(`Première fois ici ? ${vt.here} Dis-moi ce que tu veux faire — je peux le faire pour toi, ou te montrer.`, 9000);
+  },
+
+  // ---------- la main tendue quand on tourne en rond ----------
+  // 4 écrans différents en moins de 25 s = il cherche quelque chose.
+  // Savoir-vivre : 1 proposition par heure max ; ignorée 2 fois de suite
+  // → silence pendant 7 jours.
+  _trackWandering(viewId) {
+    const now = Date.now();
+    this._navLog = (this._navLog || []).filter(e => now - e.t < 25000);
+    const last = this._navLog[this._navLog.length - 1];
+    if (!last || last.v !== viewId) this._navLog.push({ v: viewId, t: now });
+    const distinct = new Set(this._navLog.map(e => e.v));
+    if (distinct.size < 4) return;
+    this._navLog = [];
+    try {
+      const lastAt = parseInt(localStorage.getItem('triskell.perceval.wander.last') || '0', 10) || 0;
+      if (now - lastAt < 3600 * 1000) return;
+      let ignored = parseInt(localStorage.getItem('triskell.perceval.wander.ignored') || '0', 10) || 0;
+      // La main tendue précédente n'a jamais été saisie → on le note.
+      if (localStorage.getItem('triskell.perceval.wander.pending') === '1') {
+        ignored += 1;
+        localStorage.setItem('triskell.perceval.wander.ignored', String(ignored));
+      }
+      if (ignored >= 2) {
+        const mutedAt = parseInt(localStorage.getItem('triskell.perceval.wander.muted') || '0', 10) || 0;
+        if (!mutedAt) localStorage.setItem('triskell.perceval.wander.muted', String(now));
+        if (now - (mutedAt || now) < 7 * 24 * 3600 * 1000) return;
+        // 7 jours passés : on repart de zéro, il a droit à une nouvelle chance.
+        localStorage.setItem('triskell.perceval.wander.ignored', '0');
+        localStorage.removeItem('triskell.perceval.wander.muted');
+      }
+      localStorage.setItem('triskell.perceval.wander.last', String(now));
+      localStorage.setItem('triskell.perceval.wander.pending', '1');
+    } catch (e) { /* sans stockage, on propose quand même */ }
+    this.say('Tu cherches quelque chose ? Écris-le-moi là, en bas à droite — je t’emmène.', 9000);
+  },
+
+  /** L'utilisateur a saisi la main tendue (il m'a parlé) : on oublie tout. */
+  _wanderReward() {
+    try {
+      localStorage.setItem('triskell.perceval.wander.pending', '0');
+      localStorage.setItem('triskell.perceval.wander.ignored', '0');
+      localStorage.removeItem('triskell.perceval.wander.muted');
+    } catch (e) {}
+  },
+
+  // ---------- pointer du doigt (guidage dans l'écran) ----------
+  /** [GUIDE] du copilote : emmène sur l'écran si besoin, retrouve
+   *  l'élément par son TEXTE VISIBLE, le fait briller avec la consigne
+   *  à côté. Dégrade proprement : introuvable → il le dit en mots. */
+  pointAt(g) {
+    if (!g || !g.find) return;
+    const wanted = String(g.view || '').trim();
+    if (wanted && typeof App !== 'undefined' && App.show
+        && App.currentView !== wanted) {
+      try { App.show(wanted); } catch (e) { /* l'écran viendra, ou pas */ }
+    }
+    this._clearSpot();
+    this._spotTry(String(g.find), String(g.note || ''), 0);
+  },
+
+  _spotTry(find, note, attempt) {
+    const el = this._findByText(find);
+    if (el) { this._spotlight(el, note); return; }
+    if (attempt >= 8) { // ~3,6 s : l'écran est rendu, l'élément n'y est pas
+      this.say(`Je n’ai pas retrouvé « ${find} » sur l’écran — il a peut-être changé de nom. Redemande-moi, ou décris-moi ce que tu vois.`, 8000);
+      return;
+    }
+    this._spotTimer = setTimeout(() => this._spotTry(find, note, attempt + 1), 450);
+  },
+
+  _norm(s) {
+    return String(s || '').toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/\s+/g, ' ').trim();
+  },
+
+  _findByText(find) {
+    const target = this._norm(find);
+    if (!target) return null;
+    const sel = 'button, a, [role="button"], summary, label, th, [data-view], input[type="submit"]';
+    const cands = document.querySelectorAll(sel);
+    let best = null, bestLen = Infinity;
+    for (const el of cands) {
+      if (el.closest('#perceval-host') || el.closest('#copilot-panel')) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 4 || r.height < 4) continue; // invisible ou replié
+      const txt = this._norm(el.textContent || el.value);
+      if (!txt || txt.length > 160) continue;
+      if (txt === target) return el; // libellé exact → gagné
+      if (txt.includes(target) && txt.length < bestLen) { best = el; bestLen = txt.length; }
+    }
+    return best;
+  },
+
+  _spotlight(el, note) {
+    try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+    el.classList.add('pv-spot');
+    const tag = document.createElement('div');
+    tag.id = 'pv-spot-note';
+    tag.textContent = `👉 ${note || 'C’est ici.'}`;
+    document.body.appendChild(tag);
+    const place = () => {
+      const r = el.getBoundingClientRect();
+      tag.style.left = Math.max(8, Math.min(window.innerWidth - tag.offsetWidth - 8, r.left)) + 'px';
+      tag.style.top = Math.max(8, r.top - tag.offsetHeight - 10) + 'px';
+    };
+    this._spotEl = el;
+    this._spotPlace = place;
+    setTimeout(place, 60);
+    setTimeout(place, 420); // après le défilement doux
+    window.addEventListener('scroll', place, { passive: true, capture: true });
+    window.addEventListener('resize', place);
+    // Un clic n'importe où (y compris sur la cible) éteint le projecteur.
+    this._spotCleanup = () => this._clearSpot();
+    setTimeout(() => document.addEventListener('click', this._spotCleanup,
+      { once: true, capture: true }), 400);
+    this._spotAutoOff = setTimeout(() => this._clearSpot(), 18000);
+  },
+
+  _clearSpot() {
+    if (this._spotTimer) { clearTimeout(this._spotTimer); this._spotTimer = null; }
+    if (this._spotAutoOff) { clearTimeout(this._spotAutoOff); this._spotAutoOff = null; }
+    if (this._spotPlace) {
+      window.removeEventListener('scroll', this._spotPlace, { capture: true });
+      window.removeEventListener('resize', this._spotPlace);
+      this._spotPlace = null;
+    }
+    if (this._spotCleanup) {
+      document.removeEventListener('click', this._spotCleanup, { capture: true });
+      this._spotCleanup = null;
+    }
+    if (this._spotEl) { this._spotEl.classList.remove('pv-spot'); this._spotEl = null; }
+    const tag = document.getElementById('pv-spot-note');
+    if (tag) tag.remove();
+  },
+
   // ---------- la voix ----------
   _speak(text) {
     if (!this.voiceOn) return;
@@ -471,6 +624,7 @@ const Perceval = {
     document.body.appendChild(host);
     document.getElementById('pv-body').onclick = () => {
       if (this.collapsed) { this._setCollapsed(false); return; }
+      this._wanderReward();
       if (typeof Copilot !== 'undefined' && Copilot.toggle) Copilot.toggle();
       else this._setCollapsed(true);
     };
@@ -487,6 +641,7 @@ const Perceval = {
         if (!q) return;
         inp.value = '';
         this._wake();
+        this._wanderReward();
         Copilot.askFromOutside(q);
       };
     }
@@ -827,6 +982,27 @@ const Perceval = {
         margin-top: 7px; padding-top: 7px;
         border-top: 1px dashed hsl(var(--border));
         font-size: 12px; color: hsl(var(--text-muted));
+      }
+
+      /* -- le doigt pointé (élément mis en lumière + consigne) -- */
+      .pv-spot {
+        outline: 3px solid hsl(var(--accent)) !important;
+        outline-offset: 3px;
+        border-radius: 8px;
+        animation: pvSpotPulse 1.2s ease-in-out infinite;
+      }
+      #pv-spot-note {
+        position: fixed; z-index: 62;
+        background: hsl(var(--accent)); color: #fff;
+        font-size: 12.5px; font-weight: 700;
+        padding: 6px 12px; border-radius: 999px;
+        box-shadow: 0 6px 20px hsl(var(--accent) / .45);
+        pointer-events: none; white-space: nowrap;
+        animation: pvFade .25s ease-out;
+      }
+      @keyframes pvSpotPulse {
+        0%,100% { outline-color: hsl(var(--accent)); }
+        50% { outline-color: hsl(var(--accent) / .3); }
       }
 
       /* -- carte de rencontre -- */
