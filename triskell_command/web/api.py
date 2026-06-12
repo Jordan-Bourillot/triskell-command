@@ -9752,6 +9752,9 @@ class Api:
         source = (p.get("source") or "").strip().lower()
         params = p.get("params") or {}
         dry_run = bool(p.get("dry_run"))
+        # Carnet de chasse : recherche déjà faite → le serveur répond
+        # {needs_confirm, warning} ; force=True = « relance quand même ».
+        force = bool(p.get("force"))
         try:
             from .auth import get_current_local_user
             who = get_current_local_user() or ""
@@ -9760,7 +9763,7 @@ class Api:
         try:
             from ..integrations import missions
             return missions.create_mission(source, params, created_by=who,
-                                            dry_run=dry_run,
+                                            dry_run=dry_run, force=force,
                                             client=self._supabase())
         except Exception as exc:
             logger.exception("prospection_start")
@@ -9796,6 +9799,21 @@ class Api:
         except Exception as exc:
             logger.debug("prospection_missions autopilot: %s", exc)
         return out
+
+    def prospection_hunt_log(self, payload: dict | None = None) -> dict:
+        """Le carnet de chasse : mémoire PERMANENTE des recherches lancées
+        (critères normalisés + date + récolte). C'est lui qui permet
+        d'avertir « déjà chassé » au lancement. Indépendant de la liste
+        des missions (et de son plafond de 50)."""
+        limit = int((payload or {}).get("limit") or 100)
+        try:
+            from ..integrations import hunt_log
+            return hunt_log.list_entries(client=self._supabase(),
+                                         limit=limit)
+        except Exception as exc:
+            logger.debug("prospection_hunt_log: %s", exc)
+            return {"ok": False, "error": str(exc), "entries": [],
+                    "total": 0}
 
     def prospection_mission_cancel(self, payload: dict) -> dict:
         """Abandonne le suivi d'une mission (la chasse déjà lancée n'est

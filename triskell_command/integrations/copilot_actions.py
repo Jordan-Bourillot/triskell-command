@@ -553,6 +553,7 @@ def _run_start_prospection(action: dict) -> dict:
         "source": action.get("source") or "",
         "params": action.get("params") or {},
         "dry_run": bool(action.get("dry_run")),
+        "force": bool(action.get("force")),
     })
     if r.get("ok"):
         label = ((r.get("mission") or {}).get("label") or "")
@@ -562,6 +563,14 @@ def _run_start_prospection(action: dict) -> dict:
                 "summary": f"{mode} : {label}. Je suivrai l'avancée — tu "
                            f"verras tout sur l'écran Prospection.",
                 "navigate": "prospection"}
+    if r.get("needs_confirm"):
+        # Carnet de chasse : recherche déjà faite. Rien n'est lancé — on
+        # le dit, et l'utilisateur peut insister (l'IA remettra force).
+        return {"ok": False,
+                "summary": (r.get("warning") or "Cette recherche a déjà "
+                            "été faite.") + " Si tu veux vraiment la "
+                            "refaire, redemande-la-moi en précisant "
+                            "« relance quand même »."}
     return {"ok": False, "summary": f"Impossible de lancer : {r.get('error')}"}
 
 
@@ -1126,6 +1135,9 @@ ACTIONS DISPONIBLES :
    - source "local" (commerces Google Maps) → params {{metier, zone, volume}}
    - source "createurs" (YouTube/Twitch) → params {{niche, plateformes:["youtube"], volume}}
    - "dry_run":true = TEST À BLANC (rien n'est enregistré, juste un rapport).
+   - Réponse « recherche déjà faite » (carnet de chasse) = rien n'a été
+     lancé. Tu relances avec "force":true UNIQUEMENT si {'{PRENOM}'} insiste
+     explicitement après avoir entendu la date et la récolte d'avant.
 2. Allumer / éteindre l'Auto-pilote{m('toggle_autopilot')} :
    [ACTION:{{"do":"toggle_autopilot","enabled":true}}]
 3. Abandonner une mission{m('cancel_mission')} : [ACTION:{{"do":"cancel_mission","id":"abc123"}}]

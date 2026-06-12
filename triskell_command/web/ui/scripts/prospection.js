@@ -82,6 +82,17 @@ const Prospection = {
           <div class="pr-section-label">Ce qui se passe en ce moment</div>
           <div id="pr-missions"></div>
         </div>
+
+        <details id="pr-carnet" class="pr-carnet">
+          <summary>
+            <span>🗒️ Carnet de chasse <span class="pr-carnet-sub">— tout ce qui a déjà été cherché</span></span>
+            <span id="pr-carnet-count" class="pr-carnet-count"></span>
+          </summary>
+          <div class="pr-carnet-hint">L’app s’en souvient : si tu relances une
+            recherche déjà faite, elle te prévient d’abord. Et de toute façon,
+            la base ne crée jamais de doublons.</div>
+          <div id="pr-carnet-list" class="pr-carnet-list">Chargement…</div>
+        </details>
       </section>
     `;
     // Restaure la dernière cible choisie + les champs saisis (mémoire locale,
@@ -104,8 +115,60 @@ const Prospection = {
     const listeBtn = document.getElementById('pr-tile-liste');
     if (listeBtn) listeBtn.onclick = () => App.show('convoy');
 
+    // Carnet de chasse : chargé à l'ouverture du volet (et rafraîchi à
+    // chaque ouverture — il a pu se remplir entre-temps).
+    const carnet = document.getElementById('pr-carnet');
+    if (carnet) carnet.addEventListener('toggle', () => {
+      if (carnet.open) this._loadCarnet();
+    });
+
     await this._refresh();
     this._startPolling();
+  },
+
+  // ───────────────────────── Carnet de chasse ─────────────────────────
+  async _loadCarnet() {
+    const list = document.getElementById('pr-carnet-list');
+    const count = document.getElementById('pr-carnet-count');
+    if (!list) return;
+    if (!App.api || typeof App.api.prospection_hunt_log !== 'function') {
+      list.innerHTML = '<div class="pr-carnet-empty">Disponible une fois connecté au serveur.</div>';
+      return;
+    }
+    let r = null;
+    try { r = await App.api.prospection_hunt_log({ limit: 60 }); } catch (e) { /* réseau */ }
+    if (!r || !r.ok) {
+      list.innerHTML = '<div class="pr-carnet-empty">Carnet illisible pour le moment — réessaie dans un instant.</div>';
+      return;
+    }
+    const rows = r.entries || [];
+    if (count) count.textContent = r.total ? `${r.total} recherche${r.total > 1 ? 's' : ''}` : '';
+    if (!rows.length) {
+      list.innerHTML = '<div class="pr-carnet-empty">Encore vide — il se remplit à chaque recherche lancée.</div>';
+      return;
+    }
+    const esc = (t) => String(t || '').replace(/[&<>"']/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const dateFr = (iso) => {
+      const d = new Date(iso || '');
+      return isNaN(d) ? '' : d.toLocaleDateString('fr-FR');
+    };
+    const SRC = { pme: '🏢', local: '📍', createurs: '🎥' };
+    list.innerHTML = rows.map(e => {
+      const res = e.result || null;
+      let bilan = '';
+      if (e.status === 'terminée' && res) {
+        bilan = `${res.pushed || 0} versée${(res.pushed || 0) > 1 ? 's' : ''} / ${res.found || 0} trouvée${(res.found || 0) > 1 ? 's' : ''}`;
+      } else if (e.status === 'lancée') bilan = 'en cours…';
+      else bilan = esc(e.status || '');
+      const runs = (e.runs || 1) > 1 ? `<span class="pr-carnet-runs" title="Nombre de fois où cette recherche a été lancée">×${e.runs}</span>` : '';
+      return `<div class="pr-carnet-row">
+        <span class="pr-carnet-ic">${SRC[e.source] || '🔎'}</span>
+        <span class="pr-carnet-label">${esc(e.label)}${runs}</span>
+        <span class="pr-carnet-date">${dateFr(e.last_at)}</span>
+        <span class="pr-carnet-res">${bilan}</span>
+      </div>`;
+    }).join('');
   },
 
   // ───────────────────────── Cibles + champs ─────────────────────────
@@ -351,14 +414,30 @@ const Prospection = {
     if (btn) { btn.disabled = true; btn.querySelector('span').textContent = 'Lancement…'; }
     let r = null;
     let excToasted = false;
+    let declined = false;
     try {
       r = await App.api.prospection_start({ source: s, params, dry_run: dryRun });
+      // Carnet de chasse : cette recherche a déjà été faite → on montre
+      // la date et la récolte, et on ne relance que sur confirmation.
+      if (r && !r.ok && r.needs_confirm) {
+        const again = await Dialog.confirm(
+          (r.warning || r.error || 'Cette recherche a déjà été faite.')
+          + '\n\nVeux-tu vraiment la refaire ?',
+          { title: 'Déjà chassé !', okLabel: 'Relancer quand même',
+            cancelLabel: 'Annuler' });
+        if (again) {
+          r = await App.api.prospection_start({ source: s, params, dry_run: dryRun, force: true });
+        } else {
+          declined = true;
+        }
+      }
     } catch (e) {
       Toast.friendlyError(e, 'Lancement impossible pour le moment.');
       excToasted = true;
     }
     this.state.launching = false;
     if (btn) { btn.disabled = false; btn.querySelector('span').textContent = '🚀 Lancer la recherche'; }
+    if (declined) return; // l'utilisateur a renoncé : rien à signaler
     if (!r || !r.ok) {
       // r.error vient du serveur, déjà en français ; sinon message générique.
       if (!excToasted) Toast.error((r && r.error) || 'Lancement impossible pour le moment.');
@@ -610,6 +689,9 @@ const Prospection = {
     try {
       r = await App.api.prospection_start({
         source: m.source, params: m.params || {}, dry_run: false,
+        // Relance depuis la carte d'une mission passée : la date et le
+        // résultat sont déjà sous les yeux — pas besoin de re-prévenir.
+        force: true,
       });
     } catch (e) {
       Toast.friendlyError(e, 'Relance impossible pour le moment.');
@@ -891,6 +973,41 @@ const Prospection = {
       .pr-rail-cur .pr-rail-label { color: hsl(var(--text)); }
       .pr-rail-done .pr-rail-dot { border-color: hsl(var(--success));
         background: hsl(var(--success) / .12); color: hsl(var(--success)); }
+
+      /* ─ Carnet de chasse ─ */
+      .pr-carnet { margin-top: 18px; border: 1px solid hsl(var(--border));
+        border-radius: 14px; background: hsl(var(--surface)); }
+      .pr-carnet > summary { display: flex; align-items: center; gap: 10px;
+        justify-content: space-between; cursor: pointer; list-style: none;
+        padding: 13px 16px; font-weight: 700; font-size: 13.5px;
+        color: hsl(var(--text-secondary)); user-select: none; }
+      .pr-carnet > summary::-webkit-details-marker { display: none; }
+      .pr-carnet[open] > summary { color: hsl(var(--text));
+        border-bottom: 1px solid hsl(var(--border)); }
+      .pr-carnet-sub { font-weight: 500; opacity: .75; }
+      .pr-carnet-count { font-size: 12px; font-weight: 600;
+        color: hsl(var(--text-muted)); flex-shrink: 0; }
+      .pr-carnet-hint { font-size: 12px; line-height: 1.5; padding: 10px 16px 0;
+        color: hsl(var(--text-muted)); text-wrap: pretty; }
+      .pr-carnet-list { padding: 8px 8px 10px; }
+      .pr-carnet-row { display: grid; gap: 10px; align-items: baseline;
+        grid-template-columns: auto 1fr auto auto; padding: 7px 9px;
+        border-radius: 9px; font-size: 13px; }
+      .pr-carnet-row:nth-child(odd) { background: hsl(var(--surface-2, var(--border)) / .35); }
+      .pr-carnet-ic { font-size: 13px; }
+      .pr-carnet-label { color: hsl(var(--text)); font-weight: 600; min-width: 0;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .pr-carnet-runs { margin-left: 7px; font-size: 11px; font-weight: 800;
+        color: hsl(var(--warning)); }
+      .pr-carnet-date { color: hsl(var(--text-muted)); font-size: 12px; }
+      .pr-carnet-res { color: hsl(var(--text-secondary)); font-size: 12px;
+        text-align: right; white-space: nowrap; }
+      .pr-carnet-empty { padding: 12px 16px; font-size: 12.5px;
+        color: hsl(var(--text-muted)); }
+      @media (max-width: 560px) {
+        .pr-carnet-row { grid-template-columns: auto 1fr auto; }
+        .pr-carnet-res { grid-column: 2 / -1; text-align: left; }
+      }
 
       /* ─ Assistant ─ */
       .pr-assistant-slot { margin-bottom: 20px; }

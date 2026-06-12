@@ -202,13 +202,144 @@ from triskell_command.web.api import Api, get_api_instance  # noqa: E402
 api = Api()
 check("singleton Api enregistré", get_api_instance() is api)
 for ep in ("prospection_start", "prospection_missions",
-           "prospection_mission_cancel"):
+           "prospection_mission_cancel", "prospection_hunt_log"):
     check(f"endpoint {ep} exposé", callable(getattr(api, ep, None)))
 r = api.prospection_start({"source": "zzz", "params": {}})
 check("cible inconnue → refus propre",
       r.get("ok") is False and "inconnue" in (r.get("error") or ""))
 r = api.prospection_mission_cancel({})
 check("abandon sans id → refus propre", r.get("ok") is False)
+
+print("5) Carnet de chasse (la mémoire des recherches)…")
+from triskell_command.integrations import hunt_log as HL  # noqa: E402
+
+# Normalisation : accents / majuscules / espaces / tirets ignorés
+check("« Électricien  / 22 » == « electricien / 22 »",
+      HL.criteria_key("pme", {"metier": "Électricien ", "departement": "22"})
+      == HL.criteria_key("pme", {"metier": "electricien",
+                                  "departement": " 22"}))
+check("« Peintre en bâtiment » == « peintre-en-batiment »",
+      HL.criteria_key("local", {"metier": "Peintre en bâtiment",
+                                 "zone": "Brest"})
+      == HL.criteria_key("local", {"metier": "peintre-en-batiment",
+                                    "zone": "brest"}))
+check("le volume ne fait pas l'identité d'une recherche",
+      HL.criteria_key("local", {"metier": "restaurant", "zone": "Rennes",
+                                 "volume": 30})
+      == HL.criteria_key("local", {"metier": "restaurant", "zone": "Rennes",
+                                    "volume": 200}))
+check("« sans site » = une AUTRE recherche",
+      HL.criteria_key("local", {"metier": "garage", "zone": "Lorient"})
+      != HL.criteria_key("local", {"metier": "garage", "zone": "Lorient",
+                                    "sans_site": True}))
+check("créateurs : l'ordre des plateformes est ignoré",
+      HL.criteria_key("createurs", {"niche": "cuisine",
+                                     "plateformes": ["twitch", "youtube"]})
+      == HL.criteria_key("createurs", {"niche": "Cuisine",
+                                        "plateformes": ["youtube", "twitch"]}))
+
+# Garde-fou « déjà chassé » dans create_mission (chasse simulée, rien ne part)
+fc2 = FakeClient()
+_old_start = MI.start_hunt_for
+MI.start_hunt_for = lambda s, p: {"ok": True, "hunt_ref": "hx",
+                                   "label": "plombier — dept 35"}
+try:
+    r1 = MI.create_mission("pme", {"metier": "plombier", "departement": "35",
+                                    "volume": 100}, client=fc2)
+    e1 = HL.find("pme", {"metier": "plombier", "departement": "35"},
+                 client=fc2)
+    check("1er lancement → passe et entre au carnet",
+          r1.get("ok") is True and e1 is not None
+          and int(e1.get("runs") or 0) == 1)
+    r2 = MI.create_mission("pme", {"metier": "Plombier ",
+                                    "departement": " 35", "volume": 50},
+                           client=fc2)
+    check("même recherche → needs_confirm, RIEN n'est lancé",
+          r2.get("ok") is False and r2.get("needs_confirm") is True)
+    w = r2.get("warning") or ""
+    check("…avertissement en français : déjà faite + libellé + doublons",
+          "déjà faite" in w and "plombier" in w and "doublon" in w)
+    check("…et error porte le même message (anciens fronts)",
+          r2.get("error") == w)
+    r3 = MI.create_mission("pme", {"metier": "plombier",
+                                    "departement": "35"},
+                           force=True, client=fc2)
+    e3 = HL.find("pme", {"metier": "plombier", "departement": "35"},
+                 client=fc2)
+    check("force=True → relance acceptée, compteur à 2",
+          r3.get("ok") is True and int(e3.get("runs") or 0) == 2)
+    check("…l'avertissement dit maintenant « 2 fois »",
+          "2 fois" in HL.warning_for(e3))
+    rf = MI.create_mission("pme", {"metier": "plombier",
+                                    "departement": "35",
+                                    "force": True}, client=fc2)
+    check("force glissé dans params → toléré aussi",
+          rf.get("ok") is True)
+    rd = MI.create_mission("pme", {"metier": "plombier",
+                                    "departement": "35"},
+                           dry_run=True, client=fc2)
+    e4 = HL.find("pme", {"metier": "plombier", "departement": "35"},
+                 client=fc2)
+    check("test à blanc : ni averti, ni compté",
+          rd.get("ok") is True and int(e4.get("runs") or 0) == 3)
+    r5 = MI.create_mission("local", {"metier": "fleuriste",
+                                      "zone": "Lorient"}, client=fc2)
+    check("recherche différente → passe sans question",
+          r5.get("ok") is True)
+
+    # Un carnet en panne ne bloque JAMAIS une chasse
+    _old_find, _old_rec = HL.find, HL.record_launch
+    HL.find = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    HL.record_launch = lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("boom"))
+    try:
+        rz = MI.create_mission("local", {"metier": "tatoueur",
+                                          "zone": "Brest"}, client=fc2)
+        check("carnet en panne → la chasse part quand même",
+              rz.get("ok") is True)
+    finally:
+        HL.find, HL.record_launch = _old_find, _old_rec
+finally:
+    MI.start_hunt_for = _old_start
+
+# Fin de mission → récolte notée ; abandon → noté aussi
+m_done = mk_mission(source="pme", status=MI.ST_HANDED,
+                    params={"metier": "plombier", "departement": "35"},
+                    counts={"found": 24, "with_email": 24, "pushed": 22,
+                            "created": 20, "merged": 2})
+HL.record_result(m_done, client=fc2)
+e5 = HL.find("pme", {"metier": "plombier", "departement": "35"}, client=fc2)
+check("mission terminée → récolte au carnet (22 versées / 24 trouvées)",
+      e5 is not None and e5.get("status") == "terminée"
+      and (e5.get("result") or {}).get("pushed") == 22
+      and "22" in HL.warning_for(e5))
+
+# Rattrapage : carnet absent → reconstruit depuis les missions (sans les 🧪)
+ents = HL.backfill_from_missions([
+    mk_mission(id="x", source="local", status=MI.ST_HANDED,
+               params={"metier": "coiffeur", "zone": "Vannes"},
+               counts={"found": 25, "with_email": 13, "pushed": 13}),
+    mk_mission(id="y", source="local", dry_run=True,
+               params={"metier": "coiffeur", "zone": "Vannes"}),
+    mk_mission(id="z", source="local", status=MI.ST_HUNTING,
+               params={"metier": "coiffeur", "zone": "vannes "}),
+])
+check("rattrapage : 2 vraies missions identiques → 1 entrée ×2, 🧪 exclu",
+      len(ents) == 1 and ents[0]["runs"] == 2)
+
+# Le tri du carnet (récentes d'abord) + le plafond
+entries_data = {"v": 1, "entries": [
+    {"key": f"k{i}", "label": f"l{i}", "source": "pme",
+     "first_at": f"2026-06-{(i % 28) + 1:02d}T00:00:00+00:00",
+     "last_at": f"2026-06-{(i % 28) + 1:02d}T00:00:00+00:00",
+     "runs": 1, "status": "terminée", "result": None, "mission_id": ""}
+    for i in range(HL.MAX_ENTRIES + 25)]}
+fc3 = FakeClient()
+HL._save_raw(entries_data, fc3)
+saved = fc3.store[HL.SHARED_KEY]["entries"]
+check("plafond du carnet appliqué (anciennes écartées d'abord)",
+      len(saved) == HL.MAX_ENTRIES
+      and saved[0]["last_at"] >= saved[-1]["last_at"])
 
 print()
 print(f"{len(PASS)} OK / {len(FAIL)} échec(s)")

@@ -170,7 +170,8 @@ def start_hunt_for(source: str, params: dict) -> dict:
 
 
 def create_mission(source: str, params: dict, *, created_by: str = "",
-                   dry_run: bool = False, client=None) -> dict:
+                   dry_run: bool = False, force: bool = False,
+                   client=None) -> dict:
     """Crée + démarre une mission. Renvoie {ok, mission} ou {ok:False,error}.
 
     dry_run (test à blanc) : la recherche tourne pour de vrai (c'est le
@@ -178,7 +179,17 @@ def create_mission(source: str, params: dict, *, created_by: str = "",
     écrit dans la base et l'Auto-pilote n'est pas prévenu. À la place,
     la mission produit un rapport : combien seraient versés, combien de
     nouveaux/fusions, quels écarts qualité, avec un échantillon.
+
+    Carnet de chasse (demande Jordan 13/06/2026) : si la MÊME recherche
+    (mêmes critères, accents/majuscules ignorés) a déjà été lancée en
+    réel, on ne relance pas en silence → {ok:False, needs_confirm:True,
+    warning} avec la date et la récolte de la fois d'avant. force=True
+    (l'utilisateur a confirmé) passe outre. Les tests à blanc ne sont
+    ni avertis ni notés. Une panne du carnet ne bloque JAMAIS la chasse.
     """
+    params = dict(params or {})
+    # Tolérance : certains appelants glissent force dans params.
+    force = bool(force or params.pop("force", False))
     if source not in SOURCES:
         return {"ok": False, "error": f"cible inconnue : {source}"}
     if dry_run and source == "createurs":
@@ -186,6 +197,29 @@ def create_mission(source: str, params: dict, *, created_by: str = "",
                 "Le test à blanc n'existe pas pour les créateurs : Obélisk "
                 "écrit directement dans la base pendant sa recherche. "
                 "Lance plutôt une vraie mission avec un petit volume (10)."}
+    if not dry_run and not force:
+        try:
+            from . import hunt_log
+            prev = hunt_log.find(source, params, client=client)
+        except Exception as exc:
+            logger.debug("create_mission carnet: %s", exc)
+            prev = None
+        if prev:
+            warning = ""
+            try:
+                from . import hunt_log
+                warning = hunt_log.warning_for(prev)
+            except Exception:
+                warning = "Cette recherche a déjà été faite."
+            return {"ok": False, "needs_confirm": True,
+                    # error AUSSI : les anciens fronts affichent r.error →
+                    # message lisible partout, même sans gestion dédiée.
+                    "error": warning, "warning": warning,
+                    "previous": {"label": prev.get("label") or "",
+                                  "last_at": prev.get("last_at") or "",
+                                  "runs": int(prev.get("runs") or 1),
+                                  "status": prev.get("status") or "",
+                                  "result": prev.get("result")}}
     started = start_hunt_for(source, params)
     if not started.get("ok"):
         return started
@@ -213,6 +247,14 @@ def create_mission(source: str, params: dict, *, created_by: str = "",
             return {"ok": False,
                     "error": "mission lancée mais impossible de l'enregistrer "
                              "(base injoignable) — la chasse tourne quand même"}
+    if not dry_run:
+        # Trace durable dans le carnet de chasse (best-effort).
+        try:
+            from . import hunt_log
+            hunt_log.record_launch(source, params, mission["id"],
+                                   client=client)
+        except Exception as exc:
+            logger.debug("create_mission record_launch: %s", exc)
     return {"ok": True, "mission": mission}
 
 
@@ -496,6 +538,7 @@ def tick(client=None) -> dict:
             return out
         new_list = []
         any_change = False
+        done_for_log = []
         for m in missions:
             if m.get("status") in ACTIVE_STATUSES:
                 out["scanned"] += 1
@@ -511,15 +554,27 @@ def tick(client=None) -> dict:
                     out["advanced"] += 1
                     if m2.get("status") == ST_ERROR:
                         out["errors"] += 1
+                    # Mission réelle arrivée au bout (versée ou en erreur)
+                    # → récolte notée dans le carnet de chasse.
+                    if (not m2.get("dry_run")
+                            and m2.get("status") in (ST_HANDED, ST_ERROR)):
+                        done_for_log.append(m2)
                 new_list.append(m2)
             else:
                 new_list.append(m)
         if any_change:
             save_missions(new_list, client)
+    for m2 in done_for_log:  # hors verrou : le carnet a le sien
+        try:
+            from . import hunt_log
+            hunt_log.record_result(m2, client=client)
+        except Exception as exc:
+            logger.debug("tick record_result: %s", exc)
     return out
 
 
 def cancel_mission(mission_id: str, client=None) -> dict:
+    cancelled = None
     with _LOCK:
         missions = load_missions(client)
         found = False
@@ -528,9 +583,16 @@ def cancel_mission(mission_id: str, client=None) -> dict:
                 if m.get("status") in ACTIVE_STATUSES:
                     m["status"] = ST_CANCELLED
                     m["updated_at"] = _now()
+                    cancelled = m
                 found = True
                 break
         if not found:
             return {"ok": False, "error": "mission introuvable"}
         save_missions(missions, client)
+    if cancelled is not None and not cancelled.get("dry_run"):
+        try:
+            from . import hunt_log
+            hunt_log.record_result(cancelled, client=client)
+        except Exception as exc:
+            logger.debug("cancel record_result: %s", exc)
     return {"ok": True}
