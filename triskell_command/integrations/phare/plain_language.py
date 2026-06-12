@@ -133,12 +133,19 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
         return {"can": False, "mode": special[1], "why": special[0]}
 
     fams = _families_of(action)
-    if fams & set(_MANUAL_FAMILIES):
+    code_fams = fams & set(_CODE_FAMILIES)
+    tool_fams = fams & set(_TOOL_FAMILIES)
+    manual_fams = fams & set(_MANUAL_FAMILIES)
+    # Une mention « à vérifier dans Search Console » n'empêche PAS le robot
+    # de faire la modification principale (vécu : la carte canonical classée
+    # « à toi de le faire » parce que son détail citait GSC pour la
+    # vérification d'après). Le manuel ne gagne que s'il est SEUL en jeu.
+    if manual_fams and not code_fams and not tool_fams:
         return {"can": False, "mode": "manual", "why": _FAMILY_TEXTS["gsc"]}
-    if fams & set(_TOOL_FAMILIES):
+    if tool_fams and not code_fams:
         return {"can": True, "mode": "tool",
                 "why": "Le robot relance la mesure tout seul."}
-    if fams & set(_CODE_FAMILIES):
+    if code_fams:
         if not (site.get("repo_github") or "").strip():
             return {"can": False, "mode": "manual",
                     "why": ("Le site n'est pas encore relié à son code — "

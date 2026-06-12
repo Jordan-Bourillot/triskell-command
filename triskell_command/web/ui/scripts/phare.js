@@ -431,8 +431,12 @@ const Phare = {
     }
     const isAuto = this._isAuto(a);                       // PR déjà prête à publier
     const apply = a.apply || {};
-    const canRobot = !isAuto && !!apply.can;              // le robot peut fabriquer la modif
     const applyState = a.apply_state || '';
+    // Si le robot a déjà regardé et conclu « à faire à la main », on ne
+    // repropose pas « OK, fais-le » : retour aux boutons humains, avec
+    // le bandeau 🛠️ qui explique pourquoi.
+    const robotDeclined = applyState === 'manual';
+    const canRobot = !isAuto && !!apply.can && !robotDeclined;
     const robotBusy = applyState === 'queued' || applyState === 'running';
     const simpleWhat = (a.simple_what || '').trim();
     const detailFull = a.detail_md || a.summary || '';

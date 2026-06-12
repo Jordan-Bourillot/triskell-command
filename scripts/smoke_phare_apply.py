@@ -263,10 +263,24 @@ v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
 check("title + site NON relié → manuel avec explication",
       not v["can"] and "relié" in v["why"])
 v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
-                           "title": "Vérifier et soumettre sitemap.xml dans Search Console"},
+                           "title": "Vérifier la couverture d'index dans Search Console",
+                           "detail_md": "Ouvrir Search Console et vérifier."},
                           site_ok)
-check("Search Console → manuel (compte Google requis)",
+check("Search Console SEUL → manuel (compte Google requis)",
       not v["can"] and v["mode"] == "manual")
+v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
+                           "title": "Ajouter canonical sur les 3 URLs paramétrées de /configurer",
+                           "detail_md": "Insérer <link rel='canonical'>. "
+                                        "Validation : Google Search Console > Inspection d'URL."},
+                          site_ok)
+check("canonical + simple mention de Search Console → le robot PEUT le faire",
+      v["can"] and v["mode"] == "code")
+v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
+                           "title": "Vérifier et soumettre sitemap.xml dans Search Console",
+                           "detail_md": "Si le fichier n'existe pas, le générer et l'uploader."},
+                          site_ok)
+check("sitemap + Search Console → le robot fait sa part (créer le fichier)",
+      v["can"] and v["mode"] == "code")
 v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
                            "title": "Lancer PageSpeed Insights et noter LCP"},
                           site_ok)
