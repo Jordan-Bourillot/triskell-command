@@ -599,8 +599,12 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         "{{competitor_example}}": "",
     }
     out = text
-    for ph, val in replacements.items():
-        out = out.replace(ph, val)
+    # Les clés longues d'abord : sans ça, "{page_demo}" (1 accolade) se
+    # substitue À L'INTÉRIEUR de "{{page_demo}}" (2 accolades) et laisse
+    # des accolades orphelines autour de la valeur — un mail avec
+    # "{https://...}" en clair. Vaut pour toute paire {x} / {{x}}.
+    for ph in sorted(replacements, key=len, reverse=True):
+        out = out.replace(ph, replacements[ph])
     # Nettoie "Bonjour ," qui apparaît quand le prénom est vide
     out = (out
            .replace("Bonjour ,", "Bonjour,")

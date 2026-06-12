@@ -148,6 +148,13 @@ check("{{page_demo}} rempli (coiffeuse → /demo-beaute)",
       f"{BASE_URL}/demo-beaute" in out)
 check("aucun placeholder pages restant",
       "page_metier" not in out and "page_demo" not in out, f"-> {out[:160]}")
+# Piège des syntaxes jumelles : {page_demo} se substituait À L'INTÉRIEUR
+# de {{page_demo}} et laissait "{https://...}" dans le mail envoyé.
+check("aucune accolade orpheline autour des liens",
+      "{" not in out and "}" not in out, f"-> {out[:200]}")
+check('href propre en HTML (pas de href="{url}")',
+      'href="https://pixel-pros.fr/demo-beaute"' in _apply_placeholders(
+          '<a href="{{page_demo}}">Voir</a>', prospect_coiffeuse, "Jordan"))
 
 prospect_macon = {"raison_sociale": "Maçonnerie Le Goff", "secteur": "maçon"}
 out2 = _apply_placeholders(tpl, prospect_macon, "Jordan")
