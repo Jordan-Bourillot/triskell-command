@@ -232,41 +232,30 @@ const Autopilot = {
               Arrêter
             </button>
             <button id="ap-save" class="btn btn-secondary" disabled>Enregistrer les réglages</button>
+            <button id="ap-wizard" class="btn btn-secondary" disabled
+                    title="L'assistant pose 4 questions (volume, horaires, adresses, validation) et remplit tout proprement">
+              🧭 Me guider
+            </button>
             <span id="ap-dirty-badge" role="status"
                   class="hidden text-xs font-semibold text-warning-text">
               ● Modifications non enregistrées
             </span>
           </div>
 
-          <!-- Paramètres avancés : ancien formulaire, replié -->
-          <details class="card p-0 mb-8 group">
-            <summary class="cursor-pointer px-5 py-4 flex items-center justify-between gap-3 hover:bg-bg/40 rounded-2xl">
-              <div>
-                <div class="font-semibold text-sm">Paramètres avancés</div>
-                <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">
-                  Service IA, modèle, signature, plafonds, plage horaire d'envoi…
-                </div>
-              </div>
-              <svg class="w-5 h-5 text-text-muted transition-transform group-open:rotate-180"
-                   fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <polyline points="6 9 12 15 18 9"/>
-              </svg>
-            </summary>
-            <div class="px-5 pb-5 pt-2">
-              <div id="ap-form" class="space-y-8"></div>
-              <!-- Double du bouton Enregistrer : évite de remonter tout en
-                   haut après avoir modifié le formulaire avancé. -->
-              <div class="mt-4 flex flex-wrap items-center gap-3">
-                <button id="ap-save-bottom" class="btn btn-secondary" disabled>
-                  Enregistrer les réglages
-                </button>
-                <span id="ap-dirty-badge-bottom" role="status"
-                      class="hidden text-xs font-semibold text-warning-text">
-                  ● Modifications non enregistrées
-                </span>
-              </div>
-            </div>
-          </details>
+          <!-- Réglages en deux étages repliés (décision Jordan 12/06 — mix) :
+               « courants » (plafonds, horaires) et « experts » (IA, règles).
+               #ap-form englobe les DEUX : les sélecteurs existants
+               (#ap-form [data-key], brouillon local) continuent de tout voir. -->
+          <div id="ap-form" class="mb-8 space-y-4"></div>
+          <div class="-mt-4 mb-8 flex flex-wrap items-center gap-3">
+            <button id="ap-save-bottom" class="btn btn-secondary" disabled>
+              Enregistrer les réglages
+            </button>
+            <span id="ap-dirty-badge-bottom" role="status"
+                  class="hidden text-xs font-semibold text-warning-text">
+              ● Modifications non enregistrées
+            </span>
+          </div>
 
           <!-- Journal technique : replié par défaut, pour debug -->
           <details class="mt-8 card p-0 group">
@@ -320,6 +309,8 @@ const Autopilot = {
     document.getElementById('ap-stop').onclick = () => this.stop();
     const saveBottom = document.getElementById('ap-save-bottom');
     if (saveBottom) saveBottom.onclick = () => this.save();
+    const wizardBtn = document.getElementById('ap-wizard');
+    if (wizardBtn) wizardBtn.onclick = () => this._openWizard();
 
     // Bandeau "X brouillons à valider" : clic = ouvre la page Brouillons
     const draftsBtn = document.getElementById('ap-drafts-banner-open');
@@ -406,7 +397,7 @@ const Autopilot = {
   },
 
   _enableActionButtons() {
-    ['ap-run', 'ap-save', 'ap-save-bottom'].forEach(id => {
+    ['ap-run', 'ap-save', 'ap-save-bottom', 'ap-wizard'].forEach(id => {
       const b = document.getElementById(id);
       if (b) b.disabled = false;
     });
@@ -1822,44 +1813,31 @@ const Autopilot = {
   // NB : le réglage « Mode d'envoi » a été retiré d'ici. L'interrupteur
   // du maillon « Envoie » (tableau de commande) est la commande unique :
   // il pilote le champ `mode` de la config (voir _gather/_syncSendModeConfig).
+  // Deux étages repliés (décision Jordan 12/06 — mix 3 étages + assistant) :
+  // l'essentiel reste visible en haut de l'écran (chaîne, adresses), les
+  // réglages COURANTS et EXPERTS vivent ici, chacun dans son tiroir.
+  _foldSection(title, sub, inner) {
+    return `
+      <details class="card p-0 group">
+        <summary class="cursor-pointer px-5 py-4 flex items-center justify-between gap-3 hover:bg-bg/40 rounded-2xl">
+          <div>
+            <div class="font-semibold text-sm">${title}</div>
+            <div class="text-xs text-text-muted mt-0.5" style="text-wrap: pretty">${sub}</div>
+          </div>
+          <svg class="w-5 h-5 text-text-muted transition-transform group-open:rotate-180"
+               fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </summary>
+        <div class="px-5 pb-5 pt-2">${inner}</div>
+      </details>`;
+  },
+
   _renderForm() {
     const c = this.cfg;
     document.getElementById('ap-form').innerHTML = `
-      ${this._section("Rédaction des mails par l'IA",
-        "Pour chaque prospect, l'IA reçoit son contexte (nom, ville, secteur, site web) " +
-        "et tes instructions, puis rédige un mail unique. Pas de copier-coller.",
-        `
-        ${this._select('Service IA', 'ai_provider', c.ai_provider || 'anthropic', [
-          ['anthropic', 'Anthropic Claude'],
-          ['google',    'Google Gemini'],
-          ['openai',    'OpenAI GPT'],
-          ['mistral',   'Mistral'],
-          ['xai',       'xAI Grok'],
-        ])}
-        ${this._input('Modèle IA', 'ai_model', c.ai_model || 'claude-sonnet-4-5',
-          'ex : claude-sonnet-4-5 (Claude — recommandé)')}
-        ${this._input("Règles d'écriture à appliquer (numéros séparés par virgules)",
-          'ai_mega_prompts_csv', (c.ai_mega_prompts || ['01']).join(','),
-          'ex : 01,06,13')}
-        <div class="text-xs text-text-muted -mt-2 mb-3" style="text-wrap: pretty">
-          Liste numérotée des règles de style que l'IA doit suivre (ton, structure,
-          longueur, ce qu'il faut éviter). La règle 01 est la base universelle.
-          Pour voir la liste complète des règles,
-          <button type="button" class="text-accent underline hover:no-underline"
-                  onclick="App.show('config', {tab:'ai'})">ouvre les Réglages</button>
-          (section Règles d'écriture).
-        </div>
-        ${this._textarea("Mes instructions à l'IA", 'ai_template_brief',
-          c.ai_template_brief || '', 6)}
-        ${this._signaturePreview()}
-        ${this._input('Mon prénom (pour la signature)', 'sender_mon_prenom',
-          c.sender_mon_prenom || '')}
-        `)}
-
-      ${this._section("Règles d'envoi de tout l'auto-pilote",
-        "Plafonds et fenêtre horaire qui s'appliquent à toute la chaîne " +
-        "(recherche, rédaction, envoi). Ces réglages sont globaux : ils valent " +
-        "pour chaque passage, peu importe l'heure ou le produit poussé.",
+      ${this._foldSection('Réglages courants',
+        "Plafond quotidien, espacement entre 2 envois, plage horaire — ce qu'on ajuste de temps en temps.",
         `
         ${this._inputNumber("Plafond total d'envois sur 24h",
           'daily_cap', String(c.daily_cap ?? 40), 1, 1000)}
@@ -1888,6 +1866,36 @@ const Autopilot = {
           Par défaut : 8h-19h. Hors plage, les mails sont mis en brouillon —
           tu les valides quand tu reviens.
         </div>
+        `)}
+
+      ${this._foldSection('Réglages experts',
+        "Service IA, règles d'écriture, instructions, signature — à ouvrir seulement si tu sais pourquoi.",
+        `
+        ${this._select('Service IA', 'ai_provider', c.ai_provider || 'anthropic', [
+          ['anthropic', 'Anthropic Claude'],
+          ['google',    'Google Gemini'],
+          ['openai',    'OpenAI GPT'],
+          ['mistral',   'Mistral'],
+          ['xai',       'xAI Grok'],
+        ])}
+        ${this._input('Modèle IA', 'ai_model', c.ai_model || 'claude-sonnet-4-5',
+          'ex : claude-sonnet-4-5 (Claude — recommandé)')}
+        ${this._input("Règles d'écriture à appliquer (numéros séparés par virgules)",
+          'ai_mega_prompts_csv', (c.ai_mega_prompts || ['01']).join(','),
+          'ex : 01,06,13')}
+        <div class="text-xs text-text-muted -mt-2 mb-3" style="text-wrap: pretty">
+          Liste numérotée des règles de style que l'IA doit suivre (ton, structure,
+          longueur, ce qu'il faut éviter). La règle 01 est la base universelle.
+          Pour voir la liste complète des règles,
+          <button type="button" class="text-accent underline hover:no-underline"
+                  onclick="App.show('config', {tab:'ai'})">ouvre les Réglages</button>
+          (section Règles d'écriture).
+        </div>
+        ${this._textarea("Mes instructions à l'IA", 'ai_template_brief',
+          c.ai_template_brief || '', 6)}
+        ${this._signaturePreview()}
+        ${this._input('Mon prénom (pour la signature)', 'sender_mon_prenom',
+          c.sender_mon_prenom || '')}
         `)}
     `;
   },
@@ -1967,6 +1975,210 @@ const Autopilot = {
       return false;
     }
     return true;
+  },
+
+  // ---- Assistant « Me guider » (décision Jordan 12/06 — le mix) ----
+  // 4 questions (volume, horaires, adresses, validation), puis l'assistant
+  // remplit les VRAIS champs du formulaire et enregistre par le circuit
+  // normal (save) : aucune écriture parallèle, aucun nouveau chemin de
+  // données. L'envoi AUTO garde sa confirmation de sécurité habituelle.
+  async _applySendMode(mode) {
+    const stage = this._STAGES.find(s => s.key === 'send');
+    if (!stage) return true;
+    const prev = this._getStageMode(stage);
+    if (mode === prev) return true;
+    if (mode === 'auto') {
+      const ok = await Dialog.confirm(
+        'Les mails partiront tout seuls, sans validation.\n\n'
+        + this._sendPlanText() + '\n\n'
+        + 'Tu peux repasser en « Manuel » à tout moment.',
+        { title: 'Activer l’envoi automatique', danger: true,
+          okLabel: 'Oui, envoyer sans validation', cancelLabel: 'Rester en validation' });
+      if (!ok) return false;
+    }
+    this._saveStageMode('send', mode);
+    const stageEl = document.querySelector('[data-stage="send"]');
+    if (stageEl) this._styleStageButtons(stageEl, mode);
+    const saved = await this._pushStageModeToAPI('send', mode);
+    if (!saved) {
+      this._saveStageMode('send', prev);
+      if (stageEl) this._styleStageButtons(stageEl, prev);
+      return false;
+    }
+    await this._syncSendModeConfig(mode);
+    return true;
+  },
+
+  _openWizard() {
+    if (!App.api) { Toast.info('Mode aperçu : l’assistant est indisponible ici.'); return; }
+    if (!this.cfg) { Toast.info('Les réglages ne sont pas encore chargés — réessaie dans un instant.'); return; }
+    const c = this.cfg;
+    const pool = Array.isArray(c.autopilot_sender_pool) ? c.autopilot_sender_pool : [];
+    const capById = {};
+    pool.forEach(e => { if (e && e.account_id) capById[e.account_id] = parseInt(e.daily_cap, 10) || 0; });
+    const accounts = (this.mailAccounts || []).filter(a => a && a.from_email);
+    const st = {
+      step: 0,
+      cap: parseInt(c.daily_cap, 10) || 40,
+      h1: Number.isFinite(parseInt(c.send_hour_start, 10)) ? parseInt(c.send_hour_start, 10) : 8,
+      h2: Number.isFinite(parseInt(c.send_hour_end, 10)) ? parseInt(c.send_hour_end, 10) : 19,
+      accs: accounts.map(a => ({
+        id: a.id, email: a.from_email,
+        on: pool.length ? (capById[a.id] || 0) > 0 : (a.id === 'primary' || !!a.is_primary),
+        cap: capById[a.id] || Math.min(30, parseInt(c.daily_cap, 10) || 30),
+      })),
+      auto: false, // recommandation : tout passe par tes brouillons
+    };
+
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4';
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+
+    const esc = (s) => this._esc(String(s == null ? '' : s));
+    const stepBody = () => {
+      if (st.step === 0) return `
+        <p class="text-sm text-text-secondary mb-3" style="text-wrap: pretty">
+          Combien de mails l'Auto-pilote a-t-il le droit d'envoyer
+          <b>au maximum par 24 h</b>, toutes adresses confondues ?</p>
+        <input type="number" min="1" max="1000" value="${st.cap}" data-wz="cap"
+               class="w-32 px-3 py-2 rounded-lg bg-bg border border-border text-sm">
+        <p class="text-xs text-text-muted mt-2" style="text-wrap: pretty">
+          Repère : 20 à 40 par jour pour démarrer en douceur — assez pour
+          obtenir des réponses, sans risquer d'être classé indésirable.</p>`;
+      if (st.step === 1) return `
+        <p class="text-sm text-text-secondary mb-3" style="text-wrap: pretty">
+          Entre quelles heures les mails peuvent-ils partir ?
+          (Hors plage, ils attendent en brouillon.)</p>
+        <div class="flex items-center gap-3">
+          <label class="text-sm">De <input type="number" min="0" max="23" value="${st.h1}" data-wz="h1"
+                 class="w-20 px-3 py-2 rounded-lg bg-bg border border-border text-sm ml-1"> h</label>
+          <label class="text-sm">à <input type="number" min="1" max="24" value="${st.h2}" data-wz="h2"
+                 class="w-20 px-3 py-2 rounded-lg bg-bg border border-border text-sm ml-1"> h</label>
+        </div>
+        <p class="text-xs text-text-muted mt-2">Le classique : 8 h à 19 h — les heures où un pro lit ses mails.</p>`;
+      if (st.step === 2) {
+        if (!st.accs.length) return `
+          <p class="text-sm text-text-secondary" style="text-wrap: pretty">
+            Aucune adresse d'envoi configurée pour l'instant. L'assistant peut
+            continuer, mais rien ne pourra partir tant qu'un compte mail n'est
+            pas branché dans <b>Réglages → Mails</b>.</p>`;
+        return `
+          <p class="text-sm text-text-secondary mb-3" style="text-wrap: pretty">
+            Depuis quelles adresses l'Auto-pilote peut-il envoyer, et combien
+            de mails max par adresse sur 24 h ?</p>
+          <div class="space-y-2">
+            ${st.accs.map((a, i) => `
+              <label class="flex items-center gap-3 p-2.5 rounded-lg bg-bg border border-border cursor-pointer">
+                <input type="checkbox" class="w-4 h-4 accent-accent" data-wz-acc="${i}" ${a.on ? 'checked' : ''}>
+                <span class="text-sm flex-1 truncate">${esc(a.email)}</span>
+                <input type="number" min="1" max="1000" value="${a.cap}" data-wz-cap="${i}"
+                       class="w-20 px-2 py-1 rounded-md bg-surface border border-border text-right text-sm">
+                <span class="text-xs text-text-muted">/ 24h</span>
+              </label>`).join('')}
+          </div>
+          <p class="text-xs text-text-muted mt-2" style="text-wrap: pretty">
+            Répartir sur plusieurs adresses protège chacune (une adresse qui
+            envoie trop d'un coup finit en indésirable).</p>`;
+      }
+      // step 3 : mode + récap
+      const accOn = st.accs.filter(a => a.on);
+      return `
+        <p class="text-sm text-text-secondary mb-3" style="text-wrap: pretty">
+          Dernière question : qui appuie sur le bouton d'envoi ?</p>
+        <div class="space-y-2 mb-4">
+          <label class="flex items-start gap-3 p-3 rounded-lg bg-bg border border-border cursor-pointer">
+            <input type="radio" name="wz-mode" class="mt-0.5 accent-accent" data-wz-mode="validation" ${st.auto ? '' : 'checked'}>
+            <span class="text-sm" style="text-wrap: pretty"><b>Je valide chaque mail</b> (recommandé) —
+              l'IA prépare, les mails attendent ton OK dans « Brouillons à valider ».</span>
+          </label>
+          <label class="flex items-start gap-3 p-3 rounded-lg bg-bg border border-warning/45 cursor-pointer">
+            <input type="radio" name="wz-mode" class="mt-0.5 accent-accent" data-wz-mode="auto" ${st.auto ? 'checked' : ''}>
+            <span class="text-sm" style="text-wrap: pretty"><b>Envoi automatique</b> — les mails partent
+              tout seuls, sans relecture par toi. À réserver à un système déjà rodé.</span>
+          </label>
+        </div>
+        <div class="text-xs text-text-muted px-3 py-2 rounded-lg bg-accent/5 border border-accent/20" style="text-wrap: pretty">
+          📋 Récap : jusqu'à <b>${st.cap} mails / 24 h</b>, entre <b>${st.h1} h et ${st.h2} h</b>,
+          depuis <b>${accOn.length} adresse${accOn.length > 1 ? 's' : ''}</b>${accOn.length ? ` (${esc(accOn.map(a => a.email).join(', '))})` : ''},
+          en mode <b>${st.auto ? 'envoi automatique' : 'validation par toi'}</b>.
+        </div>`;
+    };
+
+    const readStep = () => {
+      overlay.querySelectorAll('[data-wz]').forEach(el => {
+        const k = el.dataset.wz;
+        const n = parseInt(el.value, 10);
+        if (Number.isFinite(n)) st[k] = n;
+      });
+      overlay.querySelectorAll('[data-wz-acc]').forEach(el => {
+        const a = st.accs[parseInt(el.dataset.wzAcc, 10)];
+        if (a) a.on = !!el.checked;
+      });
+      overlay.querySelectorAll('[data-wz-cap]').forEach(el => {
+        const a = st.accs[parseInt(el.dataset.wzCap, 10)];
+        const n = parseInt(el.value, 10);
+        if (a && Number.isFinite(n) && n > 0) a.cap = n;
+      });
+      const mode = overlay.querySelector('[name="wz-mode"]:checked');
+      if (mode) st.auto = mode.dataset.wzMode === 'auto';
+    };
+
+    const TITLES = ['Le volume', 'Les horaires', 'Les adresses', 'La validation'];
+    const paint = () => {
+      overlay.innerHTML = `
+        <div class="bg-surface rounded-2xl shadow-lift border border-border w-full max-w-lg p-6">
+          <div class="hero-kicker mb-1">ME GUIDER · ÉTAPE ${st.step + 1}/4 — ${TITLES[st.step].toUpperCase()}</div>
+          <div class="mt-3">${stepBody()}</div>
+          <div class="flex items-center justify-between mt-6">
+            <button type="button" class="btn btn-secondary" data-wz-back ${st.step === 0 ? 'disabled' : ''}>← Retour</button>
+            <div class="flex items-center gap-2">
+              <button type="button" class="btn btn-secondary" data-wz-cancel>Annuler</button>
+              <button type="button" class="btn btn-primary" data-wz-next>
+                ${st.step === 3 ? '✓ Appliquer ces réglages' : 'Suivant →'}
+              </button>
+            </div>
+          </div>
+        </div>`;
+      overlay.querySelector('[data-wz-cancel]').onclick = close;
+      overlay.onclick = (e) => { if (e.target === overlay) close(); };
+      const back = overlay.querySelector('[data-wz-back]');
+      if (back) back.onclick = () => { readStep(); st.step = Math.max(0, st.step - 1); paint(); };
+      overlay.querySelector('[data-wz-next]').onclick = async () => {
+        readStep();
+        if (st.step < 3) { st.step += 1; paint(); return; }
+        await this._applyWizard(st, close);
+      };
+    };
+    paint();
+  },
+
+  async _applyWizard(st, close) {
+    // 1. Remplit les vrais champs du formulaire (mêmes data-key que save()).
+    const setVal = (key, val) => {
+      const el = document.querySelector(`[data-key="${key}"]`);
+      if (el) el.value = String(val);
+    };
+    setVal('daily_cap', st.cap);
+    setVal('send_hour_start', st.h1);
+    setVal('send_hour_end', st.h2);
+    // 2. Coche les adresses du pool (les cases du panneau principal).
+    st.accs.forEach(a => {
+      const cb = document.querySelector(`.ap-sp-check[data-account-id="${a.id}"]`);
+      const cap = document.querySelector(`.ap-sp-cap[data-account-id="${a.id}"]`);
+      if (cb) cb.checked = a.on;
+      if (cap && a.cap > 0) cap.value = String(a.cap);
+    });
+    this._refreshSenderSummary();
+    this._setDirty(true);
+    // 3. Enregistre par le circuit normal, puis règle le mode d'envoi
+    //    (avec sa confirmation de sécurité si AUTO).
+    close();
+    await this.save();
+    const okMode = await this._applySendMode(st.auto ? 'auto' : 'manual');
+    Toast.success(okMode
+      ? '🧭 Réglages appliqués — l’Auto-pilote est prêt.'
+      : '🧭 Réglages enregistrés. Le mode d’envoi n’a pas été changé.');
   },
 
   async save() {
