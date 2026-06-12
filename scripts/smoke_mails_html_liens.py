@@ -94,7 +94,7 @@ cas_reconnus = {
     "spa":                  "bien-etre",
     # Les 5 pages du 12/06/2026 (plus gros gisements de la base)
     "plaquiste":            "plaquiste",
-    "plâtrier-plaquiste":   "plaquiste",
+    "plâtrier-plaquiste":   "plaquiste",   # via « plaquist », pas « plâtr »
     "pose de placo":        "plaquiste",
     "peintre":              "peintre",
     "peintre en bâtiment":  "peintre",
@@ -118,6 +118,7 @@ for secteur, attendu in cas_reconnus.items():
 # « restauration de meubles » ne doit PAS tomber sur la page restaurant.
 cas_generiques = ["formation", "Immobilier", "traiteur",
                   "restauration de meubles anciens",
+                  "plâtrier",   # métier distinct du plaquiste (Jordan 12/06)
                   "achat-revente de maisons", "", "   "]
 for secteur in cas_generiques:
     got = slug_for_sector(secteur)

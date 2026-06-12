@@ -49,8 +49,10 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("ebenist",    "menuisier"),
     ("charpent",   "menuisier"),     # métier du bois le plus proche
     ("plaquist",   "plaquiste"),
-    ("platr",      "plaquiste"),     # plâtrier / plâtrerie
     ("placo",      "plaquiste"),
+    # PAS de règle « plâtrier » → plaquiste : deux métiers distincts
+    # (plaques sèches vs plâtre humide — rappel de Jordan, 12/06/2026).
+    # Un « plâtrier-plaquiste » est couvert par « plaquist ».
     ("peintr",     "peintre"),       # peintre(s) en bâtiment
     ("carrel",     "carreleur"),     # carreleur / carrelage
     ("macon",      "macon"),         # maçon / maçonnerie (sans accents)
