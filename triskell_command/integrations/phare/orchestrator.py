@@ -436,6 +436,10 @@ def run_strategy(*, app_state=None) -> dict:
         logger.warning("ChefOrchestre LLM: %s", exc)
         out = {}
     if out:
+        # Le plan complet vit DANS la carte. Avant : « Voir Bulletin > Plan
+        # mensuel » — un écran qui n'a jamais existé, le plan était perdu
+        # sitôt généré (constaté le 12/06/2026 sur le plan de juin).
+        detail = _strategy_detail_md(out)
         for site in snapshot.get("sites", []):
             # Le plan du mois remplace celui d'avant (périssable) ; la dédup
             # d'insert_action évite en plus le double du même mois.
@@ -446,10 +450,43 @@ def run_strategy(*, app_state=None) -> dict:
                 "site_id": site["id"], "agent": "chef_orchestre",
                 "kind": "recommandation",
                 "title": f"Plan du mois : {out.get('month_label', '')}",
-                "detail_md": "Voir Bulletin > Plan mensuel",
+                "detail_md": detail,
+                "simple_md": ("Le programme du mois : où les robots vont "
+                              "concentrer leurs efforts, et les objectifs "
+                              "chiffrés. À lire — rien à publier sur le site."),
                 "status": "draft", "impact": 5, "effort": 5,
             })
     return {"ok": True, "plan": out}
+
+
+def _strategy_detail_md(out: dict) -> str:
+    """Met en page le plan du Chef d'Orchestre pour la carte (markdown)."""
+    lines: list[str] = []
+    vision = (out.get("vision_summary_md") or "").strip()
+    if vision:
+        lines.append(vision)
+    prio = out.get("priority_sites") or []
+    if prio:
+        lines.append("\n**Les 3 sites prioritaires du mois :**")
+        for p in prio:
+            row = f"- **{p.get('domain', '?')}** — {p.get('rationale', '')}"
+            if p.get("target_delta_30d"):
+                row += f" (objectif 30 j : {p['target_delta_30d']})"
+            lines.append(row)
+    ti = out.get("transverse_initiative") or {}
+    if ti.get("title"):
+        lines.append(f"\n**Chantier transverse :** {ti['title']}"
+                     + (f" — {ti.get('scope', '')}" if ti.get("scope") else ""))
+    crit = out.get("success_criteria") or []
+    if crit:
+        lines.append("\n**Critères de succès :**")
+        for c in crit:
+            lines.append(f"- {c.get('metric', '?')} → {c.get('target', '?')}")
+    depri = out.get("deprioritized_sites") or []
+    if depri:
+        lines.append("\n**Mis en pause ce mois-ci :** "
+                     + ", ".join(d.get("domain", "?") for d in depri))
+    return "\n".join(lines).strip() or "Plan généré sans détail exploitable."
 
 
 # ---------------------------------------------------------------------------

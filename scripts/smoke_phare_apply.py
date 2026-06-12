@@ -295,6 +295,25 @@ v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
                            "title": "Plan du mois : Juin 2026"}, site_ok)
 check("plan du mois → pas automatisable", not v["can"])
 
+# Le plan du mois s'écrit DANS la carte (avant : renvoi vers un écran
+# « Bulletin > Plan mensuel » qui n'a jamais existé — plan perdu)
+from triskell_command.integrations.phare import orchestrator as _orch
+plan_md = _orch._strategy_detail_md({
+    "vision_summary_md": "Vision du mois.",
+    "priority_sites": [{"domain": "pixel-pros.fr", "rationale": "fort potentiel",
+                        "target_delta_30d": "+100 clics"}],
+    "transverse_initiative": {"title": "Cocon inter-sites", "scope": "3 sites"},
+    "success_criteria": [{"metric": "clics organiques", "target": "+20 %"}],
+    "deprioritized_sites": [{"domain": "ingrid-services.fr"}],
+})
+check("plan du mois mis en page dans la carte (vision + priorités + critères)",
+      "Vision du mois." in plan_md and "pixel-pros.fr" in plan_md
+      and "+100 clics" in plan_md and "Cocon inter-sites" in plan_md
+      and "Mis en pause" in plan_md)
+check("plan vide → texte de repli, jamais « Voir Bulletin »",
+      "Voir Bulletin" not in _orch._strategy_detail_md({})
+      and _orch._strategy_detail_md({}) != "")
+
 # ===========================================================================
 print("\n— patcher.localize_executor_patches —")
 from triskell_command.integrations.phare import patcher
