@@ -703,6 +703,11 @@ Règles ABSOLUES :
 5. Si la recommandation demande une action hors du code (Search Console,
    contacter quelqu'un, créer du contenu long) → mode="manual" avec la
    raison en français simple.
+6. Canonical sur des variantes paramétrées (?option=, ?utm=…) d'une même
+   page : en statique il n'y a PAS un fichier par variante — la solution
+   standard est UN canonical self-référentiel posé dans le fichier de la
+   page de base (head_insert avec l'URL SANS paramètres). Il couvre la
+   page ET toutes ses variantes. Ne réponds pas manual pour ça.
 
 Types de patch autorisés (page_path = le CHEMIN DE L'URL de la page :
 "/", "/demo", "/configurer" — JAMAIS un nom de fichier comme "/index.html") :
