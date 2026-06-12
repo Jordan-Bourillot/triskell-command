@@ -485,8 +485,10 @@ const Mails = {
     // Bandeau d'information sur la Boîte de réception : elle ne contient
     // que les réponses liées à la prospection, pas toute la boîte mail.
     const limitedBanner = this.state.tab === 'inbound'
-      ? `<div class="mb-3 px-4 py-2.5 rounded-xl border border-border bg-bg text-[11px] text-text-muted">
-           ℹ Cette boîte montre les réponses liées à ta prospection — pas toute ta boîte mail.
+      ? `<div class="mb-3 px-4 py-2.5 rounded-xl border border-border bg-bg text-[11px] text-text-muted" style="text-wrap: pretty">
+           ℹ Cette boîte montre les mails entrants liés à ta prospection — pas toute ta boîte mail.
+           Les réponses de prospects déjà triées par l'IA (intéressé, refus…) sont dans
+           <button type="button" class="text-accent underline hover:no-underline" onclick="App.show('replies')">Réponses</button>.
          </div>`
       : '';
 
@@ -1653,8 +1655,8 @@ const Mails = {
               <div class="flex items-center justify-between mb-1 gap-2">
                 <label class="block text-[11px] font-medium text-text-secondary">Destinataires</label>
                 <div class="flex items-center gap-1 text-[11px] font-semibold">
-                  <button id="cmp-toggle-cc" type="button" class="px-1.5 py-0.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Afficher ou masquer le champ Cc">+ Cc</button>
-                  <button id="cmp-toggle-bcc" type="button" class="px-1.5 py-0.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Afficher ou masquer le champ Cci (copie cachée)">+ Cci</button>
+                  <button id="cmp-toggle-cc" type="button" class="px-1.5 py-0.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Cc = envoyer une copie à quelqu'un d'autre, visible par tout le monde (ex. mettre Thomas en copie)">+ Cc</button>
+                  <button id="cmp-toggle-bcc" type="button" class="px-1.5 py-0.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Cci = copie cachée : la personne reçoit le mail, mais les autres destinataires ne voient pas son adresse">+ Cci</button>
                 </div>
               </div>
               <div id="cmp-to-wrap" class="chips-input chips-input--to"
@@ -1669,7 +1671,7 @@ const Mails = {
           <!-- Cc / Cci (masqués par défaut) -->
           <div id="cmp-cc-row" class="hidden">
             <div class="flex items-center justify-between mb-1">
-              <label class="block text-[11px] font-medium text-text-secondary">Cc <span class="text-text-muted font-normal">(copie visible)</span></label>
+              <label class="block text-[11px] font-medium text-text-secondary">Cc <span class="text-text-muted font-normal">(copie visible — tout le monde voit que cette personne a reçu le mail)</span></label>
               <button id="cmp-cc-remove" type="button" class="text-text-muted hover:text-danger text-sm leading-none px-1" title="Retirer le champ Cc" aria-label="Retirer le champ Cc">×</button>
             </div>
             <div id="cmp-cc-wrap" class="chips-input"

@@ -25,7 +25,10 @@ const Replies = {
             <div class="min-w-0 flex-1">
               <div class="hero-kicker mb-2">RÉPONSES</div>
               <h1 class="hero-title hero-title--md mb-2 sm:mb-3">Les prospects qui te répondent.</h1>
-              <p class="hero-subtitle">Déjà triés, déjà classés. Pas besoin d'ouvrir ta boîte mail.</p>
+              <p class="hero-subtitle">Déjà triés, déjà classés. Pas besoin d'ouvrir ta boîte mail.
+                <span class="text-text-muted text-xs">Ici : uniquement les réponses de prospects, rangées par l'IA. Tous les mails entrants bruts sont dans la
+                <button type="button" class="text-accent underline hover:no-underline" onclick="App.show('mails', {tab:'inbound'})">Boîte de réception</button>.</span>
+              </p>
             </div>
             ${typeof Help !== 'undefined' ? Help.button('replies') : ''}
           </div>

@@ -2166,6 +2166,12 @@ const Convoy = {
       ${this._sectionOpen('4. Aperçu & validation',
         'Édite, approuve ou rejette chaque mail. Les envoyés sont marqués ✓.')}
         <div id="cv-kpis">${this._kpisHtml(counts)}</div>
+        <div class="text-[11px] text-text-muted mb-4 -mt-2" style="text-wrap: pretty">
+          <b>En attente</b> = attend ton OK · <b>À revoir</b> = la 2ᵉ IA a un
+          doute, relis avant d'approuver · <b>Approuvé</b> = partira au
+          prochain lancement · <b>Doublon ignoré</b> = déjà contacté, on ne
+          renvoie pas · <b>Rejeté</b> = ne partira jamais.
+        </div>
         ${testBanner}
         ${approveAllBtn}
         <div class="space-y-3">

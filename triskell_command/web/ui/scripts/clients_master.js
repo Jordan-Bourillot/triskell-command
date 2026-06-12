@@ -25,6 +25,17 @@ const ClientsMaster = {
     'Projet livraison':    '📦',
   },
 
+  // Libellés humains des types d'événements : les types bruts viennent du
+  // serveur et parlent en noms d'offres internes (audit débutant).
+  EVENT_LABELS: {
+    'Demande Lagriffe':    'Demande de site (offre Lagriffe)',
+    'Demande RankUs':      'Demande de référencement Google (offre RankUs)',
+    'Demande Studio WoW':  'Demande de projet web (offre Studio WoW)',
+    'Facture':             'Facture émise',
+    'Email envoyé':        'Mail envoyé depuis l’app',
+    'Projet livraison':    'Projet livré (kit + mail de bienvenue)',
+  },
+
   // État de la vue
   _clients: [],
   _selectedId: null,
@@ -368,14 +379,15 @@ const ClientsMaster = {
 
         <!-- Stats -->
         <section>
-          <h3 class="text-[11px] font-bold tracking-widest text-text-muted mb-3">ACTIVITÉ</h3>
+          <h3 class="text-[11px] font-bold tracking-widest text-text-muted mb-3"
+              title="Tout ce que cette personne a fait ou reçu chez Triskell, compté par famille">ACTIVITÉ</h3>
           <div class="grid grid-cols-3 sm:grid-cols-6 gap-2">
-            ${this._stat('Lagriffe', c.lagriffe_count)}
-            ${this._stat('RankUs', c.rankus_count)}
-            ${this._stat('WoW', c.wow_count)}
-            ${this._stat('Factures', c.invoices_count)}
-            ${this._stat('Mails', c.emails_sent_count)}
-            ${this._stat('Projets', c.projects_count)}
+            ${this._stat('Sites Lagriffe', c.lagriffe_count, 'Demandes de site via l’offre Lagriffe')}
+            ${this._stat('SEO RankUs', c.rankus_count, 'Demandes de référencement Google via RankUs')}
+            ${this._stat('Projets WoW', c.wow_count, 'Demandes via l’offre Studio WoW')}
+            ${this._stat('Factures', c.invoices_count, 'Factures émises pour cette personne')}
+            ${this._stat('Mails', c.emails_sent_count, 'Mails envoyés depuis l’app à cette personne')}
+            ${this._stat('Livraisons', c.projects_count, 'Projets livrés (kit + mail de bienvenue)')}
           </div>
           ${c.total_paid_cents ? `
             <div class="mt-3 text-sm">
@@ -483,11 +495,12 @@ const ClientsMaster = {
     `;
   },
 
-  _stat(label, count) {
+  _stat(label, count, title) {
     const n = count || 0;
     const dim = n === 0 ? 'opacity-40' : '';
     return `
-      <div class="text-center p-2 rounded-lg bg-bg border border-border ${dim}">
+      <div class="text-center p-2 rounded-lg bg-bg border border-border ${dim}"
+           ${title ? `title="${this._esc(title)}"` : ''}>
         <div class="font-bold text-lg leading-none">${n}</div>
         <div class="text-[11px] text-text-muted mt-1">${this._esc(label)}</div>
       </div>
@@ -498,11 +511,12 @@ const ClientsMaster = {
     const icon = this.EVENT_ICONS[e.type] || '•';
     const date = e.created_at ? this._fmtDate(e.created_at) : '';
     const label = e.label || e.status || '';
+    const typeLabel = this.EVENT_LABELS[e.type] || e.type;
     return `
       <li class="flex items-start gap-3 text-sm">
         <span class="text-base leading-none mt-0.5">${icon}</span>
         <div class="min-w-0 flex-1">
-          <div class="font-medium">${this._esc(e.type)}${label ? ' — ' + this._esc(label) : ''}</div>
+          <div class="font-medium">${this._esc(typeLabel)}${label ? ' — ' + this._esc(label) : ''}</div>
           <div class="text-[11px] text-text-muted">${date}</div>
         </div>
       </li>
@@ -576,6 +590,11 @@ const ClientsMaster = {
                 `<option value="${k}" ${k === (c.status || 'lead') ? 'selected' : ''}>${m.label}</option>`
               ).join('')}
             </select>
+            <div class="text-[11px] text-text-muted mt-1.5" style="text-wrap: pretty">
+              L'app met ce statut à jour toute seule : « Client » à la première
+              vente, « Prospect » quand le démarchage démarre. Tu peux corriger
+              à la main si besoin.
+            </div>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             ${field('cmd-email', 'Email', c.email, 'email')}

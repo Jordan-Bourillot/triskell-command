@@ -325,7 +325,7 @@ const GEO = {
             </div>
             <div class="geo-score-text">
               <div class="geo-score-verdict">${verdict}</div>
-              <div class="geo-score-meta">${(n => `${n} IA interrogée${n > 1 ? 's' : ''}`)(new Set((surv.results || []).map(x => x.provider).filter(Boolean)).size)} · ${(surv.results || []).length} mesures · <a href="#" data-show-details>voir le détail</a></div>
+              <div class="geo-score-meta">Concrètement : ton site est ressorti <b>${surv.cited} fois sur ${surv.total} tests</b> (questions posées à ${(n => `${n} IA différente${n > 1 ? 's' : ''}`)(new Set((surv.results || []).map(x => x.provider).filter(Boolean)).size)}) · <a href="#" data-show-details>voir le détail</a></div>
             </div>
           </div>
           <div id="geo-surv-details" hidden class="mt-4">

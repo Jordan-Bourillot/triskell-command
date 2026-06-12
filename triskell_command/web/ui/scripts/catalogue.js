@@ -414,6 +414,42 @@ const Catalogue = {
     grid.querySelectorAll('[data-add-in-cat]').forEach(btn => {
       btn.onclick = () => this._openProductEdit(null, btn.dataset.addInCat || '');
     });
+    this._loadTemplateBadges();
+  },
+
+  // Badge « 📧 modèle » par produit (audit débutant) : rend VISIBLE le lien
+  // produit → modèle de prospection → Auto-pilote. Chargé après coup —
+  // si l'appel échoue, pas de badge, l'écran ne casse pas. Les démos et
+  // « bientôt » ne sont pas badgés (l'Auto-pilote ne les vend pas).
+  async _loadTemplateBadges() {
+    if (!App.api || !App.api.mail_templates_list) return;
+    if (!this._tplCounts) {
+      let tpls = null;
+      try { tpls = await App.api.mail_templates_list(); }
+      catch (e) { return; }
+      if (!tpls || !tpls.ok || !tpls.products) return;
+      const counts = {};
+      Object.entries(tpls.products).forEach(([pid, bucket]) => {
+        counts[pid] = ((bucket && bucket.templates) || []).filter(t =>
+          (t.category || 'transactionnel') === 'prospection' && t.enabled !== false
+        ).length;
+      });
+      this._tplCounts = counts;
+    }
+    (this._items || []).forEach(it => {
+      if (!it || it.kind === 'demo' || it.coming_soon) return;
+      const slot = document.querySelector(`[data-tpl-badge="${(window.CSS && CSS.escape) ? CSS.escape(it.id) : it.id}"]`);
+      if (!slot) return;
+      const n = this._tplCounts[it.id] || 0;
+      slot.className = 'px-2 py-0.5 rounded text-[11px] font-semibold '
+        + (n > 0 ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning');
+      slot.textContent = n > 0
+        ? `📧 ${n} modèle${n > 1 ? 's' : ''}`
+        : '📧 aucun modèle';
+      slot.title = n > 0
+        ? `${n} modèle${n > 1 ? 's' : ''} de prospection actif${n > 1 ? 's' : ''} — l'Auto-pilote peut proposer ce produit dans ses mails`
+        : 'Aucun modèle de prospection actif : l’Auto-pilote ne mettra pas ce produit en avant. Crée un modèle dans « Modèles · prospection ».';
+    });
   },
 
   _bundleTile(b) {
@@ -513,6 +549,7 @@ const Catalogue = {
               <div class="flex items-center gap-2 flex-wrap mb-0.5">
                 <div class="font-semibold text-[15px] leading-tight">${this._esc(it.name || '')}</div>
                 ${badge}
+                <span data-tpl-badge="${this._esc(it.id)}" class="hidden"></span>
               </div>
             </div>
           </div>
