@@ -65,18 +65,52 @@ def validate_prospect(p: dict, *, email_key: str = "email",
     return {"ok": not issues, "email": email, "issues": issues}
 
 
+def _repair_polluted_name(p: dict, *, name_key: str) -> bool:
+    """Nettoie un nom pollué par la description collée (« GF ARMOR ELEC .
+    électricien. Dépannage… Devis sous 48h. » → « GF ARMOR ELEC »).
+
+    Le descriptif retiré n'est pas perdu : il part dans la description si
+    elle est vide. Heuristiques centrales de triskell_core (record_repair)
+    — sans IA, déterministe. Renvoie True si la fiche a été nettoyée.
+    """
+    key = name_key if (p.get(name_key) or "").strip() else "name"
+    name = (p.get(key) or "").strip()
+    if not name:
+        return False
+    try:
+        from triskell_core.prospect.record_repair import (
+            name_looks_polluted, split_polluted_name)
+    except ImportError:
+        return False
+    if not name_looks_polluted(name):
+        return False
+    parts = split_polluted_name(name)
+    if not parts:
+        return False
+    p[key] = parts[0]
+    for desc_key in ("description", "notes"):
+        if desc_key in p and not (p.get(desc_key) or "").strip():
+            p[desc_key] = parts[1]
+            break
+    else:
+        p.setdefault("description", parts[1])
+    return True
+
+
 def filter_for_push(prospects: list[dict], *, email_key: str = "email",
                     name_key: str = "nom") -> tuple[list[dict], dict]:
     """Filtre une fournée avant versement. Renvoie (gardés, rapport).
 
     Le rapport : {total, kept, dropped: {no_email, bad_email,
-    placeholder_name, duplicate_in_batch}, samples_dropped: [..5 max]}.
+    placeholder_name, duplicate_in_batch}, cleaned_names,
+    samples_dropped: [..5 max]}.
     """
     report = {
         "total": len(prospects or []),
         "kept": 0,
         "dropped": {"no_email": 0, "bad_email": 0,
                     "placeholder_name": 0, "duplicate_in_batch": 0},
+        "cleaned_names": 0,
         "samples_dropped": [],
     }
     kept: list[dict] = []
@@ -98,6 +132,8 @@ def filter_for_push(prospects: list[dict], *, email_key: str = "email",
             report["dropped"]["duplicate_in_batch"] += 1
             continue
         seen_emails.add(v["email"])
+        if _repair_polluted_name(p, name_key=name_key):
+            report["cleaned_names"] += 1
         kept.append(p)
     report["kept"] = len(kept)
     return kept, report
@@ -120,4 +156,7 @@ def report_to_french(report: dict) -> str:
     for code, n in d.items():
         if n:
             parts.append(f"{n} {REASON_LABELS_FR.get(code, code)}")
+    if report.get("cleaned_names"):
+        parts.append(f"{report['cleaned_names']} nom(s) nettoyé(s) "
+                     f"(description collée au nom)")
     return " · ".join(parts)
