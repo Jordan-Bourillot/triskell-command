@@ -189,10 +189,15 @@ const App = {
             });
           } catch (netErr) {
             // Erreur réseau brute (offline, CORS, DNS, etc.)
+            // Le détail technique part en console + rapport de bug ; à
+            // l'écran : français normal + quoi faire (audit débutant).
+            console.warn(`[api] /api/${method} injoignable :`, netErr);
             if (typeof HealthCheck !== 'undefined') {
               HealthCheck.record({ kind: 'api_network', method, msg: String(netErr) });
-              HealthCheck.toast('Réseau indisponible',
-                `Impossible de joindre /api/${method}. Le serveur tourne ?`, 'error');
+              HealthCheck.toast('Connexion impossible',
+                'Le serveur Triskell n’a pas répondu. Vérifie ta connexion '
+                + 'internet, puis réessaie. Si ça continue, clique sur '
+                + '« Signaler un bug » en bas du menu.', 'error');
             }
             throw netErr;
           }

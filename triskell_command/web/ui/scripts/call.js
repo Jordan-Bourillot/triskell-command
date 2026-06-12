@@ -243,7 +243,11 @@ const TriCall = {
     if (this.state !== 'idle') return;
     await this._loadConfig();
     if (!this.peerId) {
-      this._toast('Appel indisponible pour le moment.', 'warn');
+      // peerId absent = la config d'appel n'a pas pu être chargée (souvent
+      // un souci de connexion au serveur) — on le dit, avec quoi faire.
+      this._toast('Impossible de préparer l’appel : le serveur n’a pas '
+        + 'répondu. Vérifie ta connexion internet et réessaie dans un '
+        + 'instant. En attendant, le chat écrit fonctionne.', 'warn');
       return;
     }
     this.mode = mode === 'video' ? 'video' : 'audio';

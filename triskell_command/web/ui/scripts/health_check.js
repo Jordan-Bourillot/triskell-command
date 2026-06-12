@@ -33,7 +33,9 @@ const HealthCheck = {
 
   // Message générique montré à l'utilisateur quand du code plante :
   // jamais d'erreur brute à l'écran, le détail reste en console.
-  GENERIC_ERROR_MSG: 'Quelque chose a planté — recharge la page si ça persiste.',
+  GENERIC_ERROR_MSG: 'Quelque chose a planté. Recharge la page (touche F5). '
+    + 'Si ça se reproduit, clique sur « Signaler un bug » en bas du menu — '
+    + 'le détail technique partira tout seul avec le rapport.',
 
   isQuiet() {
     try { return sessionStorage.getItem('tc-health-quiet') === '1'; }
