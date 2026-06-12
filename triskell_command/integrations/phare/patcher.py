@@ -79,9 +79,15 @@ def _fuzzy_find_exact(content: str, needle: str) -> Optional[str]:
     # Remplace chaque caractère "famille" par sa classe équivalente
     # On opère sur le pattern échappé : \\- pour -, \\' pour ', etc.
     pattern = re.sub(r"\\?[‐-―−\-]", r"[‐-―−\\-]", pattern)
-    pattern = re.sub(r"\\?[‘’ʼ'`]", r"[‘’ʼ'`]|&(apos|#39|rsquo|lsquo);", pattern)
+    # ⚠️ Les alternatives DOIVENT être dans un groupe (?:…) : sans lui, le
+    # « | » coupe la regex ENTIÈRE en deux au niveau du caractère et le
+    # moteur matche un fragment dégénéré (ex : « content=" » seul). C'est
+    # ce qui avait produit la meta description malformée d'Ingrid le 12/06
+    # (un replace partiel qui a mangé l'attribut content=).
+    pattern = re.sub(r"\\?[‘’ʼ'`]",
+                     r"(?:[‘’ʼ'`]|&(?:apos|#39|rsquo|lsquo);)", pattern)
     pattern = re.sub(r'\\?[“”«»"]',
-                     r'[“”«»"]|&(quot|laquo|raquo|ldquo|rdquo);',
+                     r'(?:[“”«»"]|&(?:quot|laquo|raquo|ldquo|rdquo);)',
                      pattern)
     # Espaces flexibles
     pattern = re.sub(r"\\? ", r"(?:\\s|&nbsp;)+", pattern)
@@ -92,7 +98,14 @@ def _fuzzy_find_exact(content: str, needle: str) -> Optional[str]:
     except re.error:
         return None
     if m:
-        return m.group(0)
+        exact = m.group(0)
+        # Filet anti-fragment : un « match » nettement plus court que le
+        # texte cherché n'est pas un match (regex dégénérée, HTML coupé…).
+        # Remplacer un fragment casserait le fichier — on préfère « pas
+        # trouvé » (revue humaine) à un replace destructeur.
+        if len(exact) < 0.6 * len(decoded):
+            return None
+        return exact
     return None
 
 # Extensions où chercher les patches (par stack)
@@ -457,6 +470,56 @@ def localize_executor_patches(workdir: str, stack: str,
             narrowed = [(f, e) for f, e in hits if f in page_files]
             if len(narrowed) == 1:
                 hits = narrowed
+        if not hits and field in ("title", "meta_description"):
+            # Plan B par BALISE : le `old` exact rate souvent d'un caractère
+            # (entité HTML, espace insécable, apostrophe typographique —
+            # vécu le 12/06 sur le title d'Ingrid). Ces balises sont uniques
+            # par page : si la page visée correspond à UN seul fichier, on
+            # remplace la balise entière — à condition que son contenu
+            # actuel RESSEMBLE au texte attendu (sinon la recommandation
+            # est probablement périmée → revue humaine, pas de remplacement
+            # à l'aveugle).
+            page_files = _files_matching_page(root, exts, page_path, page_title)
+            _done_fallback = False
+            if len(page_files) == 1:
+                _target = page_files[0]
+                _content = _read_text_safe(_target)
+                if field == "title":
+                    _rx = re.compile(r"<title>(.*?)</title>",
+                                     re.IGNORECASE | re.DOTALL)
+                    _new_tag = (new if "<" in new
+                                else f"<title>{new}</title>")
+                else:
+                    _rx = re.compile(
+                        r"<meta\s[^>]*name=[\"']description[\"'][^>]*"
+                        r"content=\"([^\"]*)\"[^>]*/?>", re.IGNORECASE)
+                    _new_tag = (new if "<" in new else
+                                f'<meta name="description" content="{new}" />')
+                _m = _rx.search(_content)
+                if _m:
+                    import difflib
+                    _norm = lambda s: re.sub(r"\s+", " ",
+                                             (s or "").lower()).strip()
+                    _ratio = difflib.SequenceMatcher(
+                        None, _norm(_m.group(1)), _norm(old)).ratio()
+                    _rel = str(_target.relative_to(root))
+                    if _ratio >= 0.5:
+                        applicable.append({
+                            "file": _rel, "old": _m.group(0), "new": _new_tag,
+                            "field": field,
+                            "rationale": p.get("rationale") or "",
+                        })
+                    else:
+                        needs_review.append({
+                            "field": field, "old": old, "new": new,
+                            "candidates": [_rel],
+                            "reason": ("la balise actuelle ne ressemble pas "
+                                       "au texte attendu — recommandation "
+                                       "probablement périmée"),
+                        })
+                    _done_fallback = True
+            if _done_fallback:
+                continue
         if not hits:
             needs_review.append({"field": field, "old": old, "new": new,
                                  "candidates": [],

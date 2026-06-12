@@ -628,5 +628,47 @@ with mock.patch.object(executor.repo, "_sb", return_value=None):
 
 # ===========================================================================
 print(f"\n{'='*60}")
+# ── Section ajoutée le 12/06/2026 au soir : plan B des balises uniques ──
+# et filet anti-fragment du fuzzy (bug « content=" » qui avait produit la
+# meta malformée d'Ingrid). Voir patcher._fuzzy_find_exact + plan B title.
+def _section_plan_b():
+    import tempfile, pathlib
+    from triskell_command.integrations.phare.patcher import (
+        localize_executor_patches, _fuzzy_find_exact)
+    d = tempfile.mkdtemp()
+    p = pathlib.Path(d) / "index.html"
+    p.write_text(
+        "<html><head><title>Ingrid Services — Ménage à Blanzy | 11 €/h après crédit d'impôt</title>"
+        '<meta name="description" content="Ancienne description du site." />'
+        "</head><body><h1>x</h1></body></html>", encoding="utf-8")
+    pages = [{"path": "/", "title": "Ingrid Services — Ménage à Blanzy"}]
+
+    out = localize_executor_patches(d, "html", [{
+        "field": "title", "page_path": "/",
+        "old": "Ingrid Services — Ménage à Blanzy | 11 €/h après crédit d'impôt",
+        "new": "Ménage à domicile dès 11 €/h | Ingrid Services"}], pages)
+    check("plan B title : espace insécable ne bloque plus",
+          len(out["applicable"]) == 1
+          and "<title>Ménage à domicile" in out["applicable"][0]["new"])
+
+    out3 = localize_executor_patches(d, "html", [{
+        "field": "title", "page_path": "/",
+        "old": "Plomberie Dupont — dépannage 24h/24 à Marseille",
+        "new": "N'importe quoi"}], pages)
+    check("plan B : un old sans rapport part en revue humaine",
+          not out3["applicable"] and bool(out3["needs_review"]))
+
+    frag = _fuzzy_find_exact(
+        '<meta name="description" content="Texte réel du site" />',
+        'content="Autre chose totalement différente"')
+    check("anti-fragment : plus jamais de match dégénéré « content=\" »",
+          frag is None)
+
+    leg = _fuzzy_find_exact("<p>L’artisan d’à côté</p>", "L'artisan d'à côté")
+    check("le fuzzy légitime (apostrophes typographiques) marche toujours",
+          leg == "L’artisan d’à côté")
+
+_section_plan_b()
+
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)
