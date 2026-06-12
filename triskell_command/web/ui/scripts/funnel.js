@@ -8,11 +8,11 @@ const Funnel = {
   PERIOD_TITLES: { '7d': '7 derniers jours', '30d': '30 derniers jours', '90d': '90 derniers jours', 'all': 'depuis le début' },
   SEGMENTS: { 'all': 'Tous', 'creators': 'Créateurs', 'b2b_local': 'Commerces locaux' },
   STAGES: [
-    { key: 'prospects',  label: 'Prospects' },
-    { key: 'sent',       label: 'Envoyés' },
-    { key: 'replies',    label: 'Réponses' },
-    { key: 'interested', label: 'Intéressés' },
-    { key: 'won',        label: 'Gagnés' },
+    { key: 'prospects',  label: 'Prospects',  sub: 'Contacts entrés dans ta base sur la période' },
+    { key: 'sent',       label: 'Envoyés',    sub: 'Prospects qui ont reçu au moins un mail' },
+    { key: 'replies',    label: 'Réponses',   sub: 'Prospects qui ont répondu (peu importe quoi)' },
+    { key: 'interested', label: 'Intéressés', sub: 'Ont répondu « ça m’intéresse » — à toi de jouer' },
+    { key: 'won',        label: 'Gagnés',     sub: 'Devenus clients : projet créé ou vente encaissée' },
   ],
 
   async render(container) {
@@ -200,7 +200,7 @@ const Funnel = {
     const stages = data.stages || {};
     let prev = null;
     return `
-      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-12">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
         ${this.STAGES.map((s, i) => {
           const value = stages[s.key] || 0;
           let delta = '';
@@ -214,13 +214,20 @@ const Funnel = {
                          (s.key === 'interested' && prev > 0 && (value/prev) >= 0.05) ? 'success' : '';
           prev = value;
           return `
-            <div class="stat-card ${accent ? 'accent-' + accent : ''}">
+            <div class="stat-card ${accent ? 'accent-' + accent : ''}" title="${this._esc(s.sub || '')}">
               <div class="label">${s.label}</div>
               <div class="value">${value}</div>
               ${delta ? `<div class="delta">${delta}</div>` : ''}
             </div>
           `;
         }).join('')}
+      </div>
+      <div class="text-xs text-text-muted mb-12" style="text-wrap: pretty">
+        <b>Prospects</b> = entrés dans ta base · <b>Envoyés</b> = ont reçu un mail ·
+        <b>Réponses</b> = ont répondu · <b>Intéressés</b> = ont dit « ça m’intéresse » ·
+        <b>Gagnés</b> = devenus clients.
+        Repère : <b>2 à 5 réponses pour 100 mails</b> envoyés, c'est la norme en
+        prospection à froid.
       </div>
     `;
   },

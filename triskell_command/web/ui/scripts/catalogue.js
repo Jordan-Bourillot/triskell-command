@@ -279,6 +279,14 @@ const Catalogue = {
           <p class="hero-subtitle">Tous les sites et outils de l'écosystème. Choisis-en un pour voir sa fiche, sa fonction précise et son lien public.</p>
         </div>
 
+        <div class="mb-6 text-[12px] text-text-muted px-3 py-2 rounded-lg bg-accent/5 border border-accent/20" style="text-wrap: pretty">
+          💡 C'est ce catalogue qui décide ce que l'Auto-pilote propose :
+          <b>produit actif</b> (interrupteur vert) + <b>modèle de mail de
+          prospection</b> = ce qui part dans les mails de démarchage. Les
+          modèles se gèrent dans
+          <button type="button" class="text-accent underline hover:no-underline" onclick="App.show('mail_templates', {tab:'prospection'})">Modèles · prospection</button>.
+        </div>
+
         <div id="catalogue-loading" class="text-text-muted text-sm py-6">Chargement…</div>
         <div id="catalogue-grid" class="hidden"></div>
         <div id="catalogue-detail-modal"></div>

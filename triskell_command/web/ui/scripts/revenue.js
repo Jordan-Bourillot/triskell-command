@@ -140,6 +140,10 @@ const Revenue = {
         <p class="text-text-secondary text-sm mt-3 max-w-xl">
           ${cur.transactions_count || 0} transactions ce mois${evolSub}.
         </p>
+        <p class="text-text-muted text-xs mt-2 max-w-xl" style="text-wrap: pretty">
+          Ces montants = ce que tes clients ont payé (Stripe, AppSumo et ventes
+          saisies à la main), avant déduction des frais bancaires.
+        </p>
       </div>
     `;
   },
