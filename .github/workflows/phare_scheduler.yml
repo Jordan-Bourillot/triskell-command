@@ -6,9 +6,17 @@ name: Phare scheduler (cron horaire)
 
 on:
   schedule:
-    # Toutes les heures à HH:05 (laisse 5 min de marge si le cron GH est lent).
-    # Le tick lui-même vérifie l'heure UTC et lance les missions appropriées.
-    - cron: '5 * * * *'
+    # Minute 23 (creuse) : GitHub saute/retarde beaucoup les crons des minutes
+    # 0-10, surchargées. Constaté avant le 12/06/2026 : 3 ticks sur 4 perdus
+    # avec HH:05. Le tick lui-même vérifie l'heure et lance les missions.
+    - cron: '23 * * * *'
+    # Renfort du lundi (heures UTC = 6h-23h Paris l'été) : 2e passage par
+    # heure pendant la fenêtre d'audit hebdo, car l'audit traite 1 site par
+    # tick — avec 7 sites et des ticks qui sautent, la journée ne suffisait
+    # pas (Pixel Pros et Ingrid jamais audités le 08/06). La dédup DB
+    # (_pick_next_for_mission) garantit qu'un tick en double ne refait ni ne
+    # repaye aucun travail.
+    - cron: '53 4-21 * * 1'
   workflow_dispatch:   # bouton « Run workflow » dans l'onglet Actions
 
 # Évite que deux ticks tournent en parallèle si un précédent traîne
