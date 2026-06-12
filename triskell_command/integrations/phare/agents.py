@@ -701,7 +701,8 @@ Règles ABSOLUES :
    contacter quelqu'un, créer du contenu long) → mode="manual" avec la
    raison en français simple.
 
-Types de patch autorisés :
+Types de patch autorisés (page_path = le CHEMIN DE L'URL de la page :
+"/", "/demo", "/configurer" — JAMAIS un nom de fichier comme "/index.html") :
 - {"field": "title",            "page_path": str, "old": str, "new": str}
 - {"field": "meta_description", "page_path": str, "old": str, "new": str}
 - {"field": "h1",               "page_path": str, "old": str, "new": str}

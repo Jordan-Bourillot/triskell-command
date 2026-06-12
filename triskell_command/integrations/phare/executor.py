@@ -50,7 +50,7 @@ COMMAND_REPO = "Jordan-Bourillot/triskell-command"
 TICK_WORKFLOW = "phare_scheduler.yml"
 
 RUNNING_TIMEOUT_HOURS = 2
-QUEUE_BATCH = 3
+QUEUE_BATCH = 5
 
 _MIGRATION_HINT = ("La base n'a pas encore la migration 48 "
                    "(supabase/48_apply_queue.sql) — à appliquer dans "
@@ -101,20 +101,24 @@ def request_apply(action_id: str, *, app_state=None) -> dict:
     action = _get_action(action_id)
     if not action:
         return {"ok": False, "error": "Action introuvable."}
-    if (action.get("github_pr_url") or "").strip():
+    status = (action.get("status") or "").lower()
+    has_pr = bool((action.get("github_pr_url") or "").strip())
+    if has_pr and (action.get("apply_state") or "") != "failed":
         return {"ok": False,
                 "error": "La modification est déjà préparée — utilise « Publier sur le site »."}
-    status = (action.get("status") or "").lower()
-    if status not in ("draft", "pending_review"):
+    if status not in ("draft", "pending_review") and not has_pr:
         return {"ok": False, "error": "Cette carte n'est plus en attente."}
     if (action.get("apply_state") or "") in ("queued", "running"):
         return {"ok": True, "mode": "already", "already": True}
 
     site = repo.get_site(action.get("site_id") or "")
-    verdict = plain_language.classify_for_apply(action, site)
-    if not verdict.get("can"):
-        return {"ok": False, "error": verdict.get("why") or
-                "Cette proposition ne peut pas être faite par le robot."}
+    if not has_pr:
+        # Reprise d'une PR existante : pas de classification — on sait déjà
+        # quoi faire (re-vérifier et publier).
+        verdict = plain_language.classify_for_apply(action, site)
+        if not verdict.get("can"):
+            return {"ok": False, "error": verdict.get("why") or
+                    "Cette proposition ne peut pas être faite par le robot."}
 
     # Mise en file — c'est ici qu'on détecte l'absence de migration 48
     sb = repo._sb()
@@ -235,7 +239,9 @@ def _apply_one(action_id: str, *, app_state=None) -> dict:
         return {"ok": False, "error": "action introuvable"}
     if (action.get("apply_state") or "") not in ("queued", "running"):
         return {"ok": True, "skipped": "plus en file", "action_id": action_id}
-    if (action.get("status") or "").lower() not in ("draft", "pending_review"):
+    status = (action.get("status") or "").lower()
+    has_pr = bool((action.get("github_pr_url") or "").strip())
+    if status not in ("draft", "pending_review") and not (has_pr and status == "preview"):
         _update(action_id, {"apply_state": ""})
         return {"ok": True, "skipped": "déjà traitée", "action_id": action_id}
 
@@ -243,6 +249,22 @@ def _apply_one(action_id: str, *, app_state=None) -> dict:
     site = repo.get_site(action.get("site_id") or "")
     if not site:
         return _fail(action_id, "Site introuvable.")
+
+    if has_pr:
+        # Reprise : la modification a déjà été préparée lors d'un essai
+        # précédent — on ne refabrique rien, on re-vérifie et on publie.
+        try:
+            pr_number = int((action.get("github_pr_url") or "")
+                            .rstrip("/").split("/")[-1])
+        except ValueError:
+            return _fail(action_id, "Lien de la modification préparée illisible.")
+        return _verify_and_merge(
+            action_id, action, site,
+            pr_number=pr_number,
+            branch=action.get("branch") or "",
+            pr_url=action.get("github_pr_url") or "",
+            simple_md=(action.get("simple_md") or "").strip(),
+            files=action.get("files_touched") or [])
 
     verdict = plain_language.classify_for_apply(action, site)
     mode = verdict.get("mode")
@@ -322,52 +344,67 @@ def _apply_one(action_id: str, *, app_state=None) -> dict:
                          f"La préparation de la modification a échoué : "
                          f"{pr.get('error') or '?'}")
 
-        # Publication : vérifs si un preview Netlify existe, sinon le clic
-        # de Jordan vaut validation (rollback_watch surveille derrière).
-        blockers: list[str] = []
-        if (site.get("netlify_site_id") or "").strip():
-            v = git_pipeline.verify_pr(site=site, pr_number=pr["pr_number"],
-                                       branch=pr["branch"])
-            checks = v.get("checks") or {}
-            blockers = [b for b in (checks.get("blockers") or [])
-                        if "Netlify non configuré" not in b]
-        if blockers:
-            _update(action_id, {
-                "status": "preview",
-                "kind": "pr_modif",
-                "branch": pr.get("branch") or "",
-                "github_pr_url": pr.get("pr_url") or "",
-                "apply_state": "failed",
-                "apply_error": ("Les vérifications automatiques bloquent la "
-                                "publication : " + " · ".join(blockers[:3])),
-                "simple_md": simple_md,
-                "files_touched": [p.get("file") for p in loc["applicable"]
-                                  if p.get("file")],
-            })
-            return {"ok": False, "action_id": action_id,
-                    "error": "vérifications bloquantes", "pr": pr}
-
-        if not git_pipeline.merge_pr(site["repo_github"], pr["pr_number"],
-                                     commit_title=f"phare: {action.get('title') or ''}"):
-            _update(action_id, {
-                "status": "preview", "kind": "pr_modif",
-                "branch": pr.get("branch") or "",
-                "github_pr_url": pr.get("pr_url") or "",
-                "apply_state": "failed",
-                "apply_error": ("La modification est prête mais la publication "
-                                "a échoué — réessaie, ou publie-la depuis la carte."),
-                "simple_md": simple_md,
-            })
-            return {"ok": False, "action_id": action_id, "error": "merge KO"}
-
-        return _done(action_id, action, site, simple_md=simple_md,
-                     extra={"kind": "pr_modif",
-                            "branch": pr.get("branch") or "",
-                            "github_pr_url": pr.get("pr_url") or "",
-                            "files_touched": [p.get("file") for p in loc["applicable"]
-                                              if p.get("file")]})
+        return _verify_and_merge(
+            action_id, action, site,
+            pr_number=pr["pr_number"], branch=pr.get("branch") or "",
+            pr_url=pr.get("pr_url") or "", simple_md=simple_md,
+            files=[p.get("file") for p in loc["applicable"] if p.get("file")])
     finally:
         shutil.rmtree(workdir_root, ignore_errors=True)
+
+
+def _verify_and_merge(action_id: str, action: dict, site: dict, *,
+                      pr_number: int, branch: str, pr_url: str,
+                      simple_md: str = "", files: Optional[list] = None) -> dict:
+    """Vérifie puis publie une modification préparée (PR ouverte).
+
+    Le clic de Jordan vaut validation humaine : un contrôle IMPOSSIBLE
+    (pas de preview Netlify, pas de clé de mesure de vitesse) ne bloque
+    pas la publication — seule une RÉGRESSION mesurée bloque (page
+    cassée, gros changement visuel, vitesse qui chute). rollback_watch
+    surveille le trafic 14 jours derrière, comme pour tout merge.
+    """
+    blockers: list[str] = []
+    if (site.get("netlify_site_id") or "").strip():
+        v = git_pipeline.verify_pr(site=site, pr_number=pr_number,
+                                   branch=branch)
+        checks = v.get("checks") or {}
+        blockers = [b for b in (checks.get("blockers") or [])
+                    if "Netlify non configuré" not in b
+                    and "PSI indisponible" not in b]
+    if blockers:
+        _update(action_id, {
+            "status": "preview",
+            "kind": "pr_modif",
+            "branch": branch,
+            "github_pr_url": pr_url,
+            "apply_state": "failed",
+            "apply_error": ("Les vérifications automatiques bloquent la "
+                            "publication : " + " · ".join(blockers[:3])),
+            "simple_md": simple_md,
+            "files_touched": files or [],
+        })
+        return {"ok": False, "action_id": action_id,
+                "error": "vérifications bloquantes", "pr_url": pr_url}
+
+    if not git_pipeline.merge_pr(site["repo_github"], pr_number,
+                                 commit_title=f"phare: {action.get('title') or ''}"):
+        _update(action_id, {
+            "status": "preview", "kind": "pr_modif",
+            "branch": branch,
+            "github_pr_url": pr_url,
+            "apply_state": "failed",
+            "apply_error": ("La modification est prête mais la publication "
+                            "a échoué — réessaie, ou publie-la depuis la carte."),
+            "simple_md": simple_md,
+        })
+        return {"ok": False, "action_id": action_id, "error": "merge KO"}
+
+    return _done(action_id, action, site, simple_md=simple_md,
+                 extra={"kind": "pr_modif",
+                        "branch": branch,
+                        "github_pr_url": pr_url,
+                        "files_touched": files or []})
 
 
 # ---------------------------------------------------------------------------

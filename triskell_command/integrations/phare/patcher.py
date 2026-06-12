@@ -268,11 +268,28 @@ def localize_patches(workdir: str, stack: str,
 _SAFE_NEW_FILE_EXTS = (".xml", ".txt", ".html", ".htm")
 
 
+def _norm_page_path(p: str) -> str:
+    """Normalise un chemin de page fourni par l'IA : « /index.html » → « / »,
+    « /demo.html » → « /demo », « demo » → « /demo ». Les agents glissent
+    parfois un nom de fichier à la place du chemin d'URL — on rattrape."""
+    p = (p or "/").split("?")[0].split("#")[0].strip().lower()
+    if not p.startswith("/"):
+        p = "/" + p
+    for suf in (".html", ".htm"):
+        if p.endswith(suf):
+            p = p[: -len(suf)]
+    if p.endswith("/index"):
+        p = p[: -len("/index")] or "/"
+    if p != "/" and p.endswith("/"):
+        p = p[:-1]
+    return p or "/"
+
+
 def _files_matching_page(root: Path, exts: tuple[str, ...],
                          page_path: str, page_title: str = "") -> list[Path]:
     """Fichiers source candidats pour une page du site (par convention
     de nommage, puis par son <title> actuel)."""
-    rel = (page_path or "/").strip("/").lower()
+    rel = _norm_page_path(page_path).strip("/").lower()
     wanted_rel = ({"index.html", "index.htm"} if not rel
                   else {f"{rel}.html", f"{rel}.htm",
                         f"{rel}/index.html", f"{rel}/index.htm"})
@@ -309,7 +326,7 @@ def localize_executor_patches(workdir: str, stack: str,
     """
     root = Path(workdir)
     exts = EXTENSIONS_BY_STACK.get(stack, EXTENSIONS_BY_STACK["any"])
-    titles_by_path = {(p.get("path") or "/"): (p.get("title") or "")
+    titles_by_path = {_norm_page_path(p.get("path") or "/"): (p.get("title") or "")
                       for p in (pages or [])}
 
     applicable: list[dict] = []
@@ -317,7 +334,7 @@ def localize_executor_patches(workdir: str, stack: str,
 
     for p in exec_patches or []:
         field = (p.get("field") or "").lower()
-        page_path = p.get("page_path") or "/"
+        page_path = _norm_page_path(p.get("page_path") or "/")
         old = p.get("old") or ""
         new = p.get("new") or ""
         page_title = titles_by_path.get(page_path, "")

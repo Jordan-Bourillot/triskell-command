@@ -335,6 +335,23 @@ with tempfile.TemporaryDirectory() as tmp:
           len(loc["applicable"]) == 1
           and loc["applicable"][0]["file"] == "page-a.html")
 
+    # L'IA met parfois un nom de fichier à la place du chemin d'URL
+    # (vécu : « /index.html » au lieu de « / » au premier essai réel)
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "head_insert", "page_path": "/index.html",
+         "new": '<script type="application/ld+json">{}</script>'},
+    ], pages2)
+    check("page_path « /index.html » → rattrapé vers la home",
+          len(loc["applicable"]) == 1
+          and loc["applicable"][0]["file"] == "index.html")
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "head_insert", "page_path": "/demo.html",
+         "new": "<meta name=\"robots\" content=\"noindex, follow\" />"},
+    ], pages2)
+    check("page_path « /demo.html » → rattrapé vers /demo",
+          len(loc["applicable"]) == 1
+          and loc["applicable"][0]["file"] == "demo.html")
+
 # ===========================================================================
 print("\n— executor._apply_one (mocks complets, ni git ni Supabase) —")
 from triskell_command.integrations.phare import executor, git_pipeline, agents
@@ -358,7 +375,8 @@ def fake_update(action_id, patch):
 
 
 def run_apply(agent_out, *, clone_ok=True, pr_ok=True, merge_ok=True,
-              localized=None):
+              localized=None, action_extra=None, site_extra=None,
+              verify_out=None):
     """Déroule executor._apply_one avec tous les accès externes doublés."""
     updates.clear()
     fake_pr = {"ok": pr_ok, "branch": "phare/auto-test", "pr_number": 7,
@@ -367,8 +385,10 @@ def run_apply(agent_out, *, clone_ok=True, pr_ok=True, merge_ok=True,
         fake_pr = {"ok": False, "error": "push refusé"}
     default_loc = {"applicable": [{"file": "index.html", "old": "a", "new": "b",
                                    "field": "title"}], "needs_review": []}
-    with mock.patch.object(executor, "_get_action", return_value=dict(ACTION)), \
-         mock.patch.object(executor.repo, "get_site", return_value=dict(SITE)), \
+    action = {**ACTION, **(action_extra or {})}
+    site = {**SITE, **(site_extra or {})}
+    with mock.patch.object(executor, "_get_action", return_value=action), \
+         mock.patch.object(executor.repo, "get_site", return_value=site), \
          mock.patch.object(executor.repo, "update_action", side_effect=fake_update), \
          mock.patch.object(executor.repo, "list_pages", return_value=PAGES), \
          mock.patch.object(executor.shutil, "which", return_value="C:/git.exe"), \
@@ -376,6 +396,9 @@ def run_apply(agent_out, *, clone_ok=True, pr_ok=True, merge_ok=True,
          mock.patch.object(git_pipeline, "clone_repo", return_value=clone_ok), \
          mock.patch.object(git_pipeline, "apply_and_open_pr", return_value=fake_pr), \
          mock.patch.object(git_pipeline, "merge_pr", return_value=merge_ok), \
+         mock.patch.object(git_pipeline, "verify_pr",
+                           return_value=verify_out or {"ok": True, "checks": {},
+                                                       "decision": "merge"}), \
          mock.patch.object(executor.patcher, "localize_executor_patches",
                            return_value=localized or default_loc), \
          mock.patch.object(agents.Executeur, "run",
@@ -426,6 +449,58 @@ r = run_apply({"mode": "patches", "simple_md": "x",
 final = updates[-1]
 check("clone KO → failed propre",
       not r.get("ok") and final.get("apply_state") == "failed")
+
+# Contrôle impossible ≠ régression : la mesure de vitesse indisponible
+# (pas de clé) ne bloque pas une publication validée par un clic humain
+r = run_apply({"mode": "patches", "simple_md": "x",
+               "patches": [{"field": "title", "page_path": "/", "old": "a", "new": "b"}]},
+              site_extra={"netlify_site_id": "nl-123"},
+              verify_out={"ok": False, "decision": "hold", "checks": {
+                  "blockers": ["audit PSI indisponible (clé manquante ou réseau)"]}})
+final = updates[-1]
+check("mesure de vitesse indisponible → publie quand même (clic = validation)",
+      r.get("ok") and final.get("status") == "merged"
+      and final.get("apply_state") == "done")
+
+# Une VRAIE régression mesurée, elle, bloque toujours
+r = run_apply({"mode": "patches", "simple_md": "x",
+               "patches": [{"field": "title", "page_path": "/", "old": "a", "new": "b"}]},
+              site_extra={"netlify_site_id": "nl-123"},
+              verify_out={"ok": False, "decision": "hold", "checks": {
+                  "blockers": ["diff visuel 42.0% > seuil 5.0%"]}})
+final = updates[-1]
+check("gros changement visuel mesuré → publication bloquée",
+      not r.get("ok") and final.get("apply_state") == "failed"
+      and "diff visuel" in final.get("apply_error", ""))
+
+# Reprise d'une modification déjà préparée (PR ouverte au tour d'avant) :
+# pas de refabrication — re-vérification puis publication directe
+r = run_apply({"mode": "manual", "manual_reason": "ne doit pas être appelé"},
+              action_extra={"status": "preview", "kind": "pr_modif",
+                            "github_pr_url": "https://github.com/x/y/pull/9",
+                            "branch": "phare/auto-old", "simple_md": "déjà prêt"})
+final = updates[-1]
+check("reprise PR existante → publiée sans repasser par l'IA",
+      r.get("ok") and final.get("status") == "merged"
+      and final.get("github_pr_url", "").endswith("/9"))
+
+# request_apply accepte la reprise d'un échec, refuse une PR saine
+with mock.patch.object(executor, "_get_action",
+                       return_value={**ACTION, "status": "preview",
+                                     "github_pr_url": "https://github.com/x/y/pull/9",
+                                     "apply_state": "failed"}), \
+     mock.patch.object(executor.repo, "get_site", return_value=dict(SITE)), \
+     mock.patch.object(executor.repo, "_sb", return_value=None):
+    r = executor.request_apply("act1")
+    check("request_apply : reprise d'un échec acceptée (jusqu'à la mise en file)",
+          "déjà préparée" not in (r.get("error") or ""))
+with mock.patch.object(executor, "_get_action",
+                       return_value={**ACTION, "status": "preview",
+                                     "github_pr_url": "https://github.com/x/y/pull/9",
+                                     "apply_state": ""}):
+    r = executor.request_apply("act1")
+    check("request_apply : PR saine → renvoyée vers « Publier sur le site »",
+          not r.get("ok") and "déjà préparée" in r.get("error", ""))
 
 # request_apply / process_apply_queue sans base → réponses propres
 with mock.patch.object(executor, "_get_action", return_value=None):
