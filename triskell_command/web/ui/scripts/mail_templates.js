@@ -237,7 +237,7 @@ const MailTemplates = {
   // Libellés humains des regroupements par adresse mail. Les adresses
   // inconnues tombent sur un libellé générique.
   SENDER_LABELS: {
-    'noreply@triskell-studio.fr':  'Sites Triskell (transactionnel)',
+    'noreply@triskell-studio.fr':  'Sites Triskell (mails automatiques)',
     'contact@triskell-studio.fr':  'Prospection & suivi client',
     'rapports@rankus-studio.fr':   'RankUs / Le Phare (rapports)',
     'jordan@triskell-studio.fr':   'Notifications internes',
@@ -307,8 +307,8 @@ const MailTemplates = {
 
         <!-- Encadré de repérage : ce que cet écran pilote (et ce qu'il ne pilote pas) -->
         <div class="mb-3 text-[12px] leading-relaxed text-text-muted px-3 py-2 rounded-lg bg-accent/5 border border-accent/20">
-          <strong>Transactionnel</strong> = les mails automatiques liés aux ventes (confirmations, livraisons, relances) ·
-          <strong>Prospection</strong> = les mails que l’Auto-pilote envoie tels quels aux prospects.<br>
+          <strong>Après-achat</strong> = les mails automatiques envoyés à tes clients après une vente (bienvenue, livraison, relances de suivi) ·
+          <strong>Prospection</strong> = les mails que l’Auto-pilote envoie tels quels aux prospects pour les démarcher.<br>
           Les modèles du composeur de mails et des autres outils se gèrent dans leurs écrans.
         </div>
 
@@ -1289,7 +1289,7 @@ const MailTemplates = {
     // Petites pastilles contextuelles : type + cible. Concises, en haut.
     const typeChip = isProspection
       ? `<span class="mt-chip mt-chip-prosp" title="Ce modèle est envoyé tel quel par l’Auto-pilote — il remplit seulement les variables {{…}}, il ne réécrit rien">🤖 Utilisé par l’Auto-pilote — envoyé tel quel</span>`
-      : `<span class="mt-chip mt-chip-auto" title="Mail transactionnel — envoyé automatiquement par tes sites">🤖 Auto</span>`;
+      : `<span class="mt-chip mt-chip-auto" title="Mail automatique après achat — envoyé tout seul par tes sites au bon moment">🤖 Auto</span>`;
     const targetChip = isProspection
       ? `<span class="mt-chip mt-chip-target">${this._esc(productLabel)}</span>`
       : `<span class="mt-chip mt-chip-target" title="${this._esc(senderLabel || '')}">${this._esc(senderAddr)}</span>`;

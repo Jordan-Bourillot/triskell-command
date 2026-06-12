@@ -7,12 +7,13 @@ const ClientsMaster = {
   // `chip` = triplet HSL du thème (jamais de couleur en dur : lisible
   // dans les 3 thèmes). À utiliser via hsl(${chip}) ou hsl(${chip} / alpha).
   STATUSES: {
+    // label = ce qui s'affiche (français normal) ; la clé stockée ne bouge pas.
     '':         { label: 'Tous',        chip: 'var(--text-muted)' },
-    'lead':     { label: 'Lead',        chip: 'var(--text-muted)' },
+    'lead':     { label: 'Contact',     chip: 'var(--text-muted)' },
     'prospect': { label: 'Prospect',    chip: 'var(--info-text)' },
     'client':   { label: 'Client',      chip: 'var(--success-text)' },
     'inactive': { label: 'Inactif',     chip: 'var(--warning-text)' },
-    'churned':  { label: 'Churn',       chip: 'var(--danger-text)' },
+    'churned':  { label: 'Parti',       chip: 'var(--danger-text)' },
   },
 
   EVENT_ICONS: {

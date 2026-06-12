@@ -60,7 +60,7 @@ function makePipelineView(config) {
           </div>
 
           <div class="flex gap-2 mb-6 border-b border-border">
-            <button data-pv-tab="plomberie" class="pv-tab">Pipeline</button>
+            <button data-pv-tab="plomberie" class="pv-tab">Vue par étapes</button>
             <button data-pv-tab="dashboard" class="pv-tab">Demandes</button>
             <button data-pv-tab="logs"      class="pv-tab">Historique d'une demande</button>
           </div>
@@ -1282,7 +1282,7 @@ function makePipelineView(config) {
           <div class="card p-10 text-center">
             <div class="text-3xl mb-3 opacity-60">→</div>
             <h2 class="text-xl font-bold mb-2">Aucune demande sélectionnée.</h2>
-            <p class="text-text-muted mb-5">Va dans l'onglet <b>Demandes</b> ou <b>Pipeline</b>, clique sur une carte, puis reviens ici.</p>
+            <p class="text-text-muted mb-5">Va dans l'onglet <b>Demandes</b> ou <b>Vue par étapes</b>, clique sur une carte, puis reviens ici.</p>
             <button id="pv-go-dashboard" class="btn btn-primary">Aller voir les demandes</button>
           </div>
         `;
@@ -1553,12 +1553,12 @@ const PIPELINE_BASE_STATUS_LABELS = {
   pending_validation: 'À valider',
   approved: 'Approuvé · démarre sous 5 min',
   processing: 'Génération en cours',
-  sent: 'Preview envoyée',
+  sent: 'Aperçu envoyé au client',
   paid: 'Payé · à finaliser',
   finalizing: 'Finalisation en cours',
   live: 'Site final en ligne',
   rejected: 'Refusé',
-  failed: 'Échec preview',
+  failed: 'Échec de l’aperçu',
   final_failed: 'Échec finalisation',
 };
 
@@ -1579,7 +1579,7 @@ const PIPELINE_BASE_STAGES = [
   { key: 'pending_validation', label: 'Brief reçu',           sub: 'En attente de validation humaine' },
   { key: 'approved',           label: 'Approuvé',             sub: 'Démarrage auto sous 5 min' },
   { key: 'processing',         label: `L'IA fabrique le site`, sub: 'Fabrication en cours' },
-  { key: 'sent',               label: 'Preview envoyée',      sub: 'Client a reçu le mail' },
+  { key: 'sent',               label: 'Aperçu envoyé',        sub: 'Client a reçu le mail' },
   { key: 'paid',               label: 'Payé',                 sub: 'Paiement confirmé' },
   { key: 'finalizing',         label: 'Finalisation',         sub: 'Toutes les pages, visuels' },
   { key: 'live',               label: 'En ligne',             sub: 'Site final livré' },

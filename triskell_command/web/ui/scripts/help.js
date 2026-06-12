@@ -185,8 +185,9 @@ const Help = {
           p: "« Modèles · prospection » = les mails que l’Auto-pilote " +
              "envoie aux prospects, utilisés TELS QUELS (l’IA remplit " +
              "juste les trous : prénom, ville…). « Modèles · " +
-             "transactionnel » = les mails automatiques liés aux ventes " +
-             "(confirmation, livraison, relances de suivi)."
+             "après-achat » = les mails automatiques envoyés à tes " +
+             "clients après une vente (bienvenue, livraison, relances " +
+             "de suivi)."
         },
         {
           h: '🤖 Et si un produit n’a pas de modèle ?',

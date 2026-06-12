@@ -109,8 +109,9 @@ const Tutorial = {
             "• « Modèles · prospection » : les mails que l’Auto-pilote " +
             "envoie aux prospects — utilisés tels quels, l’IA remplit " +
             "juste les trous.\n" +
-            "• « Modèles · transactionnel » : les mails automatiques liés " +
-            "aux ventes (confirmation, livraison, relances de suivi).\n\n" +
+            "• « Modèles · après-achat » : les mails automatiques envoyés " +
+            "à tes clients après une vente (bienvenue, livraison, relances " +
+            "de suivi).\n\n" +
             "L’IA n’écrit librement un mail QUE si le produit poussé n’a " +
             "pas de modèle. Sinon, ton modèle pilote.\n\n" +
             "💡 Un modèle par produit actif du Catalogue : c’est ici que " +
