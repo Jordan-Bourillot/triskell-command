@@ -444,17 +444,21 @@ def verify_pr(*, site: dict, pr_number: int, branch: str) -> dict:
     if psi_diff.get("ok"):
         checks["lighthouse_diff"] = psi_diff.get("diff", {})
         prev_perf = psi_diff["a"]["lighthouse"].get("perf")
-        if prev_perf is not None and prev_perf < perf_min:
+        # Un aperçu Netlify est un environnement DÉGRADÉ par nature : caché
+        # de Google (noindex → SEO -30 environ) et servi à froid hors CDN
+        # chaud (perf -15/-20 pts vs la prod, constaté le 12/06 sur Lagriffe
+        # ET RankUs). Comparer sa vitesse à celle de la prod bloquait des
+        # modifs incapables de toucher la perf (titles, métas). Donc :
+        # PAS de blocage sur le delta prod↔aperçu (mesure biaisée par
+        # construction) — un PLANCHER ADAPTATIF sur l'aperçu seul fait le
+        # garde-fou : perf_min (70) - 15 de biais, jamais sous 40. Une
+        # vraie régression massive (page cassée, JS bloquant) tombe
+        # toujours sous ce plancher ; la variance et le biais passent.
+        preview_floor = max(40, perf_min - 15)
+        if prev_perf is not None and prev_perf < preview_floor:
             checks["blockers"].append(
-                f"perf preview {prev_perf} < seuil {perf_min}")
-        delta_perf = psi_diff["diff"].get("perf")
-        # Seuil -6 (et non -2) : PageSpeed varie naturellement de ±5 pts
-        # d'une mesure à l'autre — à -2, des modifs qui ne peuvent PAS
-        # toucher la vitesse (méta-descriptions, titles) étaient bloquées
-        # au hasard de la variance (constaté par Jordan le 12/06). Le
-        # plancher absolu perf_min_score reste le vrai garde-fou.
-        if delta_perf is not None and delta_perf < -6:
-            checks["blockers"].append(f"perf chute de {abs(delta_perf)} pts")
+                f"perf preview {prev_perf} < plancher {preview_floor} "
+                f"(seuil prod {perf_min} - 15 de biais aperçu)")
     else:
         checks["blockers"].append("audit PSI indisponible (clé manquante ou réseau)")
 
