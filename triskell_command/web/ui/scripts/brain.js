@@ -36,10 +36,10 @@ const Brain = {
 
         <!-- QUICK-ADD inline (pour vider vite) -->
         <div class="card p-3 mb-5 b-quickadd">
-          <textarea id="b-quick" rows="1" placeholder="Tape une idée ici et appuie sur Entrée…"
+          <textarea id="b-quick" rows="1" placeholder="Tape une idée ici et appuie sur Entrée — Claude la range tout seul…"
                     class="w-full px-2 py-1.5 text-sm bg-transparent border-0 focus:outline-none resize-none font-sans leading-relaxed"></textarea>
           <div class="flex items-center justify-between gap-2 mt-1 text-[11px] text-text-muted">
-            <span id="b-quick-hint">Entrée = envoyer · Maj+Entrée = saut de ligne</span>
+            <span id="b-quick-hint" title="Le classement (catégorie, priorité) est automatique. Pour un rappel : écris la date dans l'idée, il se crée tout seul.">Entrée = envoyer · Maj+Entrée = saut de ligne · 💡 écris la date (« vendredi », « le 20 ») pour créer un rappel</span>
             <span class="flex items-center gap-2">
               <span id="b-quick-status"></span>
               <button id="b-quick-send" class="btn btn-secondary text-xs" style="padding:4px 12px;">Envoyer</button>

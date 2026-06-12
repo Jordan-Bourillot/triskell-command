@@ -50,7 +50,7 @@ const PixelProsAffiliates = {
             <p class="hero-subtitle">20 % de commission sur 12 mois. Suivi des ventes, paiements à préparer, gestion des comptes.</p>
           </div>
           <div class="flex items-center gap-2">
-            <button id="ppa-promote" class="btn btn-secondary" title="Rend versables les commissions en attente depuis plus de 30 jours">
+            <button id="ppa-promote" class="btn btn-secondary" title="Une commission attend 30 jours avant d'être payable — le temps d'être sûr que le client ne se fait pas rembourser. Ce bouton rend payables celles qui ont passé ce délai.">
               ⏰ Libérer les commissions (30 j et +)
             </button>
             <button id="ppa-refresh" class="btn btn-secondary">↻ Rafraîchir</button>
@@ -253,7 +253,9 @@ const PixelProsAffiliates = {
         <div class="ppa-payouts-head">
           <div>
             <h2>💰 Paiements à préparer</h2>
-            <p>Commissions versables (>30 j), groupées par affilié. Seuil 50 €.</p>
+            <p>Les commissions à payer maintenant : gagnées il y a plus de 30 jours
+            (délai de sécurité anti-remboursement), groupées par affilié, dès que
+            son total atteint 50 €.</p>
           </div>
           <button id="ppa-export-csv" class="btn btn-secondary">Exporter CSV</button>
         </div>
@@ -645,8 +647,10 @@ const PixelProsAffiliates = {
 
   async _promotePending() {
     const ok = await Dialog.confirm(
-      'Rendre versables toutes les commissions en attente depuis plus de 30 jours ?',
-      { title: 'Affiliés', okLabel: 'Libérer' }
+      'Rendre payables toutes les commissions gagnées il y a plus de 30 jours ? '
+      + '(Le délai de 30 jours protège contre les remboursements clients : '
+      + 'on ne paie un parrain que sur des ventes confirmées.)',
+      { title: 'Libérer les commissions', okLabel: 'Libérer', cancelLabel: 'Annuler' }
     );
     if (!ok) return;
     const btn = document.getElementById('ppa-promote');
