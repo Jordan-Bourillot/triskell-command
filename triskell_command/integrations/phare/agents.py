@@ -148,6 +148,9 @@ Standards qualité — RIGIDES :
 - health_score honnête (jamais > 95, jamais < 25 si le site existe)
 - critical_issues : 3 minimum, 7 maximum, ordonnés par impact € décroissant
 - quick_wins : exclusivement actionnables aujourd'hui sans dev majeur
+- quick_wins[].simple : 1-2 phrases pour quelqu'un de NON technique —
+  zéro jargon (pas de « canonical », « noindex », « title tag » : dire
+  « le titre affiché dans Google », « cacher la page des résultats »…)
 - summary_md : 150-200 mots, prose dense, breton chaleureux, pas de listes
 
 Format JSON strict (rien d'autre, pas de prose hors JSON) :
@@ -160,7 +163,7 @@ Format JSON strict (rien d'autre, pas de prose hors JSON) :
      "estimated_clicks_lost_per_month": int}
   ],
   "quick_wins": [
-    {"title": str, "page_or_global": str, "fix_hint": str,
+    {"title": str, "page_or_global": str, "fix_hint": str, "simple": str,
      "effort_minutes": int, "expected_gain": str}
   ],
   "summary_md": str
@@ -677,6 +680,74 @@ Produis le plan stratégique du mois au format JSON."""
 
 
 # ---------------------------------------------------------------------------
+# 9. Exécuteur — transforme une recommandation validée en patches concrets
+# ---------------------------------------------------------------------------
+class Executeur(Agent):
+    name = "executeur"
+    role = """Tu es l'Exécuteur de Le Phare. Jordan a cliqué « OK, fais-le »
+sur une recommandation SEO : ton travail est de la transformer en
+modifications de code CONCRÈTES et SÛRES, ou de dire honnêtement qu'un
+humain doit s'en charger.
+
+Règles ABSOLUES :
+1. Tu ne modifies QUE ce que la recommandation demande. Pas d'initiative.
+2. Chaque patch doit être minimal et ciblé : une balise, un texte exact.
+3. Le champ "old" doit reprendre EXACTEMENT le texte actuel fourni dans le
+   contexte (titles/metas/h1 des pages crawlées). Si le texte actuel n'est
+   pas dans le contexte, NE DEVINE PAS : utilise un patch "head_insert" ou
+   réponds mode="manual".
+4. Tu n'inventes JAMAIS de coordonnées, prix, avis ou faits.
+5. Si la recommandation demande une action hors du code (Search Console,
+   contacter quelqu'un, créer du contenu long) → mode="manual" avec la
+   raison en français simple.
+
+Types de patch autorisés :
+- {"field": "title",            "page_path": str, "old": str, "new": str}
+- {"field": "meta_description", "page_path": str, "old": str, "new": str}
+- {"field": "h1",               "page_path": str, "old": str, "new": str}
+- {"field": "head_insert",      "page_path": str, "new": str}
+    → new = balise(s) à insérer juste avant </head> de CETTE page
+      (canonical, noindex, JSON-LD…)
+- {"field": "new_file",         "file": str, "new": str}
+    → création d'un fichier à la racine (ex: sitemap.xml). Chemin relatif
+      simple, jamais de ../.
+
+Format JSON strict (rien d'autre) :
+{
+  "mode": "patches" | "manual",
+  "patches": [ ... ],                  // si mode=patches, 1 à 8 patches
+  "simple_md": str,                    // 1-2 phrases SANS jargon : ce que tu fais,
+                                       // compréhensible par quelqu'un de non technique
+  "manual_reason": str                 // si mode=manual : pourquoi, en français simple
+}"""
+
+    def run(self, *, site: dict, action: dict, pages: list,
+            app_state=None) -> dict:
+        pages_ctx = [{
+            "path": p.get("path"),
+            "title": p.get("title"),
+            "meta_description": p.get("meta_description"),
+            "h1": p.get("h1"),
+            "schema_types": p.get("schema_types") or [],
+        } for p in (pages or [])[:40]]
+        prompt = f"""SITE : {site.get('name')} ({site.get('domain')})
+STACK : {site.get('stack') or 'html'}
+NOTES : {site.get('notes') or ''}
+
+RECOMMANDATION VALIDÉE PAR JORDAN (à exécuter) :
+TITRE : {action.get('title') or ''}
+DÉTAIL :
+{action.get('detail_md') or ''}
+
+ÉTAT ACTUEL DES PAGES (crawl le plus récent — source de vérité pour "old") :
+{json.dumps(pages_ctx, ensure_ascii=False, indent=2)}
+
+Produis les patches au format JSON spécifié."""
+        out = self.call(prompt, app_state=app_state)
+        return out if isinstance(out, dict) else {}
+
+
+# ---------------------------------------------------------------------------
 # Registre
 # ---------------------------------------------------------------------------
 AGENTS: dict[str, type[Agent]] = {
@@ -688,6 +759,7 @@ AGENTS: dict[str, type[Agent]] = {
     ChasseurBacklinks.name: ChasseurBacklinks,
     Analyste.name: Analyste,
     ChefOrchestre.name: ChefOrchestre,
+    Executeur.name: Executeur,
 }
 
 

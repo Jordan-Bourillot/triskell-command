@@ -259,6 +259,154 @@ def localize_patches(workdir: str, stack: str,
     return {"applicable": applicable, "needs_review": needs_review}
 
 
+# ---------------------------------------------------------------------
+# Patches de l'Exécuteur (bouton « OK, fais-le » d'une recommandation).
+# Différence avec localize_patches : chaque patch vise une PAGE précise
+# (page_path), ce qui permet de désambiguïser quand le même texte vit
+# dans plusieurs fichiers, et d'insérer dans le <head> d'une page donnée.
+# ---------------------------------------------------------------------
+_SAFE_NEW_FILE_EXTS = (".xml", ".txt", ".html", ".htm")
+
+
+def _files_matching_page(root: Path, exts: tuple[str, ...],
+                         page_path: str, page_title: str = "") -> list[Path]:
+    """Fichiers source candidats pour une page du site (par convention
+    de nommage, puis par son <title> actuel)."""
+    rel = (page_path or "/").strip("/").lower()
+    wanted_rel = ({"index.html", "index.htm"} if not rel
+                  else {f"{rel}.html", f"{rel}.htm",
+                        f"{rel}/index.html", f"{rel}/index.htm"})
+    by_name: list[Path] = []
+    for f in _walk(root, exts):
+        relstr = str(f.relative_to(root)).replace("\\", "/").lower()
+        if relstr in wanted_rel:
+            by_name.append(f)
+    if len(by_name) == 1:
+        return by_name
+    if page_title:
+        hits = _find_unique_match(root, exts, page_title)
+        files = [h for h, _ in hits]
+        if len(files) == 1:
+            return files
+        inter = [c for c in by_name if c in files]
+        if len(inter) == 1:
+            return inter
+    return by_name
+
+
+def localize_executor_patches(workdir: str, stack: str,
+                              exec_patches: list[dict],
+                              pages: Optional[list[dict]] = None) -> dict:
+    """Convertit les patches de l'agent Exécuteur en patches fichier.
+
+    Formats d'entrée (cf. agents.Executeur) :
+      - {field: title|meta_description|h1, page_path, old, new}
+      - {field: head_insert, page_path, new}   → insertion avant </head>
+      - {field: new_file, file, new}           → création de fichier
+
+    Renvoie {"applicable": [...], "needs_review": [...]} — même contrat
+    que localize_patches, consommable par git_pipeline.apply_and_open_pr.
+    """
+    root = Path(workdir)
+    exts = EXTENSIONS_BY_STACK.get(stack, EXTENSIONS_BY_STACK["any"])
+    titles_by_path = {(p.get("path") or "/"): (p.get("title") or "")
+                      for p in (pages or [])}
+
+    applicable: list[dict] = []
+    needs_review: list[dict] = []
+
+    for p in exec_patches or []:
+        field = (p.get("field") or "").lower()
+        page_path = p.get("page_path") or "/"
+        old = p.get("old") or ""
+        new = p.get("new") or ""
+        page_title = titles_by_path.get(page_path, "")
+
+        if field == "new_file":
+            rel = (p.get("file") or "").replace("\\", "/").strip().lstrip("/")
+            if (not rel or ".." in rel
+                    or not rel.lower().endswith(_SAFE_NEW_FILE_EXTS)):
+                needs_review.append({"field": field, "old": "", "new": new[:200],
+                                     "candidates": [rel],
+                                     "reason": "chemin de fichier refusé"})
+                continue
+            if (root / rel).exists():
+                needs_review.append({"field": field, "old": "", "new": new[:200],
+                                     "candidates": [rel],
+                                     "reason": "le fichier existe déjà"})
+                continue
+            applicable.append({"file": rel, "old": "", "new": new,
+                               "field": field, "create": True,
+                               "rationale": p.get("rationale") or ""})
+            continue
+
+        if field == "head_insert":
+            files = _files_matching_page(root, exts, page_path, page_title)
+            files = [f for f in files
+                     if "</head>" in _read_text_safe(f)]
+            if len(files) != 1:
+                needs_review.append({
+                    "field": field, "old": "", "new": new[:200],
+                    "candidates": [str(f.relative_to(root)) for f in files[:5]],
+                    "reason": (f"{len(files)} fichiers possibles pour la page "
+                               f"{page_path}"),
+                })
+                continue
+            if not new.strip():
+                needs_review.append({"field": field, "old": "", "new": "",
+                                     "candidates": [], "reason": "patch vide"})
+                continue
+            applicable.append({
+                "file": str(files[0].relative_to(root)),
+                "old": "</head>",
+                "new": new.rstrip() + "\n</head>",
+                "field": field, "rationale": p.get("rationale") or "",
+            })
+            continue
+
+        # title / meta_description / h1 → flux classique, désambiguïsé
+        # par la page visée quand plusieurs fichiers contiennent le texte.
+        old_wrapped, new_wrapped = _build_replacement(field, old, new)
+        hits = _find_unique_match(root, exts, old_wrapped)
+        if not hits and old and old != old_wrapped:
+            hits = _find_unique_match(root, exts, old)
+            if hits:
+                old_wrapped, new_wrapped = old, new
+        if len(hits) > 1:
+            page_files = set(_files_matching_page(root, exts, page_path, page_title))
+            narrowed = [(f, e) for f, e in hits if f in page_files]
+            if len(narrowed) == 1:
+                hits = narrowed
+        if not hits:
+            needs_review.append({"field": field, "old": old, "new": new,
+                                 "candidates": [],
+                                 "reason": "texte actuel introuvable dans le code"})
+            continue
+        if len(hits) > 1:
+            needs_review.append({
+                "field": field, "old": old, "new": new,
+                "candidates": [str(h.relative_to(root)) for h, _ in hits[:5]],
+                "reason": f"{len(hits)} fichiers contiennent ce texte (ambiguïté)",
+            })
+            continue
+        target_path, exact_old = hits[0]
+        applicable.append({
+            "file": str(target_path.relative_to(root)),
+            "old": exact_old,
+            "new": new_wrapped if "<" in exact_old else new,
+            "field": field, "rationale": p.get("rationale") or "",
+        })
+
+    return {"applicable": applicable, "needs_review": needs_review}
+
+
+def _read_text_safe(f: Path) -> str:
+    try:
+        return f.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return ""
+
+
 def _find_layout_candidates(root: Path, exts: tuple[str, ...]) -> list[Path]:
     """Cherche le(s) layout(s) principaux (Astro Layout.astro, Next layout.tsx,
     fichiers HTML avec </head>).

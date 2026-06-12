@@ -406,8 +406,10 @@ def test_patcher_jsonld() -> None:
 
 def test_agents_registry() -> None:
     from triskell_command.integrations.phare.agents import AGENTS
+    # 9e agent depuis le 12/06/2026 : l'Exécuteur (bouton « OK, fais-le »)
     expected = {"auditeur", "veilleur", "redacteur", "optimiseur_onpage",
-                "tisseur", "chasseur_backlinks", "analyste", "chef_orchestre"}
+                "tisseur", "chasseur_backlinks", "analyste", "chef_orchestre",
+                "executeur"}
     assert set(AGENTS) == expected, f"agents={set(AGENTS)}"
 
 

@@ -170,6 +170,19 @@ def _tick(app_state) -> dict:
 
     actions_done: list[dict] = []
 
+    # File « OK, fais-le » : toujours en tête de cycle — un clic de Jordan
+    # passe avant les missions planifiées. Le clic web déclenche aussi un
+    # workflow_dispatch, donc ce passage arrive en général ~2 min après.
+    try:
+        from . import executor
+        q = executor.process_apply_queue(app_state=app_state)
+        if q.get("processed"):
+            actions_done.append({"mission": "apply_queue",
+                                 "site": "", **{"ok": q.get("ok", False),
+                                                "processed": q["processed"]}})
+    except Exception as exc:
+        logger.warning("phare apply_queue: %s", exc)
+
     # Audit hebdo : 1 site/heure le lundi 6-22h (rotation par dédup DB)
     if weekday == 0 and 6 <= hour <= 22:
         target = _pick_next_for_mission("audit", sites)

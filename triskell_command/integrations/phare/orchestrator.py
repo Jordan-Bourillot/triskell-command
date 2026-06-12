@@ -81,7 +81,10 @@ def run_audit(site_id: str, *, app_state=None) -> dict:
     }
     audit = repo.insert_audit(audit_row)
 
-    # Quick wins → actions de type "recommandation"
+    # Quick wins → actions de type "recommandation".
+    # insert_action dédoublonne tout seul (un audit qui retombe sur le même
+    # conseil ne crée plus de deuxième carte) ; "simple" = l'explication
+    # sans jargon écrite par l'agent, affichée en avant sur la carte.
     for qw in (analysis.get("quick_wins") or [])[:5]:
         repo.insert_action({
             "site_id": site_id,
@@ -89,6 +92,7 @@ def run_audit(site_id: str, *, app_state=None) -> dict:
             "kind": "recommandation",
             "title": qw.get("title", "Quick win"),
             "detail_md": (qw.get("fix_hint") or "") + "\n\nPage: " + (qw.get("page_or_global") or ""),
+            "simple_md": (qw.get("simple") or "").strip(),
             "status": "draft",
             "impact": 3, "effort": 2,
         })
@@ -399,6 +403,11 @@ def run_analyst(site_id: str, *, app_state=None) -> dict:
                 reco_str += f" — impact attendu : {impact}"
         else:
             reco_str = str(reco)
+        # Un bulletin est périssable : celui du jour remplace les précédents
+        # encore ouverts (fini les piles de bulletins dans « À toi de jouer »).
+        repo.expire_open_actions(site_id, agent="analyste",
+                                 title_prefix="Bulletin",
+                                 reason="Remplacé par le bulletin du jour")
         repo.insert_action({
             "site_id": site_id, "agent": "analyste", "kind": "recommandation",
             "title": f"Bulletin {date.today().isoformat()} — {out.get('trend', '')}",
@@ -428,6 +437,11 @@ def run_strategy(*, app_state=None) -> dict:
         out = {}
     if out:
         for site in snapshot.get("sites", []):
+            # Le plan du mois remplace celui d'avant (périssable) ; la dédup
+            # d'insert_action évite en plus le double du même mois.
+            repo.expire_open_actions(site["id"], agent="chef_orchestre",
+                                     title_prefix="Plan du mois",
+                                     reason="Remplacé par le plan le plus récent")
             repo.insert_action({
                 "site_id": site["id"], "agent": "chef_orchestre",
                 "kind": "recommandation",

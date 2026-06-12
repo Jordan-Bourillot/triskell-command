@@ -1,0 +1,443 @@
+"""Batterie « OK, fais-le » + anti-doublons Le Phare — sans réseau.
+
+    py -3 scripts/smoke_phare_apply.py
+
+Couvre :
+    - dedup.py : normalisation, similarité (cas RÉELS du stock Pixel Pros
+      du 12/06/2026), fenêtres de silence, grappes de doublons ;
+    - repo.insert_action : doublon évité, insertion normale, retry sans
+      les colonnes de la migration 48 ;
+    - plain_language.py : explications sans jargon + classification du
+      bouton « OK, fais-le » ;
+    - patcher.localize_executor_patches : remplacement ciblé par page,
+      insertion <head>, création de fichier (et refus des chemins louches) ;
+    - executor._apply_one : chemins done / manual / failed, sans toucher
+      ni à git ni à Supabase (tout est doublé par des mocks).
+"""
+
+from __future__ import annotations
+
+import sys
+import tempfile
+import unittest.mock as mock
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Console Windows en cp1252 : on force l'UTF-8 pour les ✅/❌
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+PASS = 0
+FAIL = 0
+
+
+def check(label: str, cond: bool, detail: str = "") -> None:
+    global PASS, FAIL
+    if cond:
+        PASS += 1
+        print(f"  ✅ {label}")
+    else:
+        FAIL += 1
+        print(f"  ❌ {label}" + (f" — {detail}" if detail else ""))
+
+
+# ===========================================================================
+print("— dedup.py —")
+from triskell_command.integrations.phare import dedup
+
+check("normalisation accents/ponctuation",
+      dedup.normalize_title("Réécrire le TITLE, de la home !") ==
+      "reecrire le title de la home")
+
+# Cas réels du stock Pixel Pros (12/06/2026)
+A = {"site_id": "s1", "agent": "auditeur",
+     "title": "Réécrire le title de la home avec le mot-clé principal",
+     "detail_md": "Page: https://pixel-pros.fr/"}
+B = {"site_id": "s1", "agent": "auditeur",
+     "title": "Réécrire le title de la home avec le mot-clé principal",
+     "detail_md": "Page: https://pixel-pros.fr/"}
+check("titres identiques (home title ×2) → doublon", dedup.is_duplicate(A, B))
+
+C1 = {"site_id": "s1", "agent": "auditeur",
+      "title": "Ajouter canonical sur les 3 URLs paramétrées de /configurer",
+      "detail_md": "Page: /configurer?option=domain, /configurer?option=seo"}
+C2 = {"site_id": "s1", "agent": "auditeur",
+      "title": "Ajouter canonical sur les trois variantes ?option= de /configurer",
+      "detail_md": "Page: https://pixel-pros.fr/configurer?option=combo"}
+check("variantes canonical /configurer → doublon", dedup.is_duplicate(C1, C2))
+
+D1 = {"site_id": "s1", "agent": "auditeur",
+      "title": "Corriger le title de /demo pour cibler une requête réelle",
+      "detail_md": "Page: https://pixel-pros.fr/demo"}
+D2 = {"site_id": "s1", "agent": "auditeur",
+      "title": "Réécrire le title et le H1 de /demo",
+      "detail_md": "Page: https://pixel-pros.fr/demo"}
+check("deux recos title sur /demo → doublon (même page + même balise)",
+      dedup.is_duplicate(D1, D2))
+
+P1 = {"site_id": "s1", "agent": "auditeur",
+      "title": "Lancer PageSpeed Insights et noter LCP / INP / CLS mobile",
+      "detail_md": "Page: https://pixel-pros.fr/"}
+P2 = {"site_id": "s1", "agent": "auditeur",
+      "title": "Lancer et documenter un audit PageSpeed Insights complet",
+      "detail_md": "Page: https://pixel-pros.fr/, /configurer, /demo"}
+check("deux recos PageSpeed → doublon (même outil, même home)",
+      dedup.is_duplicate(P1, P2))
+
+E1 = {"site_id": "s1", "agent": "auditeur",
+      "title": "Réécrire le title de la home avec le mot-clé principal",
+      "detail_md": "Page: https://pixel-pros.fr/"}
+E2 = {"site_id": "s1", "agent": "auditeur",
+      "title": "Passer les 3 pages légales en noindex",
+      "detail_md": "Page: /mentions-legales, /confidentialite, /cgv"}
+check("title home vs noindex légales → PAS doublon",
+      not dedup.is_duplicate(E1, E2))
+
+F2 = {**E1, "site_id": "s2"}
+check("même conseil sur un AUTRE site → PAS doublon",
+      not dedup.is_duplicate(E1, F2))
+
+G1 = {"site_id": "s1", "agent": "veilleur",
+      "title": "Réécrire le title de la home avec le mot-clé principal",
+      "detail_md": ""}
+check("agents différents, titres identiques → doublon (≥ 0.92)",
+      dedup.is_duplicate(E1, G1))
+G2 = {"site_id": "s1", "agent": "veilleur",
+      "title": "Réécrire le title de la page démo",
+      "detail_md": "Page: /demo"}
+check("agents différents, titres proches mais pas identiques → PAS doublon",
+      not dedup.is_duplicate(D1, G2))
+
+from datetime import datetime, timedelta, timezone
+now = datetime.now(timezone.utc)
+check("action ouverte → bloque",
+      dedup.blocks_reinsert({"status": "draft"}))
+check("refusée hier → bloque (60 j de silence)",
+      dedup.blocks_reinsert({"status": "rejected",
+                             "rejected_at": (now - timedelta(days=1)).isoformat()}))
+check("refusée il y a 90 j → ne bloque plus",
+      not dedup.blocks_reinsert({"status": "rejected",
+                                 "rejected_at": (now - timedelta(days=90)).isoformat()}))
+check("validée il y a 3 j → bloque (14 j de silence)",
+      dedup.blocks_reinsert({"status": "merged",
+                             "merged_at": (now - timedelta(days=3)).isoformat()}))
+check("expirée → ne bloque pas",
+      not dedup.blocks_reinsert({"status": "expired"}))
+
+groups = dedup.group_duplicates([
+    {**A, "id": "a", "created_at": "2026-05-22"},
+    {**B, "id": "b", "created_at": "2026-05-20"},
+    {**E2, "id": "c", "created_at": "2026-05-21"},
+])
+check("grappes : 2 groupes (title×2 fusionnés, noindex à part)",
+      len(groups) == 2 and sorted(len(g) for g in groups) == [1, 2])
+big = next(g for g in groups if len(g) == 2)
+check("grappe : la plus récente en tête", big[0]["id"] == "a")
+
+# ===========================================================================
+print("\n— repo.insert_action (dédup + retry migration 48) —")
+from triskell_command.integrations.phare import repo as phare_repo
+
+
+class FakeQuery:
+    """Chaînable minimal pour singer supabase-py."""
+    def __init__(self, table, db):
+        self.table_name = table
+        self.db = db
+        self._insert_payload = None
+
+    def __getattr__(self, name):
+        # select/eq/order/limit/like/in_/lt/update/delete → chaînable
+        def _chain(*args, **kwargs):
+            return self
+        return _chain
+
+    def insert(self, payload):
+        self._insert_payload = payload
+        return self
+
+    def execute(self):
+        class R:
+            pass
+        r = R()
+        if self._insert_payload is not None:
+            self.db["inserts"].append(self._insert_payload)
+            if self.db.get("raise_on_insert"):
+                err = self.db["raise_on_insert"]
+                self.db["raise_on_insert"] = None   # une seule fois
+                raise Exception(err)
+            r.data = [self._insert_payload]
+        else:
+            r.data = list(self.db.get("rows", []))
+        return r
+
+
+class FakeSB:
+    def __init__(self, db):
+        self.db = db
+
+    def table(self, name):
+        return FakeQuery(name, self.db)
+
+
+db = {"rows": [{"id": "x1", "site_id": "s1", "agent": "auditeur",
+                "title": "Réécrire le title de la home avec le mot-clé principal",
+                "detail_md": "Page: /", "status": "draft",
+                "created_at": "2026-06-01"}],
+      "inserts": []}
+with mock.patch.object(phare_repo, "_sb", return_value=FakeSB(db)):
+    out = phare_repo.insert_action({
+        "site_id": "s1", "agent": "auditeur",
+        "title": "Réécrire le title de la home avec le mot clé principal",
+        "detail_md": "Page: /", "status": "draft"})
+    check("doublon ouvert → pas d'insertion, renvoie l'existante",
+          out and out.get("_dedup") is True and not db["inserts"])
+
+    out2 = phare_repo.insert_action({
+        "site_id": "s1", "agent": "auditeur",
+        "title": "Créer un sitemap.xml et le déclarer",
+        "detail_md": "Page: global", "status": "draft"})
+    check("sujet nouveau → insertion réelle",
+          out2 and not out2.get("_dedup") and len(db["inserts"]) == 1)
+
+db2 = {"rows": [], "inserts": [],
+       "raise_on_insert": 'column "simple_md" of relation does not exist'}
+with mock.patch.object(phare_repo, "_sb", return_value=FakeSB(db2)):
+    out3 = phare_repo.insert_action({
+        "site_id": "s1", "agent": "auditeur", "title": "T", "detail_md": "",
+        "status": "draft", "simple_md": "explication"})
+    check("migration 48 absente → retry sans simple_md, insertion passée",
+          out3 is not None and len(db2["inserts"]) == 2
+          and "simple_md" not in db2["inserts"][1])
+
+# ===========================================================================
+print("\n— plain_language.py —")
+from triskell_command.integrations.phare import plain_language as pl
+
+t = pl.explain({"title": "Réécrire le title de la home", "detail_md": "..."})
+check("title → parle du titre dans Google, sans « title tag »",
+      "Google" in t and "title tag" not in t.lower())
+check("simple_md écrit par un agent → prioritaire",
+      pl.explain({"simple_md": "Texte maison.", "title": "Réécrire le title"})
+      == "Texte maison.")
+check("canonical → parle de copies",
+      "copies" in pl.explain({"title": "Ajouter canonical sur /configurer"}))
+check("noindex → parle de cacher des résultats Google",
+      "acher" in pl.explain({"title": "Passer les 3 pages légales en noindex"}))
+check("plan du mois → à lire, rien à publier",
+      "rien à publier" in pl.explain({"agent": "chef_orchestre",
+                                      "title": "Plan du mois : Juin 2026"}))
+check("bulletin → à lire",
+      "À lire" in pl.explain({"agent": "analyste",
+                              "title": "Bulletin 2026-06-12 — stable"}))
+check("jamais vide", bool(pl.explain({})))
+
+site_ok = {"repo_github": "Jordan-Bourillot/pixel-studio"}
+site_ko = {"repo_github": ""}
+v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
+                           "title": "Réécrire le title de la home"}, site_ok)
+check("title + site relié → robot peut le faire (code)",
+      v["can"] and v["mode"] == "code")
+v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
+                           "title": "Réécrire le title de la home"}, site_ko)
+check("title + site NON relié → manuel avec explication",
+      not v["can"] and "relié" in v["why"])
+v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
+                           "title": "Vérifier et soumettre sitemap.xml dans Search Console"},
+                          site_ok)
+check("Search Console → manuel (compte Google requis)",
+      not v["can"] and v["mode"] == "manual")
+v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
+                           "title": "Lancer PageSpeed Insights et noter LCP"},
+                          site_ok)
+check("PageSpeed → le robot relance la mesure (tool)",
+      v["can"] and v["mode"] == "tool")
+v = pl.classify_for_apply({"status": "preview", "kind": "pr_modif",
+                           "github_pr_url": "https://github.com/x/y/pull/1",
+                           "title": "Optim on-page /"}, site_ok)
+check("modif déjà préparée (PR) → pas de bouton « OK, fais-le »", not v["can"])
+v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
+                           "agent": "chef_orchestre",
+                           "title": "Plan du mois : Juin 2026"}, site_ok)
+check("plan du mois → pas automatisable", not v["can"])
+
+# ===========================================================================
+print("\n— patcher.localize_executor_patches —")
+from triskell_command.integrations.phare import patcher
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    (root / "index.html").write_text(
+        "<html><head><title>Pixel Pros — Un site pro pour 24,90€/mois</title>"
+        "</head><body><h1>Accueil</h1></body></html>", encoding="utf-8")
+    (root / "configurer.html").write_text(
+        "<html><head><title>Configurer mon site — Pixel Pros</title></head>"
+        "<body><h1>Configurer</h1></body></html>", encoding="utf-8")
+    (root / "demo.html").write_text(
+        "<html><head><title>Démo de site Pixel Pros</title></head>"
+        "<body><h1>Demo</h1></body></html>", encoding="utf-8")
+    pages = [
+        {"path": "/", "title": "Pixel Pros — Un site pro pour 24,90€/mois"},
+        {"path": "/configurer", "title": "Configurer mon site — Pixel Pros"},
+        {"path": "/demo", "title": "Démo de site Pixel Pros"},
+    ]
+
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "title", "page_path": "/",
+         "old": "Pixel Pros — Un site pro pour 24,90€/mois",
+         "new": "Créer un site web professionnel à partir de 24,90€/mois — Pixel Pros"},
+    ], pages)
+    check("title home localisé dans index.html",
+          len(loc["applicable"]) == 1
+          and loc["applicable"][0]["file"] == "index.html")
+
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "head_insert", "page_path": "/configurer",
+         "new": '<link rel="canonical" href="https://pixel-pros.fr/configurer" />'},
+    ], pages)
+    check("head_insert ciblé sur configurer.html",
+          len(loc["applicable"]) == 1
+          and loc["applicable"][0]["file"] == "configurer.html"
+          and loc["applicable"][0]["old"] == "</head>"
+          and "canonical" in loc["applicable"][0]["new"]
+          and loc["applicable"][0]["new"].endswith("</head>"))
+
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "new_file", "file": "sitemap.xml",
+         "new": "<?xml version='1.0'?><urlset></urlset>"},
+    ], pages)
+    check("new_file sitemap.xml accepté (create=True)",
+          len(loc["applicable"]) == 1 and loc["applicable"][0].get("create"))
+
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "new_file", "file": "../evil.xml", "new": "x"},
+        {"field": "new_file", "file": "hack.php", "new": "x"},
+        {"field": "new_file", "file": "index.html", "new": "x"},
+    ], pages)
+    check("new_file : ../, .php et fichier existant refusés",
+          not loc["applicable"] and len(loc["needs_review"]) == 3)
+
+    # Ambiguïté levée par la page : le même H1 vit dans 2 fichiers
+    (root / "page-a.html").write_text(
+        "<html><head><title>Page A unique</title></head>"
+        "<body><h2>Nos services</h2></body></html>", encoding="utf-8")
+    (root / "page-b.html").write_text(
+        "<html><head><title>Page B unique</title></head>"
+        "<body><h2>Nos services</h2></body></html>", encoding="utf-8")
+    pages2 = pages + [{"path": "/page-a", "title": "Page A unique"},
+                      {"path": "/page-b", "title": "Page B unique"}]
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "h2", "page_path": "/page-a",
+         "old": "Nos services", "new": "Nos prestations"},
+    ], pages2)
+    check("texte présent dans 2 fichiers → désambiguïsé par la page visée",
+          len(loc["applicable"]) == 1
+          and loc["applicable"][0]["file"] == "page-a.html")
+
+# ===========================================================================
+print("\n— executor._apply_one (mocks complets, ni git ni Supabase) —")
+from triskell_command.integrations.phare import executor, git_pipeline, agents
+
+ACTION = {"id": "act1", "site_id": "s1", "agent": "auditeur",
+          "kind": "recommandation", "status": "draft", "apply_state": "queued",
+          "title": "Réécrire le title de la home avec le mot-clé principal",
+          "detail_md": "Remplacer X par Y.\n\nPage: https://pixel-pros.fr/"}
+SITE = {"id": "s1", "name": "Pixel Pros", "domain": "pixel-pros.fr",
+        "repo_github": "Jordan-Bourillot/pixel-studio",
+        "repo_branch_main": "main", "stack": "html", "netlify_site_id": ""}
+PAGES = [{"path": "/", "title": "Pixel Pros — Un site pro pour 24,90€/mois",
+          "meta_description": "", "h1": "", "schema_types": []}]
+
+updates: list[dict] = []
+
+
+def fake_update(action_id, patch):
+    updates.append({"id": action_id, **patch})
+    return True
+
+
+def run_apply(agent_out, *, clone_ok=True, pr_ok=True, merge_ok=True,
+              localized=None):
+    """Déroule executor._apply_one avec tous les accès externes doublés."""
+    updates.clear()
+    fake_pr = {"ok": pr_ok, "branch": "phare/auto-test", "pr_number": 7,
+               "pr_url": "https://github.com/x/y/pull/7"}
+    if not pr_ok:
+        fake_pr = {"ok": False, "error": "push refusé"}
+    default_loc = {"applicable": [{"file": "index.html", "old": "a", "new": "b",
+                                   "field": "title"}], "needs_review": []}
+    with mock.patch.object(executor, "_get_action", return_value=dict(ACTION)), \
+         mock.patch.object(executor.repo, "get_site", return_value=dict(SITE)), \
+         mock.patch.object(executor.repo, "update_action", side_effect=fake_update), \
+         mock.patch.object(executor.repo, "list_pages", return_value=PAGES), \
+         mock.patch.object(executor.shutil, "which", return_value="C:/git.exe"), \
+         mock.patch.object(git_pipeline, "_github_token", return_value="tok"), \
+         mock.patch.object(git_pipeline, "clone_repo", return_value=clone_ok), \
+         mock.patch.object(git_pipeline, "apply_and_open_pr", return_value=fake_pr), \
+         mock.patch.object(git_pipeline, "merge_pr", return_value=merge_ok), \
+         mock.patch.object(executor.patcher, "localize_executor_patches",
+                           return_value=localized or default_loc), \
+         mock.patch.object(agents.Executeur, "run",
+                           return_value=agent_out), \
+         mock.patch.object(executor, "_dispatch_tick_workflow", return_value=False):
+        return executor._apply_one("act1")
+
+
+r = run_apply({"mode": "patches", "simple_md": "Je change le titre Google de l'accueil.",
+               "patches": [{"field": "title", "page_path": "/", "old": "a", "new": "b"}]})
+final = updates[-1]
+check("chemin nominal → publié (merged + apply_state done)",
+      r.get("ok") and final.get("status") == "merged"
+      and final.get("apply_state") == "done"
+      and final.get("github_pr_url", "").endswith("/7"))
+check("l'explication de l'Exécuteur est gardée sur la carte",
+      final.get("simple_md") == "Je change le titre Google de l'accueil.")
+check("publié par un clic humain → auto_merged reste False",
+      final.get("auto_merged") is False)
+
+r = run_apply({"mode": "manual", "manual_reason": "Il faut le compte Google."})
+final = updates[-1]
+check("verdict manuel → apply_state=manual + raison, la carte reste ouverte",
+      r.get("ok") and final.get("apply_state") == "manual"
+      and "Google" in final.get("apply_error", "")
+      and "status" not in final)
+
+r = run_apply({"mode": "patches", "simple_md": "x",
+               "patches": [{"field": "title", "page_path": "/", "old": "a", "new": "b"}]},
+              localized={"applicable": [],
+                         "needs_review": [{"reason": "texte actuel introuvable dans le code"}]})
+final = updates[-1]
+check("rien de localisable → failed avec explication française",
+      not r.get("ok") and final.get("apply_state") == "failed"
+      and "retrouvé" in final.get("apply_error", ""))
+
+r = run_apply({"mode": "patches", "simple_md": "x",
+               "patches": [{"field": "title", "page_path": "/", "old": "a", "new": "b"}]},
+              merge_ok=False)
+final = updates[-1]
+check("merge KO → PR conservée + failed propre (publiable depuis la carte)",
+      not r.get("ok") and final.get("apply_state") == "failed"
+      and final.get("status") == "preview" and final.get("kind") == "pr_modif")
+
+r = run_apply({"mode": "patches", "simple_md": "x",
+               "patches": [{"field": "title", "page_path": "/", "old": "a", "new": "b"}]},
+              clone_ok=False)
+final = updates[-1]
+check("clone KO → failed propre",
+      not r.get("ok") and final.get("apply_state") == "failed")
+
+# request_apply / process_apply_queue sans base → réponses propres
+with mock.patch.object(executor, "_get_action", return_value=None):
+    r = executor.request_apply("zzz")
+    check("request_apply sur action inconnue → erreur claire",
+          not r.get("ok") and "introuvable" in r.get("error", ""))
+with mock.patch.object(executor.repo, "_sb", return_value=None):
+    r = executor.process_apply_queue()
+    check("process_apply_queue sans base → pas de crash",
+          not r.get("ok") and r.get("processed") == 0)
+
+# ===========================================================================
+print(f"\n{'='*60}")
+print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
+sys.exit(1 if FAIL else 0)

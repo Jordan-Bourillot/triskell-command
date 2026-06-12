@@ -429,21 +429,86 @@ const Phare = {
           </div>
         </article>`;
     }
-    const isAuto = this._isAuto(a);
-    const badge = isAuto
-      ? `<div class="phare-action-kind phare-action-kind--auto" title="Le robot a déjà préparé la modification. Si tu approuves, elle est publiée automatiquement sur ton site.">
+    const isAuto = this._isAuto(a);                       // PR déjà prête à publier
+    const apply = a.apply || {};
+    const canRobot = !isAuto && !!apply.can;              // le robot peut fabriquer la modif
+    const applyState = a.apply_state || '';
+    const robotBusy = applyState === 'queued' || applyState === 'running';
+    const simpleWhat = (a.simple_what || '').trim();
+    const detailFull = a.detail_md || a.summary || '';
+
+    let badge;
+    if (isAuto) {
+      badge = `<div class="phare-action-kind phare-action-kind--auto" title="Le robot a déjà préparé la modification. Si tu approuves, elle est publiée automatiquement sur ton site.">
            <span class="phare-action-kind-ico">🤖</span>
            <span class="phare-action-kind-lbl">Le robot publie pour toi</span>
-         </div>`
-      : `<div class="phare-action-kind phare-action-kind--manual" title="C'est un conseil à faire toi-même. Approuver ne déclenche rien — ça marque juste la proposition comme lue.">
+         </div>`;
+    } else if (canRobot) {
+      badge = `<div class="phare-action-kind phare-action-kind--auto" title="Tu cliques, le robot modifie le site, vérifie et publie. Tu n'as rien d'autre à faire.">
+           <span class="phare-action-kind-ico">🤖</span>
+           <span class="phare-action-kind-lbl">Le robot peut le faire</span>
+         </div>`;
+    } else {
+      badge = `<div class="phare-action-kind phare-action-kind--manual" title="${this._esc(apply.why || 'C’est un conseil à faire toi-même. Approuver ne déclenche rien — ça marque juste la proposition comme lue.')}">
            <span class="phare-action-kind-ico">👤</span>
            <span class="phare-action-kind-lbl">À toi de le faire</span>
          </div>`;
+    }
+
+    // Corps : l'explication simple d'abord, le détail technique replié
+    const body = simpleWhat
+      ? `<div class="phare-action-summary" style="font-size:13.5px;line-height:1.5">${this._esc(simpleWhat)}</div>
+         ${detailFull ? `<details class="phare-action-tech" style="margin-top:6px">
+           <summary style="cursor:pointer;font-size:12px;opacity:.65">Détail technique</summary>
+           <div class="phare-action-summary" style="margin-top:6px">${this._esc(detailFull.slice(0, 700))}${detailFull.length > 700 ? '…' : ''}</div>
+         </details>` : ''}`
+      : (detailFull ? `<div class="phare-action-summary">${this._esc(detailFull.slice(0, 240))}${detailFull.length > 240 ? '…' : ''}</div>` : '');
+
+    // Bandeaux d'état du robot (échec / à faire à la main)
+    let stateNote = '';
+    if (applyState === 'failed') {
+      stateNote = `<div class="phare-empty-inline" style="margin-top:8px;border-left:3px solid #e5484d;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <span>⚠️ ${this._esc(a.apply_error || 'Le robot n’a pas réussi.')}</span>
+          <span style="display:flex;gap:8px">
+            ${a.github_pr_url ? `<a class="phare-action-link" href="${this._esc(a.github_pr_url)}" target="_blank" rel="noopener">Voir la modif préparée</a>` : ''}
+            <button class="btn btn-secondary btn-sm" data-apply-retry="${this._esc(a.id || '')}">Réessayer</button>
+          </span>
+        </div>`;
+    } else if (applyState === 'manual') {
+      stateNote = `<div class="phare-empty-inline" style="margin-top:8px;border-left:3px solid #f5a623">
+          🛠️ Le robot a regardé : ${this._esc(a.apply_error || 'c’est à faire à la main.')}
+        </div>`;
+    }
+
+    // Carte « robot au travail » : pas de boutons, suivi en direct
+    if (robotBusy) {
+      return `
+      <article class="phare-action phare-action--todo is-auto" data-aid="${this._esc(a.id || '')}" data-apply-pending="${this._esc(a.id || '')}">
+        ${badge}
+        <div class="phare-action-head">
+          <div class="phare-action-icon phare-action-icon--todo">${this._actionEmoji(a.agent)}</div>
+          <div class="phare-action-body">
+            <div class="phare-action-title">${this._esc(a.title || a.kind || '—')}</div>
+            <div class="phare-action-meta">Proposition de ${this._esc(agentLabel)} · ${date || '—'}</div>
+          </div>
+        </div>
+        ${body}
+        <div class="phare-empty-inline" style="margin-top:8px" data-apply-note>⏳ Le robot s'en occupe — modification, vérifications, publication. Tu peux quitter la page, ça continue tout seul.</div>
+      </article>`;
+    }
+
     const approveLabel = isAuto
       ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M5 3l14 9-14 9V3z"/></svg>Publier sur le site`
       : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M20 6L9 17l-5-5"/></svg>J'ai fait, suivant`;
+    const mainButton = canRobot
+      ? `<button class="btn btn-primary btn-auto" data-apply="${this._esc(a.id || '')}">
+           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M5 3l14 9-14 9V3z"/></svg>OK, fais-le
+         </button>`
+      : `<button class="btn btn-primary ${isAuto ? 'btn-auto' : 'btn-manual'}" data-approve="${this._esc(a.id || '')}" data-approve-auto="${isAuto ? '1' : '0'}">
+           ${approveLabel}
+         </button>`;
     return `
-      <article class="phare-action phare-action--todo ${isAuto ? 'is-auto' : 'is-manual'}" data-aid="${this._esc(a.id || '')}">
+      <article class="phare-action phare-action--todo ${isAuto || canRobot ? 'is-auto' : 'is-manual'}" data-aid="${this._esc(a.id || '')}">
         ${badge}
         <div class="phare-action-head">
           <div class="phare-action-icon phare-action-icon--todo">${this._actionEmoji(a.agent)}</div>
@@ -455,7 +520,8 @@ const Phare = {
             </div>
           </div>
         </div>
-        ${summaryShort ? `<div class="phare-action-summary">${summaryShort}</div>` : ''}
+        ${body}
+        ${stateNote}
         <footer class="phare-action-foot">
           <button class="btn btn-secondary btn-reject" data-reject="${this._esc(a.id || '')}">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
@@ -466,9 +532,7 @@ const Phare = {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             Aperçu avant publication
           </button>` : ''}
-          <button class="btn btn-primary ${isAuto ? 'btn-auto' : 'btn-manual'}" data-approve="${this._esc(a.id || '')}" data-approve-auto="${isAuto ? '1' : '0'}">
-            ${approveLabel}
-          </button>
+          ${mainButton}
         </footer>
       </article>
     `;
@@ -503,6 +567,151 @@ const Phare = {
     root.querySelectorAll('[data-archive]').forEach(b => {
       b.onclick = () => this._archiveAction(b.dataset.archive, b);
     });
+    // « OK, fais-le » : le robot fabrique et publie la modification
+    root.querySelectorAll('[data-apply]').forEach(b => {
+      b.onclick = () => this._applyAction(b.dataset.apply, b);
+    });
+    root.querySelectorAll('[data-apply-retry]').forEach(b => {
+      b.onclick = () => this._applyRetry(b.dataset.applyRetry, b);
+    });
+    // Cartes déjà en cours au chargement de la page : on reprend le suivi
+    root.querySelectorAll('[data-apply-pending]').forEach(el => {
+      this._pollApply(el.dataset.applyPending);
+    });
+  },
+
+  // ── « OK, fais-le » ─────────────────────────────────────────────────
+  // Le clic met l'action en file côté serveur ; la carte passe en mode
+  // « le robot s'en occupe » et un suivi léger met à jour l'issue
+  // (publié / à faire à la main / échec) sans recharger la page.
+
+  async _applyAction(id, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Je m’en occupe…'; }
+    try {
+      const res = await App.api.phare_apply_action({ id });
+      if (!res || !res.ok) {
+        Toast.friendlyError(res && res.error, 'Le robot n’a pas pu prendre la demande. Réessaie dans un instant.');
+        if (btn) { btn.disabled = false; btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M5 3l14 9-14 9V3z"/></svg>OK, fais-le`; }
+        return false;
+      }
+      const msg = res.mode === 'server'
+        ? 'C’est parti — le robot s’en occupe (2-3 minutes).'
+        : (res.mode === 'github_actions'
+            ? 'C’est parti — robot réveillé, ça se fait dans les minutes qui viennent.'
+            : 'C’est noté — le robot passera dans l’heure. Tu peux quitter la page.');
+      Toast.success(msg);
+      this._setCardBusy(id);
+      this._pollApply(id);
+      return true;
+    } catch (e) {
+      Toast.friendlyError(e);
+      if (btn) { btn.disabled = false; }
+      return false;
+    }
+  },
+
+  async _applyRetry(id, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Relance…'; }
+    try {
+      const res = await App.api.phare_apply_retry({ id });
+      if (!res || !res.ok) {
+        Toast.friendlyError(res && res.error, 'La relance n’a pas pu partir. Réessaie dans un instant.');
+        if (btn) { btn.disabled = false; btn.textContent = 'Réessayer'; }
+        return false;
+      }
+      Toast.success('C’est reparti — le robot réessaie.');
+      this._setCardBusy(id);
+      this._pollApply(id);
+      return true;
+    } catch (e) {
+      Toast.friendlyError(e);
+      if (btn) { btn.disabled = false; btn.textContent = 'Réessayer'; }
+      return false;
+    }
+  },
+
+  // Remplace pied + bandeaux de la carte par la note « le robot s'en occupe »
+  _setCardBusy(id) {
+    const card = this._findCard(id);
+    if (!card) return;
+    card.classList.add('is-auto');
+    card.querySelectorAll('.phare-action-foot, [data-apply-note], .phare-empty-inline').forEach(el => el.remove());
+    const note = document.createElement('div');
+    note.className = 'phare-empty-inline';
+    note.style.marginTop = '8px';
+    note.setAttribute('data-apply-note', '');
+    note.textContent = '⏳ Le robot s’en occupe — modification, vérifications, publication. Tu peux quitter la page, ça continue tout seul.';
+    card.appendChild(note);
+  },
+
+  _findCard(id) {
+    let card = null;
+    document.querySelectorAll('.phare-action[data-aid]').forEach(el => {
+      if (el.dataset.aid === String(id)) card = el;
+    });
+    return card;
+  },
+
+  // Suivi léger : interroge le statut toutes les 10 s pendant ~6 min.
+  // Au-delà (file pour le prochain passage horaire), on arrête poliment :
+  // le travail continue côté serveur même page fermée.
+  _pollApply(id, attempt = 0) {
+    if (!App.api || typeof App.api.phare_action_status !== 'function') return;
+    if (this.view !== 'site') return;
+    App.viewTimeout(async () => {
+      if (this.view !== 'site') return;
+      let st = null;
+      try { st = await App.api.phare_action_status({ id }); } catch (e) { st = null; }
+      if (!st || !st.ok) {
+        if (attempt < 36) this._pollApply(id, attempt + 1);
+        return;
+      }
+      const state = st.apply_state || '';
+      if (state === 'done' || st.status === 'merged') {
+        Toast.success('✅ C’est fait — la modification est publiée. Le site se met à jour dans quelques minutes.');
+        if (window.Guide && Guide.say) { try { Guide.say('✓ Modification publiée par le robot'); } catch (e) {} }
+        this._removeActionCard(id);
+        return;
+      }
+      if (state === 'failed' || state === 'manual') {
+        this._showApplyOutcome(id, st);
+        return;
+      }
+      if (attempt < 36) {
+        this._pollApply(id, attempt + 1);
+      } else {
+        const card = this._findCard(id);
+        const note = card && card.querySelector('[data-apply-note]');
+        if (note) note.textContent = '⏳ Toujours en file — le robot passera dans l’heure. Tu peux quitter la page, ça continue tout seul.';
+      }
+    }, 10000);
+  },
+
+  // Met la carte à jour après un échec ou un verdict « à faire à la main »
+  _showApplyOutcome(id, st) {
+    const card = this._findCard(id);
+    if (!card) return;
+    card.querySelectorAll('[data-apply-note]').forEach(el => el.remove());
+    const note = document.createElement('div');
+    note.className = 'phare-empty-inline';
+    note.style.marginTop = '8px';
+    if ((st.apply_state || '') === 'manual') {
+      note.style.borderLeft = '3px solid #f5a623';
+      note.textContent = `🛠️ Le robot a regardé : ${st.apply_error || 'c’est à faire à la main.'}`;
+      card.appendChild(note);
+      // On remet les boutons habituels (J'ai fait / Poubelle) au prochain
+      // rechargement de la vue ; en attendant la carte reste informative.
+      return;
+    }
+    note.style.borderLeft = '3px solid #e5484d';
+    note.innerHTML = `⚠️ ${this._esc(st.apply_error || 'Le robot n’a pas réussi.')}
+      <span style="display:inline-flex;gap:8px;margin-left:8px">
+        ${st.github_pr_url ? `<a class="phare-action-link" href="${this._esc(st.github_pr_url)}" target="_blank" rel="noopener">Voir la modif préparée</a>` : ''}
+        <button class="btn btn-secondary btn-sm" data-apply-retry="${this._esc(id)}">Réessayer</button>
+      </span>`;
+    card.appendChild(note);
+    const retryBtn = note.querySelector('[data-apply-retry]');
+    if (retryBtn) retryBtn.onclick = () => this._applyRetry(id, retryBtn);
   },
 
   // ── Actions partagées cartes + modale d'aperçu ──────────────────────
@@ -658,6 +867,7 @@ const Phare = {
           <button class="phare-modal-close" data-close aria-label="Fermer">×</button>
         </header>
         <div class="phare-modal-body">
+          ${a.simple_what ? `<div class="phare-preview-detail" style="font-size:14px;line-height:1.55"><strong>En clair :</strong> ${this._esc(a.simple_what)}</div>` : ''}
           ${detail ? `<div class="phare-preview-detail">${this._mdToHtml(detail)}</div>` : ''}
           ${previewUrl ? `
             <div class="phare-preview-section">

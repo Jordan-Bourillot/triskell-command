@@ -2343,6 +2343,20 @@ class Api:
             # Tri "à regarder" : impact desc puis date desc
             to_review.sort(key=lambda x: (-(x.get("impact") or 0),
                                           -(len(x.get("created_at") or ""))),)
+            # Enrichissement langage clair + bouton « OK, fais-le » :
+            # chaque carte reçoit `simple_what` (phrase sans jargon) et
+            # `apply` ({can, mode, why}) calculés côté serveur — l'UI ne
+            # devine rien.
+            try:
+                from ..integrations.phare import plain_language
+                for a in to_review:
+                    a["simple_what"] = plain_language.explain(a)
+                    a["apply"] = plain_language.classify_for_apply(a, site)
+                for a in done:
+                    if a.get("simple_md"):
+                        a["simple_what"] = a["simple_md"]
+            except Exception as exc:
+                logger.debug("phare_site_dashboard plain_language: %s", exc)
             # Tone santé
             health = latest.get("lighthouse_seo")
             tone = "unknown"
@@ -2530,6 +2544,14 @@ class Api:
                           "Critères de succès chiffrés"],
              "cadence": "1er du mois 9h",
              "model": "claude-opus-4-7", "model_short": "Opus 4.7"},
+            {"name": "executeur", "label": "L'Exécuteur", "emoji": "🔧",
+             "tagline": "Tu cliques, il le fait.",
+             "description": "Quand tu cliques « OK, fais-le » sur une proposition, il transforme le conseil en vraie modification du site : il prépare le changement, le vérifie et le publie. S'il ne peut pas, il te dit pourquoi en français.",
+             "missions": ["Transformer une proposition validée en modification réelle",
+                          "Vérifier avant de publier",
+                          "Expliquer ce qui a été fait, sans jargon"],
+             "cadence": "À la demande — quand tu cliques « OK, fais-le »",
+             "model": "claude-sonnet-4-6", "model_short": "Sonnet 4.6"},
         ]
         # Tente d'enrichir avec le dernier run réel par agent
         try:
@@ -2594,6 +2616,62 @@ class Api:
                               name=f"PhareAgent-{agent}").start()
             return {"ok": True, "started": True, "agent": agent, "site_id": site_id}
         except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def phare_apply_action(self, payload: dict) -> dict:
+        """Bouton « OK, fais-le » : le robot transforme une recommandation en
+        vraie modification du site (patch → PR → vérifs → publication).
+
+        Renvoie {ok, mode} — mode 'server' (traitement immédiat ici),
+        'github_actions' (réveillé, ~2 min) ou 'next_tick' (≤ 1 h).
+        """
+        action_id = ((payload or {}).get("id") or "").strip()
+        if not action_id:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.phare import executor
+            return executor.request_apply(action_id, app_state=self._app_state)
+        except Exception as exc:
+            logger.warning("phare_apply_action: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def phare_apply_retry(self, payload: dict) -> dict:
+        """Relance une action « OK, fais-le » qui a échoué."""
+        action_id = ((payload or {}).get("id") or "").strip()
+        if not action_id:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.phare import executor
+            return executor.retry_apply(action_id, app_state=self._app_state)
+        except Exception as exc:
+            logger.warning("phare_apply_retry: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def phare_action_status(self, payload: dict) -> dict:
+        """Statut léger d'une action (polling de la carte pendant que le
+        robot travaille) : status, apply_state, apply_error, lien PR…"""
+        action_id = ((payload or {}).get("id") or "").strip()
+        if not action_id:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.phare import repo as phare_repo, plain_language
+            sb = phare_repo._sb()
+            if sb is None:
+                return {"ok": False, "error": "Connexion à la base impossible."}
+            rows = (sb.table("phare_actions").select("*")
+                    .eq("id", action_id).limit(1).execute().data)
+            if not rows:
+                return {"ok": False, "error": "Action introuvable."}
+            a = rows[0]
+            return {"ok": True,
+                    "id": a.get("id"),
+                    "status": a.get("status"),
+                    "apply_state": a.get("apply_state") or "",
+                    "apply_error": a.get("apply_error") or "",
+                    "github_pr_url": a.get("github_pr_url") or "",
+                    "simple_what": plain_language.explain(a)}
+        except Exception as exc:
+            logger.warning("phare_action_status: %s", exc)
             return {"ok": False, "error": str(exc)}
 
     def pixelpros_auto_build_get(self) -> dict:

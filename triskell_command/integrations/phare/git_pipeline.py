@@ -311,6 +311,21 @@ def apply_and_open_pr(*,
             skipped.append({"reason": "no_file", "patch": p})
             continue
         full = Path(workdir) / rel
+        if p.get("create"):
+            # Création d'un nouveau fichier (ex: sitemap.xml). Refus si le
+            # fichier existe déjà ou si le chemin sort du repo.
+            try:
+                full.resolve().relative_to(Path(workdir).resolve())
+            except ValueError:
+                skipped.append({"reason": "outside_repo", "file": rel})
+                continue
+            if full.exists():
+                skipped.append({"reason": "already_exists", "file": rel})
+                continue
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_text(new, encoding="utf-8")
+            applied += 1
+            continue
         if not full.exists():
             skipped.append({"reason": "missing_file", "file": rel})
             continue

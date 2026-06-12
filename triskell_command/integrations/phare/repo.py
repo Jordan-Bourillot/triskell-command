@@ -323,16 +323,83 @@ def list_pages(site_id: str, limit: int = 500) -> list[dict]:
 # ---------------------------------------------------------------------------
 # phare_actions (PRs & recommandations)
 # ---------------------------------------------------------------------------
-def insert_action(action: dict) -> Optional[dict]:
+# Colonnes ajoutées par la migration 48 — si elle n'est pas encore appliquée,
+# l'insert est retenté sans elles (mode dégradé propre, même esprit que 45/46).
+_ACTION_OPTIONAL_COLS = ("simple_md", "apply_state", "apply_error",
+                         "apply_requested_at")
+
+
+def insert_action(action: dict, *, dedup: bool = True) -> Optional[dict]:
+    """Insère une action — en refusant les doublons.
+
+    Avant d'écrire, on regarde si une action « équivalente » existe déjà
+    pour ce site (ouverte, refusée < 60 j ou validée < 14 j) : si oui, on
+    renvoie l'existante avec un marqueur `_dedup` au lieu d'en créer une
+    deuxième. Règle posée par Jordan le 12/06/2026 : plus jamais de cartes
+    en double dans « À toi de jouer ».
+    """
     sb = _sb()
     if sb is None:
         return None
+    if dedup:
+        try:
+            from . import dedup as _dedup
+            existing = (sb.table("phare_actions").select("*")
+                        .eq("site_id", action.get("site_id"))
+                        .order("created_at", desc=True)
+                        .limit(400).execute().data) or []
+            twin = _dedup.find_blocking_duplicate(existing, action)
+            if twin is not None:
+                logger.info("phare.insert_action: doublon évité « %s » (≈ %s)",
+                            (action.get("title") or "")[:80],
+                            (twin.get("title") or "")[:80])
+                return {**twin, "_dedup": True}
+        except Exception as exc:
+            logger.debug("phare.insert_action dedup KO (on insère quand même): %s", exc)
     try:
         rows = sb.table("phare_actions").insert(action).execute().data
         return rows[0] if rows else None
     except Exception as exc:
+        # Migration 48 pas appliquée → retente sans les colonnes optionnelles
+        msg = str(exc)
+        slim = {k: v for k, v in action.items() if k not in _ACTION_OPTIONAL_COLS}
+        if len(slim) != len(action) and ("column" in msg.lower()
+                                          or "PGRST204" in msg):
+            try:
+                rows = sb.table("phare_actions").insert(slim).execute().data
+                return rows[0] if rows else None
+            except Exception as exc2:
+                logger.warning("phare.insert_action (retry sans cols 48): %s", exc2)
+                return None
         logger.warning("phare.insert_action: %s", exc)
         return None
+
+
+def expire_open_actions(site_id: str, *, agent: str, title_prefix: str,
+                        reason: str = "Remplacée par une version plus récente") -> int:
+    """Expire les actions ouvertes d'un agent dont le titre commence par
+    `title_prefix` (bulletins quotidiens, plans du mois… : périssables —
+    une nouvelle édition rend l'ancienne obsolète).
+    """
+    sb = _sb()
+    if sb is None:
+        return 0
+    try:
+        from . import dedup as _dedup
+        rows = (sb.table("phare_actions").select("id,title,status")
+                .eq("site_id", site_id).eq("agent", agent)
+                .like("title", f"{title_prefix}%")
+                .in_("status", list(_dedup.OPEN_STATUSES))
+                .execute().data) or []
+        for r in rows:
+            sb.table("phare_actions").update({
+                "status": "expired",
+                "rejected_reason": reason,
+            }).eq("id", r["id"]).execute()
+        return len(rows)
+    except Exception as exc:
+        logger.warning("phare.expire_open_actions: %s", exc)
+        return 0
 
 
 def update_action(action_id: str, patch: dict) -> bool:
