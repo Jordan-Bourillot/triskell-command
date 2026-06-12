@@ -310,6 +310,16 @@ const Argus = {
   // ---- Actions ----
 
   async _start() {
+    // Verrou doux (audit débutant) : l'outil est en pause et ne ramène
+    // quasiment rien — on prévient AVANT de laisser perdre 10 minutes.
+    const okPause = await Dialog.confirm(
+      'Argus est en pause : aux derniers essais, ses sources n’ont '
+      + 'quasiment rien ramené. Tu risques d’attendre pour zéro résultat.\n\n'
+      + 'Pour le même travail en mieux : Le Chasseur (PME) ou le '
+      + 'Prospecteur Google (commerces locaux).',
+      { title: 'Lancer Argus quand même ?', danger: true,
+        okLabel: 'Essayer quand même', cancelLabel: 'Annuler' });
+    if (!okPause) return;
     const sources = [...document.querySelectorAll('.argus-source:checked')].map(c => c.value);
     if (sources.length === 0) {
       Toast.error('Sélectionne au moins une source.');

@@ -1375,6 +1375,11 @@ const PixelPros = {
             <span class="pp-card-time">${this._timeRelative(it.updated_at || it.created_at)}</span>
             ${isUrgent ? `<span class="pp-urgent-badge">URGENT</span>` : ''}
           </div>
+          ${it.status === 'failed' ? `
+          <div class="text-[11px] mt-1" style="color:#ef4444; text-wrap: pretty;">
+            ${data.error ? '⚠ ' + this._escape(String(data.error).slice(0, 120)) : '⚠ La fabrication a échoué'}
+            — clic : voir le détail et « ↻ Relancer la construction »
+          </div>` : ''}
         </div>
       </div>
     `;

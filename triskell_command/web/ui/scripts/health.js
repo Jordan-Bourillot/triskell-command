@@ -393,14 +393,27 @@ const Health = {
     // Robot à l'arrêt : bouton « Relancer » (sauf le Phare, qui tourne sur
     // GitHub et ne se relance pas d'ici). Le serveur ne relance que les
     // robots vraiment arrêtés — un robot qui tourne n'est jamais touché.
+    // En PANNE : vrai bouton bien visible (le lien discret n'était jamais
+    // vu — audit débutant) + marche à suivre en 3 temps.
+    const inTrouble = (w.health === 'error' || !!rawError);
     const canRestart = !w.running && w.name && w.name !== 'phare_scheduler';
     const restartBtn = canRestart
-      ? `<button class="text-xs text-accent underline mt-2 mr-4" data-restart="${this._esc(w.name)}"
-                 title="Redémarre ce robot sur le serveur">Relancer</button>`
+      ? (inTrouble
+          ? `<button class="btn btn-primary text-xs mt-2 mr-3" data-restart="${this._esc(w.name)}"
+                     title="Redémarre ce robot sur le serveur">↻ Relancer ce robot</button>`
+          : `<button class="text-xs text-accent underline mt-2 mr-4" data-restart="${this._esc(w.name)}"
+                     title="Redémarre ce robot sur le serveur">Relancer</button>`)
       : '';
     // Robot en panne : on donne au moins une action (vérifier les réglages).
-    const fixLink = (w.health === 'error' || rawError)
+    const fixLink = inTrouble
       ? `<button class="text-xs text-accent underline mt-2" onclick="App.show('config')">Vérifier les réglages</button>`
+      : '';
+    const helpSteps = inTrouble
+      ? `<div class="text-[11px] text-text-muted mt-2" style="text-wrap: pretty">
+           Quoi faire : 1. « Relancer ce robot » · 2. s'il retombe en panne,
+           « Vérifier les réglages » · 3. toujours rouge ? « Signaler un
+           bug » (en bas du menu) — le détail technique part avec le rapport.
+         </div>`
       : '';
     return `
       <article class="card p-4 flex items-start gap-4">
@@ -415,6 +428,7 @@ const Health = {
           ${skipReason}
           ${errors}
           ${restartBtn}${fixLink}
+          ${helpSteps}
         </div>
       </article>
     `;
