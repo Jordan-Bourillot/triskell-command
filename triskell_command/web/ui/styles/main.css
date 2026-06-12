@@ -2006,6 +2006,15 @@ html {
   color: hsl(var(--text-secondary));
   box-shadow: 0 0 0 2px hsl(var(--text-secondary) / 0.18);
 }
+/* Bouton « Envoi direct » : signal de prudence même au repos — c'est le
+   réglage qui fait partir des mails sans relecture humaine. */
+.cockpit-mode-opt.risky {
+  border-color: hsl(var(--warning) / 0.45);
+}
+.cockpit-mode-opt.risky:hover {
+  border-color: hsl(var(--danger) / 0.6);
+  background: hsl(var(--danger) / 0.06);
+}
 .cockpit-mode-opt-icon {
   font-size: 15px;
   line-height: 1;

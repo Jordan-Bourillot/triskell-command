@@ -999,10 +999,13 @@ const Autopilot = {
           if (mode === prev || stageEl.dataset.modeBusy === '1') return;
 
           // Garde-fou envoi réel : passer « Envoie » en Auto, c'est armer
-          // des envois sans validation → confirmation explicite.
+          // des envois sans validation → confirmation explicite, avec le
+          // plan d'envoi CONCRET (volume max, adresses, plage horaire).
           if (stageKey === 'send' && mode === 'auto') {
             const okConfirm = await Dialog.confirm(
-              'Les mails partiront tout seuls, sans validation. Confirmer ?',
+              'Les mails partiront tout seuls, sans validation.\n\n'
+              + this._sendPlanText() + '\n\n'
+              + 'Tu peux repasser en « Manuel » à tout moment.',
               { title: 'Activer l’envoi automatique', danger: true,
                 okLabel: 'Oui, envoyer sans validation', cancelLabel: 'Annuler' });
             if (!okConfirm) return;
@@ -1497,6 +1500,51 @@ const Autopilot = {
     return pool;
   },
 
+  // Décrit en clair ce qui va partir si l'envoi automatique est armé :
+  // plafond réel (le plus petit des plafonds), adresses d'envoi cochées,
+  // plage horaire. Lu depuis l'état AFFICHÉ (comme _gather) : c'est
+  // exactement ce qui sera enregistré puis appliqué. Utilisé par les
+  // confirmations « envoi auto » pour annoncer du concret (volume + adresses)
+  // au lieu d'un « les mails partiront tout seuls » abstrait.
+  _sendPlanText() {
+    let pool = this._gatherSenderPool();
+    if (!pool.length && !document.querySelector('.ap-sp-check')) {
+      // Liste des boîtes pas encore rendue : on retombe sur la config sauvée.
+      pool = (this.cfg && Array.isArray(this.cfg.autopilot_sender_pool))
+        ? this.cfg.autopilot_sender_pool : [];
+    }
+    if (!pool.length) {
+      return '⚠ Aucune adresse d’envoi n’est cochée : en l’état, rien ne '
+        + 'peut partir. Coche au moins une adresse dans '
+        + '« Adresses expéditrices ».';
+    }
+    const byId = {};
+    (this.mailAccounts || []).forEach(a => { byId[a.id] = a; });
+    const emails = pool
+      .map(p => (byId[p.account_id] && byId[p.account_id].from_email) || '')
+      .filter(Boolean);
+    const readNum = (key, fallback) => {
+      const el = document.querySelector(`[data-key="${key}"]`);
+      const n = parseInt((el && el.value) || '', 10);
+      if (Number.isFinite(n)) return n;
+      const c = parseInt(this.cfg && this.cfg[key], 10);
+      return Number.isFinite(c) ? c : fallback;
+    };
+    const globalCap = readNum('daily_cap', 40);
+    const poolCap = pool.reduce((s, p) => s + (parseInt(p.daily_cap, 10) || 0), 0);
+    const cap = poolCap > 0 ? Math.min(globalCap, poolCap) : globalCap;
+    const h1 = readNum('send_hour_start', 8);
+    const h2 = readNum('send_hour_end', 19);
+    const fromTxt = emails.length === 1
+      ? `depuis ${emails[0]}`
+      : (emails.length > 1
+          ? `depuis ${emails.length} adresses (${emails.join(', ')})`
+          : `depuis ${pool.length} adresse(s) cochée(s)`);
+    return `Concrètement : jusqu’à ${cap} mail${cap > 1 ? 's' : ''} sur 24 h, `
+      + `envoyés entre ${h1} h et ${h2} h, ${fromTxt}, aux prospects de ta `
+      + `base « Tous les prospects ».`;
+  },
+
   // Met a jour le bandeau "X brouillons a valider" en haut de la page.
   // Appele au render + apres chaque run de l'autopilote (fin de _refreshStatus).
   //
@@ -1935,7 +1983,9 @@ const Autopilot = {
     const wasAuto  = !!(this.cfg && this.cfg.enabled && this.cfg.mode === 'auto');
     if (willAuto && !wasAuto) {
       const okConfirm = await Dialog.confirm(
-        'Les mails partiront tout seuls, sans validation. Confirmer ?',
+        'Le passage automatique est coché AVEC l’envoi en Auto : à l’heure '
+        + 'programmée, les mails partiront tout seuls, sans validation.\n\n'
+        + this._sendPlanText(),
         { title: 'Activer l’envoi automatique', danger: true,
           okLabel: 'Oui, envoyer sans validation', cancelLabel: 'Annuler' });
       if (!okConfirm) return; // Annuler = rien n'est enregistré
@@ -1987,10 +2037,12 @@ const Autopilot = {
     const sendAuto = sendStage && this._getStageMode(sendStage) === 'auto';
     const okConfirm = await Dialog.confirm(
       sendAuto
-        ? 'Les mails partiront tout seuls, sans validation. ' +
-          'Les réglages affichés seront aussi enregistrés. Confirmer ?'
-        : 'Lancer un passage maintenant ? Les réglages affichés seront aussi ' +
-          'enregistrés. Rien ne partira sans ta validation.',
+        ? 'Les mails partiront tout seuls, sans validation.\n\n'
+          + this._sendPlanText() + '\n\n'
+          + 'Les réglages affichés seront aussi enregistrés.'
+        : 'Lancer un passage maintenant ? Les réglages affichés seront aussi '
+          + 'enregistrés. L’IA prépare les mails et les pose dans '
+          + '« Brouillons à valider » — rien ne part sans toi.',
       sendAuto
         ? { title: 'Lancer avec envoi automatique', danger: true,
             okLabel: 'Oui, lancer et envoyer', cancelLabel: 'Annuler' }

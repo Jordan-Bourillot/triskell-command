@@ -298,7 +298,8 @@ const PixelPros = {
             'une seule tentative automatique par commande).\n\n' +
             'Tu seras prévenu au lancement, à la mise en ligne, et si quelque ' +
             'chose échoue.',
-            { title: 'Activer la construction automatique ?', okLabel: 'Activer' });
+            { title: 'Activer la construction automatique ?', okLabel: 'Activer',
+              cancelLabel: 'Annuler', danger: true });
           if (!ok) return;
         }
         paint(on, true);

@@ -586,6 +586,18 @@ const Phare = {
   // (publié / à faire à la main / échec) sans recharger la page.
 
   async _applyAction(id, btn) {
+    // Garde-fou : « OK, fais-le » enclenche modification → vérifications →
+    // publication sur le site en ligne, sans autre étape de validation.
+    const siteName = this._selectedSiteName || '';
+    const okGo = await Dialog.confirm(
+      'Le robot va modifier '
+      + (siteName ? `« ${siteName} »` : 'ton site')
+      + ', vérifier que rien n’est cassé, puis publier tout seul — '
+      + 'sans autre validation de ta part.\n\n'
+      + 'Tu retrouveras le résultat dans « Ce qui a été fait ».',
+      { title: 'Laisser le robot faire ?', danger: true,
+        okLabel: 'OK, fais-le', cancelLabel: 'Annuler' });
+    if (!okGo) return false;
     if (btn) { btn.disabled = true; btn.textContent = 'Je m’en occupe…'; }
     try {
       const res = await App.api.phare_apply_action({ id });
@@ -719,7 +731,22 @@ const Phare = {
   // de re-rendre toute la page : le scroll ne bouge plus.
   // Retourne true si l'action a abouti (la modale d'aperçu s'en sert).
 
-  async _approveAction(id, isAuto, btn) {
+  async _approveAction(id, isAuto, btn, opts = {}) {
+    // Garde-fou publication réelle : « Publier sur le site » modifie le site
+    // en ligne, pour de vrai. On le dit AVANT, avec le nom du site quand on
+    // le connaît. opts.skipConfirm : true depuis l'aperçu (modif déjà vue).
+    if (isAuto && !opts.skipConfirm) {
+      const siteName = this._selectedSiteName || '';
+      const okGo = await Dialog.confirm(
+        (siteName
+          ? `La modification préparée par le robot va être publiée pour de vrai sur « ${siteName} ».`
+          : 'La modification préparée par le robot va être publiée pour de vrai sur ton site.')
+        + '\n\nDes contrôles automatiques tournent avant la mise en ligne, '
+        + 'et tu retrouveras la modification dans « Ce qui a été fait ».',
+        { title: 'Publier sur le site ?', danger: true,
+          okLabel: 'Publier', cancelLabel: 'Annuler' });
+      if (!okGo) return false;
+    }
     const prevHtml = btn ? btn.innerHTML : '';
     const setBusy = (on) => {
       if (!btn) return;
@@ -925,7 +952,9 @@ const Phare = {
     const rejectBtn = dlg.querySelector('[data-preview-reject]');
     if (approveBtn) {
       approveBtn.onclick = async () => {
-        const ok = await this._approveAction(a.id, this._isAuto(a), approveBtn);
+        // skipConfirm : l'aperçu vient d'être regardé, pas de double fenêtre.
+        const ok = await this._approveAction(a.id, this._isAuto(a), approveBtn,
+                                             { skipConfirm: true });
         if (ok) close();
       };
     }
@@ -1105,7 +1134,8 @@ const Phare = {
             '(vitesse, rendu visuel, aucun lien cassé). Maximum 3 par jour.\n\n' +
             'Tu seras prévenu à chaque publication, et si le trafic d’un site ' +
             'décroche dans les 14 jours, tu seras alerté pour retour arrière.',
-            { title: 'Activer la publication automatique ?', okLabel: 'Activer', cancelLabel: 'Annuler' });
+            { title: 'Activer la publication automatique ?', okLabel: 'Activer',
+              cancelLabel: 'Annuler', danger: true });
           if (!sure) return;
         }
         paint(on, true);

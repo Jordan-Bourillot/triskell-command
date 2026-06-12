@@ -782,10 +782,10 @@ const Morning = {
             <span class="cockpit-mode-opt-label">Je valide</span>
           </button>
           <button type="button"
-                  class="cockpit-mode-opt ${isDirect ? 'active danger' : ''}"
+                  class="cockpit-mode-opt risky ${isDirect ? 'active danger' : ''}"
                   data-mode="direct"
-                  title="L'IA envoie tout de suite, sans demander">
-            <span class="cockpit-mode-opt-icon">🚀</span>
+                  title="L'IA envoie tout de suite, sans relecture par toi — à activer en connaissance de cause">
+            <span class="cockpit-mode-opt-icon">⚡</span>
             <span class="cockpit-mode-opt-label">Envoi direct</span>
           </button>
         </div>
@@ -804,7 +804,10 @@ const Morning = {
           if (card.dataset.current === target) return;
           if (target === 'direct') {
             const ok = await Dialog.confirm(
-              "L’IA répondra toute seule aux mails reçus, sans te demander. Tu peux revenir à « Je valide » à tout moment.",
+              'L’IA répondra toute seule aux mails reçus, sans te demander. '
+              + 'Si une réponse est mal ajustée, elle partira quand même : '
+              + 'personne ne relit avant l’envoi.\n\n'
+              + 'Tu peux revenir à « Je valide » à tout moment.',
               { title: 'Passer en envoi direct ?', okLabel: 'Oui, envoi direct',
                 cancelLabel: 'Annuler', danger: true });
             if (!ok) return;

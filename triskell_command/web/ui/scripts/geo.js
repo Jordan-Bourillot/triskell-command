@@ -468,7 +468,7 @@ const GEO = {
           const linked = (this._apSites || []).filter(s => s && s.repo);
           const msg = linked.length === 0
             ? 'Aucun de tes sites n’est branché pour l’instant, donc rien ne partira en ligne tout de suite. L’option marchera dès que tu auras branché un site (clique dessus → ✎ Modifier → « Publication automatique »). Activer quand même ?'
-            : `L’app mettra des pages en ligne toute seule, sans te demander à chaque fois, sur : ${linked.map(s => s.name || s.url).join(', ')}. Activer ?`;
+            : `L’app mettra en ligne des pages écrites par l’IA, toute seule, sans te demander et sans relecture, sur : ${linked.map(s => s.name || s.url).join(', ')}. Activer ?`;
           const ok = await Dialog.confirm(
             msg,
             { title: 'Mise en ligne automatique', danger: true, okLabel: 'Activer', cancelLabel: 'Annuler' }
@@ -790,7 +790,8 @@ const GEO = {
       pubBtn.textContent = '⏳ Publication en cours…';
       msg.textContent = 'Publication en cours — on prépare la page et on l’envoie sur ton site…';
       msg.className = 'geo-msg';
-      const ok = await this._publishFinding(audit, finding, cardBtn || null);
+      const ok = await this._publishFinding(audit, finding, cardBtn || null,
+                                            { skipConfirm: true });
       closeBtn.disabled = false;
       if (ok) { close(); }
       else {
@@ -804,7 +805,9 @@ const GEO = {
   // Publie un bloc proposé par l'IA. Verrou _pubBusy : une seule
   // publication à la fois, impossible de re-cliquer pendant l'envoi.
   // Renvoie true si la publication a réussi.
-  async _publishFinding(audit, finding, btn) {
+  // opts.skipConfirm : true quand on arrive de l'aperçu (la modif vient
+  // d'être vue) — sinon on confirme TOUJOURS avant de toucher au site.
+  async _publishFinding(audit, finding, btn, opts = {}) {
     if (this._pubBusy) return false;
     const prevLabel = btn ? btn.textContent : '';
     if (btn) btn.disabled = true;
@@ -816,6 +819,20 @@ const GEO = {
         return false;
       }
       audit.site_id = sid;
+    }
+    // Garde-fou : un clic sur la carte publie pour de vrai sur le site.
+    if (!opts.skipConfirm) {
+      const okGo = await Dialog.confirm(
+        'Ce bloc écrit par l’IA va être publié pour de vrai sur ton site '
+        + '(visible en ligne d’ici 1 à 3 minutes).\n\n'
+        + 'Astuce : le bouton « 👁 Aperçu » montre exactement ce qui change, '
+        + 'avant d’envoyer.',
+        { title: 'Publier sur le site ?', danger: true,
+          okLabel: 'Publier', cancelLabel: 'Annuler' });
+      if (!okGo) {
+        if (btn) { btn.disabled = false; btn.textContent = prevLabel; }
+        return false;
+      }
     }
     if (this._pubBusy) { // une autre publication a démarré entre-temps
       if (btn) { btn.disabled = false; btn.textContent = prevLabel; }

@@ -276,7 +276,7 @@ const Replies = {
     const mode = sug.mode || 'manual';
     const modeLabel = (status === 'sent') ? 'envoyé' :
                       (mode === 'manual') ? 'validation manuelle' :
-                      (mode === 'instant') ? 'envoi imminent' :
+                      (mode === 'instant') ? 'envoi auto dans un instant' :
                       this._delayLabel(sug.send_after);
     const modeColor = (status === 'sent') ? 'text-success' :
                       (mode === 'manual') ? 'text-text-muted' : 'text-warning';
@@ -303,14 +303,19 @@ const Replies = {
   },
 
   _delayLabel(sendAfter) {
-    if (!sendAfter) return 'auto';
+    // « envoi auto … » : on dit QUE ça part tout seul ET QUAND — l'ancien
+    // « envoi imminent » ne disait ni l'un ni l'autre clairement.
+    if (!sendAfter) return 'envoi auto';
     try {
       const target = new Date(sendAfter);
       const delta = (target - new Date()) / 1000;
-      if (delta <= 0) return 'envoi imminent';
+      if (delta <= 0) return 'envoi auto dans un instant';
       const mins = Math.floor(delta / 60);
-      return `auto dans ${mins} min`;
-    } catch (e) { return 'auto'; }
+      if (mins < 60) return `envoi auto dans ${Math.max(1, mins)} min`;
+      const hh = target.getHours();
+      const mm = String(target.getMinutes()).padStart(2, '0');
+      return `envoi auto à ${hh}h${mm}`;
+    } catch (e) { return 'envoi auto'; }
   },
 
   _bindCardActions() {
