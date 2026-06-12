@@ -30,6 +30,9 @@ const Copilot = {
     if (!panel) return;
     this._open = true;
     panel.classList.add('cop-visible');
+    // Grand écran : la discussion se met EN COLONNE à côté du contenu
+    // (l'app se pousse, on continue à travailler en parlant).
+    document.body.classList.add('cop-open');
     this.setBadge(false);
     if (this._memoryOpen) this.toggleMemory();   // toujours rouvrir sur le fil
     if (this._journalOpen) this.toggleJournal();
@@ -49,6 +52,7 @@ const Copilot = {
   close() {
     const panel = document.getElementById('copilot-panel');
     if (panel) panel.classList.remove('cop-visible');
+    document.body.classList.remove('cop-open');
     this._open = false;
     this._stopDictation();
   },
@@ -56,6 +60,26 @@ const Copilot = {
   toggle() {
     if (this._open) this.close();
     else this.open();
+  },
+
+  /** Question posée depuis l'extérieur (la zone « Dis-moi ce que tu veux
+   *  faire » de Perceval) : ouvre la colonne, attend que le fil soit
+   *  chargé, puis envoie — sans jamais perdre la question. */
+  askFromOutside(text) {
+    const q = String(text == null ? '' : text).trim();
+    if (!q) return;
+    this.open();
+    if (this._loaded && !this._busy) { this.send(q); return; }
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries += 1;
+      if (this._loaded && !this._busy) {
+        clearInterval(timer);
+        this.send(q);
+      } else if (tries > 80) { // ~8 s : le fil ne vient pas, on n'insiste pas
+        clearInterval(timer);
+      }
+    }, 100);
   },
 
   isOpen() { return this._open; },
@@ -1214,6 +1238,21 @@ const Copilot = {
           inset: 0; width: 100%; height: 100%;
           border-radius: 0; border: 0;
         }
+      }
+      /* -- Grand écran : la discussion en COLONNE à côté du contenu.
+            L'app se pousse à gauche, on travaille à deux, côte à côte. -- */
+      #main { transition: margin-right .22s ease; }
+      @media (min-width: 1200px) {
+        body.cop-open #copilot-panel {
+          top: 0; right: 0; bottom: 0;
+          width: 420px; height: auto; max-height: none;
+          border-radius: 0; border: 0;
+          border-left: 1px solid hsl(var(--border-strong));
+          box-shadow: -10px 0 32px rgba(15,23,42,.16);
+        }
+        body.cop-open #main { margin-right: 420px; }
+        body.cop-open #tc-toast-host { right: 436px !important; }
+        body.cop-open #thomas-fab { right: 444px; }
       }
       .cop-head {
         display: flex; align-items: center; justify-content: space-between;

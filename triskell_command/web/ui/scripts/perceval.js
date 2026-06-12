@@ -456,6 +456,12 @@ const Perceval = {
     host.dataset.mood = this.mood;
     host.innerHTML = `
       <div id="pv-bubble" role="status" aria-live="polite"></div>
+      <form id="pv-ask" autocomplete="off">
+        <input id="pv-ask-input" type="text" maxlength="600"
+               placeholder="Dis-moi ce que tu veux faire…"
+               aria-label="Écrire à ${this.name}"/>
+        <button type="submit" title="Envoyer à ${this.name}" aria-label="Envoyer">➤</button>
+      </form>
       <button id="pv-body" type="button"
               title="${this.name} — ton copilote"
               aria-label="${this.name}, ton copilote">
@@ -468,6 +474,22 @@ const Perceval = {
       if (typeof Copilot !== 'undefined' && Copilot.toggle) Copilot.toggle();
       else this._setCollapsed(true);
     };
+    // La zone « binôme » : on lui parle directement, sans rien ouvrir.
+    // Le formulaire n'est JAMAIS re-rendu (la frappe en cours est sacrée).
+    const ask = document.getElementById('pv-ask');
+    if (typeof Copilot === 'undefined' || !Copilot.askFromOutside) {
+      ask.style.display = 'none';
+    } else {
+      ask.onsubmit = (e) => {
+        e.preventDefault();
+        const inp = document.getElementById('pv-ask-input');
+        const q = (inp.value || '').trim();
+        if (!q) return;
+        inp.value = '';
+        this._wake();
+        Copilot.askFromOutside(q);
+      };
+    }
   },
 
   // Le corps : l'écu validé avec Jordan — liseré, cimier, yeux lumineux,
@@ -734,6 +756,35 @@ const Perceval = {
       #perceval-host[data-speaking="1"] .pv-b2 { animation: pvEq .5s ease-in-out .12s infinite; }
       #perceval-host[data-speaking="1"] .pv-b3 { animation: pvEq .5s ease-in-out .24s infinite; }
       #perceval-host[data-speaking="1"] .pv-b4 { animation: pvEq .5s ease-in-out .36s infinite; }
+
+      /* -- la zone « dis-moi ce que tu veux faire » -- */
+      #pv-ask {
+        display: flex; align-items: center; gap: 4px;
+        width: 268px; padding: 4px 4px 4px 12px;
+        background: hsl(var(--surface-elevated, var(--surface)) / .94);
+        backdrop-filter: blur(10px);
+        border: 1px solid hsl(var(--border-strong));
+        border-radius: 999px;
+        box-shadow: 0 4px 14px rgba(15,23,42,.14);
+      }
+      #pv-ask:focus-within { border-color: hsl(var(--accent) / .6); }
+      #pv-ask input {
+        flex: 1; min-width: 0; border: 0; background: transparent;
+        font-size: 12.5px; color: hsl(var(--text));
+        outline: none; padding: 5px 0;
+      }
+      #pv-ask input::placeholder { color: hsl(var(--text-muted)); }
+      #pv-ask button {
+        flex-shrink: 0; border: 0; cursor: pointer;
+        width: 26px; height: 26px; border-radius: 50%;
+        background: hsl(var(--accent)); color: #fff;
+        font-size: 12px; line-height: 1;
+      }
+      #pv-ask button:hover { transform: scale(1.06); }
+      #perceval-host.pv-mini #pv-ask { display: none; }
+      @media (max-width: 640px) {
+        #pv-ask { display: none; }
+      }
 
       /* -- la bulle -- */
       #pv-bubble {
