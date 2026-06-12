@@ -101,10 +101,23 @@ def push_branch(workdir: str, branch: str) -> bool:
 # ---------------------------------------------------------------------------
 # GitHub PR
 # ---------------------------------------------------------------------------
+# Raison du dernier échec d'open_pr — lue par les appelants pour donner
+# des messages de carte utiles (un seul worker applique à la fois).
+last_pr_error: str = ""
+
+
 def open_pr(repo_full: str, *, head: str, base: str = "main",
             title: str, body: str = "") -> Optional[dict]:
+    """Ouvre une PR. En échec, renvoie None et mémorise la raison exacte
+    dans `last_pr_error` — avant, le détail (rate limit GitHub, « PR déjà
+    ouverte », « aucun commit entre les branches »…) finissait dans un
+    journal invisible et la carte disait juste « ouverture PR échouée »
+    (constaté par Jordan le 12/06)."""
+    global last_pr_error
+    last_pr_error = ""
     token = _github_token()
     if not token:
+        last_pr_error = "jeton GitHub manquant"
         return None
     try:
         r = requests.post(
@@ -116,9 +129,20 @@ def open_pr(repo_full: str, *, head: str, base: str = "main",
         )
     except requests.RequestException as exc:
         logger.warning("open_pr: %s", exc)
+        last_pr_error = f"réseau : {str(exc)[:140]}"
         return None
     if r.status_code >= 400:
         logger.warning("open_pr HTTP %s: %s", r.status_code, r.text[:200])
+        detail = ""
+        try:
+            j = r.json()
+            detail = (j.get("message") or "")
+            errs = j.get("errors") or []
+            if errs and isinstance(errs[0], dict) and errs[0].get("message"):
+                detail += f" — {errs[0]['message']}"
+        except Exception:
+            detail = r.text[:140]
+        last_pr_error = f"GitHub HTTP {r.status_code} : {detail[:200]}"
         return None
     return r.json()
 
@@ -358,7 +382,10 @@ def apply_and_open_pr(*,
     pr = open_pr(repo_full, head=branch, base=base_branch,
                  title=f"[Le Phare] {pr_title}", body=body)
     if not pr:
-        return {"ok": False, "error": "ouverture PR échouée"}
+        # La raison exacte (rate limit, PR déjà ouverte, aucun commit…)
+        # remonte jusqu'à la carte au lieu de mourir dans le journal.
+        why = last_pr_error or "raison inconnue"
+        return {"ok": False, "error": f"ouverture PR échouée ({why})"}
     return {
         "ok": True,
         "branch": branch,
@@ -421,7 +448,12 @@ def verify_pr(*, site: dict, pr_number: int, branch: str) -> dict:
             checks["blockers"].append(
                 f"perf preview {prev_perf} < seuil {perf_min}")
         delta_perf = psi_diff["diff"].get("perf")
-        if delta_perf is not None and delta_perf < -2:
+        # Seuil -6 (et non -2) : PageSpeed varie naturellement de ±5 pts
+        # d'une mesure à l'autre — à -2, des modifs qui ne peuvent PAS
+        # toucher la vitesse (méta-descriptions, titles) étaient bloquées
+        # au hasard de la variance (constaté par Jordan le 12/06). Le
+        # plancher absolu perf_min_score reste le vrai garde-fou.
+        if delta_perf is not None and delta_perf < -6:
             checks["blockers"].append(f"perf chute de {abs(delta_perf)} pts")
     else:
         checks["blockers"].append("audit PSI indisponible (clé manquante ou réseau)")
