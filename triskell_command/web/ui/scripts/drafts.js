@@ -449,6 +449,9 @@ const Drafts = {
     if (ts)      meta.push(ts);
     const iaLabel = this._iaLabel(r.provider, r.model);
     if (iaLabel) meta.push(iaLabel);
+    // Adresse d'expédition exigée par le modèle (câblage modèle→adresse) :
+    // Jordan voit AVANT d'approuver depuis quelle boîte le mail partira.
+    if (r.sender_address) meta.push('départ : ' + this._esc(r.sender_address));
     let badge = '';
     if (r.source === 'convoy') {
       const camp = r.campaign_name || r.offer_name || 'Convoi';
@@ -590,13 +593,23 @@ const Drafts = {
       }
       // Envoi réel du brouillon (appelé après la fenêtre d'annulation).
       const doApprove = async () => {
-        const body = bodyEl ? bodyEl.value : ((rows[idx] || {}).body || '');
+        // On ne transmet le corps QUE s'il a vraiment été retouché :
+        // un corps intact renvoyé quand même faisait perdre au serveur
+        // la version HTML du mail (mise en forme + boutons) — le
+        // prospect recevait du texte brut.
+        const original = (rows[idx] || {}).body || '';
+        const edited = bodyEl ? bodyEl.value : original;
+        const payload = { id, source, key: id };
+        if (edited.replace(/\r\n/g, '\n').trim()
+            !== original.replace(/\r\n/g, '\n').trim()) {
+          payload.body = edited;
+        }
         setBusy(true);
         const originalLabel = approveBtn.textContent;
         approveBtn.textContent = 'Envoi…';
         let r;
         try {
-          r = await App.api.draft_approve({ id, source, key: id, body });
+          r = await App.api.draft_approve(payload);
         } catch (e) {
           console.error('draft_approve KO', e);
           Toast.friendlyError(e, 'Erreur réseau pendant l’envoi.');

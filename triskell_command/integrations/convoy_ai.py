@@ -529,6 +529,11 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
       - syntaxe EN a 2 accolades : {{first_name}} {{city}} {{business_type}} ...
     Toutes pointent vers les memes champs du dict prospect, donc l'auteur
     du template peut utiliser celle qu'il prefere sans se prendre la tete.
+
+    Variables speciales {page_metier} / {page_demo} : URLs des pages de
+    pub metier de pixel-pros.fr, choisies selon le secteur du prospect
+    (coiffeuse -> /beaute + /demo-beaute). Toujours remplies : secteur
+    inconnu -> accueil + demo generique, jamais un trou dans le mail.
     """
     if not text:
         return ""
@@ -544,6 +549,16 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
     # Fallback "name" = prenom si dispo, sinon raison sociale, sinon ""
     name_any  = prenom or raison
 
+    # Pages de pub metier Pixel Pros ciblees sur le secteur du prospect.
+    # Best-effort : si le module manque, on retombe sur l'accueil pour ne
+    # jamais laisser {{page_metier}} en clair dans un mail envoye.
+    try:
+        from .pixelpros_pages import pages_for_sector
+        page_metier_url, page_demo_url = pages_for_sector(secteur)
+    except Exception:
+        page_metier_url = "https://pixel-pros.fr"
+        page_demo_url = "https://pixel-pros.fr/demo"
+
     replacements = {
         # === Syntaxe FR a 1 accolade (historique) ===
         "{prenom}":         prenom,
@@ -553,6 +568,8 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         "{secteur}":        secteur,
         "{email}":          email,
         "{sender_name}":    sender,
+        "{page_metier}":    page_metier_url,
+        "{page_demo}":      page_demo_url,
         # === Syntaxe EN a 2 accolades (templates Pixel Pros) ===
         "{{first_name}}":    prenom,
         "{{last_name}}":     nom,
@@ -568,6 +585,8 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         "{{domain}}":        website,
         "{{signature}}":     sender,
         "{{sender_name}}":   sender,
+        "{{page_metier}}":   page_metier_url,
+        "{{page_demo}}":     page_demo_url,
         # Placeholders contextuels qu'on ne peut pas auto-remplir : on les
         # vide pour eviter d'envoyer "{{price}}" en clair au prospect.
         # IMPORTANT : tous les placeholders presents dans les templates Pixel

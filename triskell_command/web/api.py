@@ -940,15 +940,39 @@ class Api:
             sb = client.raw
             # ---- prospect_drafts (Dénicheur / Drip / Post-sale / Dormant) --
             # PostgREST embed : on récupère le prospect lié pour name/email/city.
-            res = (sb.table("prospect_drafts")
-                    .select("id, subject, body, kind, provider, model, "
-                            "created_at, "
-                            "prospects:prospect_id(id, name, legal_name, "
-                            "emails, emails_meta, city, sources, platform_url)")
-                    .eq("status", "pending")
-                    .order("created_at", desc=True)
-                    .limit(self._DRAFTS_LIMIT_PER_SOURCE * 4)
-                    .execute())
+            # Colonnes bonus selon migrations passées : body_html + notes 2e
+            # IA (45) puis sender_address (46) → lecture en cascade pour
+            # rester compatible avec une base pas encore migrée. Sans elles,
+            # l'écran Brouillons montrait le texte brut alors que le mail
+            # part avec une vraie mise en forme HTML (bug remonté par
+            # Jordan le 2026-06-12 : « je ne vois pas de mise en forme »).
+            _base_cols = ("id, subject, body, kind, provider, model, "
+                          "created_at, "
+                          "prospects:prospect_id(id, name, legal_name, "
+                          "emails, emails_meta, city, sources, platform_url)")
+            _bonus_attempts = (
+                "body_html, review_score, review_verdict, review_comment, "
+                "sender_address, ",
+                "body_html, review_score, review_verdict, review_comment, ",
+                "body_html, ",
+                "",
+            )
+            res = None
+            _read_exc = None
+            for _bonus in _bonus_attempts:
+                try:
+                    res = (sb.table("prospect_drafts")
+                            .select(_bonus + _base_cols)
+                            .eq("status", "pending")
+                            .order("created_at", desc=True)
+                            .limit(self._DRAFTS_LIMIT_PER_SOURCE * 4)
+                            .execute())
+                    break
+                except Exception as exc:
+                    _read_exc = exc
+                    res = None
+            if res is None:
+                raise _read_exc or RuntimeError("lecture prospect_drafts KO")
             for r in (res.data or []):
                 subj = (r.get("subject") or "").strip()
                 bod = (r.get("body") or "").strip()
@@ -973,6 +997,16 @@ class Api:
                     "city": p.get("city") or "",
                     "subject": r.get("subject") or "",
                     "body": r.get("body") or "",
+                    # Version HTML du mail (aperçu « tel que reçu » dans
+                    # l'UI). Vide si la base n'a pas la migration 45.
+                    "body_html": r.get("body_html") or "",
+                    # Adresse d'expéditeur exigée par le brouillon
+                    # (câblage modèle→adresse, migration 46).
+                    "sender_address": r.get("sender_address") or "",
+                    # Note de la 2e IA de relecture (bandeau de tri UI).
+                    "review_score": r.get("review_score"),
+                    "review_verdict": r.get("review_verdict") or "",
+                    "review_comment": r.get("review_comment") or "",
                     "ts": (r.get("created_at") or "")[:19],
                     "provider": r.get("provider") or "",
                     "model": r.get("model") or "",
@@ -1179,6 +1213,43 @@ class Api:
             r"[0-9a-f]{4}-[0-9a-f]{12}$", (s or "").lower()))
 
     @staticmethod
+    def _resolve_draft_html(stored_body: str, stored_html: str,
+                            edited_body) -> tuple[str, str, bool]:
+        """Décide du (corps, HTML) final d'un brouillon à l'approbation.
+
+        - corps intact (ou non fourni) → on garde le HTML stocké tel quel
+          (c'est la mise en forme du modèle, écrite à la main) ;
+        - corps retouché à la main → on régénère un HTML propre depuis le
+          texte final (liens transformés en boutons), pour que la version
+          reçue par le prospect corresponde TOUJOURS à ce que Jordan a lu.
+
+        Renvoie (final_body, body_html, html_regenere). La comparaison
+        ignore fins de ligne (\\r\\n vs \\n) et espaces de bord : le
+        textarea du navigateur ne doit pas compter comme une retouche.
+        """
+        def _norm(t: str) -> str:
+            return ((t or "").replace("\r\n", "\n")
+                             .replace("\r", "\n").strip())
+
+        stored_body = stored_body or ""
+        stored_html = stored_html or ""
+        if edited_body is None or _norm(edited_body) == _norm(stored_body):
+            final = stored_body if edited_body is None else edited_body
+            return final, stored_html, False
+        try:
+            from ..integrations.convoy_ai import (
+                _first_url_in, text_to_email_html,
+            )
+            html = text_to_email_html(
+                edited_body,
+                primary_url=_first_url_in(edited_body),
+                primary_label="En savoir plus",
+            )
+        except Exception:
+            html = ""
+        return edited_body, html, True
+
+    @staticmethod
     def _iso_now() -> str:
         from datetime import datetime
         return datetime.now().isoformat(timespec="seconds")
@@ -1252,10 +1323,14 @@ class Api:
             return {"ok": False, "error": "draft introuvable"}
         d = data[0]
         subject = d.get("subject") or ""
-        final_body = body if body is not None else (d.get("body") or "")
-        # La version HTML n'est utilisable que si le texte n'a pas été
-        # retouché à la main (sinon les deux versions divergeraient).
-        body_html = (d.get("body_html") or "") if body is None else ""
+        # Version HTML : conservée si le texte n'a pas bougé, régénérée
+        # depuis le texte final s'il a été retouché à la main. Avant, le
+        # moindre passage par l'UI (qui renvoie toujours le corps, même
+        # intact) jetait le HTML → tous les mails validés depuis le site
+        # partaient en texte brut, sans bouton ni mise en page (bug
+        # remonté par Jordan le 2026-06-12).
+        final_body, body_html, _html_regen = self._resolve_draft_html(
+            d.get("body") or "", d.get("body_html") or "", body)
         prospect = d.get("prospects") or {}
         to = ((prospect.get("emails") or [""])[0] or "").strip()
         if not to:
@@ -1332,14 +1407,27 @@ class Api:
             return {"ok": False,
                     "error": "config SMTP introuvable — rien envoyé"}
 
-        # 3) statut → approved + body mis à jour
+        # 3) statut → approved + body mis à jour. Si le HTML a été
+        # régénéré (texte retouché), on le sauve aussi — en 2 temps car
+        # la colonne body_html n'existe pas sur une base sans migration 45.
+        _upd = {
+            "body": final_body,
+            "status": "approved",
+            "approved_at": self._iso_now(),
+            "approved_by": client.user_id,
+        }
         try:
-            sb.table("prospect_drafts").update({
-                "body": final_body,
-                "status": "approved",
-                "approved_at": self._iso_now(),
-                "approved_by": client.user_id,
-            }).eq("id", draft_id).execute()
+            if _html_regen:
+                try:
+                    sb.table("prospect_drafts").update(
+                        {**_upd, "body_html": body_html}
+                    ).eq("id", draft_id).execute()
+                except Exception:
+                    sb.table("prospect_drafts").update(_upd).eq(
+                        "id", draft_id).execute()
+            else:
+                sb.table("prospect_drafts").update(_upd).eq(
+                    "id", draft_id).execute()
         except Exception as exc:
             return {"ok": False, "error": f"update KO : {exc}"}
 
@@ -1652,7 +1740,18 @@ class Api:
             captured = None
             if target and target.pending_drafts:
                 if body is not None:
-                    target.pending_drafts[0]["body"] = body
+                    # Même logique que le chemin Supabase : texte retouché
+                    # → le HTML stocké ne correspond plus, on le régénère
+                    # depuis le texte final (jamais un HTML divergent).
+                    _stored = target.pending_drafts[0].get("body") or ""
+                    _fb, _fh, _regen = self._resolve_draft_html(
+                        _stored,
+                        target.pending_drafts[0].get("body_html") or "",
+                        body,
+                    )
+                    target.pending_drafts[0]["body"] = _fb
+                    if _regen:
+                        target.pending_drafts[0]["body_html"] = _fh
                     crm._dirty = True  # noqa
                     crm.save()
                 d = target.pending_drafts[0]
@@ -7112,11 +7211,13 @@ class Api:
                 })
 
             try:
+                # Pas de "body" : l'envoi groupé n'édite jamais le texte,
+                # et ne pas le renvoyer garantit que la version HTML du
+                # brouillon (mise en forme du modèle) part telle quelle.
                 res = self.draft_approve({
                     "id":     r.get("id") or r.get("key") or "",
                     "key":    r.get("id") or r.get("key") or "",
                     "source": r.get("source") or "",
-                    "body":   r.get("body"),
                 })
                 ok = bool(res and res.get("ok"))
             except Exception as exc:
