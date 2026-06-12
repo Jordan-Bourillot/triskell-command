@@ -423,6 +423,8 @@ const Phare = {
               <div class="phare-action-meta">${this._esc(agentLabel)} · Appliqué le ${date || '—'}</div>
             </div>
             ${a.github_pr_url ? `<a class="phare-action-link" href="${this._esc(a.github_pr_url)}" target="_blank" rel="noopener">Voir la modif</a>` : ''}
+            ${a.github_pr_url ? `<button class="btn btn-secondary btn-sm" data-revert="${this._esc(a.id || '')}"
+                     title="Le robot fabrique la modification inverse et la publie — le site revient comme avant cette modif">↩ Annuler</button>` : ''}
             <button class="phare-action-archive" data-archive="${this._esc(a.id || '')}" title="Retirer de la liste" aria-label="Retirer de la liste">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
             </button>
@@ -570,6 +572,10 @@ const Phare = {
     });
     root.querySelectorAll('[data-archive]').forEach(b => {
       b.onclick = () => this._archiveAction(b.dataset.archive, b);
+    });
+    // « ↩ Annuler » : le robot publie la modification inverse (revert).
+    root.querySelectorAll('[data-revert]').forEach(b => {
+      b.onclick = () => this._revertAction(b.dataset.revert, b);
     });
     // « OK, fais-le » : le robot fabrique et publie la modification
     root.querySelectorAll('[data-apply]').forEach(b => {
@@ -805,6 +811,43 @@ const Phare = {
       restore();
       return false;
     } catch (e) { Toast.friendlyError(e); restore(); return false; }
+  },
+
+  // « ↩ Annuler » une modification publiée : le serveur fabrique le commit
+  // inverse et le publie (revert). Confirmation concrète avant (nom du
+  // site), gestion claire du cas « le site a bougé depuis » (conflit).
+  async _revertAction(id, btn) {
+    const siteName = this._selectedSiteName || 'ton site';
+    const okGo = await Dialog.confirm(
+      `Le robot va publier la modification INVERSE sur « ${siteName} » : `
+      + 'le site redevient comme avant cette modification.\n\n'
+      + 'Le site en ligne se met à jour en 1 à 3 minutes.',
+      { title: 'Annuler cette modification ?', danger: true,
+        okLabel: 'Annuler la modification', cancelLabel: 'Laisser en place' });
+    if (!okGo) return false;
+    const prevHtml = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Annulation…'; }
+    try {
+      const res = await App.api.phare_revert_action({ id });
+      if (res && res.ok) {
+        Toast.success('Modification annulée — le site revient comme avant (1 à 3 min).');
+        this._removeActionCard(id);
+        return true;
+      }
+      if (res && res.conflict) {
+        Toast.warn((res.error || 'Le site a été modifié depuis — annulation à faire à la main.'),
+                   'Annulation impossible automatiquement');
+      } else {
+        Toast.friendlyError(res && res.error,
+          'L’annulation n’a pas abouti. Réessaie dans un instant.');
+      }
+      if (btn) { btn.disabled = false; btn.innerHTML = prevHtml; }
+      return false;
+    } catch (e) {
+      Toast.friendlyError(e, 'L’annulation n’a pas abouti.');
+      if (btn) { btn.disabled = false; btn.innerHTML = prevHtml; }
+      return false;
+    }
   },
 
   async _archiveAction(id, btn) {

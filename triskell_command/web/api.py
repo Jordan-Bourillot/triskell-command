@@ -2205,6 +2205,26 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def phare_revert_action(self, payload: dict) -> dict:
+        """Annule une modification PUBLIÉE : commit inverse + PR mergée.
+
+        Le « vrai bouton Annuler » (décision Jordan 12/06). La logique vit
+        dans integrations/phare/revert.py (module séparé) — garde-fous :
+        conflit si le site a bougé depuis, déjà annulée, conseil sans
+        publication.
+
+        Payload : { id: str }
+        """
+        aid = ((payload or {}).get("id") or "").strip()
+        if not aid:
+            return {"ok": False, "error": "id manquant"}
+        try:
+            from ..integrations.phare import revert
+            return revert.revert_action(aid)
+        except Exception as exc:
+            logger.warning("phare_revert_action: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def phare_home(self, payload: dict | None = None) -> dict:
         """Vue d'accueil 1-minute : 1 carte par site avec son état global.
 
