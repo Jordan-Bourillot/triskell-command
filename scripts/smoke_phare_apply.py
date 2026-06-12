@@ -427,6 +427,45 @@ with tempfile.TemporaryDirectory() as tmp:
           fields == ["head_insert", "title"]
           and all("Nouveau" not in p["new"] for p in loc["applicable"]))
 
+    # LE désastre du 12/06 (vitrine Triskell) reproduit : la home et la page
+    # produit partagent le même title générique ; le patch pour /produit ne
+    # matche par grep QUE la home → il ne doit JAMAIS l'écraser
+    import shutil as _sh
+    desast = root / "desastre"
+    (desast / "produit").mkdir(parents=True)
+    (desast / "index.html").write_text(
+        "<html><head><title>Studio générique — Bientôt</title></head>"
+        "<body><h1>Accueil</h1></body></html>", encoding="utf-8")
+    (desast / "produit" / "index.html").write_text(
+        "<html><head><title>Autre chose</title></head>"
+        "<body><h1>Produit</h1></body></html>", encoding="utf-8")
+    loc = patcher.localize_executor_patches(str(desast), "html", [
+        {"field": "title", "page_path": "/produit",
+         "old": "Studio générique — Bientôt",
+         "new": "Produit — La super fiche"},
+    ], [{"path": "/", "title": "Studio générique — Bientôt"},
+        {"path": "/produit", "title": "Studio générique — Bientôt"}])
+    check("patch /produit qui ne matche que la home → REFUSÉ (needs_review)",
+          not loc["applicable"] and len(loc["needs_review"]) == 1
+          and "mauvaise page" in loc["needs_review"][0]["reason"])
+    _sh.rmtree(desast, ignore_errors=True)
+
+    # meta robots déjà présente → remplacée, jamais empilée
+    (root / "legal.html").write_text(
+        "<html><head><title>Légal unique</title>"
+        '<meta name="robots" content="index, follow"></head>'
+        "<body></body></html>", encoding="utf-8")
+    pages3 = pages + [{"path": "/legal", "title": "Légal unique"}]
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "head_insert", "page_path": "/legal",
+         "new": '<meta name="robots" content="noindex, follow">'},
+    ], pages3)
+    check("head_insert d'un meta robots existant → remplacement",
+          len(loc["applicable"]) == 1
+          and loc["applicable"][0]["field"] == "meta_robots"
+          and "index, follow" in loc["applicable"][0]["old"]
+          and "noindex" in loc["applicable"][0]["new"])
+
 # ===========================================================================
 print("\n— executor._apply_one (mocks complets, ni git ni Supabase) —")
 from triskell_command.integrations.phare import executor, git_pipeline, agents

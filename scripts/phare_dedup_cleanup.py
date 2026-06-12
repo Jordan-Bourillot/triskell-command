@@ -63,9 +63,12 @@ def main() -> int:
         to_expire: list[tuple[dict, str]] = []   # (action, raison)
         rest: list[dict] = []
 
-        # 1 & 2 — périssables : bulletins et plans du mois (le + récent gagne)
+        # 1 & 2 — périssables : bulletins, plans du mois et clusters du
+        # veilleur (le + récent gagne — un cluster reformulé chaque semaine
+        # n'est pas un nouveau sujet)
         for prefix, agent, label in (("Bulletin", "analyste", "bulletin"),
-                                     ("Plan du mois", "chef_orchestre", "plan du mois")):
+                                     ("Plan du mois", "chef_orchestre", "plan du mois"),
+                                     ("Cluster sémantique", "veilleur", "cluster")):
             family = [a for a in rows
                       if (a.get("agent") or "") == agent
                       and (a.get("title") or "").startswith(prefix)]

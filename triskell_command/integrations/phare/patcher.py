@@ -285,6 +285,24 @@ def _norm_page_path(p: str) -> str:
     return p or "/"
 
 
+def _file_matches_page(rel: str, page_path: str) -> bool:
+    """Le fichier résolu est-il plausiblement la page visée ?
+
+    Garde-fou né du 12/06/2026 : sur triskell-studio.fr, la home et les
+    pages produit partageaient le même <title> générique — le patch destiné
+    à /le-denicheur a matché par grep LE SEUL fichier portant ce texte…
+    la home. Résultat en prod : la vitrine titrée comme un produit.
+    Règle : un patch pour la page X ne touche un fichier que si son chemin
+    ressemble à X ; pour X ≠ « / », jamais un index.html de racine.
+    """
+    rel_n = rel.replace("\\", "/").lower()
+    page = _norm_page_path(page_path)
+    if page == "/":
+        return rel_n.split("/")[-1] in ("index.html", "index.htm")
+    slug = page.strip("/").split("/")[-1]
+    return bool(slug) and slug in rel_n
+
+
 def _files_matching_page(root: Path, exts: tuple[str, ...],
                          page_path: str, page_title: str = "") -> list[Path]:
     """Fichiers source candidats pour une page du site (par convention
@@ -375,6 +393,15 @@ def localize_executor_patches(workdir: str, stack: str,
                 continue
             target = files[0]
             rel = str(target.relative_to(root))
+            if not _file_matches_page(rel, page_path):
+                needs_review.append({
+                    "field": field, "old": "", "new": new[:200],
+                    "candidates": [rel],
+                    "reason": (f"le fichier trouvé ({rel}) ne ressemble pas "
+                               f"à la page {page_path} — risque de toucher "
+                               "la mauvaise page"),
+                })
+                continue
             content = _read_text_safe(target)
             remaining = new
             # Balises uniques : si la page a DÉJÀ un <title> ou une meta
@@ -387,6 +414,12 @@ def localize_executor_patches(workdir: str, stack: str,
                  re.compile(r"<title>.*?</title>", re.IGNORECASE | re.DOTALL)),
                 ("meta_description",
                  re.compile(r"<meta\s[^>]*name=[\"']description[\"'][^>]*>",
+                            re.IGNORECASE)),
+                ("meta_robots",
+                 re.compile(r"<meta\s[^>]*name=[\"']robots[\"'][^>]*>",
+                            re.IGNORECASE)),
+                ("canonical",
+                 re.compile(r"<link\s[^>]*rel=[\"']canonical[\"'][^>]*>",
                             re.IGNORECASE)),
             ):
                 m_new = rx.search(remaining)
@@ -437,8 +470,18 @@ def localize_executor_patches(workdir: str, stack: str,
             })
             continue
         target_path, exact_old = hits[0]
+        rel = str(target_path.relative_to(root))
+        if not _file_matches_page(rel, page_path):
+            needs_review.append({
+                "field": field, "old": old, "new": new,
+                "candidates": [rel],
+                "reason": (f"le seul fichier qui contient ce texte ({rel}) "
+                           f"ne ressemble pas à la page {page_path} — "
+                           "risque de toucher la mauvaise page"),
+            })
+            continue
         applicable.append({
-            "file": str(target_path.relative_to(root)),
+            "file": rel,
             "old": exact_old,
             "new": new_wrapped if "<" in exact_old else new,
             "field": field, "rationale": p.get("rationale") or "",

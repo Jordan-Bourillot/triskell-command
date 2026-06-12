@@ -142,8 +142,14 @@ def run_keywords(site_id: str, *, app_state=None) -> dict:
         })
     inserted = repo.upsert_keywords(site_id, persisted)
 
-    # Recommandation cluster
+    # Recommandation cluster — périssable : le veilleur en repropose un à
+    # chaque passage avec un pivot reformulé (vécu : 5 cartes « Cluster
+    # sémantique » ouvertes sur Triskell Studio pour la même idée). Le
+    # nouveau remplace les anciens encore ouverts.
     if plan.get("cluster_pivot"):
+        repo.expire_open_actions(site_id, agent="veilleur",
+                                 title_prefix="Cluster sémantique",
+                                 reason="Remplacé par le cluster le plus récent")
         repo.insert_action({
             "site_id": site_id, "agent": "veilleur", "kind": "recommandation",
             "title": f"Cluster sémantique : {plan['cluster_pivot']}",
