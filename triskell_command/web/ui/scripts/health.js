@@ -111,6 +111,20 @@ const Health = {
   _dnsResult: null,
   _dnsChecking: false,   // une vérif tourne → l'auto-refresh ne touche à rien
 
+  // Traductions des contrôles (P5) : à l'écran, chaque tampon dit ce qu'il
+  // FAIT et ce qu'on risque sans lui. Les conseils du serveur (advice,
+  // déjà en français avec les chemins IONOS) restent affichés tels quels.
+  _DNS_FR: {
+    spf:   { name: 'Autorisation d’envoyer (SPF)',
+             risk: 'sans elle, tes mails partent tout droit en indésirable' },
+    dkim:  { name: 'Signature de tes mails (DKIM)',
+             risk: 'sans elle, Gmail et Yahoo se méfient de tes envois' },
+    dmarc: { name: 'Consigne en cas de doute (DMARC)',
+             risk: 'sans elle, n’importe qui peut se faire passer pour ton adresse' },
+    mx:    { name: 'Réception des réponses (MX)',
+             risk: 'sans elle, les réponses de tes prospects n’arrivent jamais' },
+  },
+
   _renderDnsCard() {
     const r = this._dnsResult;
     let body;
@@ -141,15 +155,20 @@ const Health = {
           <span class="font-semibold text-text">${this._esc(r.domain)}</span>
           — score ${this._esc(r.score)}</div>
         <div class="space-y-2 mb-3">
-          ${(r.checks || []).map(c => `
+          ${(r.checks || []).map(c => {
+            const fr = this._DNS_FR[String(c.id || '').toLowerCase()] || null;
+            const name = fr ? fr.name : c.label;
+            return `
             <div class="flex items-start gap-2 text-sm">
               <span>${c.ok ? '✅' : '❌'}</span>
               <div>
-                <span class="font-semibold">${this._esc(c.label)}</span>
+                <span class="font-semibold">${this._esc(name)}</span>
                 <span class="text-text-muted"> — ${this._esc(c.detail)}</span>
-                ${c.advice ? `<div class="text-xs text-warning mt-0.5">→ ${this._esc(c.advice)}</div>` : ''}
+                ${(!c.ok && fr) ? `<div class="text-xs text-danger-text mt-0.5">Risque : ${this._esc(fr.risk)}.</div>` : ''}
+                ${c.advice ? `<div class="text-xs text-warning mt-0.5">→ Quoi faire : ${this._esc(c.advice)}</div>` : ''}
               </div>
-            </div>`).join('')}
+            </div>`;
+          }).join('')}
         </div>
         <button id="h-dns-check" class="btn btn-secondary text-xs">Re-vérifier</button>`;
     }

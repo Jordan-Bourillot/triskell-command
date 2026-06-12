@@ -321,6 +321,28 @@ const Prospection = {
       if (!params.plateformes.length) {
         return Toast.warn('Coche au moins une plateforme.');
       }
+      // Garde-fou clé manquante (P5) : YouTube sans clé = recherche qui
+      // tourne pour rien. On vérifie AVANT, sans bloquer (une clé peut
+      // exister côté serveur).
+      if (params.plateformes.includes('youtube')
+          && App.api && typeof App.api.obelisk_get_config === 'function') {
+        let cfg = null;
+        try {
+          const rc = await App.api.obelisk_get_config({});
+          cfg = (rc && rc.ok && rc.config) || null;
+        } catch (e) { /* injoignable : on n'empêche pas le lancement */ }
+        if (cfg && !String(cfg.youtube_api_key || '').trim()) {
+          const goOn = await Dialog.confirm(
+            'La clé YouTube semble manquante : la partie YouTube de cette '
+            + 'recherche risque de revenir vide.\n\n'
+            + 'Elle se règle dans l’écran Obélisk → onglet « Réglages » '
+            + '(et « Où trouver cette clé ? » dans Réglages → IA & clés '
+            + 't’explique comment l’obtenir).',
+            { title: 'Clé YouTube manquante ?', danger: true,
+              okLabel: 'Lancer quand même', cancelLabel: 'Annuler' });
+          if (!goOn) return;
+        }
+      }
     }
     const dryBox = document.getElementById('pr-f-dry');
     const dryRun = !!(dryBox && dryBox.checked && !dryBox.disabled);

@@ -2433,6 +2433,30 @@ const Obelisk = {
       osm_area:         osmArea,
     };
 
+    // Garde-fou clé manquante (P5) : avant, une recherche YouTube sans clé
+    // tournait pour rien et le débutant croyait à « zéro résultat ». On
+    // vérifie AVANT et on prévient — sans bloquer (une clé serveur peut
+    // exister en secours).
+    if (platforms.includes('youtube')) {
+      let cfg = this.state.config;
+      if (!cfg) {
+        const rc = await this._api('get_config', null, { silent: true });
+        cfg = (rc && rc.ok && rc.config) || {};
+        this.state.config = cfg;
+      }
+      if (!String(cfg.youtube_api_key || '').trim()) {
+        const goOn = await Dialog.confirm(
+          'La clé YouTube semble manquante : la partie YouTube de cette '
+          + 'recherche risque de revenir vide.\n\n'
+          + 'Tu peux la coller dans l’onglet « Réglages » d’Obélisk '
+          + '(le lien « Où trouver cette clé ? » des Réglages → IA & clés '
+          + 't’explique comment l’obtenir).',
+          { title: 'Clé YouTube manquante ?', danger: true,
+            okLabel: 'Lancer quand même', cancelLabel: 'Annuler' });
+        if (!goOn) return;
+      }
+    }
+
     const btn = document.getElementById('ob-s-launch');
     btn.disabled = true; btn.textContent = 'Démarrage…';
     const res = await this._api('start_search', {

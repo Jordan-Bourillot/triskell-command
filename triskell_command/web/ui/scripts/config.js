@@ -980,6 +980,19 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
           ${this._mailField('label',        'Nom affiché dans l’app',             existing?.label || '')}
           ${this._mailField('from_email',   'Adresse mail (envoi & réception)',   existing?.from_email || '', 'email')}
           ${this._mailField('from_name',    'Nom d’expéditeur (ex : Lagriffe Studio)', existing?.from_name || '')}
+          <!-- Préréglages fournisseurs (P5) : un clic remplit les serveurs
+               et les ports, et dit QUEL mot de passe utiliser — le piège
+               n°1 étant Gmail et son mot de passe d'application. -->
+          <div>
+            <div class="text-[11px] font-bold tracking-widest text-text-muted mb-1.5">REMPLISSAGE RAPIDE — MA BOÎTE EST CHEZ…</div>
+            <div class="flex flex-wrap gap-1.5">
+              <button type="button" data-mail-preset="gmail" class="btn btn-secondary text-xs">Gmail</button>
+              <button type="button" data-mail-preset="ionos" class="btn btn-secondary text-xs">IONOS</button>
+              <button type="button" data-mail-preset="ovh" class="btn btn-secondary text-xs">OVH</button>
+              <button type="button" data-mail-preset="outlook" class="btn btn-secondary text-xs">Outlook</button>
+            </div>
+            <div id="mail-preset-note" class="hidden mt-2 text-[11px] px-3 py-2 rounded-lg bg-accent/5 border border-accent/20" style="text-wrap: pretty"></div>
+          </div>
           <div class="grid grid-cols-2 gap-3">
             ${this._mailField('smtp_host',  'Serveur d’envoi (SMTP)',  existing?.smtp_host || 'smtp.ionos.fr')}
             ${this._mailField('smtp_port',  'Port SMTP',  existing?.smtp_port || 587, 'number')}
@@ -1007,6 +1020,45 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
     document.body.appendChild(overlay);
     const close = () => overlay.remove();
     document.getElementById('mail-form-cancel').onclick = close;
+
+    // Préréglages fournisseurs : serveurs + ports posés, identifiants
+    // pré-remplis avec l'adresse, et la consigne mot de passe qui va bien.
+    const MAIL_PRESETS = {
+      gmail: { smtp_host: 'smtp.gmail.com', smtp_port: 587,
+               imap_host: 'imap.gmail.com', imap_port: 993,
+               note: '⚠ Gmail refuse ton mot de passe habituel : il faut un « mot de passe d’application » (16 lettres). Active la validation en 2 étapes sur ton compte Google, crée-le sur <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" class="text-accent underline">myaccount.google.com/apppasswords</a>, puis colle-le dans les deux champs mot de passe.' },
+      ionos: { smtp_host: 'smtp.ionos.fr', smtp_port: 587,
+               imap_host: 'imap.ionos.fr', imap_port: 993,
+               note: 'IONOS : utilise le mot de passe de la boîte mail elle-même (celui de la messagerie, pas celui de l’espace client).' },
+      ovh:   { smtp_host: 'ssl0.ovh.net', smtp_port: 587,
+               imap_host: 'ssl0.ovh.net', imap_port: 993,
+               note: 'OVH : utilise le mot de passe de la boîte mail. Les deux serveurs s’appellent « ssl0.ovh.net », c’est normal.' },
+      outlook: { smtp_host: 'smtp-mail.outlook.com', smtp_port: 587,
+                 imap_host: 'outlook.office365.com', imap_port: 993,
+                 note: '⚠ Outlook/Microsoft : si la double vérification est activée, il faut un « mot de passe d’application » — compte Microsoft → Sécurité → <a href="https://account.live.com/proofs/AppPassword" target="_blank" rel="noopener" class="text-accent underline">créer un mot de passe d’application</a>.' },
+    };
+    overlay.querySelectorAll('[data-mail-preset]').forEach(b => {
+      b.onclick = () => {
+        const p = MAIL_PRESETS[b.dataset.mailPreset];
+        if (!p) return;
+        const set = (k, v) => {
+          const el = overlay.querySelector(`[data-mail-field="${k}"]`);
+          if (el) el.value = String(v);
+        };
+        set('smtp_host', p.smtp_host); set('smtp_port', p.smtp_port);
+        set('imap_host', p.imap_host); set('imap_port', p.imap_port);
+        const mailEl = overlay.querySelector('[data-mail-field="from_email"]');
+        const mail = (mailEl && mailEl.value || '').trim();
+        if (mail) {
+          ['smtp_user', 'imap_user'].forEach(k => {
+            const el = overlay.querySelector(`[data-mail-field="${k}"]`);
+            if (el && !el.value.trim()) el.value = mail;
+          });
+        }
+        const note = overlay.querySelector('#mail-preset-note');
+        if (note) { note.innerHTML = p.note; note.classList.remove('hidden'); }
+      };
+    });
 
     // Rassemble les champs du formulaire en un compte. L’identifiant interne
     // n’est plus demandé : il est dérivé automatiquement de l’adresse mail.
@@ -1160,23 +1212,34 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
   _renderAi(s) {
     const ai = (s && s.ai) || { api_keys: {} };
     const keys = ai.api_keys || {};
+    // `get` : où obtenir la clé (P5) — lien direct + consigne en un souffle.
     const providers = [
-      { id: 'anthropic',  label: 'Anthropic (Claude)', recommended: false },
-      { id: 'google',     label: 'Google (Gemini) — gratuit', recommended: true },
-      { id: 'mistral',    label: 'Mistral — gratuit', recommended: true },
-      { id: 'groq',       label: 'Groq (Llama / Meta AI) — gratuit', recommended: true },
-      { id: 'deepseek',   label: 'DeepSeek — très bon marché', recommended: true },
-      { id: 'perplexity', label: 'Perplexity (mode web) — payant', recommended: false },
-      { id: 'openai',     label: 'OpenAI (GPT)',     recommended: false },
-      { id: 'xai',        label: 'xAI (Grok)',       recommended: false },
+      { id: 'anthropic',  label: 'Anthropic (Claude)', recommended: false,
+        get: { url: 'https://console.anthropic.com/settings/keys', tip: 'compte Anthropic → Settings → API keys → Create Key' } },
+      { id: 'google',     label: 'Google (Gemini) — gratuit', recommended: true,
+        get: { url: 'https://aistudio.google.com/apikey', tip: 'connecte-toi avec ton compte Google et clique « Create API key »' } },
+      { id: 'mistral',    label: 'Mistral — gratuit', recommended: true,
+        get: { url: 'https://console.mistral.ai/api-keys', tip: 'compte Mistral → API keys' } },
+      { id: 'groq',       label: 'Groq (Llama / Meta AI) — gratuit', recommended: true,
+        get: { url: 'https://console.groq.com/keys', tip: 'compte Groq → API Keys' } },
+      { id: 'deepseek',   label: 'DeepSeek — très bon marché', recommended: true,
+        get: { url: 'https://platform.deepseek.com/api_keys', tip: 'compte DeepSeek → API keys' } },
+      { id: 'perplexity', label: 'Perplexity (mode web) — payant', recommended: false,
+        get: { url: 'https://www.perplexity.ai/settings/api', tip: 'abonnement requis → Settings → API' } },
+      { id: 'openai',     label: 'OpenAI (GPT)',     recommended: false,
+        get: { url: 'https://platform.openai.com/api-keys', tip: 'compte OpenAI → API keys' } },
+      { id: 'xai',        label: 'xAI (Grok)',       recommended: false,
+        get: { url: 'https://console.x.ai/', tip: 'console xAI → API Keys' } },
     ];
     // Clés "Services Google" — utilisées par les outils bêta (Chasseur
     // Créateur, Prospecteur Google). Ces clés sont stockées dans le même
     // namespace que les clés IA pour réutiliser le même mécanisme de
     // sauvegarde côté serveur. Pré-remplies en dur si non configurées.
     const googleApis = [
-      { id: 'youtube_data',  label: 'YouTube Data API — utilisée par le Chasseur Créateur', recommended: false },
-      { id: 'google_places', label: 'Google Places API — utilisée par le Prospecteur Google', recommended: false },
+      { id: 'youtube_data',  label: 'YouTube Data API — utilisée par le Chasseur Créateur', recommended: false,
+        get: { url: 'https://console.cloud.google.com/apis/credentials', tip: 'console Google Cloud → Identifiants → « Créer une clé API », puis active « YouTube Data API v3 » dans Bibliothèque' } },
+      { id: 'google_places', label: 'Google Places API — utilisée par le Prospecteur Google', recommended: false,
+        get: { url: 'https://console.cloud.google.com/apis/credentials', tip: 'la même clé Google Cloud peut servir : active « Places API » dans Bibliothèque' } },
     ];
     return `
       <section>
@@ -1194,6 +1257,10 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
                   ${this._esc(p.label)}
                   ${p.recommended ? '<span class="ml-2 text-[11px] bg-success/15 text-success px-2 py-0.5 rounded-full font-bold">RECOMMANDÉ</span>' : ''}
                 </label>
+                ${p.get ? `<div class="text-[11px] text-text-muted mb-1.5" style="text-wrap: pretty">
+                  <a href="${p.get.url}" target="_blank" rel="noopener" class="text-accent underline hover:no-underline">Où trouver cette clé ?</a>
+                  — ${this._esc(p.get.tip)}
+                </div>` : ''}
                 <div class="flex gap-2 items-stretch">
                   <input type="password"
                          data-save-path="ai.api_keys.${p.id}"
@@ -1239,6 +1306,10 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
                 <label class="block text-sm font-semibold mb-1">
                   ${this._esc(p.label)}
                 </label>
+                ${p.get ? `<div class="text-[11px] text-text-muted mb-1.5" style="text-wrap: pretty">
+                  <a href="${p.get.url}" target="_blank" rel="noopener" class="text-accent underline hover:no-underline">Où trouver cette clé ?</a>
+                  — ${this._esc(p.get.tip)}
+                </div>` : ''}
                 <div class="flex gap-2 items-stretch">
                   <input type="password"
                          data-save-path="ai.api_keys.${p.id}"
