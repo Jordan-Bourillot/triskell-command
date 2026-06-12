@@ -55,6 +55,26 @@ jobs:
           pip install -r requirements.txt
           # Web Push (pour notifs phare → Jordan)
           pip install pywebpush
+          # Search Console : gsc.py exige google-auth-oauthlib pour le
+          # chemin OAuth user (sans lui, import KO → GSC silencieusement vide)
+          pip install google-auth google-auth-oauthlib
+
+      - name: Pose les accès Search Console (si les secrets existent)
+        env:
+          GSC_OAUTH_CLIENT_JSON: ${{ secrets.GSC_OAUTH_CLIENT_JSON }}
+          GSC_OAUTH_TOKEN_JSON: ${{ secrets.GSC_OAUTH_TOKEN_JSON }}
+        run: |
+          # gsc.py lit ~/.triskell-command/gsc-oauth-{client,token}.json
+          # (chemins codés en dur). On matérialise les secrets en fichiers ;
+          # sans secrets, le tick tourne comme avant (GSC ignorée proprement).
+          if [ -n "$GSC_OAUTH_CLIENT_JSON" ] && [ -n "$GSC_OAUTH_TOKEN_JSON" ]; then
+            mkdir -p ~/.triskell-command
+            printf '%s' "$GSC_OAUTH_CLIENT_JSON" > ~/.triskell-command/gsc-oauth-client.json
+            printf '%s' "$GSC_OAUTH_TOKEN_JSON" > ~/.triskell-command/gsc-oauth-token.json
+            echo "Accès Search Console posés pour ce tick."
+          else
+            echo "Pas de secrets GSC : tick sans Search Console."
+          fi
 
       - name: Run scheduler tick
         env:
