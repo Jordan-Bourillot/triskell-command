@@ -282,12 +282,23 @@ def upsert_pages(site_id: str, pages: list[dict]) -> int:
     if sb is None or not pages:
         return 0
     rows = []
+    seen_paths: set[str] = set()
     now = datetime.now(timezone.utc).isoformat()
     for p in pages:
+        path = p.get("path") or "/"
+        # Le crawler retire la query string : « /configurer?option=seo » et
+        # « /configurer?option=combo » donnent le même path. Deux lignes
+        # identiques dans le MÊME upsert → Postgres rejette TOUT le lot
+        # (21000, « cannot affect row a second time ») et la table restait
+        # vide en silence (vécu sur Pixel Pros le 12/06/2026 : 50 pages
+        # crawlées, 0 écrites → l'Exécuteur travaillait à l'aveugle).
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
         rows.append({
             "site_id": site_id,
             "url": p["url"],
-            "path": p.get("path") or "/",
+            "path": path,
             "title": p.get("title") or "",
             "meta_description": p.get("meta_description") or "",
             "h1": p.get("h1") or "",
@@ -303,8 +314,16 @@ def upsert_pages(site_id: str, pages: list[dict]) -> int:
         sb.table("phare_pages").upsert(rows, on_conflict="site_id,path").execute()
         return len(rows)
     except Exception as exc:
-        logger.warning("phare.upsert_pages: %s", exc)
-        return 0
+        # Filet : une seule ligne pourrie ne doit plus emporter tout le lot
+        logger.warning("phare.upsert_pages (lot): %s — reprise ligne à ligne", exc)
+        ok = 0
+        for row in rows:
+            try:
+                sb.table("phare_pages").upsert(row, on_conflict="site_id,path").execute()
+                ok += 1
+            except Exception as exc2:
+                logger.warning("phare.upsert_pages (%s): %s", row.get("path"), exc2)
+        return ok
 
 
 def list_pages(site_id: str, limit: int = 500) -> list[dict]:

@@ -373,12 +373,42 @@ def localize_executor_patches(workdir: str, stack: str,
                 needs_review.append({"field": field, "old": "", "new": "",
                                      "candidates": [], "reason": "patch vide"})
                 continue
-            applicable.append({
-                "file": str(files[0].relative_to(root)),
-                "old": "</head>",
-                "new": new.rstrip() + "\n</head>",
-                "field": field, "rationale": p.get("rationale") or "",
-            })
+            target = files[0]
+            rel = str(target.relative_to(root))
+            content = _read_text_safe(target)
+            remaining = new
+            # Balises uniques : si la page a DÉJÀ un <title> ou une meta
+            # description et que l'insertion en apporte, on REMPLACE
+            # l'existante au lieu d'empiler un doublon (vécu le 12/06/2026 :
+            # double <title> sur pixel-pros.fr — le premier gagnait, le
+            # changement restait invisible).
+            for unique_field, rx in (
+                ("title",
+                 re.compile(r"<title>.*?</title>", re.IGNORECASE | re.DOTALL)),
+                ("meta_description",
+                 re.compile(r"<meta\s[^>]*name=[\"']description[\"'][^>]*>",
+                            re.IGNORECASE)),
+            ):
+                m_new = rx.search(remaining)
+                if not m_new:
+                    continue
+                m_old = rx.search(content)
+                if not m_old:
+                    continue   # la balise n'existe pas : l'insertion est saine
+                applicable.append({
+                    "file": rel, "old": m_old.group(0), "new": m_new.group(0),
+                    "field": unique_field,
+                    "rationale": p.get("rationale") or "",
+                })
+                remaining = remaining.replace(m_new.group(0), "", 1)
+            remaining = remaining.strip()
+            if remaining:
+                applicable.append({
+                    "file": rel,
+                    "old": "</head>",
+                    "new": remaining + "\n</head>",
+                    "field": field, "rationale": p.get("rationale") or "",
+                })
             continue
 
         # title / meta_description / h1 → flux classique, désambiguïsé

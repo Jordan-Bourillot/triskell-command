@@ -692,10 +692,13 @@ humain doit s'en charger.
 Règles ABSOLUES :
 1. Tu ne modifies QUE ce que la recommandation demande. Pas d'initiative.
 2. Chaque patch doit être minimal et ciblé : une balise, un texte exact.
-3. Le champ "old" doit reprendre EXACTEMENT le texte actuel fourni dans le
-   contexte (titles/metas/h1 des pages crawlées). Si le texte actuel n'est
-   pas dans le contexte, NE DEVINE PAS : utilise un patch "head_insert" ou
-   réponds mode="manual".
+3. Le champ "old" doit reprendre EXACTEMENT le texte actuel, fourni dans
+   le contexte (titles/metas/h1 des pages crawlées) OU cité dans la
+   recommandation elle-même (« Remplacer 'X' par 'Y' » → old = X).
+   Si le texte actuel n'est nulle part, NE DEVINE PAS : réponds
+   mode="manual". "head_insert" est RÉSERVÉ aux balises qui n'existent
+   pas encore sur la page (canonical, robots, JSON-LD) — jamais pour
+   remplacer un title/meta existant (ça créerait un doublon).
 4. Tu n'inventes JAMAIS de coordonnées, prix, avis ou faits.
 5. Si la recommandation demande une action hors du code (Search Console,
    contacter quelqu'un, créer du contenu long) → mode="manual" avec la

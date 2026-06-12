@@ -157,6 +157,10 @@ class FakeQuery:
         self._insert_payload = payload
         return self
 
+    def upsert(self, payload, **kwargs):
+        self.db.setdefault("upserts", []).append(payload)
+        return self
+
     def execute(self):
         class R:
             pass
@@ -210,6 +214,21 @@ with mock.patch.object(phare_repo, "_sb", return_value=FakeSB(db2)):
     check("migration 48 absente → retry sans simple_md, insertion passée",
           out3 is not None and len(db2["inserts"]) == 2
           and "simple_md" not in db2["inserts"][1])
+
+# upsert_pages : les variantes « ?option= » donnent le même path — un seul
+# doublon dans le lot faisait tout rejeter par Postgres (table restée vide)
+db3 = {"rows": [], "inserts": [], "upserts": []}
+with mock.patch.object(phare_repo, "_sb", return_value=FakeSB(db3)):
+    n = phare_repo.upsert_pages("s1", [
+        {"url": "https://x.fr/configurer", "path": "/configurer", "title": "A"},
+        {"url": "https://x.fr/configurer?option=seo", "path": "/configurer", "title": "A"},
+        {"url": "https://x.fr/configurer?option=combo", "path": "/configurer", "title": "A"},
+        {"url": "https://x.fr/demo", "path": "/demo", "title": "B"},
+    ])
+    batch = db3["upserts"][0] if db3["upserts"] else []
+    check("upsert_pages : variantes ?query dédupliquées (4 pages → 2 lignes)",
+          n == 2 and len(batch) == 2
+          and sorted(r["path"] for r in batch) == ["/configurer", "/demo"])
 
 # ===========================================================================
 print("\n— plain_language.py —")
@@ -351,6 +370,29 @@ with tempfile.TemporaryDirectory() as tmp:
     check("page_path « /demo.html » → rattrapé vers /demo",
           len(loc["applicable"]) == 1
           and loc["applicable"][0]["file"] == "demo.html")
+
+    # head_insert d'un <title> sur une page qui en a DÉJÀ un → remplacement,
+    # jamais d'empilement (vécu : double <title> sur pixel-pros.fr)
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "head_insert", "page_path": "/demo",
+         "new": "<title>Nouveau titre démo</title>"},
+    ], pages)
+    check("head_insert d'un title existant → patch de remplacement",
+          len(loc["applicable"]) == 1
+          and loc["applicable"][0]["field"] == "title"
+          and loc["applicable"][0]["old"].startswith("<title>")
+          and "</head>" not in loc["applicable"][0]["new"])
+
+    # Mixte : title (existe → remplacé) + canonical (absent → inséré)
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "head_insert", "page_path": "/demo",
+         "new": "<title>Titre frais</title>\n"
+                '<link rel="canonical" href="https://pixel-pros.fr/demo" />'},
+    ], pages)
+    fields = sorted(p["field"] for p in loc["applicable"])
+    check("head_insert mixte → title remplacé + canonical inséré",
+          fields == ["head_insert", "title"]
+          and all("Nouveau" not in p["new"] for p in loc["applicable"]))
 
 # ===========================================================================
 print("\n— executor._apply_one (mocks complets, ni git ni Supabase) —")
