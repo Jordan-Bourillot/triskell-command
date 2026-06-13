@@ -51,8 +51,7 @@ const GlobalSearch = {
       keywords: 'google maps commerces locaux ville metier métier sans site' },
     { view: 'argus',       label: 'Argus (mails pros en masse)', kind: 'view', icon: '🦅',
       keywords: 'argus annuaires pages jaunes europages mails en masse' },
-    { view: 'chasseur_createurs', label: 'Chasseur Créateur', kind: 'view', icon: '🎥',
-      keywords: 'chasseur createur créateur abonnes abonnés niche chasse ponctuelle' },
+    // Chasseur Créateur retiré du menu le 14/06/2026 (remplacé par Obélisk).
     // — Mails —
     { view: 'mails', action: 'compose', label: 'Rédiger un mail', kind: 'view', icon: '✏',
       keywords: 'rediger rédiger composer ecrire écrire nouveau mail message' },

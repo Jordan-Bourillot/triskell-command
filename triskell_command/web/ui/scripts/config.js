@@ -1236,7 +1236,7 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
     // namespace que les clés IA pour réutiliser le même mécanisme de
     // sauvegarde côté serveur. Pré-remplies en dur si non configurées.
     const googleApis = [
-      { id: 'youtube_data',  label: 'YouTube Data API — utilisée par le Chasseur Créateur', recommended: false,
+      { id: 'youtube_data',  label: 'YouTube Data API — utilisée par Obélisk (recherche créateurs)', recommended: false,
         get: { url: 'https://console.cloud.google.com/apis/credentials', tip: 'console Google Cloud → Identifiants → « Créer une clé API », puis active « YouTube Data API v3 » dans Bibliothèque' } },
       { id: 'google_places', label: 'Google Places API — utilisée par le Prospecteur Google', recommended: false,
         get: { url: 'https://console.cloud.google.com/apis/credentials', tip: 'la même clé Google Cloud peut servir : active « Places API » dans Bibliothèque' } },
@@ -1294,8 +1294,8 @@ p{margin:0 0 10px;}a{color:#5b5fd6;}img{max-width:100%;height:auto;}</style>
       <section class="mt-8">
         <div class="section-label">Services Google</div>
         <p class="text-sm text-text-muted mb-4">
-          Clés utilisées par les outils bêta (Chasseur Créateur, Prospecteur
-          Google). Si tu as ta propre clé Google Cloud, colle-la ici pour
+          Clés utilisées par Obélisk (recherche créateurs) et le Prospecteur
+          Google. Si tu as ta propre clé Google Cloud, colle-la ici pour
           remplacer celle partagée par défaut.
         </p>
         <div class="card p-6 space-y-5">
