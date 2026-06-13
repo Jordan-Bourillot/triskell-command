@@ -404,7 +404,7 @@ def _fetch_places(region_code: str, metier: str, zone: str, num_results: int,
 # Champs minimaux pour une recherche « site d'UNE entreprise » : on ne
 # demande QUE l'URL du site (+ le nom pour vérifier qu'on est sur la bonne
 # boîte) → requête la moins chère possible côté facturation Places.
-_SITE_LOOKUP_FIELDS = "places.displayName,places.websiteUri"
+_SITE_LOOKUP_FIELDS = "places.displayName,places.websiteUri,places.internationalPhoneNumber"
 
 
 def lookup_site_for_company(name: str, city: str, api_key: str = "",
@@ -442,6 +442,42 @@ def lookup_site_for_company(name: str, city: str, api_key: str = "",
         return (places[0].get("websiteUri") or "").strip()
     except Exception:
         return ""
+
+
+def lookup_site_and_phone_for_company(name: str, city: str, api_key: str = "",
+                                      region_code: str = "FR") -> tuple[str, str]:
+    """Comme lookup_site_for_company mais renvoie AUSSI le téléphone Google
+    Places — dans la MÊME requête (donc aucun coût supplémentaire). Renvoie
+    (url, phone) ; l'un ou l'autre peut être vide. Best-effort, ne lève jamais.
+
+    Sert au Chasseur : même quand la boîte n'a pas de site, Places connaît
+    souvent son numéro → alimente la « liste à appeler »."""
+    key = (api_key or "").strip() or _get_api_key()
+    q = " ".join(p for p in [(name or "").strip(), (city or "").strip()] if p)
+    if not key or not q:
+        return "", ""
+    try:
+        r = requests.post(
+            PLACES_URL,
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": key,
+                "X-Goog-FieldMask": _SITE_LOOKUP_FIELDS,
+            },
+            json={"textQuery": q, "pageSize": 1, "languageCode": "fr",
+                  "regionCode": region_code or "FR"},
+            timeout=12,
+        )
+        if r.status_code != 200:
+            return "", ""
+        places = (r.json() or {}).get("places") or []
+        if not places:
+            return "", ""
+        url = (places[0].get("websiteUri") or "").strip()
+        phone = (places[0].get("internationalPhoneNumber") or "").strip()
+        return url, phone
+    except Exception:
+        return "", ""
 
 
 def _run_hunt(hunt: ProspectHunt, metier: str, zone: str, num_results: int,
