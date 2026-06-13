@@ -614,6 +614,66 @@ def delete_hunt(hunt_id: str) -> dict:
     return {"ok": True}
 
 
+# Boîtes mail grand public : un petit commerce les utilise comme adresse
+# pro (resto@gmail.com…), donc on les GARDE même si elles ne sont pas sur
+# le domaine du site.
+_FREE_MAIL_DOMAINS = {
+    "gmail.com", "googlemail.com", "orange.fr", "wanadoo.fr", "free.fr",
+    "sfr.fr", "neuf.fr", "laposte.net", "outlook.fr", "outlook.com",
+    "hotmail.fr", "hotmail.com", "live.fr", "yahoo.fr", "yahoo.com",
+    "icloud.com", "me.com", "aol.com", "gmx.fr", "bbox.fr", "protonmail.com",
+}
+
+
+def _registrable_label(domain: str) -> str:
+    """Renvoie l'étiquette de marque d'un domaine : 'lebaden-roc.fr' -> 'lebaden-roc',
+    'www.gavrinis.com' -> 'gavrinis'. Heuristique simple (avant-dernier label),
+    suffisante pour les domaines FR (.fr/.com/.bzh/.net…)."""
+    d = (domain or "").lower().strip().rstrip(".")
+    if d.startswith("www."):
+        d = d[4:]
+    parts = [p for p in d.split(".") if p]
+    if len(parts) < 2:
+        return d
+    return parts[-2]
+
+
+def _select_own_emails(website: str, primary: str, extra: list) -> list:
+    """Ne garde que les adresses qui sont VRAIMENT celles du commerce, et
+    les met dans le bon ordre. Règles (demande Jordan : protéger la
+    réputation d'envoi, pas de mauvais destinataire) :
+
+    1. Adresse dont le domaine = domaine du site -> c'est SA boîte (priorité).
+    2. Adresse sur une boîte grand public (gmail, orange…) -> gardée (les
+       petits commerces s'en servent), en second.
+    3. Adresse sur un AUTRE domaine pro (agence web, siège de groupe,
+       fournisseur…) -> JETÉE (mauvais destinataire = rebond/spam).
+    4. Garde-fou « page annuaire » : si aucune adresse ne colle au site et
+       qu'on a ramassé 4+ adresses grand public en vrac -> on jette tout
+       (c'est une liste scrapée, pas la boîte du commerce).
+    """
+    seen, all_e = set(), []
+    for e in [primary] + list(extra or []):
+        e = (e or "").strip().lower()
+        if e and "@" in e and e not in seen:
+            seen.add(e)
+            all_e.append(e)
+    if not all_e:
+        return []
+    site_label = _registrable_label(website.split("//")[-1]) if website else ""
+    matched, free = [], []
+    for e in all_e:
+        dom = e.split("@", 1)[1]
+        if site_label and _registrable_label(dom) == site_label:
+            matched.append(e)
+        elif dom in _FREE_MAIL_DOMAINS:
+            free.append(e)
+        # sinon : autre domaine pro -> ignoré
+    if not matched and len(free) >= 4:
+        return []   # liste d'adresses sans rapport avec le commerce
+    return matched + free
+
+
 def push_to_prospects(hunt_id: str) -> dict:
     """Pousse les prospects d'une chasse Google vers la base partagée
     (table `prospects`), là où l'Auto-Pilote et la vue "Tous les prospects"
@@ -655,11 +715,20 @@ def push_to_prospects(hunt_id: str) -> dict:
         h.prospects, email_key="email", name_key="name")
 
     core_prospects: list[CoreProspect] = []
+    dropped_thirdparty = 0
     for p in clean_prospects:
-        email = (p.get("email") or "").strip()
-        if not email:
+        # Tri d'adresses : on ne garde que la (les) vraie(s) boîte(s) du
+        # commerce — domaine du site d'abord, boîtes grand public ensuite,
+        # domaines tiers (agence web, siège de groupe…) jetés.
+        all_emails = _select_own_emails(
+            p.get("website") or "",
+            p.get("email") or "",
+            p.get("emails_extra") or [],
+        )
+        if not all_emails:
+            dropped_thirdparty += 1
             continue
-        all_emails = [email] + [e for e in (p.get("emails_extra") or []) if e]
+        email = all_emails[0]
         emails_meta = [{
             "email": e,
             "source": "maps",
@@ -692,6 +761,9 @@ def push_to_prospects(hunt_id: str) -> dict:
             status="new",
         )
         core_prospects.append(cp)
+
+    if isinstance(quality, dict):
+        quality["dropped_thirdparty_email"] = dropped_thirdparty
 
     if not core_prospects:
         return {"ok": False, "error":
