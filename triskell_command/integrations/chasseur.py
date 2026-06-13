@@ -51,10 +51,13 @@ import requests
 logger = logging.getLogger(__name__)
 
 try:
-    from triskell_core.prospect.naf_labels import naf_label
+    from triskell_core.prospect.naf_labels import naf_label, sector_keywords
 except Exception:  # triskell_core absent → repli minimal, ne bloque jamais
     def naf_label(code: str, section: str = "") -> str:  # type: ignore
         return section or code or ""
+
+    def sector_keywords(code: str) -> frozenset:  # type: ignore
+        return frozenset()
 
 
 CHASSEUR_DIR = Path.home() / ".triskell-command" / "chasseur"
@@ -575,6 +578,20 @@ def _mojeek_first_results(query: str, limit: int = 5) -> list[str]:
         if len(out) >= limit:
             break
     return out
+
+
+def _site_matches_sector(html: str, naf: str) -> bool:
+    """Garde-fou de pertinence : vrai si le contenu du site mentionne le
+    métier cherché (code NAF), OU si on n'a pas de mots-clés pour ce métier
+    (dans ce cas on ne juge pas → on garde, pour ne JAMAIS écarter un vrai
+    prospect). Évite de démarcher une activité hors-sujet (ex : un « fleuriste »
+    mal classé au registre dont le site parle en réalité d'immobilier).
+    Vérifié le 14/06/2026 : garde le vrai fleuriste, écarte immo + animalerie."""
+    kws = sector_keywords(naf)
+    if not kws:
+        return True
+    low = (html or "").lower()
+    return any(k in low for k in kws)
 
 
 def _discover_site(nom: str, ville: str,
@@ -1193,6 +1210,20 @@ def _run_hunt(hunt: Hunt, target: int, with_email_only: bool,
                 sources_count[source] = sources_count.get(source, 0) + 1
             if source == "places":
                 places_used += 1
+
+            # 1bis) Garde-fou pertinence métier (14/06/2026) : si le site
+            #       trouvé ne parle JAMAIS du métier cherché, c'est qu'on est
+            #       tombé sur une autre activité (ex : une « SARL FLEUR'IMMO »
+            #       mal classée fleuriste au registre, mais dont le vrai site
+            #       est immobilier). On écarte le site → pas de mail extrait →
+            #       la fiche ne sera pas démarchée à tort. Prudent : ne joue
+            #       que si on a des mots-clés pour ce métier (sinon on garde).
+            if site_root and html_home and not _site_matches_sector(
+                    html_home, prospect.naf):
+                log(f"  ⤫ {prospect.nom} : site hors secteur — écarté")
+                site_root = ""
+                prospect.site_web = ""
+                html_home = ""
 
             # 2) Crawl des pages contact pour récupérer un mail public.
             #    On garde le html_home (page d'accueil) déjà chargé pour
