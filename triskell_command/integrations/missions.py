@@ -52,6 +52,57 @@ ST_ERROR = "error"
 ST_CANCELLED = "cancelled"
 ACTIVE_STATUSES = (ST_HUNTING, ST_HANDING)
 
+# ---------------------------------------------------------------------------
+# Reprise automatique (demande Jordan 13/06/2026) : un redéploiement du
+# serveur tue les threads de chasse — la mission ne doit PAS finir en
+# erreur pour autant. Quand la chasse meurt pour une cause « technique »
+# (interruption serveur, fichier de chasse disparu avec le conteneur),
+# la mission RELANCE la même recherche toute seule et continue. Le
+# versement final dédoublonne : repartir de zéro ne crée jamais de
+# doublon. Plafonné pour qu'une vraie panne ne tourne pas en boucle.
+# ---------------------------------------------------------------------------
+MAX_AUTO_RELAUNCHES = 2
+RESCUE_WINDOW_HOURS = 24    # repêchage des missions tuées AVANT ce déploiement
+
+# Messages d'erreur de chasse qui signifient « interruption technique »
+# (jamais une vraie panne métier type clé API manquante).
+_RESUMABLE_MARKERS = (
+    "interrompue par un redémarrage",   # hunt_zombies.ZOMBIE_ERROR_MESSAGE
+    "chasse introuvable",               # fichier parti avec l'ancien conteneur
+    "job introuvable",                  # équivalent Obélisk
+)
+
+
+def _is_resumable_hunt_error(err: str) -> bool:
+    e = (err or "").lower()
+    return any(marker in e for marker in _RESUMABLE_MARKERS)
+
+
+def _try_relaunch(mission: dict, relaunch) -> bool:
+    """Relance la chasse d'une mission interrompue. Mute la mission et
+    renvoie True si la reprise est partie, False sinon (cap atteint ou
+    relance impossible). Ne lève jamais."""
+    m = mission
+    relaunches = int(m.get("relaunches") or 0)
+    if relaunches >= MAX_AUTO_RELAUNCHES or relaunch is None:
+        return False
+    try:
+        r = relaunch(m.get("source") or "", m.get("params") or {})
+    except Exception as exc:
+        logger.warning("relaunch mission %s: %s", m.get("id"), exc)
+        r = {"ok": False, "error": str(exc)}
+    if not (r or {}).get("ok"):
+        return False
+    m["hunt_ref"] = r["hunt_ref"]
+    m["relaunches"] = relaunches + 1
+    m["status"] = ST_HUNTING
+    m["error"] = ""
+    m["resume_note"] = (f"↻ Chasse reprise automatiquement après une "
+                        f"interruption du serveur "
+                        f"({m['relaunches']}/{MAX_AUTO_RELAUNCHES})")
+    m["updated_at"] = _now()
+    return True
+
 _LOCK = threading.Lock()
 
 
@@ -400,8 +451,13 @@ def advance_mission(mission: dict, *,
                     push: Callable[[str, str], Optional[dict]],
                     kick_autopilot: Callable[[], tuple[bool, str]],
                     dry_push: Callable[[str, str], dict] | None = None,
+                    relaunch: Callable[[str, dict], dict] | None = None,
                     ) -> tuple[dict, bool]:
     """Fait avancer UNE mission d'un cran si possible.
+
+    relaunch (optionnel) : appelé (source, params) quand la chasse meurt
+    pour une cause technique (serveur redémarré, fichier disparu) — la
+    mission repart en chasse au lieu de finir en erreur (plafonné).
 
     Renvoie (mission_mise_à_jour, a_changé). Ne lève jamais.
     """
@@ -425,9 +481,14 @@ def advance_mission(mission: dict, *,
                 m["status"] = ST_HANDING
                 changed = True
             elif status == "error":
+                err = (st.get("error")
+                       or "la recherche s'est arrêtée en erreur")
+                # Interruption technique → on relance la même recherche
+                # au lieu d'abandonner (le versement final dédoublonne).
+                if _is_resumable_hunt_error(err) and _try_relaunch(m, relaunch):
+                    return m, True
                 m["status"] = ST_ERROR
-                m["error"] = (st.get("error")
-                              or "la recherche s'est arrêtée en erreur")
+                m["error"] = err
                 changed = True
 
         if m.get("status") == ST_HANDING and m.get("dry_run"):
@@ -529,13 +590,52 @@ def default_kick_autopilot() -> tuple[bool, str]:
         return False, str(exc)
 
 
+def rescue_interrupted(missions: list[dict], *, relaunch,
+                       now: Optional[datetime] = None) -> tuple[list[dict], int]:
+    """Repêche les missions tuées par un redémarrage AVANT que la reprise
+    automatique n'existe (ou pendant que le serveur était éteint) :
+    statut erreur + cause technique + récentes → on relance leur chasse.
+
+    Pure (relaunch injecté, horloge injectable) pour être testable.
+    Renvoie (missions_mises_à_jour, nb_repêchées).
+    """
+    now = now or datetime.now(timezone.utc)
+    rescued = 0
+    out = []
+    for m in missions:
+        m = dict(m)
+        if (m.get("status") == ST_ERROR
+                and _is_resumable_hunt_error(m.get("error") or "")):
+            ts_raw = m.get("updated_at") or m.get("created_at") or ""
+            recent = False
+            try:
+                ts = datetime.fromisoformat(ts_raw)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                recent = (now - ts).total_seconds() < RESCUE_WINDOW_HOURS * 3600
+            except Exception:
+                recent = False
+            if recent and _try_relaunch(m, relaunch):
+                rescued += 1
+        out.append(m)
+    return out, rescued
+
+
 def tick(client=None) -> dict:
     """Un passage du chef de gare : avance toutes les missions actives."""
-    out = {"scanned": 0, "advanced": 0, "errors": 0}
+    out = {"scanned": 0, "advanced": 0, "errors": 0, "rescued": 0}
     with _LOCK:
         missions = load_missions(client)
         if not missions:
             return out
+        # Repêchage : les missions interrompues par un redémarrage
+        # repartent en chasse au lieu de rester « en erreur ».
+        missions, rescued = rescue_interrupted(missions,
+                                               relaunch=start_hunt_for)
+        if rescued:
+            out["rescued"] = rescued
+            save_missions(missions, client)
+            missions = load_missions(client)
         new_list = []
         any_change = False
         done_for_log = []
@@ -548,6 +648,7 @@ def tick(client=None) -> dict:
                     push=push_for,
                     kick_autopilot=default_kick_autopilot,
                     dry_push=lambda s, r: dry_push_for(s, r, client=client),
+                    relaunch=start_hunt_for,
                 )
                 if changed:
                     any_change = True

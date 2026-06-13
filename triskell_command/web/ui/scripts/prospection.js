@@ -866,6 +866,7 @@ const Prospection = {
           </div>
         </div>
         ${m.error ? `<div class="pr-mission-err">⚠ ${this._esc(m.error)}</div>` : ''}
+        ${!m.error && m.resume_note ? `<div class="pr-mission-resume">${this._esc(m.resume_note)}</div>` : ''}
         <div class="pr-mchain">
           ${step('1 · Trouve', huntState, huntDetail)}
           ${step(dry ? '2 · Rangement (simulé)' : '2 · Range dans la base', pushState, pushDetail)}
@@ -1127,6 +1128,7 @@ const Prospection = {
       .pr-more-btn:hover { color: hsl(var(--text)); border-color: hsl(var(--accent) / .5); }
       .pr-more-btn:disabled { opacity: .6; cursor: wait; }
       .pr-mission-err { font-size: 12px; color: hsl(var(--danger-text)); margin-bottom: 10px; }
+      .pr-mission-resume { font-size: 12px; color: hsl(var(--text-secondary)); margin-bottom: 10px; }
       .pr-mchain { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 9px; }
       .pr-mstep { display: flex; gap: 8px; align-items: flex-start; padding: 9px 11px;
         border-radius: 11px; background: hsl(var(--bg) / .55); border: 1px solid hsl(var(--border)); }

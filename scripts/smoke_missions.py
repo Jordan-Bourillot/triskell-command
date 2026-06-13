@@ -327,6 +327,95 @@ ents = HL.backfill_from_missions([
 check("rattrapage : 2 vraies missions identiques → 1 entrée ×2, 🧪 exclu",
       len(ents) == 1 and ents[0]["runs"] == 2)
 
+print("6) Reprise automatique après interruption serveur…")
+
+ZOMBIE = ("Chasse interrompue par un redémarrage du serveur. "
+          "Les résultats déjà trouvés sont conservés.")
+RELAUNCH_OK = lambda s, p: {"ok": True, "hunt_ref": "h-neuf",       # noqa: E731
+                             "label": "relancée"}
+RELAUNCH_KO = lambda s, p: {"ok": False, "error": "outil indispo"}  # noqa: E731
+
+# Chasse interrompue → la mission REPART en chasse (pas d'erreur)
+m, ch = MI.advance_mission(
+    mk_mission(),
+    hunt_state=lambda s, r: {"status": "error", "error": ZOMBIE},
+    push=lambda s, r: None, kick_autopilot=KICK_OK,
+    relaunch=RELAUNCH_OK)
+check("interruption serveur → chasse relancée, mission toujours en chasse",
+      ch and m["status"] == MI.ST_HUNTING and m["hunt_ref"] == "h-neuf"
+      and m["relaunches"] == 1 and "reprise automatiquement" in m["resume_note"])
+
+# Fichier de chasse disparu avec l'ancien conteneur → pareil
+m, _ = MI.advance_mission(
+    mk_mission(),
+    hunt_state=lambda s, r: {"status": "error", "error": "chasse introuvable"},
+    push=lambda s, r: None, kick_autopilot=KICK_OK,
+    relaunch=RELAUNCH_OK)
+check("chasse introuvable (conteneur neuf) → relancée aussi",
+      m["status"] == MI.ST_HUNTING and m["relaunches"] == 1)
+
+# Une VRAIE panne ne se relance pas (clé API, réseau…)
+calls = []
+m, _ = MI.advance_mission(
+    mk_mission(),
+    hunt_state=lambda s, r: {"status": "error", "error": "clé API manquante"},
+    push=lambda s, r: None, kick_autopilot=KICK_OK,
+    relaunch=lambda s, p: (calls.append("relaunch")
+                            or {"ok": True, "hunt_ref": "x"}))
+check("vraie panne → erreur directe, AUCUNE relance",
+      m["status"] == MI.ST_ERROR and calls == [])
+
+# Plafond : 2 reprises max, après on s'arrête proprement
+m, _ = MI.advance_mission(
+    mk_mission(relaunches=MI.MAX_AUTO_RELAUNCHES),
+    hunt_state=lambda s, r: {"status": "error", "error": ZOMBIE},
+    push=lambda s, r: None, kick_autopilot=KICK_OK,
+    relaunch=RELAUNCH_OK)
+check("plafond de reprises atteint → erreur assumée",
+      m["status"] == MI.ST_ERROR and "interrompue" in m["error"].lower())
+
+# Relance impossible (outil KO) → erreur claire, pas de boucle
+m, _ = MI.advance_mission(
+    mk_mission(),
+    hunt_state=lambda s, r: {"status": "error", "error": ZOMBIE},
+    push=lambda s, r: None, kick_autopilot=KICK_OK,
+    relaunch=RELAUNCH_KO)
+check("relance impossible → erreur conservée",
+      m["status"] == MI.ST_ERROR)
+
+# Sans relanceur branché (compat) → comportement historique
+m, _ = MI.advance_mission(
+    mk_mission(),
+    hunt_state=lambda s, r: {"status": "error", "error": ZOMBIE},
+    push=lambda s, r: None, kick_autopilot=KICK_OK)
+check("sans relanceur → comportement historique (erreur)",
+      m["status"] == MI.ST_ERROR)
+
+# Repêchage des missions tuées AVANT ce déploiement (cas du 13/06)
+from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+_now_dt = _dt(2026, 6, 13, 1, 0, 0, tzinfo=_tz.utc)
+lot = [
+    mk_mission(id="r1", status=MI.ST_ERROR, error=ZOMBIE,
+               updated_at=(_now_dt - _td(hours=1)).isoformat()),
+    mk_mission(id="r2", status=MI.ST_ERROR, error=ZOMBIE,
+               updated_at=(_now_dt - _td(hours=30)).isoformat()),
+    mk_mission(id="r3", status=MI.ST_ERROR, error="clé API manquante",
+               updated_at=(_now_dt - _td(hours=1)).isoformat()),
+    mk_mission(id="r4", status=MI.ST_CANCELLED,
+               updated_at=(_now_dt - _td(hours=1)).isoformat()),
+]
+lot2, n = MI.rescue_interrupted(lot, relaunch=RELAUNCH_OK, now=_now_dt)
+by_id = {m["id"]: m for m in lot2}
+check("repêchage : la récente interrompue repart en chasse",
+      n == 1 and by_id["r1"]["status"] == MI.ST_HUNTING
+      and by_id["r1"]["relaunches"] == 1)
+check("…la vieille (> 24 h) reste en erreur",
+      by_id["r2"]["status"] == MI.ST_ERROR)
+check("…la vraie panne reste en erreur",
+      by_id["r3"]["status"] == MI.ST_ERROR)
+check("…l'abandonnée reste abandonnée",
+      by_id["r4"]["status"] == MI.ST_CANCELLED)
+
 # Le tri du carnet (récentes d'abord) + le plafond
 entries_data = {"v": 1, "entries": [
     {"key": f"k{i}", "label": f"l{i}", "source": "pme",
