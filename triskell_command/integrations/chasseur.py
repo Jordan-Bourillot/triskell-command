@@ -50,6 +50,12 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+try:
+    from triskell_core.prospect.naf_labels import naf_label
+except Exception:  # triskell_core absent → repli minimal, ne bloque jamais
+    def naf_label(code: str, section: str = "") -> str:  # type: ignore
+        return section or code or ""
+
 
 CHASSEUR_DIR = Path.home() / ".triskell-command" / "chasseur"
 HUNTS_DIR = CHASSEUR_DIR / "hunts"
@@ -235,7 +241,10 @@ def _prospect_from_api(result: dict, zone_filter: dict | None = None) -> Prospec
         siren=str(result.get("siren") or ""),
         nom=nom.strip(),
         naf=str(result.get("activite_principale") or ""),
-        naf_libelle=str(result.get("section_activite_principale") or ""),
+        naf_libelle=naf_label(
+            str(result.get("activite_principale") or ""),
+            str(result.get("section_activite_principale") or ""),
+        ),
         adresse=(etab.get("adresse") or "").strip(),
         code_postal=(etab.get("code_postal") or "").strip(),
         ville=(etab.get("libelle_commune") or "").strip(),

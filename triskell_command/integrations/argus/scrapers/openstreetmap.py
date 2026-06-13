@@ -31,7 +31,13 @@ OVERPASS_MIRRORS = [
 ]
 
 OSM_HEADERS = {
-    "User-Agent": "EmailsScraper-B2B/1.0",
+    # User-Agent explicite avec contact : la politique d'usage Nominatim/
+    # Overpass exige un UA identifiable. « EmailsScraper » se faisait bloquer
+    # (HTTP 403 sur overpass.openstreetmap.fr). Vérifié le 13/06/2026 :
+    # avec cet en-tête, les miroirs répondent 200.
+    "User-Agent": "TriskellProspect/1.0 (+https://triskell-studio.fr; contact@triskell-studio.fr)",
+    # Sans Accept explicite, overpass-api.de renvoie HTTP 406 (Not Acceptable).
+    "Accept": "application/json",
     "Accept-Language": "fr-FR,fr;q=0.9",
 }
 
