@@ -9713,6 +9713,15 @@ class Api:
         except Exception:
             pass
 
+        # Améliorations GEO en attente d'application (audit IA : suggestions
+        # du DERNIER audit de chaque site pas encore appliquées). En mémoire,
+        # aucune requête — et jamais bloquant.
+        try:
+            out["geo_pending_fixes"] = sum(
+                self._geo_pending_fixes_by_site(self._geo_root()).values())
+        except Exception:
+            out["geo_pending_fixes"] = None
+
         cache["data"] = out
         cache["at"] = _time.time()
         return self._with_copilot_unseen(out)
@@ -10706,6 +10715,28 @@ class Api:
             return ""
 
     # -- Tableau de bord -----------------------------------------------
+    def _geo_pending_fixes_by_site(self, root) -> dict:
+        """Améliorations d'audit IA en attente, par site.
+
+        On ne compte que le DERNIER audit de chaque site (re-analyser un
+        site périme les suggestions d'avant), et dedans uniquement les
+        suggestions jamais appliquées (pas de applied_at). C'est ce qui
+        alimente le badge « ✏️ en attente » des cartes et le Guide.
+        """
+        seen: set = set()
+        out: dict = {}
+        # ai_audits est rangé du plus récent au plus ancien (insert(0)).
+        for a in (root.get("ai_audits") or []):
+            sid = a.get("site_id") or ""
+            if not sid or sid in seen:
+                continue
+            seen.add(sid)
+            n = sum(1 for f in (a.get("findings") or [])
+                    if not f.get("applied_at"))
+            if n:
+                out[sid] = n
+        return out
+
     def geo_state(self, payload: dict | None = None) -> dict:
         """Renvoie tout l'état GEO pour la home du module."""
         root = self._geo_root()
@@ -10723,6 +10754,7 @@ class Api:
             cur = last_run_by_site.get(sid)
             if not cur or (r.get("ts", "") > cur.get("ts", "")):
                 last_run_by_site[sid] = r
+        pending_fixes = self._geo_pending_fixes_by_site(root)
         sites_out = []
         for s in root["sites"]:
             sid = s["id"]
@@ -10735,6 +10767,8 @@ class Api:
                 "last_audit_ts":    la.get("ts") if la else None,
                 "last_run_score":   lr.get("score") if lr else None,
                 "last_run_ts":      lr.get("ts") if lr else None,
+                # Suggestions d'audit IA pas encore appliquées (badge ✏️)
+                "pending_fixes":    pending_fixes.get(sid, 0),
             })
         return {
             "ok": True,
@@ -11300,10 +11334,17 @@ class Api:
         root["generated"] = root["generated"][:200]
         self._geo_save()
         # Publie via le flow standard
-        return self.geo_publish_content({
+        res = self.geo_publish_content({
             "content_id": item["id"],
             "site_id":    audit.get("site_id") or (p.get("site_id") or "").strip(),
         })
+        # Publication réussie → la suggestion est marquée appliquée :
+        # elle sort du compteur « ✏️ en attente » (cartes + Guide) et la
+        # fiche du site l'affiche cochée au lieu de la re-proposer.
+        if isinstance(res, dict) and res.get("ok"):
+            finding["applied_at"] = self._geo_now()
+            self._geo_save()
+        return res
 
     # -- Questions surveillées -----------------------------------------
     def geo_questions(self, payload: dict) -> dict:

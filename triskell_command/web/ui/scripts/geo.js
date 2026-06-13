@@ -344,16 +344,19 @@ const GEO = {
     }
     // Section 2 : améliorations recommandées par l'IA
     if (audit && audit.findings && audit.findings.length) {
+      const pendCount = audit.findings.filter(f => !f.applied_at).length;
       parts.push(`
         <section class="geo-card mt-5">
           <div class="hero-kicker">AMÉLIORATIONS À APPLIQUER</div>
-          <h3 class="geo-card-title mt-1">${audit.findings.length} chose${audit.findings.length > 1 ? 's' : ''} à corriger pour grimper</h3>
+          <h3 class="geo-card-title mt-1">${pendCount > 0
+            ? `${pendCount} chose${pendCount > 1 ? 's' : ''} à corriger pour grimper`
+            : 'Tout est appliqué ✓'}</h3>
           <p class="geo-card-sub">${this._esc(audit.verdict || '')}</p>
           <div class="geo-aifindings mt-4">
             ${audit.findings.map((f, idx) => `
-              <div class="geo-aifinding" data-fid="${f.id}">
+              <div class="geo-aifinding ${f.applied_at ? 'geo-aifinding--done' : ''}" data-fid="${f.id}">
                 <div class="geo-aifinding-head">
-                  <div class="geo-aifinding-num">${idx + 1}</div>
+                  <div class="geo-aifinding-num">${f.applied_at ? '✓' : idx + 1}</div>
                   <div class="geo-aifinding-title">
                     <div class="geo-aifinding-titletxt">${this._esc(f.title)}</div>
                     <div class="geo-aifinding-problem">${this._esc(f.problem)}</div>
@@ -362,8 +365,10 @@ const GEO = {
                 <div class="geo-aifinding-fix">
                   <div class="geo-aifinding-fixtitle">💡 ${this._esc(f.fix_title)}</div>
                   <div class="geo-aifinding-actions">
-                    <button class="btn btn-secondary geo-btn-mini" data-preview-finding="${f.id}">👁 Aperçu</button>
-                    <button class="btn btn-primary geo-btn-mini" data-publish-finding="${f.id}">📤 Appliquer sur le site</button>
+                    ${f.applied_at
+                      ? `<span class="geo-aifinding-applied">✓ Appliquée le ${this._fmtDate(f.applied_at)}</span>`
+                      : `<button class="btn btn-secondary geo-btn-mini" data-preview-finding="${f.id}">👁 Aperçu</button>
+                         <button class="btn btn-primary geo-btn-mini" data-publish-finding="${f.id}">📤 Appliquer sur le site</button>`}
                   </div>
                 </div>
               </div>
@@ -855,6 +860,9 @@ const GEO = {
         btn.classList.remove('btn-primary');
         btn.classList.add('btn-secondary');
       }
+      // Reflète tout de suite l'état serveur (compteur ✏️, fiche) sans
+      // attendre un rechargement : la suggestion est appliquée.
+      finding.applied_at = new Date().toISOString();
       Toast.success(`Le site se met à jour dans 1 à 3 minutes : ${r.url}`, 'Publié !');
       return true;
     } catch (e) {
@@ -1189,6 +1197,7 @@ const GEO = {
     const subText = !hasRun
       ? 'Pas encore de surveillance lancée'
       : `Citée par ${score}% des IA · ${this._fmtDate(s.last_run_ts)}`;
+    const fixes = s.pending_fixes || 0;
     return `
       <div class="geo-site-card" data-site-id="${s.id}" role="button" tabindex="0"
            aria-label="Ouvrir ${this._esc(s.name)}">
@@ -1202,6 +1211,7 @@ const GEO = {
           <span class="geo-site-questions">${s.questions_count} question${s.questions_count > 1 ? 's' : ''}</span>
         </div>
         <div class="geo-site-sub">${subText}</div>
+        ${fixes > 0 ? `<div class="geo-site-fixes" title="Des corrections proposées par l’audit IA attendent ton OK sur la fiche du site">✏️ ${fixes} amélioration${fixes > 1 ? 's' : ''} en attente</div>` : ''}
       </div>
     `;
   },

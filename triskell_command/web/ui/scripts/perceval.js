@@ -255,6 +255,7 @@ const Perceval = {
     // confirme le traitement, pas l'envoi.
     if (d('drafts_pending') < 0) return '✓ Brouillon traité.';
     if (d('replies_unhandled') < 0) return '✓ Réponse traitée. Au suivant !';
+    if (d('geo_pending_fixes') < 0) return '✓ Amélioration GEO appliquée — le site se met à jour.';
     if (d('prospects_total') > 0) return `✓ ${d('prospects_total')} prospect(s) de plus dans ta base.`;
     if (!prev.autopilot_enabled && cur.autopilot_enabled) {
       return '✓ Auto-pilote allumé — il va écrire aux prospects de la base.';
@@ -297,6 +298,12 @@ const Perceval = {
     if (active) {
       return { label: 'Suivre la chasse', view: 'prospection',
                why: `${active.progress || 0}% — je te préviens à la fin`,
+               soft: true };
+    }
+    if ((s.geo_pending_fixes || 0) > 0) {
+      return { label: `Appliquer ${s.geo_pending_fixes} amélioration(s) GEO`,
+               view: 'geo',
+               why: 'des corrections attendent ton OK pour être citées par les IA',
                soft: true };
     }
     if (!s.autopilot_enabled && (s.prospects_new || 0) > 0) {
@@ -349,6 +356,8 @@ const Perceval = {
       const active = (s.missions || []).find(m => m.status === 'hunting' || m.status === 'handing');
       if (active) {
         info = `La chasse tourne (${active.progress || 0}%) — je te préviens à la fin.`;
+      } else if ((s.geo_pending_fixes || 0) > 0) {
+        info = `${s.geo_pending_fixes} amélioration(s) GEO attendent ton OK sur l’écran GEO.`;
       } else if (!s.autopilot_enabled && (s.prospects_new || 0) > 0) {
         info = `${s.prospects_new} prospect(s) attendent qu’on leur écrive.`;
       } else {

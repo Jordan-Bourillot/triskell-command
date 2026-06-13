@@ -3668,6 +3668,18 @@ body.nav-simple #sidebar nav > div:not(:has(.nav-item[data-nav-core])) { display
 .geo-site-questions { font-size: 12px; color: hsl(var(--text-secondary)); }
 .geo-site-sub { font-size: 12px; color: hsl(var(--text-muted)); margin-top: 8px; }
 
+/* Badge « ✏️ améliorations en attente » sur les cartes de sites GEO */
+.geo-site-fixes {
+  margin-top: 10px;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 700;
+  color: hsl(var(--warning-text));
+  background: hsl(var(--warning) / 0.10);
+  border: 1px solid hsl(var(--warning) / 0.30);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
 .geo-icon-btn {
   width: 36px; height: 36px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -4222,6 +4234,20 @@ select.geo-input:focus {
 }
 .geo-aifinding-actions {
   display: flex; gap: 8px; flex-wrap: wrap;
+}
+
+/* Suggestion d'audit déjà appliquée : carte apaisée + mention datée */
+.geo-aifinding--done {
+  opacity: 0.72;
+  border-color: hsl(var(--success) / 0.35);
+}
+.geo-aifinding--done .geo-aifinding-num {
+  background: hsl(var(--success) / 0.12);
+  color: hsl(var(--success-text));
+}
+.geo-aifinding-applied {
+  font-size: 12.5px; font-weight: 700;
+  color: hsl(var(--success-text));
 }
 
 /* Modale d'aperçu : plus large pour mieux voir le bloc rendu */
