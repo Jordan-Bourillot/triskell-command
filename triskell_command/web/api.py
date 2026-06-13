@@ -6881,6 +6881,27 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def autopilot_sender_pool_status(self) -> dict:
+        """Statut du pool d'adresses d'envoi, rampe de montée auto comprise.
+
+        Par boîte : daily_cap = plafond DU JOUR (rampe appliquée),
+        max_cap = plafond max réglé à la main, sent_24h / remaining,
+        et si la boîte est en montée auto : palier, volume 30 j, frein.
+        """
+        try:
+            from triskell_core.prospect.pipeline import PipelineConfig
+            from triskell_command.integrations import (
+                sender_pool_tracker as spt,
+            )
+            cfg = PipelineConfig.load()
+            pool = list(getattr(cfg, "autopilot_sender_pool", None) or [])
+            if not pool:
+                return {"ok": True, "accounts": [], "total_remaining": 0,
+                        "next_free_at": None, "ramp_ok": True}
+            return spt.pool_status_with_ramp(pool)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def autopilot_save_config(self, payload: dict) -> dict:
         """Sauve la config (et synchronise les clés API/SMTP vers le Core)."""
         p = (payload or {}).get("config") or {}

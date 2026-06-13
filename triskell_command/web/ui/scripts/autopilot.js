@@ -508,6 +508,9 @@ const Autopilot = {
               par boîte sur les dernières 24h. À chaque envoi, l'app tire au hasard parmi
               les boîtes encore disponibles — une adresse qui envoie trop d'un coup finit
               classée en indésirable, répartir protège chacune.
+              <b>Montée auto</b> : le plafond du jour démarre bas et grimpe tout seul
+              semaine après semaine selon ce que la boîte a vraiment envoyé (et redescend
+              en cas de rebonds) — le plafond saisi reste le maximum jamais dépassé.
             </div>
           </div>
           <div id="ap-sender-summary" class="text-xs text-text-muted whitespace-nowrap"></div>
@@ -1378,6 +1381,7 @@ const Autopilot = {
     }
     this._renderSenderPool();
     this._refreshSenderSummary();
+    this._refreshPoolStatusFromServer();
   },
 
   _renderSenderPool() {
@@ -1394,13 +1398,17 @@ const Autopilot = {
         </div>`;
       return;
     }
-    // Map id → cap déjà sauvegardé dans cfg.autopilot_sender_pool
+    // Map id → réglages déjà sauvegardés dans cfg.autopilot_sender_pool
     const saved = (this.cfg && Array.isArray(this.cfg.autopilot_sender_pool))
                 ? this.cfg.autopilot_sender_pool : [];
     const capById = {};
+    const rampById = {};
+    const rampStartById = {};
     for (const e of saved) {
       if (e && e.account_id) {
         capById[e.account_id] = parseInt(e.daily_cap, 10) || 0;
+        rampById[e.account_id] = !!e.ramp;
+        rampStartById[e.account_id] = (e.ramp_start === 'warm') ? 'warm' : 'soft';
       }
     }
     // Par défaut (rien de sauvegardé) : on coche "primary" avec un cap doux
@@ -1413,30 +1421,52 @@ const Autopilot = {
         ? (a.id === 'primary' || a.is_primary)
         : (capById[a.id] || 0) > 0;
       const cap = capById[a.id] || defaultCap;
+      const rampOn = !!rampById[a.id];
+      const rampStart = rampStartById[a.id] || 'soft';
       const fromEmail = this._esc(a.from_email || '');
       const fromName = a.from_name ? ` (${this._esc(a.from_name)})` : '';
       const lbl = this._esc(a.label || a.from_email || a.id);
+      const aid = this._esc(a.id);
       return `
-        <label class="flex items-center gap-3 p-3 rounded-lg bg-bg border border-border
-                       hover:border-accent/40 transition-colors cursor-pointer"
-               data-account-id="${this._esc(a.id)}">
-          <input type="checkbox" class="ap-sp-check w-4 h-4 accent-accent flex-shrink-0"
-                 ${checked ? 'checked' : ''}
-                 data-account-id="${this._esc(a.id)}">
-          <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold truncate">${lbl}</div>
-            <div class="text-xs text-text-muted truncate">${fromEmail}${fromName}</div>
+        <div class="p-3 rounded-lg bg-bg border border-border
+                    hover:border-accent/40 transition-colors"
+             data-account-id="${aid}">
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" class="ap-sp-check w-4 h-4 accent-accent flex-shrink-0"
+                   ${checked ? 'checked' : ''}
+                   data-account-id="${aid}">
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-semibold truncate">${lbl}</div>
+              <div class="text-xs text-text-muted truncate">${fromEmail}${fromName}</div>
+            </div>
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+              <input type="number" class="ap-sp-cap w-16 px-2 py-1 rounded-md
+                                          border border-border text-right text-sm
+                                          focus:border-accent focus:outline-none"
+                     style="background: hsl(var(--bg)); color: hsl(var(--text));"
+                     min="1" max="1000" value="${cap}"
+                     data-account-id="${aid}">
+              <span class="text-xs text-text-muted">max / 24h</span>
+            </div>
+          </label>
+          <div class="ap-sp-ramprow flex items-center gap-2 flex-wrap mt-2 pl-7
+                      ${checked ? '' : 'opacity-50'}">
+            <label class="flex items-center gap-1.5 text-xs cursor-pointer flex-shrink-0">
+              <input type="checkbox" class="ap-sp-ramp w-3.5 h-3.5 accent-accent"
+                     ${rampOn ? 'checked' : ''} ${checked ? '' : 'disabled'}
+                     data-account-id="${aid}">
+              <span>Montée auto</span>
+            </label>
+            <select class="ap-sp-rampstart text-xs px-1.5 py-0.5 rounded-md border border-border
+                           ${rampOn ? '' : 'hidden'}"
+                    style="background: hsl(var(--bg)); color: hsl(var(--text));"
+                    ${checked ? '' : 'disabled'} data-account-id="${aid}">
+              <option value="soft" ${rampStart === 'soft' ? 'selected' : ''}>départ en douceur (10/j)</option>
+              <option value="warm" ${rampStart === 'warm' ? 'selected' : ''}>boîte déjà rodée (25/j)</option>
+            </select>
+            <span class="ap-sp-rampinfo text-xs text-text-muted" data-account-id="${aid}"></span>
           </div>
-          <div class="flex items-center gap-1.5 flex-shrink-0">
-            <input type="number" class="ap-sp-cap w-16 px-2 py-1 rounded-md
-                                        border border-border text-right text-sm
-                                        focus:border-accent focus:outline-none"
-                   style="background: hsl(var(--bg)); color: hsl(var(--text));"
-                   min="1" max="1000" value="${cap}"
-                   data-account-id="${this._esc(a.id)}">
-            <span class="text-xs text-text-muted">/ 24h</span>
-          </div>
-        </label>`;
+        </div>`;
     }).join('');
     wrap.innerHTML = rows;
 
@@ -1444,6 +1474,15 @@ const Autopilot = {
     // (le pool n'est sauvegardé qu'au clic sur Enregistrer).
     wrap.querySelectorAll('.ap-sp-check').forEach(cb => {
       cb.addEventListener('change', () => {
+        // Active/désactive la ligne « Montée auto » de cette boîte
+        const row = wrap.querySelector(
+          `div[data-account-id="${cb.dataset.accountId}"] .ap-sp-ramprow`);
+        if (row) {
+          row.classList.toggle('opacity-50', !cb.checked);
+          row.querySelectorAll('input,select').forEach(el => {
+            el.disabled = !cb.checked;
+          });
+        }
         this._refreshSenderSummary();
         this._setDirty(true);
       });
@@ -1454,13 +1493,48 @@ const Autopilot = {
         this._setDirty(true);
       });
     });
+    wrap.querySelectorAll('.ap-sp-ramp').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const sel = wrap.querySelector(
+          `.ap-sp-rampstart[data-account-id="${cb.dataset.accountId}"]`);
+        if (sel) sel.classList.toggle('hidden', !cb.checked);
+        this._refreshSenderSummary();
+        this._setDirty(true);
+      });
+    });
+    wrap.querySelectorAll('.ap-sp-rampstart').forEach(sel => {
+      sel.addEventListener('change', () => this._setDirty(true));
+    });
+  },
+
+  // Complète chaque boîte avec son état RÉEL côté serveur : plafond du
+  // jour (montée auto appliquée), envois des dernières 24h, frein rebonds.
+  async _refreshPoolStatusFromServer() {
+    if (!App.api || !App.api.autopilot_sender_pool_status) return;
+    let r = null;
+    try { r = await App.api.autopilot_sender_pool_status(); }
+    catch (e) { return; }
+    if (!r || !r.ok || !Array.isArray(r.accounts)) return;
+    r.accounts.forEach(acc => {
+      const span = document.querySelector(
+        `.ap-sp-rampinfo[data-account-id="${acc.account_id}"]`);
+      if (!span) return;
+      if (acc.ramp) {
+        let txt = `→ aujourd'hui : ${acc.daily_cap} max · déjà partis : ${acc.sent_24h}`;
+        if (acc.braked) txt += ' · ⚠ frein rebonds actif';
+        span.textContent = txt;
+        if (acc.braked) span.style.color = 'hsl(var(--warning))';
+      } else if ((acc.sent_24h || 0) > 0) {
+        span.textContent = `→ déjà partis : ${acc.sent_24h} / ${acc.daily_cap} sur 24h`;
+      }
+    });
   },
 
   _refreshSenderSummary() {
     const out = document.getElementById('ap-sender-summary');
     if (!out) return;
     const checks = document.querySelectorAll('.ap-sp-check');
-    let nChecked = 0, totalCap = 0;
+    let nChecked = 0, totalCap = 0, nRamp = 0;
     checks.forEach(cb => {
       if (!cb.checked) return;
       nChecked += 1;
@@ -1468,11 +1542,16 @@ const Autopilot = {
         `.ap-sp-cap[data-account-id="${cb.dataset.accountId}"]`
       );
       totalCap += parseInt((capInput && capInput.value) || 0, 10) || 0;
+      const rampCb = document.querySelector(
+        `.ap-sp-ramp[data-account-id="${cb.dataset.accountId}"]`
+      );
+      if (rampCb && rampCb.checked) nRamp += 1;
     });
     if (nChecked === 0) {
       out.innerHTML = '<span style="color: hsl(var(--danger));">⚠ Aucune adresse cochée — rien ne pourra être envoyé.</span>';
     } else {
-      out.textContent = `${nChecked} adresse(s) · jusqu'à ${totalCap} mails / 24h au total`;
+      const rampTxt = nRamp > 0 ? ` · montée auto sur ${nRamp}` : '';
+      out.textContent = `${nChecked} adresse(s) · jusqu'à ${totalCap} mails / 24h au total${rampTxt}`;
     }
   },
 
@@ -1486,7 +1565,20 @@ const Autopilot = {
       );
       const cap = parseInt((capInput && capInput.value) || 0, 10) || 0;
       if (id && cap > 0) {
-        pool.push({ account_id: id, daily_cap: cap });
+        const entry = { account_id: id, daily_cap: cap };
+        // Montée auto : le plafond saisi devient un MAX, le plafond du
+        // jour est calculé côté serveur sur l'historique réel de la boîte.
+        const rampCb = document.querySelector(
+          `.ap-sp-ramp[data-account-id="${id}"]`
+        );
+        if (rampCb && rampCb.checked) {
+          entry.ramp = true;
+          const sel = document.querySelector(
+            `.ap-sp-rampstart[data-account-id="${id}"]`
+          );
+          entry.ramp_start = (sel && sel.value === 'warm') ? 'warm' : 'soft';
+        }
+        pool.push(entry);
       }
     });
     return pool;

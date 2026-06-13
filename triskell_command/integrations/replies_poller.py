@@ -374,9 +374,13 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                         if bounced_addr:
                             target_pid = from_to_prospect.get(bounced_addr.lower())
                         if target_pid:
+                            # account_id = la boîte d'ENVOI (le DSN revient
+                            # chez l'expéditeur) → la rampe de montée auto
+                            # sait quelle boîte freiner.
                             PS.mark_bounced(client, target_pid,
                                             bounced_address=bounced_addr,
-                                            reason=f"DSN from {from_addr}")
+                                            reason=f"DSN from {from_addr}",
+                                            account_id=account_id)
                             counters["matched"] += 1
                             counters["written"] += 1
                         else:

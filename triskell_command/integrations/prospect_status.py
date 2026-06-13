@@ -230,8 +230,13 @@ def mark_refused(client, prospect_id: str, reason: str = "") -> None:
 
 
 def mark_bounced(client, prospect_id: str, bounced_address: str = "",
-                  reason: str = "") -> None:
-    """Passe en 'bounced' : adresse morte, on ne tape plus dedans."""
+                  reason: str = "", account_id: str = "") -> None:
+    """Passe en 'bounced' : adresse morte, on ne tape plus dedans.
+
+    account_id (optionnel) = la boîte d'ENVOI dont le mail a rebondi (le
+    DSN arrive dans la boîte de l'expéditeur). Tracé dans email_history
+    pour que la rampe de montée auto puisse freiner la bonne boîte.
+    """
     if not prospect_id:
         return
     try:
@@ -241,21 +246,26 @@ def mark_bounced(client, prospect_id: str, bounced_address: str = "",
             "updated_by": client.user_id,
         }).eq("id", prospect_id).execute()
         _audit("bounced", client, prospect_id,
-               (reason or "") + (f" addr={bounced_address}" if bounced_address else ""))
+               (reason or "") + (f" addr={bounced_address}" if bounced_address else ""),
+               extra_fields={"account_id": account_id})
     except Exception as exc:
         logger.warning("mark_bounced KO: %s", exc)
 
 
-def _audit(kind: str, client, prospect_id: str, reason: str) -> None:
+def _audit(kind: str, client, prospect_id: str, reason: str,
+           extra_fields: dict | None = None) -> None:
     """Trace l'evenement dans email_history (best-effort)."""
     try:
+        extra = {"reason": (reason or "")[:500], "auto": True}
+        if extra_fields:
+            extra.update({k: v for k, v in extra_fields.items() if v})
         client.raw.table("email_history").insert(with_workspace(client, {
             "prospect_id": prospect_id,
             "kind": f"status_{kind}",
             "ts": datetime.now().isoformat(timespec="seconds"),
             "subject": f"[auto] prospect marque {kind}",
             "body": "",
-            "extra": {"reason": (reason or "")[:500], "auto": True},
+            "extra": extra,
             "created_by": client.user_id,
         })).execute()
     except Exception as exc:

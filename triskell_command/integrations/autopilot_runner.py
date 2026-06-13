@@ -329,6 +329,33 @@ def run_pipeline_with_ui_modes(cfg, progress):
         f"'{cfg.autopilot_product or '(libre)'}')..."
     )
 
+    # === Montée automatique du volume (rampe par boîte) ===
+    # Les boîtes marquées "ramp" dans le pool voient leur plafond 24h DU
+    # JOUR calculé sur leur historique réel (sender_pool_tracker.apply_ramp) :
+    # montée progressive palier par palier, frein automatique si pic de
+    # rebonds. cfg est ajusté EN MÉMOIRE uniquement — la config stockée
+    # garde les plafonds max et les réglages de rampe intacts.
+    try:
+        from . import sender_pool_tracker as _spt
+        _ramp = _spt.apply_ramp(
+            list(getattr(cfg, "autopilot_sender_pool", None) or []))
+        if _ramp["details"]:
+            cfg.autopilot_sender_pool = _ramp["pool"]
+            for _d in _ramp["details"]:
+                _brake_txt = (" -- FREIN rebonds actif" if _d["braked"] else "")
+                progress(
+                    f"Montee auto [{_d['account_id']}] : "
+                    f"{_d['effective_cap']}/24h aujourd'hui "
+                    f"(volume 30 j : {_d['sent_30d']}, palier {_d['step_cap']}, "
+                    f"max regle {_d['max_cap']}){_brake_txt}"
+                )
+        elif not _ramp["ok"]:
+            progress(f"[WARN] montee auto indisponible ({_ramp['reason']}) "
+                     "-> plafonds manuels appliques tels quels.")
+    except Exception as exc:
+        logger.debug("apply_ramp KO: %s", exc)
+        progress(f"[WARN] montee auto KO ({exc}) -> plafonds manuels.")
+
     # Resout les SMTP du pool (vide si pas de pool configure).
     sender_pool_smtp = _resolve_sender_pool_smtp(cfg, progress)
 
