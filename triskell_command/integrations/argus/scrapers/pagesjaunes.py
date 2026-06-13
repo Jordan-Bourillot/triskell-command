@@ -322,6 +322,17 @@ class PagesJaunesScraper(BaseScraper):
             except Exception:
                 return
 
+            # Extrait les emails affichés en clair sur la fiche (Pages Jaunes
+            # en expose certains). consume_text() valide + ajoute à l'état.
+            # Manquait totalement → 0 mail récolté alors que les fiches sont
+            # bien visitées (Europages, lui, appelle consume_text). 14/06/2026.
+            try:
+                html_fiche = await page.content()
+                if html_fiche:
+                    self.consume_text(html_fiche)
+            except Exception:
+                pass
+
             try:
                 data = await page.evaluate(
                     """() => {

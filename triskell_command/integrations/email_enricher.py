@@ -357,6 +357,19 @@ def _scrape_bio_urls(urls: Iterable[str]) -> set[str]:
 # ---------------------------------------------------------------------------
 # API publique
 # ---------------------------------------------------------------------------
+def _apply_central_filter(emails) -> list[str]:
+    """Passe les emails par le filtre central de triskell_core (domaines
+    plateforme / hébergeurs / raccourcisseurs / www. / factices). Sans lui,
+    les emails scrapés ici (Éclaireur + enrichissement Obélisk) échappaient
+    au filtre central, d'où des adresses douteuses qui passaient. Repli :
+    liste inchangée si triskell_core est absent."""
+    try:
+        from triskell_core.prospect.enrichers.email_filter import filter_emails
+    except Exception:
+        return list(emails)
+    return filter_emails(list(emails), verify_mx=False)
+
+
 def enrich_emails(prospect: dict) -> tuple[list[str], str, str, str]:
     """Cherche un email pour un prospect qui n'en a pas. Retourne un tuple
     `(emails, source, context, url)` :
@@ -388,14 +401,14 @@ def enrich_emails(prospect: dict) -> tuple[list[str], str, str, str]:
         prospect.get("about") or "",
         prospect.get("headline") or "",
     ]))
-    found = _extract_emails_from_text(bio_text)
+    found = _apply_central_filter(_extract_emails_from_text(bio_text))
     if found:
         return sorted(found), "bio", "bio / description du profil", ""
 
     # 2) Site web officiel
     website = prospect.get("website") or ""
     if website:
-        found = _scrape_website(website)
+        found = _apply_central_filter(_scrape_website(website))
         if found:
             return (sorted(found), "web",
                     "page contact ou mentions légales du site officiel",
@@ -408,7 +421,7 @@ def enrich_emails(prospect: dict) -> tuple[list[str], str, str, str]:
         or []
     )
     if bio_urls:
-        found = _scrape_bio_urls(bio_urls)
+        found = _apply_central_filter(_scrape_bio_urls(bio_urls))
         if found:
             return (sorted(found), "linktree",
                     "hub de liens (Linktree, Beacons, etc.)",

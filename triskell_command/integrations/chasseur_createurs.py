@@ -386,20 +386,20 @@ def _scrap_youtube(hunt: CreatorHunt, niche: str, min_subs: int, max_subs: int,
         for em in re.findall(EMAIL_REGEX, ch["description"]):
             emails.add(em.lower())
 
-        # 2) Page /about de la chaîne
+        # 2) Page /about de la chaîne — via le scraper central de triskell_core
+        #    qui MARCHE (cookie de consentement YouTube complet, décodage des
+        #    liens youtube.com/redirect, filtre email central). L'ancien code
+        #    maison ne posait qu'un cookie partiel et ne gardait que les liens
+        #    "bio" (linktr.ee…) → 0 lien externe en réel (vérifié 14/06/2026).
         try:
-            about_url = f"https://www.youtube.com/channel/{ch['id']}/about"
-            r = requests.get(about_url, headers=UA_WEB, timeout=10)
-            html = r.text
-            for em in re.findall(EMAIL_REGEX, html):
+            from triskell_core.prospect.sources.youtube import YouTubeAPI
+            about = YouTubeAPI.scrape_about_page(
+                channel_id=ch.get("id", ""), handle=ch.get("handle", ""))
+            for em in about.get("emails", []):
                 emails.add(em.lower())
-            for url in re.findall(r'https?://[^\s"\'<>\\]+', html):
-                low = url.lower()
-                for dom in BIO_DOMAINS:
-                    if dom in low:
-                        externals.add(url.split("\\")[0])
-                        break
-            log(f"  ✓ /about scrapé — {len(externals)} lien(s) bio")
+            for url in about.get("external_links", []):
+                externals.add(url)
+            log(f"  ✓ /about scrapé — {len(externals)} lien(s) externe(s)")
         except Exception as exc:
             log(f"  ⚠️ /about KO : {exc}")
 
