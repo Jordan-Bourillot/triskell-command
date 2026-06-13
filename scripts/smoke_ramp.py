@@ -166,6 +166,38 @@ check("pool mixte : un seul détail de rampe",
       len(r["details"]) == 1 and r["details"][0]["account_id"] == "a")
 
 # ---------------------------------------------------------------------------
+print("2k) Plancher de départ sur-mesure (ramp_floor)…")
+# Démarrer à 15 dès maintenant (peu d'historique) puis monter vers 50.
+spt._read_history_days = _fake_history(
+    [{"ts": _ts(15), "kind": "email_sent", "account_id": "a"} for _ in range(25)], [])
+r = spt.apply_ramp([{"account_id": "a", "daily_cap": 50, "ramp": True, "ramp_floor": 15}])
+check("ramp_floor 15, peu d'historique → démarre à 15",
+      r["pool"][0]["daily_cap"] == 15, f"(obtenu {r['pool'][0]['daily_cap']})")
+
+# Gros volume → monte jusqu'au max (50), le plancher ne bride pas.
+spt._read_history_days = _fake_history(
+    [{"ts": _ts(10), "kind": "email_sent", "account_id": "a"} for _ in range(900)], [])
+r = spt.apply_ramp([{"account_id": "a", "daily_cap": 50, "ramp": True, "ramp_floor": 15}])
+check("ramp_floor 15, gros volume → monte jusqu'au max 50",
+      r["pool"][0]["daily_cap"] == 50, f"(obtenu {r['pool'][0]['daily_cap']})")
+
+# Plancher > max réglé → le max plafonne (jamais au-dessus du max).
+spt._read_history_days = _fake_history([], [])
+r = spt.apply_ramp([{"account_id": "a", "daily_cap": 15, "ramp": True, "ramp_floor": 20}])
+check("ramp_floor 20 mais max 15 → plafonné à 15",
+      r["pool"][0]["daily_cap"] == 15)
+
+# ramp_floor absent → rétrocompat ancien preset warm (25).
+r = spt.apply_ramp([{"account_id": "a", "daily_cap": 100, "ramp": True, "ramp_start": "warm"}])
+check("sans ramp_floor → ancien preset warm (25)",
+      r["pool"][0]["daily_cap"] == 25)
+
+# ramp_floor illisible → fallback douceur (10).
+r = spt.apply_ramp([{"account_id": "a", "daily_cap": 100, "ramp": True, "ramp_floor": "abc"}])
+check("ramp_floor invalide → fallback douceur (10)",
+      r["pool"][0]["daily_cap"] == 10)
+
+# ---------------------------------------------------------------------------
 print("3) pool_status_with_ramp (statut UI)…")
 spt._read_history_days = _fake_history(sends_500, [])
 _orig_sends24 = spt._read_sends_24h

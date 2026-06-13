@@ -1403,12 +1403,15 @@ const Autopilot = {
                 ? this.cfg.autopilot_sender_pool : [];
     const capById = {};
     const rampById = {};
-    const rampStartById = {};
+    const rampFloorById = {};
     for (const e of saved) {
       if (e && e.account_id) {
         capById[e.account_id] = parseInt(e.daily_cap, 10) || 0;
         rampById[e.account_id] = !!e.ramp;
-        rampStartById[e.account_id] = (e.ramp_start === 'warm') ? 'warm' : 'soft';
+        // Plancher de départ sur-mesure ; sinon on retombe sur l'ancien
+        // preset (warm=25, sinon 10) pour les configs d'avant ce champ.
+        rampFloorById[e.account_id] = parseInt(e.ramp_floor, 10)
+          || (e.ramp_start === 'warm' ? 25 : 10);
       }
     }
     // Par défaut (rien de sauvegardé) : on coche "primary" avec un cap doux
@@ -1422,7 +1425,7 @@ const Autopilot = {
         : (capById[a.id] || 0) > 0;
       const cap = capById[a.id] || defaultCap;
       const rampOn = !!rampById[a.id];
-      const rampStart = rampStartById[a.id] || 'soft';
+      const rampFloor = rampFloorById[a.id] || 10;
       const fromEmail = this._esc(a.from_email || '');
       const fromName = a.from_name ? ` (${this._esc(a.from_name)})` : '';
       const lbl = this._esc(a.label || a.from_email || a.id);
@@ -1457,13 +1460,17 @@ const Autopilot = {
                      data-account-id="${aid}">
               <span>Montée auto</span>
             </label>
-            <select class="ap-sp-rampstart text-xs px-1.5 py-0.5 rounded-md border border-border
-                           ${rampOn ? '' : 'hidden'}"
-                    style="background: hsl(var(--bg)); color: hsl(var(--text));"
-                    ${checked ? '' : 'disabled'} data-account-id="${aid}">
-              <option value="soft" ${rampStart === 'soft' ? 'selected' : ''}>départ en douceur (10/j)</option>
-              <option value="warm" ${rampStart === 'warm' ? 'selected' : ''}>boîte déjà rodée (25/j)</option>
-            </select>
+            <span class="ap-sp-rampwrap flex items-center gap-1.5 text-xs
+                         ${rampOn ? '' : 'hidden'}">
+              <span class="text-text-muted">démarrer à</span>
+              <input type="number" class="ap-sp-rampfloor w-14 px-2 py-1 rounded-md
+                                          border border-border text-right
+                                          focus:border-accent focus:outline-none"
+                     style="background: hsl(var(--bg)); color: hsl(var(--text));"
+                     min="1" max="1000" value="${rampFloor}"
+                     ${checked ? '' : 'disabled'} data-account-id="${aid}">
+              <span class="text-text-muted">/jour, puis monte tout seul</span>
+            </span>
             <span class="ap-sp-rampinfo text-xs text-text-muted" data-account-id="${aid}"></span>
           </div>
         </div>`;
@@ -1495,15 +1502,15 @@ const Autopilot = {
     });
     wrap.querySelectorAll('.ap-sp-ramp').forEach(cb => {
       cb.addEventListener('change', () => {
-        const sel = wrap.querySelector(
-          `.ap-sp-rampstart[data-account-id="${cb.dataset.accountId}"]`);
-        if (sel) sel.classList.toggle('hidden', !cb.checked);
+        const row = cb.closest('.ap-sp-ramprow');
+        const wrapEl = row && row.querySelector('.ap-sp-rampwrap');
+        if (wrapEl) wrapEl.classList.toggle('hidden', !cb.checked);
         this._refreshSenderSummary();
         this._setDirty(true);
       });
     });
-    wrap.querySelectorAll('.ap-sp-rampstart').forEach(sel => {
-      sel.addEventListener('change', () => this._setDirty(true));
+    wrap.querySelectorAll('.ap-sp-rampfloor').forEach(inp => {
+      inp.addEventListener('input', () => this._setDirty(true));
     });
   },
 
@@ -1573,10 +1580,13 @@ const Autopilot = {
         );
         if (rampCb && rampCb.checked) {
           entry.ramp = true;
-          const sel = document.querySelector(
-            `.ap-sp-rampstart[data-account-id="${id}"]`
+          // Plancher de départ sur-mesure : la rampe démarre là et monte
+          // tout seul vers le max (le plafond /24h ci-dessus).
+          const floorInput = document.querySelector(
+            `.ap-sp-rampfloor[data-account-id="${id}"]`
           );
-          entry.ramp_start = (sel && sel.value === 'warm') ? 'warm' : 'soft';
+          const floor = parseInt((floorInput && floorInput.value) || 0, 10) || 10;
+          entry.ramp_floor = Math.min(floor, cap);
         }
         pool.push(entry);
       }

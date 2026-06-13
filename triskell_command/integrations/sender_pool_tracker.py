@@ -349,9 +349,19 @@ def apply_ramp(pool: list[dict]) -> dict:
         s30 = counts30.get(acc, 0)
         s7 = counts7.get(acc, 0)
         b7 = bounces7.get(acc, 0)
-        step = ramp_step_for_volume(s30)
-        floor = RAMP_FLOOR_WARM if start == "warm" else RAMP_FLOOR_SOFT
-        step = max(step, floor)
+        # Plancher de départ : sur-mesure (ramp_floor) prioritaire, sinon le
+        # preset soft (10) / warm (25). Permet « démarrer à 15/jour dès
+        # maintenant puis monter au-dessus » : le plafond du jour ne descend
+        # jamais sous le plancher, et grimpe avec le volume réellement envoyé.
+        floor_custom = p.get("ramp_floor")
+        if floor_custom is not None and str(floor_custom).strip() != "":
+            try:
+                floor = max(1, int(floor_custom))
+            except (TypeError, ValueError):
+                floor = RAMP_FLOOR_WARM if start == "warm" else RAMP_FLOOR_SOFT
+        else:
+            floor = RAMP_FLOOR_WARM if start == "warm" else RAMP_FLOOR_SOFT
+        step = max(ramp_step_for_volume(s30), floor)
         braked = (b7 >= RAMP_BRAKE_MIN_BOUNCES
                   and b7 > RAMP_BRAKE_RATIO * max(s7, 1))
         if braked:
@@ -368,6 +378,7 @@ def apply_ramp(pool: list[dict]) -> dict:
             "bounced_7d":    b7,
             "braked":        braked,
             "ramp_start":    start,
+            "ramp_floor":    floor,
         })
     return {"pool": entries, "details": details, "ok": True, "reason": ""}
 
