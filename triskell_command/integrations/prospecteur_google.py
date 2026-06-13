@@ -208,10 +208,17 @@ def _scrape_site_for_emails(url: str) -> set[str]:
     ]
     # Filtre central anti-fausses-adresses de triskell_core (même protection
     # qu'Obélisk et le Chasseur Créateur). Fallback : blacklist locale seule.
+    # + has_mail_record : on ne garde QUE les adresses dont le domaine peut
+    #   vraiment recevoir du courrier (enregistrement MX/A). Une adresse sur
+    #   un domaine mort rebondirait et abîmerait la réputation d'envoi —
+    #   demande explicite de Jordan (13/06/2026). Cache MX en mémoire process.
     try:
-        from triskell_core.prospect.enrichers.email_filter import clean_email
+        from triskell_core.prospect.enrichers.email_filter import (
+            clean_email, has_mail_record,
+        )
     except ImportError:
         clean_email = None
+        has_mail_record = None
     for page in pages:
         try:
             r = requests.get(page, headers=UA_WEB, timeout=8)
@@ -222,8 +229,14 @@ def _scrape_site_for_emails(url: str) -> set[str]:
                         em_low = clean_email(em_low) or ""
                         if not em_low:
                             continue
-                    if not any(b in em_low for b in EMAIL_BLACKLIST):
-                        emails.add(em_low)
+                    if any(b in em_low for b in EMAIL_BLACKLIST):
+                        continue
+                    # Vérif délivrabilité : domaine capable de recevoir du mail.
+                    if has_mail_record is not None and "@" in em_low:
+                        domain = em_low.split("@", 1)[1]
+                        if not has_mail_record(domain):
+                            continue
+                    emails.add(em_low)
         except Exception:
             pass
         time.sleep(random.uniform(0.3, 0.6))
