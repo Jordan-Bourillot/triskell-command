@@ -387,7 +387,12 @@ def _fetch_places(region_code: str, metier: str, zone: str, num_results: int,
             places.extend(batch)
             log(f"📄 [{region_code}] +{len(batch)} entreprise(s) (total {len(places)})")
             page_token = data.get("nextPageToken")
-            if not page_token:
+            # On s'arrête dès qu'une page ne ramène plus RIEN de neuf, même si
+            # l'API renvoie encore un token : sinon, quand on demande plus de
+            # résultats qu'il n'en existe (ex. 80 photographes mais 38 en vrai),
+            # l'API boucle sur des pages vides à l'infini (bug du 13/06/2026 —
+            # quota Google gaspillé, chasse jamais finie).
+            if not batch or not page_token:
                 break
             time.sleep(2)
         except Exception as exc:
