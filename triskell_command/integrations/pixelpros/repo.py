@@ -562,6 +562,20 @@ def dispatch_build(intake_id: str) -> tuple[bool, str]:
 
     Renvoie (success, message).
     """
+    # Garde-fou « payer d'abord » : on ne construit JAMAIS un site sans contenu.
+    # Depuis le 13/06/2026, une commande payée reste en 'awaiting_content' tant
+    # que le client n'a pas rempli le formulaire détaillé (qui la passe en
+    # 'paid'). On refuse donc de construire un 'draft' ou un 'awaiting_content'
+    # (sinon on fabriquerait un site vide au moment du paiement).
+    intake = get_intake(intake_id)
+    if intake is not None:
+        st = str(intake.get("status") or "").strip()
+        if st in ("draft", "awaiting_content"):
+            return False, (
+                "En attente du contenu du client — rien à construire pour "
+                "l'instant (commande payée, formulaire pas encore rempli)."
+            )
+
     # 1) Tentative locale via subprocess
     pixel_studio = _find_pixel_studio_dir()
     if pixel_studio is not None:

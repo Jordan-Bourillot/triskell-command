@@ -48,8 +48,9 @@ const PixelPros = {
   COLUMNS: [
     { status: 'contact',  label: 'Messages reçus',      icon: '✉️', accent: '#f59e0b', short: 'Messages',    group: 'comm' },
     { status: 'recall',   label: 'On vous rappelle',    icon: '☎️', accent: '#06b6d4', short: 'À rappeler',  group: 'comm' },
-    { status: 'draft',    label: 'Formulaire reçu',     icon: '📝', accent: '#94a3b8', short: 'Formulaires', group: 'pipeline' },
-    { status: 'paid',     label: 'Payé · à construire', icon: '💳', accent: '#facc15', short: 'Payés',       group: 'pipeline' },
+    { status: 'draft',            label: 'Commencé (pas payé)', icon: '📝', accent: '#94a3b8', short: 'Commencés',   group: 'pipeline' },
+    { status: 'awaiting_content', label: 'Payé · à compléter',  icon: '⏳', accent: '#fb923c', short: 'À compléter', group: 'pipeline' },
+    { status: 'paid',             label: 'Payé · à construire', icon: '💳', accent: '#facc15', short: 'À construire', group: 'pipeline' },
     { status: 'building', label: 'En construction',     icon: '🛠',  accent: '#818cf8', short: 'En cours',    group: 'pipeline' },
     { status: 'live',     label: 'En ligne',            icon: '✅', accent: '#22c55e', short: 'En ligne',     group: 'pipeline' },
   ],

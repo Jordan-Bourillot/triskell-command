@@ -6674,6 +6674,7 @@ class Api:
             ("mission_runner",        "Chef de gare des prospections"),
             ("autopilot_runner",      "Prospection nocturne (3h Paris)"),
             ("pixelpros.auto_builder", "Construction auto des sites payés"),
+            ("pixelpros.content_chaser", "Relances des sites payés à compléter"),
         ]
         for mod_name, label in worker_modules:
             try:
@@ -6788,6 +6789,7 @@ class Api:
             "mission_runner":         ("mission_runner",         "start_worker", True),
             "autopilot_runner":       ("autopilot_runner",       "start_worker", True),
             "pixelpros.auto_builder": ("pixelpros.auto_builder", "start_worker", True),
+            "pixelpros.content_chaser": ("pixelpros.content_chaser", "start_worker", True),
         }
         entry = restartable.get(name)
         if entry is None:
@@ -8251,6 +8253,7 @@ class Api:
             ("mission_runner",         "start_worker", "mission_runner"),
             ("autopilot_runner",       "start_worker", "autopilot_nightly"),
             ("pixelpros.auto_builder", "start_worker", "pixelpros_auto_builder"),
+            ("pixelpros.content_chaser", "start_worker", "pixelpros_content_chaser"),
         ]:
             try:
                 mod = __import__(

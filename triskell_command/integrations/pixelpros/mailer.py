@@ -41,16 +41,19 @@ AUTO_KEYS = {
 }
 
 DEFAULT_PAID = {
-    "subject": "On a bien reçu ton paiement — ton site Pixel Pros arrive sous 24h",
+    "subject": "Paiement reçu — dernière étape : décris ton activité (5 min)",
     "body_text": (
         "Salut {firstname},\n\n"
-        "On a bien reçu ton paiement, c'est parti pour la fabrication de ton site Pixel Pros{business_paren}.\n\n"
-        "Voilà ce qu'il se passe maintenant :\n"
-        "  1. On reprend toutes tes infos et tes photos\n"
-        "  2. On rédige les textes et on monte le site\n"
-        "  3. On le met en ligne sur ton adresse perso\n"
-        "  4. Tu reçois un mail dès qu'il est dispo (sous 24h ouvrées)\n\n"
-        "Si tu as oublié quelque chose ou si tu veux ajouter une info, réponds simplement à ce mail.\n\n"
+        "On a bien reçu ton paiement, merci{business_paren} !\n\n"
+        "Il reste UNE dernière étape pour qu'on lance ton site : nous décrire ton activité.\n"
+        "Ça prend environ 5 minutes, et tu peux t'arrêter et revenir quand tu veux — tout est gardé.\n\n"
+        "Décris ton activité ici :\n"
+        "  {complete_url}\n\n"
+        "Une fois que c'est fait :\n"
+        "  1. On reprend tes textes et on les optimise pour Google\n"
+        "  2. On monte ton site\n"
+        "  3. Il est en ligne sous 24h ouvrées — tu reçois le lien par mail\n\n"
+        "Une question ? Réponds simplement à ce mail.\n\n"
         "À très vite,\n"
         "L'équipe Pixel Pros\n"
         "https://pixel-pros.fr"
@@ -77,15 +80,16 @@ DEFAULT_PAID = {
         "  <!-- Carte principale -->\n"
         "  <div style=\"background:#ffffff; border:3px solid #0b0d1a; border-radius:14px; box-shadow:6px 6px 0 #0b0d1a; padding:28px 26px;\">\n"
         "    <p style=\"margin:0 0 14px; font-size:16px;\">Salut <strong>{firstname}</strong>,</p>\n"
-        "    <p style=\"margin:0 0 22px; font-size:15px; line-height:1.6;\">On a bien reçu ton paiement, c'est parti pour la fabrication de ton site Pixel Pros{business_html_strong}.</p>\n"
+        "    <p style=\"margin:0 0 18px; font-size:15px; line-height:1.6;\">On a bien reçu ton paiement{business_html_strong} ! Il reste <strong>une dernière étape</strong> pour qu'on lance ton site : nous décrire ton activité — environ 5 minutes, et tu peux revenir plus tard.</p>\n"
+        "    <p style=\"text-align:center; margin:0 0 24px;\"><a href=\"{complete_url}\" style=\"display:inline-block; background:#facc15; color:#0b0d1a; font-weight:800; font-size:15px; padding:15px 26px; border:3px solid #0b0d1a; border-radius:10px; box-shadow:4px 4px 0 #0b0d1a; text-decoration:none;\">➜ Décrire mon activité</a></p>\n"
         "\n"
-        "    <p style=\"margin:0 0 14px; font-weight:800; font-size:13px; letter-spacing:0.08em; text-transform:uppercase; color:#51546b;\">▶ Voilà ce qui se passe maintenant</p>\n"
+        "    <p style=\"margin:0 0 14px; font-weight:800; font-size:13px; letter-spacing:0.08em; text-transform:uppercase; color:#51546b;\">▶ Voilà ce qui se passe ensuite</p>\n"
         "\n"
         "    <!-- Étapes -->\n"
         "    <div style=\"margin-bottom:8px;\">\n"
         "      <div style=\"display:flex; align-items:flex-start; gap:14px; padding:12px 14px; background:#fff8ed; border:2px solid #0b0d1a; border-radius:10px; margin-bottom:10px;\">\n"
         "        <span style=\"display:inline-block; min-width:30px; height:30px; line-height:26px; text-align:center; background:#0ea5ff; color:#fff; border:2px solid #0b0d1a; border-radius:6px; font-family:'Press Start 2P', monospace; font-size:11px;\">1</span>\n"
-        "        <span style=\"font-size:14.5px; line-height:1.5;\">On reprend toutes tes infos et tes photos</span>\n"
+        "        <span style=\"font-size:14.5px; line-height:1.5;\">Tu nous décris ton activité (le bouton ci-dessus)</span>\n"
         "      </div>\n"
         "      <div style=\"display:flex; align-items:flex-start; gap:14px; padding:12px 14px; background:#fff8ed; border:2px solid #0b0d1a; border-radius:10px; margin-bottom:10px;\">\n"
         "        <span style=\"display:inline-block; min-width:30px; height:30px; line-height:26px; text-align:center; background:#ec4899; color:#fff; border:2px solid #0b0d1a; border-radius:6px; font-family:'Press Start 2P', monospace; font-size:11px;\">2</span>\n"
@@ -393,6 +397,12 @@ def _render_placeholders(template: dict, intake: dict) -> tuple[str, str, str]:
     firstname = _firstname_from(data)
     business = data.get("business_name") or data.get("business-name") or ""
     site_url = intake.get("site_url") or ""
+    draft_id = str(intake.get("id") or "")
+    # Lien pour compléter le contenu APRÈS paiement (parcours « payer d'abord »).
+    complete_url = (
+        "https://pixel-pros.fr/configurer.html?draft=" + draft_id
+        if draft_id else "https://pixel-pros.fr/commander.html"
+    )
 
     ctx = {
         "firstname": firstname,
@@ -401,6 +411,7 @@ def _render_placeholders(template: dict, intake: dict) -> tuple[str, str, str]:
         "business_space": (" " + business) if business else "",
         "business_html_strong": (" <strong>" + _html(business) + "</strong>") if business else "",
         "site_url": site_url,
+        "complete_url": complete_url,
     }
 
     def _safe_format(s: str, ctx: dict) -> str:
@@ -543,6 +554,26 @@ def send_paid_mail(intake: dict) -> tuple[bool, str]:
     if not to:
         return False, "Email du client introuvable dans le draft"
     subject, body, body_html = _build_paid_mail(intake)
+    # Filet « payer d'abord » : le lien pour compléter le site DOIT être présent,
+    # même si un ancien modèle personnalisé (override) ne le contient pas encore.
+    draft_id = str(intake.get("id") or "")
+    if draft_id and "configurer.html?draft" not in (body or ""):
+        complete_url = "https://pixel-pros.fr/configurer.html?draft=" + draft_id
+        body = (body or "") + (
+            "\n\n———\n"
+            "Dernière étape pour lancer ton site — décris ton activité ici :\n"
+            + complete_url + "\n"
+        )
+        if body_html and "configurer.html?draft" not in body_html:
+            cta = (
+                '<p style="text-align:center;margin:24px 0;">'
+                '<a href="' + complete_url + '" style="display:inline-block;'
+                'background:#facc15;color:#0b0d1a;font-weight:800;padding:14px 24px;'
+                'border:3px solid #0b0d1a;border-radius:10px;text-decoration:none;">'
+                '➜ Décrire mon activité et lancer mon site</a></p>'
+            )
+            body_html = (body_html.replace("</body>", cta + "</body>", 1)
+                         if "</body>" in body_html else body_html + cta)
     ok = _send_via_smtp(cfg, to=to, subject=subject, body=body, body_html=body_html,
                         source="pixelpros_paid_mail")
     return (True, f"Envoyé à {to}") if ok else (False, "Envoi SMTP a échoué (voir logs)")
