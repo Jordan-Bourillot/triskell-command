@@ -549,8 +549,18 @@ def _mojeek_first_results(query: str, limit: int = 5) -> list[str]:
         text = r.text or ""
     except Exception:
         return []
-    # Pattern principal : <a class="ob" href="...">
-    links = re.findall(r'<a[^>]+class="ob"[^>]+href="(https?://[^"]+)"', text)
+    # Les résultats Mojeek sont des liens <a class="ob">. En 2026 Mojeek a
+    # changé l'ORDRE des attributs (href AVANT class) : l'ancienne regex
+    # « class puis href » ne matchait plus rien → Mojeek renvoyait 0 et la
+    # chasse basculait sur Google Places (payant). Vérifié en vrai le
+    # 14/06/2026 : le bon site (fleuriste-lannilis.fr) était bien présent.
+    # On matche donc la balise <a class="ob"> entière, puis on extrait href
+    # quel que soit l'ordre des attributs.
+    links: list[str] = []
+    for tag in re.findall(r'<a\b[^>]*\bclass="ob"[^>]*>', text):
+        m = re.search(r'href="(https?://[^"]+)"', tag)
+        if m:
+            links.append(m.group(1))
     if not links:
         links = re.findall(r'<h2[^>]*>\s*<a[^>]+href="(https?://[^"]+)"', text)
     blacklist = BLACKLIST_DOMAINS | _MOJEEK_BLACKLIST_EXTRA

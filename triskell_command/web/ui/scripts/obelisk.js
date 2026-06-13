@@ -2259,11 +2259,11 @@ const Obelisk = {
 
           <div class="grid grid-cols-2 gap-3 mb-4">
             <label class="block">
-              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Audience minimum</div>
+              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Abonnés minimum</div>
               <input id="ob-s-min-subs" type="number" min="0" placeholder="0 = pas de plancher" value="${cfg.min_subscribers || ''}" style="width:100%; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px;">
             </label>
             <label class="block">
-              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Audience maximum</div>
+              <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2">Abonnés maximum</div>
               <input id="ob-s-max-subs" type="number" min="0" placeholder="0 = pas de plafond" value="${cfg.max_subscribers || ''}" style="width:100%; padding:9px 12px; border-radius:7px; background: hsl(var(--bg)); color: hsl(var(--text)); border: 1px solid hsl(var(--border)); font-size: 13px;">
             </label>
           </div>
