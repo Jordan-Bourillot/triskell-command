@@ -1431,16 +1431,22 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": f"update KO : {exc}"}
 
-        # 4) envoi SMTP (mail de prospection → en-tête de désinscription)
+        # 4) envoi SMTP (mail de prospection → désinscription en 1 clic :
+        #    pied cliquable dans le corps + en-tête List-Unsubscribe signé).
         try:
             from triskell_core.prospect.outreach.smtp_sender import (
                 prospection_headers,
             )
+            from ..integrations import unsubscribe as _unsub
+            _pid = (prospect.get("id") or "")
+            _send_body, _send_html = _unsub.inject_footer(
+                final_body, body_html, to, _pid)
             msg_id = send_email(
-                smtp_cfg, to=to, subject=subject, body=final_body,
-                body_html=body_html,
+                smtp_cfg, to=to, subject=subject, body=_send_body,
+                body_html=_send_html,
                 custom_headers=prospection_headers(
-                    smtp_cfg.get("from_email", "")),
+                    smtp_cfg.get("from_email", ""),
+                    to_email=to, prospect_id=_pid),
             )
         except Exception as exc:
             # Envoi KO → on remet en pending pour ne pas perdre le brouillon
@@ -7158,6 +7164,13 @@ class Api:
                 "total":          0,
                 "sent":           0,
                 "errors":         0,
+                # Reportés : brouillons laissés en attente parce que le
+                # plafond du jour de leur adresse d'envoi est atteint
+                # (même garde-fou qu'en envoi automatique, montée auto
+                # comprise). Protège la réputation même en validation à la
+                # main : « tout envoyer » n'inonde plus.
+                "deferred":       0,
+                "deferred_note":  "",
                 "current_name":   "",
                 "current_email":  "",
                 "error_msgs":     [],
@@ -7227,11 +7240,65 @@ class Api:
                 })
             return
 
+        # --- Garde-fou volume : même protection qu'en envoi automatique. ---
+        # Plafond par adresse (montée auto comprise) : au-delà du plafond du
+        # jour d'une adresse, ses brouillons sont REPORTÉS (laissés en
+        # attente) au lieu d'être envoyés. Valider 200 brouillons d'un coup
+        # n'inonde plus — le reste part les jours suivants.
+        caps_by_account: dict = {}
+        count_by_account: dict = {}
+        addr_to_account: dict = {}
+        global_cap = 0
+        try:
+            from triskell_core.prospect.pipeline import PipelineConfig
+            from ..integrations import sender_pool_tracker as _spt
+            from ..integrations import shared_secrets as _ss
+            _cfg = PipelineConfig.load()
+            global_cap = int(getattr(_cfg, "daily_cap", 0) or 0)
+            _pool = list(getattr(_cfg, "autopilot_sender_pool", None) or [])
+            _ramp = _spt.apply_ramp(_pool)
+            for _p in _ramp.get("pool", []):
+                _aid = str(_p.get("account_id") or "").strip()
+                if _aid:
+                    caps_by_account[_aid] = int(_p.get("daily_cap") or 0)
+            for _a in (_ss.get_all_mail_accounts() or []):
+                _em = (_a.get("from_email") or "").strip().lower()
+                _aid = (_a.get("id") or "").strip()
+                if _em and _aid:
+                    addr_to_account[_em] = _aid
+            _all_ids = list({*caps_by_account.keys(), *addr_to_account.values()})
+            if _all_ids:
+                count_by_account = _spt.count_sent_24h_by_account(_all_ids)
+        except Exception as exc:
+            logger.debug("batch garde-fou init KO: %s", exc)
+
+        def _row_account(row) -> str:
+            a = (row.get("sender_address") or "").strip().lower()
+            if a and a in addr_to_account:
+                return addr_to_account[a]
+            return "primary"
+
+        def _cap_for(acct: str) -> int:
+            # Adresse du pool → son plafond du jour ; sinon filet global.
+            c = caps_by_account.get(acct)
+            return int(c if c is not None else global_cap)
+
         for i, r in enumerate(rows):
             # Stop demandé par l'UI ?
             with self._drafts_batch_lock:
                 if self._drafts_batch_state.get("stop_requested"):
                     break
+
+            # Garde-fou : l'adresse de ce brouillon a-t-elle encore de la
+            # marge sur 24 h ? Sinon on REPORTE (laissé en attente).
+            _acct = _row_account(r)
+            _cap = _cap_for(_acct)
+            if _cap > 0 and count_by_account.get(_acct, 0) >= _cap:
+                with self._drafts_batch_lock:
+                    self._drafts_batch_state["deferred"] += 1
+                continue
+
+            with self._drafts_batch_lock:
                 self._drafts_batch_state.update({
                     "current_name":  r.get("name") or "",
                     "current_email": r.get("email") or "",
@@ -7250,6 +7317,8 @@ class Api:
             except Exception as exc:
                 res = {"ok": False, "error": str(exc)}
                 ok = False
+            if ok:
+                count_by_account[_acct] = count_by_account.get(_acct, 0) + 1
 
             with self._drafts_batch_lock:
                 if ok:
@@ -7284,11 +7353,20 @@ class Api:
                         break
 
         with self._drafts_batch_lock:
+            _def = self._drafts_batch_state.get("deferred", 0)
+            _note = ""
+            if _def > 0:
+                _note = (
+                    f"{_def} brouillon(s) gardé(s) en attente : le plafond du "
+                    "jour de leur adresse d'envoi est atteint. Ils partiront "
+                    "automatiquement les prochains jours (protection de ta "
+                    "réputation d'envoi).")
             self._drafts_batch_state.update({
                 "running":     False,
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
                 "current_name":  "",
                 "current_email": "",
+                "deferred_note": _note,
             })
 
     # ------------------------------------------------------------------

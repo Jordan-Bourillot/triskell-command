@@ -214,6 +214,43 @@ def mark_unsubscribed(client, prospect_id: str, reason: str = "") -> None:
         logger.warning("mark_unsubscribed KO: %s", exc)
 
 
+def mark_unsubscribed_by_email(client, email: str, reason: str = "") -> int:
+    """Passe en 'unsubscribed' TOUTES les fiches portant cette adresse.
+
+    Sert au clic sur le lien de désinscription : on n'a que l'adresse, pas
+    forcément l'id de fiche. Renvoie le nombre de fiches passées en
+    désinscrit (0 si l'adresse n'est dans aucune fiche — la signature du
+    lien a déjà été vérifiée en amont, donc on ne se base que sur elle).
+    """
+    addr = (email or "").strip().lower()
+    if not addr:
+        return 0
+    try:
+        rows = (client.raw.table("prospects")
+                .select("id")
+                .contains("emails", [addr])
+                .execute().data or [])
+    except Exception as exc:
+        logger.warning("mark_unsubscribed_by_email lookup KO: %s", exc)
+        rows = []
+    n = 0
+    for r in rows:
+        pid = r.get("id")
+        if not pid:
+            continue
+        try:
+            client.raw.table("prospects").update({
+                "status": "unsubscribed",
+                "last_contact_at": datetime.now().isoformat(timespec="seconds"),
+                "updated_by": client.user_id,
+            }).eq("id", pid).execute()
+            _audit("unsubscribed", client, pid, reason)
+            n += 1
+        except Exception as exc:
+            logger.warning("mark_unsubscribed_by_email update KO: %s", exc)
+    return n
+
+
 def mark_refused(client, prospect_id: str, reason: str = "") -> None:
     """Passe en 'refused' (prospect a dit non clairement)."""
     if not prospect_id:

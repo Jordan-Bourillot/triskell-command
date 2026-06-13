@@ -76,6 +76,7 @@ PUBLIC_API_PATHS = {
     "/api/pixelpros/affiliate-login-request",  # Demande de magic link affilié (public, rate-limité)
     "/api/pixelpros/contact",  # Formulaire de contact des sites clients (public, rate-limité)
     "/api/pixelpros/contact_studio",  # Formulaire de contact de pixel-pros.fr (public, rate-limité)
+    "/api/unsubscribe",  # Désinscription en 1 clic (lien signé dans les mails de prospection)
 }
 
 # Utilisateurs reconnus (étendre ici si on ajoute du monde)

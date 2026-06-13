@@ -377,6 +377,75 @@ def create_app() -> FastAPI:
         )
         return JSONResponse(content={"ok": True, **result})
 
+    # ---------------- Désinscription en 1 clic (public) ----------------
+    # GET  : page de confirmation (n'agit PAS — évite qu'un antivirus/proxy
+    #        qui préfetche le lien désinscrive à tort).
+    # POST : désinscrit réellement. C'est aussi ce qu'appelle le one-click
+    #        des messageries (RFC 8058, body « List-Unsubscribe=One-Click »).
+    _UNSUB_PAGE_CSS = (
+        "body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;"
+        "background:#f8fafc;color:#1f2937;display:flex;min-height:100vh;"
+        "align-items:center;justify-content:center;margin:0;padding:24px}"
+        ".card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;"
+        "padding:32px 28px;max-width:440px;box-shadow:0 4px 24px rgba(0,0,0,.06);"
+        "text-align:center}h1{font-size:20px;margin:0 0 12px}"
+        "p{font-size:15px;line-height:1.6;color:#4b5563;margin:0 0 20px}"
+        ".btn{display:inline-block;background:#dc2626;color:#fff;border:0;"
+        "border-radius:10px;padding:12px 22px;font-size:15px;font-weight:600;"
+        "cursor:pointer;text-decoration:none}.ok{color:#059669;font-size:34px}"
+        ".muted{color:#9ca3af;font-size:13px;margin-top:16px}")
+
+    def _unsub_page(title: str, body_html: str, status: int = 200) -> HTMLResponse:
+        return HTMLResponse(status_code=status, content=(
+            "<!doctype html><html lang=fr><head><meta charset=utf-8>"
+            "<meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<meta name=robots content='noindex'>"
+            f"<title>{title}</title><style>{_UNSUB_PAGE_CSS}</style></head>"
+            f"<body><div class=card>{body_html}</div></body></html>"))
+
+    @app.get("/api/unsubscribe")
+    async def unsubscribe_get(request: Request) -> HTMLResponse:
+        from html import escape
+        from ..integrations import unsubscribe as unsub
+        token = request.query_params.get("u", "")
+        info = unsub.verify_token(token)
+        if not info:
+            return _unsub_page(
+                "Lien invalide",
+                "<h1>Lien invalide</h1><p>Ce lien de désinscription n'est "
+                "pas valide ou a expiré.</p>", status=400)
+        email = escape(info["email"])
+        return _unsub_page("Confirmer la désinscription", (
+            "<h1>Se désinscrire</h1>"
+            f"<p>Confirmez la désinscription de <b>{email}</b>.<br>"
+            "Vous ne recevrez plus aucun message de notre part.</p>"
+            f"<form method=post action='/api/unsubscribe?u={escape(token)}'>"
+            "<button class=btn type=submit>Confirmer la désinscription</button>"
+            "</form>"))
+
+    @app.post("/api/unsubscribe")
+    async def unsubscribe_post(request: Request) -> HTMLResponse:
+        from ..integrations import unsubscribe as unsub
+        token = request.query_params.get("u", "")
+        if not token:
+            # one-click : le token peut être dans le corps de formulaire
+            try:
+                form = await request.form()
+                token = str(form.get("u", "") or "")
+            except Exception:
+                token = ""
+        result = unsub.process_unsubscribe(token)
+        if result.get("ok"):
+            return _unsub_page("Désinscription confirmée", (
+                "<div class=ok>✓</div><h1>C'est fait</h1>"
+                "<p>Vous êtes désinscrit. Vous ne recevrez plus aucun "
+                "message de notre part.</p>"
+                "<div class=muted>Vous pouvez fermer cette page.</div>"))
+        return _unsub_page("Désinscription", (
+            "<h1>Un instant</h1>"
+            f"<p>{result.get('error') or 'Réessayez dans quelques minutes.'}</p>"),
+            status=400)
+
     @app.get("/api/_methods")
     async def list_methods() -> dict:
         """Liste les méthodes API disponibles (utile pour debug front)."""
