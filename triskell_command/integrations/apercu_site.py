@@ -17,6 +17,7 @@ Usage :
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import html as _html
 import logging
@@ -101,6 +102,54 @@ def _initials(nom: str) -> str:
     return ("".join(w[0] for w in sig[:2]).upper()) or "✦"
 
 
+# Vraies photos par métier (téléchargées + vérifiées à l'œil le 14/06/2026 ;
+# Unsplash, libres). Embarquées dans la maquette pour faire sérieux — fini
+# l'emoji « jeu vidéo ». Un métier non couvert → photo « default » (devanture
+# élégante neutre, jamais hors-sujet).
+_PHOTO_DIR = os.path.join(os.path.dirname(__file__), "apercu_photos")
+_PHOTO_MAP: dict[str, str] = {
+    "boulang": "boulangerie.jpg", "patiss": "boulangerie.jpg", "pain": "boulangerie.jpg",
+    "fleur": "fleuriste.jpg",
+    "restaur": "restaurant.jpg", "pizz": "restaurant.jpg", "bar": "restaurant.jpg",
+    "traiteur": "restaurant.jpg", "brasser": "restaurant.jpg", "creperie": "restaurant.jpg",
+    "coiff": "coiffeur.jpg",
+    "beaut": "beaute.jpg", "estheti": "beaute.jpg", "spa": "beaute.jpg",
+    "ongle": "beaute.jpg", "manucure": "beaute.jpg", "massage": "beaute.jpg",
+    "plomb": "batiment.jpg", "electric": "batiment.jpg", "chauffag": "batiment.jpg",
+    "peintr": "batiment.jpg", "menuis": "batiment.jpg", "macon": "batiment.jpg",
+    "carrel": "batiment.jpg", "couvr": "batiment.jpg", "platr": "batiment.jpg",
+    "plaqu": "batiment.jpg", "renov": "batiment.jpg", "batiment": "batiment.jpg",
+    "artisan": "batiment.jpg", "serrur": "batiment.jpg", "charpent": "batiment.jpg",
+    "jardin": "jardin.jpg", "paysag": "jardin.jpg", "elagag": "jardin.jpg",
+    "garage": "garage.jpg", "auto": "garage.jpg", "mecanic": "garage.jpg",
+    "carross": "garage.jpg", "pneu": "garage.jpg",
+}
+_photo_cache: dict[str, str] = {}
+
+
+def _photo_file_for(metier: str) -> str:
+    key = _strip_accents((metier or "").lower())
+    for frag, fn in _PHOTO_MAP.items():
+        if frag in key:
+            return fn
+    return "default.jpg"
+
+
+def _photo_base64(metier: str) -> str:
+    """Photo du métier encodée en base64 (embarquée dans la maquette). "" si
+    absente — la maquette retombe alors sur un fond dégradé + monogramme."""
+    fn = _photo_file_for(metier)
+    if fn in _photo_cache:
+        return _photo_cache[fn]
+    try:
+        with open(os.path.join(_PHOTO_DIR, fn), "rb") as f:
+            b = base64.b64encode(f.read()).decode("ascii")
+    except Exception:
+        b = ""
+    _photo_cache[fn] = b
+    return b
+
+
 def build_preview_html(nom: str, metier: str = "", ville: str = "") -> str:
     """HTML auto-contenu d'une maquette de site (cadre navigateur + hero)."""
     nom = (nom or "Votre entreprise").strip()
@@ -109,6 +158,19 @@ def build_preview_html(nom: str, metier: str = "", ville: str = "") -> str:
     c1, c2, _emoji = _style_for(metier)
     slug = _domain_slug(nom)
     initials = _initials(nom)
+    photo_b64 = _photo_base64(metier)
+    if photo_b64:
+        # Vraie photo du métier en fond du panneau, avec un léger voile sombre
+        # en bas (lisibilité du badge) + une touche de couleur de marque.
+        right_style = (f"background-image:linear-gradient(to top,"
+                       f"rgba(0,0,0,.55),rgba(0,0,0,0) 52%),"
+                       f"linear-gradient(135deg,{c1}33,transparent 55%),"
+                       f"url('data:image/jpeg;base64,{photo_b64}');"
+                       f"background-size:cover;background-position:center;")
+        right_inner = ""
+    else:
+        right_style = f"background:linear-gradient(135deg,{c1},{c2});"
+        right_inner = f'<div class="mono">{_html.escape(initials)}</div>'
 
     # Eyebrow : « MÉTIER · VILLE » (ou juste l'un, ou un défaut).
     eyebrow_bits = [b for b in (metier.upper(), ville.upper()) if b]
@@ -158,11 +220,8 @@ def build_preview_html(nom: str, metier: str = "", ville: str = "") -> str:
   .btn1 {{ background:{c1}; color:#fff; font-weight:600; font-size:15px;
            padding:14px 26px; border-radius:11px; box-shadow:0 10px 24px {c1}40; }}
   .btn2 {{ color:#0f172a; font-weight:600; font-size:15px; padding:14px 8px; }}
-  .right {{ flex:1; background:linear-gradient(135deg,{c1},{c2}); position:relative;
-            display:flex; align-items:center; justify-content:center; overflow:hidden; }}
-  .right::after {{ content:''; position:absolute; width:320px; height:320px;
-                   background:rgba(255,255,255,.13); border-radius:50%;
-                   top:-90px; right:-90px; }}
+  .right {{ flex:1; position:relative; display:flex; align-items:center;
+            justify-content:center; overflow:hidden; }}
   .mono {{ width:190px; height:190px; border-radius:50%;
            background:rgba(255,255,255,.16); border:2px solid rgba(255,255,255,.45);
            display:flex; align-items:center; justify-content:center;
@@ -195,8 +254,8 @@ def build_preview_html(nom: str, metier: str = "", ville: str = "") -> str:
           <span class="btn2">Voir nos réalisations →</span>
         </div>
       </div>
-      <div class="right">
-        <div class="mono">{e(initials)}</div>
+      <div class="right" style="{right_style}">
+        {right_inner}
         <div class="badge">✓ Site moderne, rapide et <span>adapté au mobile</span></div>
       </div>
     </div>
