@@ -810,19 +810,44 @@ def push_to_prospects(hunt_id: str) -> dict:
         return {"ok": False, "error":
                 "aucun prospect avec mail à pousser (mail requis)"}
 
-    try:
-        result = crm.upsert_many(core_prospects)
-        if hasattr(crm, "save"):
-            try: crm.save()
-            except Exception: pass
-        return {
-            "ok": True,
-            "backend":  backend,
-            "created":  int(result.get("created") or 0),
-            "merged":   int(result.get("merged") or 0),
-            "total":    int(result.get("total") or 0),
-            "pushed":   len(core_prospects),
-            "quality":  quality,
-        }
-    except Exception as exc:
-        return {"ok": False, "error": f"upsert échoué : {exc}"}
+    # Versement fiche par fiche, TOLÉRANT aux collisions : si une adresse
+    # est déjà présente sous une autre fiche (verrou « mail unique »,
+    # migration 39 → erreur 23505), on saute CETTE fiche au lieu de faire
+    # échouer tout le lot. Sans ça, une seule adresse déjà connue annulait
+    # le versement de toute la chasse — et ça empire à mesure que la base
+    # grandit (demande Jordan : gérer et continuer, 14/06/2026).
+    created = merged = skipped_collision = 0
+    errors: list[str] = []
+    for cp in core_prospects:
+        try:
+            _, was_new = crm.upsert(cp)
+            if was_new:
+                created += 1
+            else:
+                merged += 1
+        except Exception as exc:
+            msg = str(exc)
+            if "23505" in msg or "deja present" in msg or "duplicate" in msg.lower():
+                skipped_collision += 1
+            else:
+                errors.append(msg)
+            continue
+    if hasattr(crm, "save"):
+        try: crm.save()
+        except Exception: pass
+    if isinstance(quality, dict):
+        quality["skipped_collision"] = skipped_collision
+
+    if created == 0 and merged == 0 and errors:
+        # Rien n'est passé ET ce ne sont pas que des collisions → vrai échec.
+        return {"ok": False, "error": f"upsert échoué : {errors[0]}"}
+    return {
+        "ok": True,
+        "backend":  backend,
+        "created":  created,
+        "merged":   merged,
+        "pushed":   created + merged,
+        "skipped_collision": skipped_collision,
+        "errors":   len(errors),
+        "quality":  quality,
+    }
