@@ -108,21 +108,43 @@ def _initials(nom: str) -> str:
 # élégante neutre, jamais hors-sujet).
 _PHOTO_DIR = os.path.join(os.path.dirname(__file__), "apercu_photos")
 _PHOTO_MAP: dict[str, str] = {
-    "boulang": "boulangerie.jpg", "patiss": "boulangerie.jpg", "pain": "boulangerie.jpg",
+    # Bâtiment — chaque métier a SA photo (ordre = priorité, 1er trouvé gagne).
+    "plomb": "plombier.jpg", "chauffag": "plombier.jpg",
+    "electric": "electricien.jpg",
+    "peintr": "peintre.jpg",
+    "carrel": "carreleur.jpg",
+    "macon": "macon.jpg",
+    "menuis": "menuisier.jpg", "ebenist": "menuisier.jpg", "charpent": "menuisier.jpg",
+    "plaquist": "plaquiste.jpg", "placo": "plaquiste.jpg", "platr": "plaquiste.jpg",
+    "couvr": "batiment.jpg", "serrur": "batiment.jpg", "terrass": "batiment.jpg",
+    # Jardin / paysage
+    "paysag": "paysagiste.jpg", "jardin": "paysagiste.jpg", "elagag": "paysagiste.jpg",
+    # Commerce de bouche (fleur AVANT animal : la fiche fleuriste mentionne
+    # « animaux de compagnie » → ne doit pas partir en animalier).
     "fleur": "fleuriste.jpg",
-    "restaur": "restaurant.jpg", "pizz": "restaurant.jpg", "bar": "restaurant.jpg",
-    "traiteur": "restaurant.jpg", "brasser": "restaurant.jpg", "creperie": "restaurant.jpg",
-    "coiff": "coiffeur.jpg",
-    "beaut": "beaute.jpg", "estheti": "beaute.jpg", "spa": "beaute.jpg",
-    "ongle": "beaute.jpg", "manucure": "beaute.jpg", "massage": "beaute.jpg",
-    "plomb": "batiment.jpg", "electric": "batiment.jpg", "chauffag": "batiment.jpg",
-    "peintr": "batiment.jpg", "menuis": "batiment.jpg", "macon": "batiment.jpg",
-    "carrel": "batiment.jpg", "couvr": "batiment.jpg", "platr": "batiment.jpg",
-    "plaqu": "batiment.jpg", "renov": "batiment.jpg", "batiment": "batiment.jpg",
-    "artisan": "batiment.jpg", "serrur": "batiment.jpg", "charpent": "batiment.jpg",
-    "jardin": "jardin.jpg", "paysag": "jardin.jpg", "elagag": "jardin.jpg",
-    "garage": "garage.jpg", "auto": "garage.jpg", "mecanic": "garage.jpg",
-    "carross": "garage.jpg", "pneu": "garage.jpg",
+    "patiss": "patisserie.jpg", "boulang": "patisserie.jpg", "chocolat": "patisserie.jpg",
+    "confis": "patisserie.jpg",
+    "restaur": "restaurant.jpg", "pizz": "restaurant.jpg", "brasser": "restaurant.jpg",
+    "creper": "restaurant.jpg", "bistro": "restaurant.jpg", "traiteur": "restaurant.jpg",
+    # Coiffure / beauté / bien-être (coiff/barbier AVANT beaut)
+    "coiff": "coiffeur.jpg", "barbier": "coiffeur.jpg",
+    "esthet": "beaute.jpg", "beaut": "beaute.jpg", "ongle": "beaute.jpg",
+    "manucur": "beaute.jpg", "maquill": "beaute.jpg", "institut": "beaute.jpg",
+    "massag": "bien-etre.jpg", "spa": "bien-etre.jpg", "bien-etre": "bien-etre.jpg",
+    "bien etre": "bien-etre.jpg", "sophro": "bien-etre.jpg", "naturopath": "bien-etre.jpg",
+    "reflexo": "bien-etre.jpg", "yoga": "bien-etre.jpg", "hypno": "bien-etre.jpg",
+    # Services
+    "coach": "coach.jpg",
+    "photograph": "photographe.jpg", "photo": "photographe.jpg",
+    "tatou": "tatoueur.jpg", "tattoo": "tatoueur.jpg", "piercing": "tatoueur.jpg",
+    "animal": "animalier.jpg", "canin": "animalier.jpg", "toilettag": "animalier.jpg",
+    "veterin": "animalier.jpg", "chien": "animalier.jpg",
+    # Auto (automobile, pas « auto » seul → trop large)
+    "garage": "garage.jpg", "mecanic": "garage.jpg", "carross": "garage.jpg",
+    "automobile": "garage.jpg", "pneu": "garage.jpg",
+    # Bâtiment générique (après les métiers précis)
+    "renov": "batiment.jpg", "batiment": "batiment.jpg", "travaux": "batiment.jpg",
+    "artisan": "batiment.jpg", "isolation": "batiment.jpg",
 }
 _photo_cache: dict[str, str] = {}
 
@@ -182,16 +204,25 @@ def build_preview_html(nom: str, metier: str = "", ville: str = "") -> str:
     sub += "."
 
     e = _html.escape
+    services = [
+        ("Savoir-faire", "Un métier maîtrisé et un vrai souci du détail."),
+        ("Proximité", "Une équipe à votre écoute, près de chez vous."),
+        ("Réactivité", "Une réponse rapide à chacune de vos demandes."),
+    ]
+    svc_html = "".join(
+        f'<div class="svc"><div class="svc-ic">✓</div>'
+        f'<div class="svc-t">{e(t)}</div><div class="svc-d">{e(d)}</div></div>'
+        for t, d in services)
+
     return f"""<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ width:1000px; height:640px; background:#e9eef5;
-         font-family:'Inter',system-ui,sans-serif; display:flex;
-         align-items:center; justify-content:center; }}
-  .win {{ width:920px; height:560px; background:#fff; border-radius:14px;
-          overflow:hidden; box-shadow:0 30px 70px rgba(15,23,42,.28); }}
+  body {{ width:1000px; background:#e9eef5; font-family:'Inter',system-ui,sans-serif;
+         display:flex; justify-content:center; padding:32px 0; }}
+  .win {{ width:940px; background:#fff; border-radius:14px; overflow:hidden;
+          box-shadow:0 30px 70px rgba(15,23,42,.28); }}
   .chrome {{ height:42px; background:#f1f5f9; display:flex; align-items:center;
              gap:8px; padding:0 16px; border-bottom:1px solid #e2e8f0; }}
   .dot {{ width:12px; height:12px; border-radius:50%; }}
@@ -201,37 +232,52 @@ def build_preview_html(nom: str, metier: str = "", ville: str = "") -> str:
   .nav {{ height:58px; display:flex; align-items:center; justify-content:space-between;
           padding:0 34px; border-bottom:1px solid #f1f5f9; }}
   .logo {{ font-family:'Poppins'; font-weight:800; font-size:18px; color:#0f172a; }}
-  .logo b {{ color:{c1}; }}
   .menu {{ display:flex; gap:24px; font-size:13.5px; color:#475569; font-weight:500; }}
   .menu .cta {{ background:{c1}; color:#fff; padding:8px 16px; border-radius:999px;
                 font-weight:600; }}
-  .hero {{ height:calc(560px - 42px - 58px); display:flex; }}
-  .left {{ flex:1.15; padding:48px 40px; display:flex; flex-direction:column;
+  .hero {{ height:380px; display:flex; }}
+  .left {{ flex:1.15; padding:44px 40px; display:flex; flex-direction:column;
            justify-content:center; }}
   .eyebrow {{ display:inline-block; align-self:flex-start; font-family:'Poppins';
               font-weight:700; font-size:11.5px; letter-spacing:1.5px;
               color:{c1}; background:{c1}14; padding:7px 13px; border-radius:999px;
               margin-bottom:20px; }}
-  h1 {{ font-family:'Poppins'; font-weight:800; font-size:46px; line-height:1.06;
+  h1 {{ font-family:'Poppins'; font-weight:800; font-size:44px; line-height:1.06;
         color:#0f172a; letter-spacing:-1px; text-wrap:balance; }}
-  .sub {{ margin-top:18px; font-size:16.5px; line-height:1.5; color:#475569;
+  .sub {{ margin-top:18px; font-size:16px; line-height:1.5; color:#475569;
           max-width:430px; text-wrap:pretty; }}
-  .ctas {{ margin-top:30px; display:flex; gap:14px; align-items:center; }}
+  .ctas {{ margin-top:28px; display:flex; gap:14px; align-items:center; }}
   .btn1 {{ background:{c1}; color:#fff; font-weight:600; font-size:15px;
            padding:14px 26px; border-radius:11px; box-shadow:0 10px 24px {c1}40; }}
   .btn2 {{ color:#0f172a; font-weight:600; font-size:15px; padding:14px 8px; }}
   .right {{ flex:1; position:relative; display:flex; align-items:center;
             justify-content:center; overflow:hidden; }}
-  .mono {{ width:190px; height:190px; border-radius:50%;
+  .mono {{ width:175px; height:175px; border-radius:50%;
            background:rgba(255,255,255,.16); border:2px solid rgba(255,255,255,.45);
            display:flex; align-items:center; justify-content:center;
-           font-family:'Poppins'; font-weight:800; font-size:78px; color:#fff;
+           font-family:'Poppins'; font-weight:800; font-size:72px; color:#fff;
            letter-spacing:1px; box-shadow:0 18px 44px rgba(0,0,0,.20); }}
-  .badge {{ position:absolute; bottom:26px; left:26px; right:26px;
-            background:rgba(255,255,255,.92); border-radius:12px; padding:13px 16px;
+  .badge {{ position:absolute; bottom:22px; left:22px; right:22px;
+            background:rgba(255,255,255,.93); border-radius:12px; padding:12px 15px;
             font-size:13px; color:#0f172a; font-weight:600;
             box-shadow:0 12px 28px rgba(0,0,0,.16); }}
   .badge span {{ color:{c1}; }}
+  .services {{ padding:40px 40px 36px; }}
+  .svc-title {{ font-family:'Poppins'; font-weight:800; font-size:24px; color:#0f172a;
+                text-align:center; margin-bottom:26px; letter-spacing:-.5px; }}
+  .svc-row {{ display:flex; gap:20px; }}
+  .svc {{ flex:1; background:#f8fafc; border:1px solid #eef2f7; border-radius:14px;
+          padding:24px 22px; }}
+  .svc-ic {{ width:42px; height:42px; border-radius:11px; background:{c1}1f; color:{c1};
+             display:flex; align-items:center; justify-content:center;
+             font-weight:800; font-size:20px; margin-bottom:14px; }}
+  .svc-t {{ font-family:'Poppins'; font-weight:700; font-size:17px; color:#0f172a;
+            margin-bottom:7px; }}
+  .svc-d {{ font-size:14px; line-height:1.5; color:#64748b; }}
+  .footer {{ background:#0f172a; color:#cbd5e1; padding:24px 40px; display:flex;
+             align-items:center; justify-content:space-between; }}
+  .f-logo {{ font-family:'Poppins'; font-weight:800; font-size:17px; color:#fff; }}
+  .f-links {{ font-size:12.5px; color:#94a3b8; }}
 </style></head><body>
   <div class="win">
     <div class="chrome">
@@ -258,6 +304,14 @@ def build_preview_html(nom: str, metier: str = "", ville: str = "") -> str:
         {right_inner}
         <div class="badge">✓ Site moderne, rapide et <span>adapté au mobile</span></div>
       </div>
+    </div>
+    <div class="services">
+      <div class="svc-title">Nos engagements</div>
+      <div class="svc-row">{svc_html}</div>
+    </div>
+    <div class="footer">
+      <div class="f-logo">{e(nom)}</div>
+      <div class="f-links">Mentions légales · Plan du site · Contact · © 2026</div>
     </div>
   </div>
 </body></html>"""
@@ -287,8 +341,7 @@ def render_preview_png(nom: str, metier: str = "", ville: str = "",
                 except Exception:
                     pass
                 page.wait_for_timeout(700)
-                png = page.screenshot(
-                    clip={"x": 0, "y": 0, "width": 1000, "height": 640})
+                png = page.screenshot(full_page=True)
             finally:
                 browser.close()
         if output_path:
