@@ -27,7 +27,7 @@ const Autopilot = {
       n:      '1',
       title:  'Cherche',
       sources:'Fichier « Tous les prospects »',
-      desc:   "Pioche uniquement dans tes prospects existants. L'autopilote n'ajoute jamais de nouveaux prospects — utilise Chasseur, Éclaireur ou Obélisk pour ça.",
+      desc:   "Pioche uniquement dans tes prospects existants. L'autopilote n'ajoute jamais de nouveaux prospects — utilise Le Chasseur, le Prospecteur Google ou Obélisk pour ça.",
       defaultMode: 'auto',
     },
     {

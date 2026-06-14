@@ -45,8 +45,6 @@ const GlobalSearch = {
       keywords: 'obelisk obélisk denicheur dénicheur createurs créateurs youtube twitch instagram tiktok' },
     { view: 'chasseur',    label: 'Le Chasseur (PME françaises)', kind: 'view', icon: '🎯',
       keywords: 'chasseur pme entreprises francaises françaises metier métier departement département' },
-    { view: 'eclaireur',   label: 'Compléter les fiches', kind: 'view', icon: '🔍',
-      keywords: 'eclaireur éclaireur completer compléter fiches mails telephones téléphones manquants' },
     { view: 'prospecteur_google', label: 'Prospecteur Google (commerces locaux)', kind: 'view', icon: '📍',
       keywords: 'google maps commerces locaux ville metier métier sans site' },
     { view: 'argus',       label: 'Argus (mails pros en masse)', kind: 'view', icon: '🦅',
