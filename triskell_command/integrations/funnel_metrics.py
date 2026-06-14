@@ -306,3 +306,87 @@ def compute_template_performance(period: str = "90d") -> dict[str, Any]:
         sent_res.data or [], reply_res.data or [])
     out["ok"] = True
     return out
+
+
+# ---------------------------------------------------------------------------
+# Performance par CIBLE (métier) — quelles cibles répondent le mieux ?
+# ---------------------------------------------------------------------------
+def compute_target_performance(period: str = "90d") -> dict[str, Any]:
+    """Croise envois/réponses avec le métier (industry) de chaque prospect.
+
+    La boucle d'apprentissage : « les fleuristes répondent 3× plus que les
+    coiffeurs » → on oriente la prospection vers ce qui convertit. Lecture
+    seule, 100 % sur la donnée existante (aucune colonne ni migration : le
+    métier est déjà dans prospects.industry). Période par défaut : 90 jours.
+    """
+    out: dict[str, Any] = {"ok": False, "period": period, "rows": [],
+                           "recommendations": [], "error": ""}
+    client = _get_client()
+    if client is None:
+        out["error"] = "supabase_unavailable"
+        return out
+    period = period if period in PERIODS else "90d"
+    since = _period_start(period)
+    sb = client.raw
+    try:
+        prospects = (sb.table("prospects").select("id,industry")
+                     .limit(20000).execute()).data or []
+        sent = (sb.table("email_history").select("prospect_id")
+                .eq("kind", "email_sent").gte("ts", since)
+                .limit(40000).execute()).data or []
+        reply = (sb.table("email_history").select("prospect_id,extra")
+                 .eq("kind", "reply_received").gte("ts", since)
+                 .limit(40000).execute()).data or []
+    except Exception as exc:
+        out["error"] = f"db: {exc}"
+        return out
+
+    ind_by_pid: dict[str, str] = {}
+    for p in prospects:
+        pid = p.get("id")
+        if pid:
+            ind_by_pid[pid] = (p.get("industry") or "").strip().lower() or "(inconnu)"
+
+    counts: dict[str, dict] = {}
+    for h in sent:
+        m = ind_by_pid.get(h.get("prospect_id"))
+        if not m:
+            continue
+        counts.setdefault(m, {"sent": 0, "replies": 0, "interested": 0})["sent"] += 1
+    for h in reply:
+        m = ind_by_pid.get(h.get("prospect_id"))
+        if not m:
+            continue
+        c = counts.setdefault(m, {"sent": 0, "replies": 0, "interested": 0})
+        c["replies"] += 1
+        extra = h.get("extra") or {}
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except Exception:
+                extra = {}
+        if ((extra.get("classification") or {}).get("category")) == "interested":
+            c["interested"] += 1
+
+    rows = []
+    for m, c in counts.items():
+        rate = round(100.0 * c["replies"] / c["sent"], 1) if c["sent"] else 0.0
+        rows.append({"target": m, "sent": c["sent"], "replies": c["replies"],
+                     "interested": c["interested"], "reply_rate": rate})
+    rows.sort(key=lambda x: (-x["reply_rate"], -x["sent"]))
+    out["rows"] = rows[:30]
+
+    # Recommandations : cibles nettement au-dessus de la moyenne (>= 5 envois).
+    rated = [r for r in rows if r["sent"] >= 5]
+    if rated:
+        avg = sum(r["reply_rate"] for r in rated) / len(rated)
+        recos = [
+            {"target": r["target"], "reply_rate": r["reply_rate"],
+             "sent": r["sent"], "ratio": round(r["reply_rate"] / avg, 1) if avg else 0}
+            for r in rated
+            if avg > 0 and r["reply_rate"] >= avg * 1.5 and r["reply_rate"] > 0
+        ]
+        recos.sort(key=lambda x: -x["reply_rate"])
+        out["recommendations"] = recos[:5]
+    out["ok"] = True
+    return out

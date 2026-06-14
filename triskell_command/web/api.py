@@ -9940,6 +9940,19 @@ class Api:
             logger.debug("prospection_estimate: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def prospection_response_insights(self, payload: dict | None = None) -> dict:
+        """Quelles cibles (métiers) répondent le mieux ? Croise les envois et
+        les réponses avec le métier des prospects (lecture seule, données
+        existantes). payload = {period?} (défaut 90d)."""
+        p = payload or {}
+        try:
+            from ..integrations import funnel_metrics
+            return funnel_metrics.compute_target_performance(
+                period=p.get("period") or "90d")
+        except Exception as exc:
+            logger.debug("prospection_response_insights: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def prospection_mission_cancel(self, payload: dict) -> dict:
         """Abandonne le suivi d'une mission (la chasse déjà lancée n'est
         pas tuée, ses résultats restent consultables dans son outil)."""

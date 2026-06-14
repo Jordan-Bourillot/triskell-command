@@ -84,6 +84,8 @@ const Prospection = {
           <div id="pr-missions"></div>
         </div>
 
+        <div id="pr-recos" hidden style="margin:0 0 20px;padding:14px 16px;border-radius:12px;background:hsl(var(--surface));border:1px solid hsl(var(--border));"></div>
+
         <details id="pr-carnet" class="pr-carnet">
           <summary>
             <span>🗒️ Carnet de chasse <span class="pr-carnet-sub">— tout ce qui a déjà été cherché</span></span>
@@ -125,6 +127,7 @@ const Prospection = {
     });
 
     await this._refresh();
+    this._loadRecommendations();
     this._startPolling();
   },
 
@@ -399,6 +402,37 @@ const Prospection = {
     if (!r || !r.ok || !r.message) { slot.hidden = true; return; }
     const icon = r.has_history ? (r.estimate ? '📊' : 'ℹ️') : '✨';
     slot.textContent = `${icon} ${r.message}`;
+    slot.hidden = false;
+  },
+
+  _escTxt(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  },
+
+  // Boucle d'apprentissage : « quelles cibles répondent le mieux » (90 j).
+  async _loadRecommendations() {
+    const slot = document.getElementById('pr-recos');
+    if (!slot) return;
+    if (!App.api || typeof App.api.prospection_response_insights !== 'function') {
+      slot.hidden = true; return;
+    }
+    let r = null;
+    try {
+      r = await App.api.prospection_response_insights({ period: '90d' });
+    } catch (e) { slot.hidden = true; return; }
+    if (!r || !r.ok || !r.recommendations || !r.recommendations.length) {
+      slot.hidden = true; return;
+    }
+    const items = r.recommendations.map(rec =>
+      `<li style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;">
+         <span>${this._escTxt(rec.target)}</span>
+         <strong style="color:hsl(var(--accent));">${rec.reply_rate}%</strong>
+       </li>`).join('');
+    slot.innerHTML =
+      `<div style="font-weight:700;margin-bottom:8px;">💡 Cibles qui répondent le mieux (90 derniers jours)</div>
+       <ul style="list-style:none;margin:0;padding:0;font-size:13px;">${items}</ul>
+       <div style="font-size:11.5px;color:hsl(var(--text-muted));margin-top:8px;">Ces métiers répondent nettement plus que la moyenne — à relancer en priorité.</div>`;
     slot.hidden = false;
   },
 
