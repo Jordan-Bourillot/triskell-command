@@ -38,7 +38,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Clone triskell-core (sibling repo). Le SHA peut être pinné via build-arg si besoin.
 ARG TRISKELL_CORE_REF=main
-RUN git clone --depth=1 --branch ${TRISKELL_CORE_REF} \
+# Cache-bust : bump cette valeur à chaque déploiement qui doit récupérer une
+# nouvelle version de triskell-core (sinon Docker garde l'ancien clone en cache).
+ARG CORE_BUILD_REV=2026-06-15-pro-category
+RUN echo "triskell-core build rev ${CORE_BUILD_REV}" \
+ && git clone --depth=1 --branch ${TRISKELL_CORE_REF} \
     https://github.com/Jordan-Bourillot/triskell-core.git \
     /opt/triskell-core
 
