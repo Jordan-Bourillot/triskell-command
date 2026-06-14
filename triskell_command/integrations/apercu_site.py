@@ -27,9 +27,34 @@ import html as _html
 import logging
 import os
 import re
+import threading
 import unicodedata
 
 logger = logging.getLogger(__name__)
+
+
+def _in_thread(fn, *args):
+    """Exécute fn dans un thread dédié et renvoie son résultat (None si échec).
+
+    sync_playwright() REFUSE de démarrer quand une boucle asyncio tourne dans
+    le thread courant — c'est le cas du serveur (uvicorn). Un thread neuf n'a
+    pas de boucle active → le rendu fonctionne partout (serveur comme desktop).
+    """
+    box: dict = {}
+
+    def _run():
+        try:
+            box["v"] = fn(*args)
+        except Exception as exc:  # pragma: no cover - filet
+            box["e"] = exc
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join()
+    if "e" in box:
+        logger.warning("apercu_site : rendu (thread) échoué : %s", box["e"])
+        return None
+    return box.get("v")
 
 
 def _strip_accents(s: str) -> str:
@@ -523,10 +548,12 @@ def render_preview_png(nom: str, metier: str = "", ville: str = "",
     être rendu — le mail part alors sans aperçu (jamais bloquant)."""
     png = None
     slug = _demo_slug_for(metier)
+    # Rendu TOUJOURS dans un thread dédié (sync_playwright ne tourne pas dans
+    # la boucle asyncio du serveur).
     if slug and (ville or "").strip():
-        png = _render_demo_png(nom, metier, ville, slug)
+        png = _in_thread(_render_demo_png, nom, metier, ville, slug)
     if png is None:
-        png = _render_mockup_png(nom, metier, ville)
+        png = _in_thread(_render_mockup_png, nom, metier, ville)
     if png is None:
         return None
     if output_path:
@@ -557,17 +584,40 @@ def _public_url(path: str) -> str:
     return f"{base}/storage/v1/object/public/{_BUCKET}/{path}" if base else ""
 
 
+# Version du design : à incrémenter si on change l'aspect de l'aperçu, pour
+# invalider les images déjà mises en cache (la clé en dépend).
+_DESIGN_VERSION = "2"
+
+
+def _object_exists(url: str) -> bool:
+    """Vrai si l'objet est déjà en ligne (évite de le refabriquer)."""
+    if not url:
+        return False
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req, timeout=6) as r:
+            return 200 <= getattr(r, "status", 200) < 300
+    except Exception:
+        return False
+
+
 def preview_image_url(nom: str, metier: str = "", ville: str = "") -> str:
     """Génère l'aperçu, l'héberge sur Supabase Storage, renvoie l'URL publique.
+    Réutilise l'image si elle existe déjà (même prospect) — pas de re-rendu.
     Renvoie "" si indisponible (Playwright/Supabase absents) — jamais bloquant."""
+    key = hashlib.sha1(
+        f"{nom}|{metier}|{ville}|v{_DESIGN_VERSION}".encode("utf-8")).hexdigest()[:20]
+    path = f"apercus/{key}.png"
+    url = _public_url(path)
+    if url and _object_exists(url):
+        return url  # déjà généré → on réutilise
     png = render_preview_png(nom, metier, ville)
     if not png:
         return ""
     c = _sb_client()
     if c is None:
         return ""
-    key = hashlib.sha1(f"{nom}|{metier}|{ville}".encode("utf-8")).hexdigest()[:20]
-    path = f"apercus/{key}.png"
     try:
         c.raw.storage.from_(_BUCKET).upload(
             path=path, file=png,
@@ -575,7 +625,7 @@ def preview_image_url(nom: str, metier: str = "", ville: str = "") -> str:
     except Exception as exc:
         logger.warning("apercu_site : upload échoué : %s", exc)
         return ""
-    return _public_url(path)
+    return url or _public_url(path)
 
 
 def preview_img_html(nom: str, metier: str = "", ville: str = "") -> str:
