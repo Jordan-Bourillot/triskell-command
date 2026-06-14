@@ -107,11 +107,10 @@ const Argus = {
             Ramène les mails d'entreprises françaises par secteur et ville.
           </h1>
           <p class="hero-subtitle">
-            Choisis tes sources, un mot-clé (ex : <em>plombier</em>) et une ville
-            (ex : <em>Lyon</em>). Argus parcourt Pages Jaunes, Europages,
-            OpenStreetMap et la recherche web, puis visite les pages Contact
-            des sites trouvés pour récolter les emails publics. Aucun email
-            n'est inventé.
+            Le plus efficace : <strong>colle une liste de sites web</strong>
+            (champ ci-dessous). Argus visite chaque site et récolte les emails
+            publics. Les annuaires (Pages Jaunes, Europages…) restent en secours,
+            mais ils bloquent souvent les robots. Aucun email n'est inventé.
           </p>
         </header>
 
@@ -125,11 +124,11 @@ const Argus = {
               </label>
               <div class="grid gap-1.5">
                 <label class="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" class="argus-source" value="pagesjaunes" checked>
+                  <input type="checkbox" class="argus-source" value="pagesjaunes">
                   Pages Jaunes
                 </label>
                 <label class="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" class="argus-source" value="europages" checked>
+                  <input type="checkbox" class="argus-source" value="europages">
                   Europages
                 </label>
                 <label class="flex items-center gap-2 text-sm cursor-pointer">
@@ -137,7 +136,7 @@ const Argus = {
                   OpenStreetMap
                 </label>
                 <label class="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" class="argus-source" value="duckduckgo" checked>
+                  <input type="checkbox" class="argus-source" value="duckduckgo">
                   Recherche web
                 </label>
                 <label class="flex items-center gap-2 text-sm cursor-pointer">
@@ -189,11 +188,12 @@ const Argus = {
             </div>
 
             <div>
-              <label for="argus-seed-urls" class="block text-xs font-semibold tracking-wider uppercase opacity-70 mb-1">
-                Sites web supplémentaires (un par ligne, optionnel)
+              <label for="argus-seed-urls" class="block text-xs font-semibold tracking-wider uppercase mb-1" style="color: hsl(var(--accent));">
+                📋 Sites web à scraper (un par ligne) — le mode le plus fiable
               </label>
-              <textarea id="argus-seed-urls" rows="3"
+              <textarea id="argus-seed-urls" rows="6" placeholder="exemple.fr&#10;https://mon-commerce.com&#10;autre-site.fr"
                         class="w-full px-3 py-2 rounded-lg bg-surface border border-border-strong focus:border-accent outline-none text-sm font-mono"></textarea>
+              <p class="text-xs text-text-muted mt-1">Colle des adresses de sites : Argus visite chacun et en extrait les mails publics. C’est le mode qui marche le mieux.</p>
             </div>
 
             <div>
@@ -310,25 +310,33 @@ const Argus = {
   // ---- Actions ----
 
   async _start() {
-    // Verrou doux (audit débutant) : l'outil est en pause et ne ramène
-    // quasiment rien — on prévient AVANT de laisser perdre 10 minutes.
-    const okPause = await Dialog.confirm(
-      'Argus est en pause : aux derniers essais, ses sources n’ont '
-      + 'quasiment rien ramené. Tu risques d’attendre pour zéro résultat.\n\n'
-      + 'Pour le même travail en mieux : Le Chasseur (PME) ou le '
-      + 'Prospecteur Google (commerces locaux).',
-      { title: 'Lancer Argus quand même ?', danger: true,
-        okLabel: 'Essayer quand même', cancelLabel: 'Annuler' });
-    if (!okPause) return;
-    const sources = [...document.querySelectorAll('.argus-source:checked')].map(c => c.value);
-    if (sources.length === 0) {
-      Toast.error('Sélectionne au moins une source.');
-      return;
+    const seedUrls = (document.getElementById('argus-seed-urls')?.value || '').trim();
+    // Verrou doux : les ANNUAIRES (Pages Jaunes…) bloquent souvent et ne
+    // ramènent presque rien. On ne prévient que si l’utilisateur compte sur
+    // eux (aucune liste de sites collée) — le mode « coller des sites » marche.
+    if (!seedUrls) {
+      const okPause = await Dialog.confirm(
+        'Les annuaires d’Argus (Pages Jaunes, Europages…) bloquent souvent '
+        + 'et ne ramènent presque rien.\n\nLe plus efficace : colle une liste '
+        + 'de sites web dans le champ dédié. Sinon, Le Chasseur (PME) ou le '
+        + 'Prospecteur Google (commerces locaux) font mieux.',
+        { title: 'Lancer sur les annuaires quand même ?', danger: true,
+          okLabel: 'Essayer quand même', cancelLabel: 'Annuler' });
+      if (!okPause) return;
     }
+    const sources = [...document.querySelectorAll('.argus-source:checked')].map(c => c.value);
     const query = document.getElementById('argus-query').value.trim();
-    if (!query) {
-      Toast.error('Indique un secteur ou un mot-clé (ex : plombier) avant de lancer.');
-      return;
+    // Mode principal : une liste de sites collée suffit (ni source ni mot-clé
+    // requis). Sinon (annuaires), il faut au moins une source + un mot-clé.
+    if (!seedUrls) {
+      if (sources.length === 0) {
+        Toast.error('Colle des sites à scraper, ou coche au moins une source d’annuaire.');
+        return;
+      }
+      if (!query) {
+        Toast.error('Pour les annuaires, indique un secteur (ex : plombier). Ou colle une liste de sites.');
+        return;
+      }
     }
     const payload = {
       sources,
