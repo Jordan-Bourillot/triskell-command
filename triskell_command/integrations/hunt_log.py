@@ -364,6 +364,57 @@ def record_result(mission: dict, client=None) -> None:
         logger.debug("hunt_log record_result: %s", exc)
 
 
+def estimate_for(source: str, params: dict | None, client=None) -> dict:
+    """Estime, AVANT de lancer, ce qu'une recherche va donner — d'après la
+    récolte réelle des fois précédentes (carnet). Lecture seule, best-effort.
+
+    Renvoie {ok, has_history, estimate|None, label, runs?, last_at?, message}.
+    estimate = {found_last, with_email_last, pushed_last, est_with_email}.
+    """
+    try:
+        p = params or {}
+        src = (source or "").strip().lower()
+        try:
+            volume = int(p.get("volume") or 0)
+        except (TypeError, ValueError):
+            volume = 0
+        if volume <= 0:
+            volume = {"pme": 100, "local": 60, "createurs": 30}.get(src, 60)
+        label = criteria_label(source, p)
+        e = find(source, params, client)
+        if not e:
+            return {"ok": True, "has_history": False, "estimate": None,
+                    "label": label,
+                    "message": "Nouvelle recherche — aucun historique pour estimer."}
+        runs = int(e.get("runs") or 1)
+        last = e.get("last_at")
+        res = e.get("result") or {}
+        found = int(res.get("found") or 0)
+        with_email = int(res.get("with_email") or 0)
+        pushed = int(res.get("pushed") or 0)
+        fois = f"déjà cherchée {runs} fois" if runs > 1 else "déjà cherchée une fois"
+        if not found:
+            return {"ok": True, "has_history": True, "estimate": None,
+                    "label": label, "runs": runs, "last_at": last,
+                    "message": f"{label} : {fois} (dernière le {_date_fr(last)}), "
+                               f"récolte précédente inconnue."}
+        rate = (with_email / found) if found else 0.0
+        est_with_email = round(min(found, volume) * rate)
+        return {
+            "ok": True, "has_history": True, "label": label,
+            "runs": runs, "last_at": last,
+            "estimate": {"found_last": found, "with_email_last": with_email,
+                         "pushed_last": pushed, "est_with_email": est_with_email},
+            "message": (f"{label} : {fois} (dernière le {_date_fr(last)}) — "
+                        f"{found} trouvés dont {with_email} avec mail. "
+                        f"Pour {volume}, compte ~{est_with_email} avec mail."),
+        }
+    except Exception as exc:
+        logger.debug("hunt_log estimate_for: %s", exc)
+        return {"ok": False, "error": str(exc), "has_history": False,
+                "estimate": None, "message": ""}
+
+
 def list_entries(client=None, limit: int = 100) -> dict:
     """Pour l'écran : {ok, entries (récentes d'abord), total}."""
     try:

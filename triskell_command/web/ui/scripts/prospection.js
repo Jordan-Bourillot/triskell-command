@@ -72,6 +72,7 @@ const Prospection = {
               <input type="checkbox" id="pr-f-dry" />
               <span>🧪 Faire un essai d'abord (rien n'est enregistré — juste un aperçu)</span>
             </label>
+            <div id="pr-estimate" hidden style="margin:0 0 10px;padding:10px 12px;border-radius:10px;background:hsl(var(--surface));color:hsl(var(--text-secondary));font-size:13px;line-height:1.4;"></div>
             <button type="submit" id="pr-launch" class="pr-launch">
               <span>🚀 Lancer la recherche</span>
             </button>
@@ -103,6 +104,7 @@ const Prospection = {
     }
     this._bindTiles();
     this._renderFields();
+    this._scheduleEstimate();
     const form = document.getElementById('pr-form');
     form.onsubmit = (e) => {
       e.preventDefault();
@@ -110,8 +112,8 @@ const Prospection = {
     };
     // Mémorise la saisie au fil de l'eau (délégation : survit aux re-rendus
     // de #pr-fields quand on change de cible).
-    form.addEventListener('input', () => this._saveForm());
-    form.addEventListener('change', () => this._saveForm());
+    form.addEventListener('input', () => { this._saveForm(); this._scheduleEstimate(); });
+    form.addEventListener('change', () => { this._saveForm(); this._scheduleEstimate(); });
     const listeBtn = document.getElementById('pr-tile-liste');
     if (listeBtn) listeBtn.onclick = () => App.show('convoy');
 
@@ -352,6 +354,54 @@ const Prospection = {
   },
 
   // ───────────────────────── Lancement ─────────────────────────
+  // Construit les paramètres de la cible courante (mêmes champs que _launch).
+  _buildParams() {
+    const s = this.state.source;
+    const params = {};
+    if (s === 'pme') {
+      params.metier = this._val('metier');
+      params.departement = this._val('departement');
+      params.volume = parseInt(this._val('volume') || '100', 10);
+      params.sites_pourris = this._val('sites_pourris');
+    } else if (s === 'local') {
+      params.metier = this._val('metier');
+      params.zone = this._val('zone');
+      params.volume = parseInt(this._val('volume') || '60', 10);
+      params.sans_site = this._val('sans_site');
+    } else if (s === 'createurs') {
+      params.niche = this._val('niche');
+      params.volume = parseInt(this._val('volume') || '30', 10);
+    }
+    return params;
+  },
+
+  // Anti-rafale : on n'estime qu'une fois la saisie posée (500 ms).
+  _scheduleEstimate() {
+    clearTimeout(this._estimateTimer);
+    this._estimateTimer = setTimeout(() => this._loadEstimate(), 500);
+  },
+
+  // Estimation AVANT lancement (récolte attendue), d'après le carnet de chasse.
+  async _loadEstimate() {
+    const slot = document.getElementById('pr-estimate');
+    if (!slot) return;
+    const s = this.state.source;
+    const params = this._buildParams();
+    const main = params.metier || params.niche || params.zone || params.departement;
+    if (!s || !main) { slot.hidden = true; return; }
+    if (!App.api || typeof App.api.prospection_estimate !== 'function') {
+      slot.hidden = true; return;
+    }
+    let r = null;
+    try {
+      r = await App.api.prospection_estimate({ source: s, params });
+    } catch (e) { slot.hidden = true; return; }
+    if (!r || !r.ok || !r.message) { slot.hidden = true; return; }
+    const icon = r.has_history ? (r.estimate ? '📊' : 'ℹ️') : '✨';
+    slot.textContent = `${icon} ${r.message}`;
+    slot.hidden = false;
+  },
+
   async _launch() {
     if (this.state.launching) return;
     if (!App.api || typeof App.api.prospection_start !== 'function') {

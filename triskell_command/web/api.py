@@ -9926,6 +9926,20 @@ class Api:
             return {"ok": False, "error": str(exc), "entries": [],
                     "total": 0}
 
+    def prospection_estimate(self, payload: dict | None = None) -> dict:
+        """Estime, AVANT de lancer, la récolte attendue d'une recherche
+        d'après l'historique réel du carnet de chasse. Lecture seule.
+        payload = {source, params} (comme prospection_start)."""
+        p = payload or {}
+        source = (p.get("source") or "").strip().lower()
+        params = p.get("params") or {}
+        try:
+            from ..integrations import hunt_log
+            return hunt_log.estimate_for(source, params, client=self._supabase())
+        except Exception as exc:
+            logger.debug("prospection_estimate: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def prospection_mission_cancel(self, payload: dict) -> dict:
         """Abandonne le suivi d'une mission (la chasse déjà lancée n'est
         pas tuée, ses résultats restent consultables dans son outil)."""
