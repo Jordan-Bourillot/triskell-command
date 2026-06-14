@@ -197,14 +197,15 @@ def _scrape_site_for_emails(url: str) -> set[str]:
     if not url.startswith("http"):
         url = "https://" + url
     base = url.rstrip("/")
+    # On se limite aux 4 pages où un mail se trouve vraiment (accueil,
+    # contact, mentions légales, à propos). Avant on en lisait 7, ce qui
+    # bloquait le serveur ~2× plus longtemps par commerce — c'est ce qui
+    # contribuait à le rendre injoignable pendant les chasses (14/06/2026).
     pages = [
         url,
         f"{base}/contact",
-        f"{base}/contact.html",
-        f"{base}/contact.php",
-        f"{base}/a-propos",
-        f"{base}/about",
         f"{base}/mentions-legales",
+        f"{base}/a-propos",
     ]
     # Filtre central anti-fausses-adresses de triskell_core (même protection
     # qu'Obélisk et le Chasseur Créateur). Fallback : blacklist locale seule.
@@ -221,7 +222,7 @@ def _scrape_site_for_emails(url: str) -> set[str]:
         has_mail_record = None
     for page in pages:
         try:
-            r = requests.get(page, headers=UA_WEB, timeout=8)
+            r = requests.get(page, headers=UA_WEB, timeout=6)
             if r.status_code == 200:
                 for em in re.findall(EMAIL_REGEX, r.text):
                     em_low = em.lower()

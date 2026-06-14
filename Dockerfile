@@ -81,8 +81,12 @@ ENV PIXEL_PROS_REPO_PATH=/data/pixel-studio
 RUN git config --global user.email "robot@pixel-pros.fr" \
  && git config --global user.name "Pixel Pros Robot"
 
-# Healthcheck simple : ping /api/_health
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+# Healthcheck : ping /api/_health. Tolérant aux moments chargés (une
+# chasse occupe le seul guichet quelques minutes) : 15s de délai et 6
+# ratés tolérés (~3 min) avant de déclarer le conteneur mort. Avant
+# (5s / 3 ratés = 90s) l'hébergeur tuait le serveur en pleine chasse,
+# d'où les « plantages » (diagnostic du 14/06/2026).
+HEALTHCHECK --interval=30s --timeout=15s --start-period=30s --retries=6 \
     CMD curl -fsS http://localhost:8765/api/_health || exit 1
 
 EXPOSE 8765
