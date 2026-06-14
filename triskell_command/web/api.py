@@ -9997,7 +9997,6 @@ class Api:
                     "error":      h.error,
                     "log_tail":   h.log[-30:],
                     "prospects":  h.prospects,
-                    "prospects_call_only": getattr(h, "prospects_call_only", []),
                     "running":    chasseur.is_running(hid),
                 },
             }

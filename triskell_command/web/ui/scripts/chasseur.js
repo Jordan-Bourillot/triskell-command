@@ -750,11 +750,6 @@ const Chasseur = {
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 CSV
               </button>` : ''}
-            ${isDone && (h.prospects_call_only || []).length ? `
-              <button id="ch-export-call" class="btn btn-secondary" title="Télécharge les prospects sans mail mais avec téléphone — à contacter par appel direct.">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                À appeler (${(h.prospects_call_only || []).length})
-              </button>` : ''}
             <button id="ch-delete" class="btn btn-secondary text-xs">Supprimer</button>
           </div>
         </div>
@@ -870,8 +865,6 @@ const Chasseur = {
 
     const exportBtn = document.getElementById('ch-export');
     if (exportBtn) exportBtn.onclick = () => this._exportCsv();
-    const exportCallBtn = document.getElementById('ch-export-call');
-    if (exportCallBtn) exportCallBtn.onclick = () => this._exportCallList();
     const pushBtn = document.getElementById('ch-push');
     if (pushBtn) pushBtn.onclick = () => this._pushToAutopilot();
     const delBtn = document.getElementById('ch-delete');
@@ -1100,50 +1093,6 @@ const Chasseur = {
 
     const n = prospects.length;
     this._toast(`CSV téléchargé — ${n} ligne${n > 1 ? 's' : ''}. Fichier : ${fname}`, 'success');
-  },
-
-  // Export « à appeler » : prospects sans mail mais avec téléphone.
-  // Construit côté navigateur (le serveur les fournit dans prospects_call_only).
-  _exportCallList() {
-    const h = this.state.currentHunt;
-    const rows = (h && h.prospects_call_only) || [];
-    if (!rows.length) {
-      this._toast('Aucun prospect à appeler pour cette chasse.', 'warn');
-      return;
-    }
-    const cell = (v) => {
-      const s = String(v == null ? '' : v);
-      return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-    };
-    const headers = ['Entreprise', 'Téléphone', 'Ville', 'Adresse', 'Site', 'Remarque'];
-    const lines = [headers.map(cell).join(';')];
-    rows.forEach(p => {
-      const sansSite = !String(p.site_web || '').trim();
-      const row = [
-        p.nom || '', p.telephone || '', p.ville || '',
-        p.adresse || '', p.site_web || '',
-        sansSite ? 'Sans site web — cible idéale pour un site' : '',
-      ];
-      lines.push(row.map(cell).join(';'));
-    });
-    const sectorRaw = (h.filters && h.filters.sector_input) || h.label || 'prospects';
-    const d0 = new Date(h.created_at || Date.now());
-    const d = isNaN(d0.getTime()) ? new Date() : d0;
-    const pad = (n) => String(n).padStart(2, '0');
-    const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    const fname = `a-appeler-${this._slugify(sectorRaw)}-${dateStr}.csv`;
-    const bom = String.fromCharCode(0xFEFF);
-    const blob = new Blob([bom + lines.join('\r\n')], {type: 'text/csv;charset=utf-8'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fname;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-    const n = rows.length;
-    this._toast(`Liste à appeler téléchargée — ${n} prospect${n > 1 ? 's' : ''}.`, 'success');
   },
 
   // « Boulangerie — 35 » → « boulangerie-35 » (pour les noms de fichiers)

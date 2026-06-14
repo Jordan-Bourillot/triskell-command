@@ -109,9 +109,6 @@ class Hunt:
     filters: dict = field(default_factory=dict)
     stats: dict = field(default_factory=dict)
     prospects: list[dict] = field(default_factory=list)
-    # Prospects sans mail mais avec téléphone → « liste à appeler » (hors base
-    # mail, qui exige un mail). Exportable à part pour de la prospection tél.
-    prospects_call_only: list[dict] = field(default_factory=list)
     error: str = ""
 
     @property
@@ -602,8 +599,7 @@ def _site_matches_sector(html: str, naf: str) -> bool:
 
 
 def _discover_site(nom: str, ville: str,
-                   places_key: str = "",
-                   phone_out: dict | None = None) -> tuple[str, int, str, str]:
+                   places_key: str = "") -> tuple[str, int, str, str]:
     """Trouve le meilleur site pour cette boîte.
 
     Renvoie (site_root, score, source, html_home).
@@ -689,14 +685,10 @@ def _discover_site(nom: str, ville: str,
     if places_key and best_score < 60:
         try:
             from . import prospecteur_google
-            purl, pphone = prospecteur_google.lookup_site_and_phone_for_company(
+            purl = prospecteur_google.lookup_site_for_company(
                 nom, ville, api_key=places_key)
         except Exception:
-            purl, pphone = "", ""
-        # Téléphone Google Places : précieux même quand la boîte n'a pas de
-        # site (il alimente la « liste à appeler »). Transmis via phone_out.
-        if phone_out is not None and pphone:
-            phone_out["phone"] = pphone
+            purl = ""
         if purl:
             site_root = _normalize_site(purl)
             if site_root:
@@ -1223,14 +1215,10 @@ def _run_hunt(hunt: Hunt, target: int, with_email_only: bool,
         try:
             # 1) Découverte du site : devinage → Mojeek → DDG → Places (filet)
             use_key = places_key if (places_key and places_used < places_cap) else ""
-            phone_box: dict = {}
             site_root, score, source, html_home = _discover_site(
                 prospect.nom, prospect.ville, places_key=use_key,
-                phone_out=phone_box,
             )
             prospect.site_web = site_root
-            if phone_box.get("phone"):
-                prospect.telephone = phone_box["phone"]
             if source:
                 sources_count[source] = sources_count.get(source, 0) + 1
             if source == "places":
@@ -1288,10 +1276,6 @@ def _run_hunt(hunt: Hunt, target: int, with_email_only: bool,
                 kept.append(prospect)
                 if prospect.email:
                     seen_emails.add(prospect.email)
-            # Liste à appeler : un téléphone mais pas de mail → joignable par
-            # appel direct. Hors base mail (verrou respecté), gardé à part.
-            if prospect.telephone and not prospect.email:
-                hunt.prospects_call_only.append(asdict(prospect))
         except Exception as exc:
             logger.warning("enrich fail %s: %s", prospect.nom, exc)
 
@@ -1381,43 +1365,6 @@ def export_csv(hunt_id: str) -> dict:
                 "site_quality_reasons": "; ".join(reasons) if isinstance(reasons, list) else "",
             })
     return {"ok": True, "path": str(path), "rows": sum(1 for r in rows if r.get("email"))}
-
-
-def export_call_list(hunt_id: str) -> dict:
-    """Exporte les prospects SANS mail mais AVEC téléphone (« liste à appeler »).
-
-    Ne touche JAMAIS la base mail (qui exige un mail). Marque les fiches sans
-    site web (cible idéale pour vendre un site). Retourne {ok, path, rows}.
-    """
-    h = Hunt.load(hunt_id)
-    if not h:
-        return {"ok": False, "error": "chasse introuvable"}
-    rows = getattr(h, "prospects_call_only", None) or []
-    if not rows:
-        return {"ok": False,
-                "error": "aucun prospect à appeler (sans mail mais avec téléphone)"}
-    ensure_dirs()
-    path = EXPORTS_DIR / f"{h.id}_{_slug(h.label)}_a_appeler.csv"
-    fields = ["entreprise", "telephone", "site_web", "adresse",
-              "code_postal", "ville", "secteur", "siren", "remarque"]
-    with path.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fields)
-        w.writeheader()
-        for r in rows:
-            sans_site = not (r.get("site_web") or "").strip()
-            w.writerow({
-                "entreprise":  r.get("nom") or "",
-                "telephone":   r.get("telephone") or "",
-                "site_web":    r.get("site_web") or "",
-                "adresse":     r.get("adresse") or "",
-                "code_postal": r.get("code_postal") or "",
-                "ville":       r.get("ville") or "",
-                "secteur":     r.get("naf_libelle") or r.get("naf") or "",
-                "siren":       r.get("siren") or "",
-                "remarque":    "Sans site web — cible ideale pour un site"
-                               if sans_site else "",
-            })
-    return {"ok": True, "path": str(path), "rows": len(rows)}
 
 
 def push_to_autopilot(hunt_id: str) -> dict:
