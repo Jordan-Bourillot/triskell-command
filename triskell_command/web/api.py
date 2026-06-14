@@ -9980,6 +9980,26 @@ class Api:
             logger.debug("prospection_response_insights: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def apercu_preview(self, payload: dict | None = None) -> dict:
+        """Génère un aperçu de site personnalisé (image PNG en base64) pour
+        un prospect — pour le visualiser. payload = {nom, metier?, ville?}."""
+        p = payload or {}
+        nom = (p.get("nom") or p.get("name") or "").strip()
+        if not nom:
+            return {"ok": False, "error": "nom requis"}
+        try:
+            from ..integrations.apercu_site import render_preview_png
+            png = render_preview_png(
+                nom, p.get("metier") or p.get("secteur") or "",
+                p.get("ville") or "")
+            if not png:
+                return {"ok": False,
+                        "error": "aperçu indisponible (Playwright absent ?)"}
+            import base64
+            return {"ok": True, "png_b64": base64.b64encode(png).decode("ascii")}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def prospection_mission_cancel(self, payload: dict) -> dict:
         """Abandonne le suivi d'une mission (la chasse déjà lancée n'est
         pas tuée, ses résultats restent consultables dans son outil)."""

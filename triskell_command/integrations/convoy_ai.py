@@ -559,6 +559,17 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         page_metier_url = "https://pixel-pros.fr"
         page_demo_url = "https://pixel-pros.fr/demo"
 
+    # {{apercu_site}} : maquette personnalisée du futur site (image hébergée).
+    # Générée UNIQUEMENT si le modèle l'utilise → zéro coût/risque sinon.
+    # Best-effort : échec → vide, le mail part quand même.
+    apercu_html = ""
+    if "{{apercu_site}}" in text or "{apercu_site}" in text:
+        try:
+            from .apercu_site import preview_img_html
+            apercu_html = preview_img_html(raison, secteur, ville)
+        except Exception:
+            apercu_html = ""
+
     replacements = {
         # === Syntaxe FR a 1 accolade (historique) ===
         "{prenom}":         prenom,
@@ -570,6 +581,7 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         "{sender_name}":    sender,
         "{page_metier}":    page_metier_url,
         "{page_demo}":      page_demo_url,
+        "{apercu_site}":    apercu_html,
         # === Syntaxe EN a 2 accolades (templates Pixel Pros) ===
         "{{first_name}}":    prenom,
         "{{last_name}}":     nom,
@@ -587,6 +599,7 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         "{{sender_name}}":   sender,
         "{{page_metier}}":   page_metier_url,
         "{{page_demo}}":     page_demo_url,
+        "{{apercu_site}}":   apercu_html,
         # Placeholders contextuels qu'on ne peut pas auto-remplir : on les
         # vide pour eviter d'envoyer "{{price}}" en clair au prospect.
         # IMPORTANT : tous les placeholders presents dans les templates Pixel
