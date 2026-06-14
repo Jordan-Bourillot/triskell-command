@@ -355,6 +355,7 @@ const Obelisk = {
           <span class="ob-flow-arrow">→</span>
           <span class="ob-flow-step"><b>4 · Réponses</b> — triées toutes seules</span>
         </div>
+        <div id="ob-pending-banner"></div>
         <div id="ob-content"></div>
       </section>
     `;
@@ -364,7 +365,57 @@ const Obelisk = {
     // Restaure les filtres de la liste si on revient sur la vue
     this._applyListFilters();
     await this._loadStats();
+    this._loadPending();
     await this._renderCreators();
+  },
+
+  // « Relire avant d'ajouter » : bandeau des créateurs en attente de validation.
+  async _loadPending() {
+    const slot = document.getElementById('ob-pending-banner');
+    if (!slot) return;
+    let r = null;
+    try { r = await this._api('pending_list', null, { silent: true }); }
+    catch (e) { return; }
+    if (!r || !r.ok || !r.count) { slot.innerHTML = ''; return; }
+    slot.innerHTML = `
+      <div style="margin:0 0 16px;padding:14px 16px;border-radius:12px;background:hsl(38 92% 42% / .12);border:1px solid hsl(38 92% 42% / .35);">
+        <div style="font-weight:700;margin-bottom:6px;">📋 ${r.count} créateur(s) en attente de ta validation</div>
+        <div style="font-size:12.5px;color:hsl(var(--text-muted));margin-bottom:10px;">Trouvés en mode « relire avant d'ajouter » : ils n'entrent dans ta base que si tu valides.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button id="ob-pending-approve" class="btn btn-primary" style="padding:9px 16px;">Tout ajouter à la base</button>
+          <button id="ob-pending-discard" class="btn btn-ghost" style="padding:9px 16px;">Ignorer</button>
+        </div>
+      </div>`;
+    const ap = document.getElementById('ob-pending-approve');
+    if (ap) ap.onclick = () => this._approvePending();
+    const di = document.getElementById('ob-pending-discard');
+    if (di) di.onclick = () => this._discardPending();
+  },
+
+  async _approvePending() {
+    const r = await this._api('pending_approve');
+    if (r && r.ok) {
+      Toast.success(`${r.approved || 0} créateur(s) ajouté(s) à la base.`);
+      await this._loadStats();
+      this._loadPending();
+      await this._renderCreators();
+    } else {
+      Toast.error((r && r.error) || 'Ajout impossible.');
+    }
+  },
+
+  async _discardPending() {
+    const ok = await Dialog.confirm(
+      'Ignorer les créateurs en attente ? Ils ne seront pas ajoutés à la base.',
+      { title: 'Ignorer la file', okLabel: 'Ignorer', cancelLabel: 'Annuler' });
+    if (!ok) return;
+    const r = await this._api('pending_discard');
+    if (r && r.ok) {
+      Toast.info(`${r.discarded || 0} en attente ignoré(s).`);
+      this._loadPending();
+    } else {
+      Toast.error((r && r.error) || 'Action impossible.');
+    }
   },
 
   _injectStyles() {
@@ -2301,6 +2352,13 @@ const Obelisk = {
                 <div class="text-[11px] text-text-muted">Évite de retomber sur des prospects que tu as déjà sollicités.</div>
               </div>
             </label>
+            <label class="ob-toggle-row">
+              <input id="ob-s-validation" type="checkbox">
+              <div>
+                <div class="font-semibold text-sm">Relire avant d'ajouter à la base</div>
+                <div class="text-[11px] text-text-muted">Les créateurs trouvés attendent ton feu vert (bandeau en haut de la liste) au lieu d'entrer direct dans la base.</div>
+              </div>
+            </label>
           </div>
 
           <label class="block mb-5">
@@ -2435,11 +2493,13 @@ const Obelisk = {
     const maxSubs = maxSubsEl ? (parseInt(maxSubsEl.value, 10) || 0) : 0;
     const onlyWithEmail = document.getElementById('ob-s-with-email').checked;
     const onlyUncontacted = document.getElementById('ob-s-uncontacted').checked;
+    const validationMode = !!(document.getElementById('ob-s-validation') || {}).checked;
 
     const osmAreaEl = document.getElementById('ob-s-osm-area');
     const osmArea = osmAreaEl ? osmAreaEl.value.trim() : '';
 
     const filters = {
+      validation_mode: validationMode,
       monetized_mode:  monetMode,
       min_subscribers: minSubs,
       max_subscribers: maxSubs,

@@ -398,7 +398,9 @@ def _run_thread(job_id: str, user_email: str, niche: str, platforms: list[str],
                 # n'écrit pas dans Supabase de lui-même.
                 _upload_new_locals_to_supabase(
                     before_keys=before_keys, niche=sub_niche, log=log,
-                    agg_stats=agg_stats, filters=filters)
+                    agg_stats=agg_stats, filters=filters,
+                    pending_only=bool((overrides or {}).get("validation_mode")),
+                    job_id=job_id)
 
         # 2) Phantoms (LinkedIn / Instagram / TikTok)
         # Le multi-hashtag est déjà natif côté Phantom Instagram / TikTok
@@ -627,7 +629,9 @@ def _local_prospect_to_supabase_row(p: dict, niche: str,
 
 def _upload_new_locals_to_supabase(*, before_keys: set[str], niche: str,
                                      log, agg_stats: dict,
-                                     filters: dict | None = None) -> None:
+                                     filters: dict | None = None,
+                                     pending_only: bool = False,
+                                     job_id: str = "") -> None:
     """Détecte les nouveaux prospects ajoutés par le pipeline natif dans
     ~/.ledenicheur/prospects.json et les uploade vers la table Supabase
     `prospects` avec workspace_id (sinon les RLS rejettent silencieusement).
@@ -773,15 +777,27 @@ def _upload_new_locals_to_supabase(*, before_keys: set[str], niche: str,
             if dup:
                 skipped += 1; continue
             row = with_workspace(triskell_client, row)
-            sb.table("prospects").insert(row).execute()
+            if pending_only:
+                # « Relire avant d'ajouter » : file d'attente au lieu d'écrire
+                # direct. Jordan valide (ou ignore) ensuite dans l'écran Obélisk.
+                sb.table("obelisk_pending").insert(
+                    {"job_id": job_id, "prospect": row}).execute()
+            else:
+                sb.table("prospects").insert(row).execute()
             inserted += 1
         except Exception as exc:
             logger.warning("upload prospect failed: %s", exc)
             errors += 1
-    agg_stats["uploaded_to_supabase"] = inserted
     agg_stats["skipped_no_email"] = no_email
-    log(f"✅ {inserted} prospects uploadés (skip {skipped}, "
-        f"sans mail {no_email}, erreurs {errors})")
+    if pending_only:
+        agg_stats["uploaded_to_supabase"] = 0
+        agg_stats["pending_review"] = inserted
+        log(f"📋 {inserted} createur(s) EN ATTENTE de validation (skip {skipped}, "
+            f"sans mail {no_email}, erreurs {errors}). A valider dans Obelisk.")
+    else:
+        agg_stats["uploaded_to_supabase"] = inserted
+        log(f"✅ {inserted} prospects uploadés (skip {skipped}, "
+            f"sans mail {no_email}, erreurs {errors})")
 
 
 # ---------------------------------------------------------------------------

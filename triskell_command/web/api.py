@@ -5700,6 +5700,33 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def obelisk_pending_list(self, payload: dict | None = None) -> dict:
+        """Créateurs en attente de validation (mode « relire avant d'ajouter »)."""
+        jid = ((payload or {}).get("job_id") or "").strip()
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.list_pending(jid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "rows": [], "count": 0}
+
+    def obelisk_pending_approve(self, payload: dict | None = None) -> dict:
+        """Verse les créateurs en attente dans la base, puis vide la file."""
+        jid = ((payload or {}).get("job_id") or "").strip()
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.approve_pending(jid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "approved": 0}
+
+    def obelisk_pending_discard(self, payload: dict | None = None) -> dict:
+        """Ignore (supprime) les créateurs en attente sans les verser."""
+        jid = ((payload or {}).get("job_id") or "").strip()
+        try:
+            from ..integrations.obelisk import repo as r
+            return r.discard_pending(jid)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "discarded": 0}
+
     def obelisk_get_job(self, payload: dict) -> dict:
         jid = ((payload or {}).get("job_id") or "").strip()
         if not jid:

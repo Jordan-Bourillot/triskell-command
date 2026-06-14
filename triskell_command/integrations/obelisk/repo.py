@@ -844,6 +844,76 @@ def save_user_config(user_email: str, config: dict) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+def list_pending(job_id: str = "") -> dict:
+    """File d'attente « relire avant d'ajouter » : créateurs trouvés en mode
+    validation, pas encore versés en base. Lecture seule."""
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "base indisponible", "rows": [], "count": 0}
+    try:
+        q = sb.table("obelisk_pending").select("id,job_id,prospect,created_at")
+        if job_id:
+            q = q.eq("job_id", job_id)
+        rows = (q.order("created_at", desc=True).limit(1000).execute()).data or []
+        return {"ok": True,
+                "rows": [r.get("prospect") or {} for r in rows],
+                "count": len(rows)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "rows": [], "count": 0}
+
+
+def approve_pending(job_id: str = "") -> dict:
+    """Verse les créateurs en attente dans la base, puis vide la file.
+    Les fiches sont prêtes (workspace déjà appliqué) ; les contraintes SQL
+    (mail unique, etc.) écartent d'elles-mêmes un éventuel doublon."""
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "base indisponible", "approved": 0}
+    try:
+        q = sb.table("obelisk_pending").select("id,prospect")
+        if job_id:
+            q = q.eq("job_id", job_id)
+        rows = (q.limit(5000).execute()).data or []
+        approved = 0
+        for r in rows:
+            row = r.get("prospect") or {}
+            if row.get("name"):
+                try:
+                    sb.table("prospects").insert(row).execute()
+                    approved += 1
+                except Exception:
+                    pass  # déjà en base / contrainte → on ignore (pas de doublon)
+            try:
+                sb.table("obelisk_pending").delete().eq("id", r.get("id")).execute()
+            except Exception:
+                pass
+        return {"ok": True, "approved": approved}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "approved": 0}
+
+
+def discard_pending(job_id: str = "") -> dict:
+    """Vide la file d'attente sans rien verser (on ignore ces créateurs)."""
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "base indisponible", "discarded": 0}
+    try:
+        q = sb.table("obelisk_pending").select("id")
+        if job_id:
+            q = q.eq("job_id", job_id)
+        rows = (q.limit(5000).execute()).data or []
+        n = 0
+        for r in rows:
+            try:
+                sb.table("obelisk_pending").delete().eq("id", r.get("id")).execute()
+                n += 1
+            except Exception:
+                pass
+        return {"ok": True, "discarded": n}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "discarded": 0}
+
+
 def _default_config() -> dict:
     return {
         "niche": "",
