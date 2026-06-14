@@ -2,18 +2,22 @@
 
 Idée (demande Jordan, 14/06/2026) : dans le mail de prospection, montrer au
 prospect À QUOI POURRAIT RESSEMBLER SON SITE. C'est ce qui fait répondre quand
-on vend des sites — surtout aux commerces qui n'en ont PAS (cible la plus
-chaude, et justement celle pour qui aucune capture n'existe aujourd'hui).
+on vend des sites — surtout aux commerces qui n'en ont PAS.
 
-Ce module fabrique une image PNG : une maquette de site (cadre navigateur +
-hero personnalisé avec le nom de l'entreprise, son métier, sa ville). 100 %
-auto-contenu (CSS en ligne, pas d'image externe à charger → rapide et jamais
-de visuel cassé). Rendu via Playwright (déjà installé côté serveur — utilisé
-par Argus). Sans Playwright : renvoie None (le mail part alors sans aperçu).
+Refonte 14/06/2026 (demande Jordan « des aperçus qui font vraiment très pros ») :
+on ne fabrique plus une maquette « maison », on montre LE VRAI SITE DE DÉMO
+Pixel Pros du métier (pixel-pros.fr/demo-xxx), personnalisé au nom et à la
+ville du prospect. C'est exactement le produit vendu → plus crédible, plus
+beau, et honnête. On capture la première vue (en-tête + hero), en mode
+« embed » (sans le bandeau démo). Repli automatique sur l'ancienne maquette
+auto-contenue pour les métiers SANS page de démo (ou si le rendu live échoue).
+
+Rendu via Playwright (déjà installé côté serveur — utilisé par Argus). Sans
+Playwright / sans réseau : renvoie None (le mail part alors sans aperçu).
 
 Usage :
     from triskell_command.integrations import apercu_site
-    png = apercu_site.render_preview_png("Boulangerie Morvan", "boulangerie", "Vannes")
+    png = apercu_site.render_preview_png("Aux Fleurs des Abers", "fleuriste", "Lannilis")
 """
 from __future__ import annotations
 
@@ -27,53 +31,237 @@ import unicodedata
 
 logger = logging.getLogger(__name__)
 
-# Couleur d'accent + emoji décoratif par famille de métier. Volontairement
-# court : un défaut élégant couvre tout le reste. L'emoji évite toute photo
-# (donc zéro risque de « mauvaise image » et zéro chargement réseau).
-_SECTOR_STYLE: dict[str, tuple[str, str, str]] = {
-    # mot-clé (sans accent)      accent1     accent2     emoji
-    "boulang":      ("#b45309", "#f59e0b", "🥖"),
-    "patiss":       ("#be185d", "#f472b6", "🧁"),
-    "boucher":      ("#b91c1c", "#ef4444", "🥩"),
-    "fleur":        ("#be185d", "#fb7185", "🌸"),
-    "restaur":      ("#9a3412", "#fb923c", "🍽️"),
-    "pizz":         ("#b91c1c", "#f87171", "🍕"),
-    "bar":          ("#7c2d12", "#f59e0b", "🍸"),
-    "coiff":        ("#7c3aed", "#c084fc", "✂️"),
-    "beaut":        ("#be185d", "#f9a8d4", "💅"),
-    "estheti":      ("#be185d", "#f9a8d4", "💆"),
-    "spa":          ("#0f766e", "#5eead4", "🌿"),
-    "sport":        ("#1d4ed8", "#60a5fa", "🏋️"),
-    "plomb":        ("#1d4ed8", "#38bdf8", "🔧"),
-    "electric":     ("#a16207", "#facc15", "💡"),
-    "chauffag":     ("#c2410c", "#fb923c", "🔥"),
-    "peintr":       ("#7c3aed", "#a78bfa", "🎨"),
-    "menuis":       ("#92400e", "#d97706", "🪚"),
-    "macon":        ("#57534e", "#a8a29e", "🧱"),
-    "carrel":       ("#0e7490", "#22d3ee", "◼️"),
-    "couvr":        ("#9a3412", "#f97316", "🏠"),
-    "jardin":       ("#15803d", "#4ade80", "🌳"),
-    "paysag":       ("#15803d", "#4ade80", "🌳"),
-    "garage":       ("#334155", "#64748b", "🚗"),
-    "auto":         ("#334155", "#64748b", "🚗"),
-    "immobil":      ("#0f766e", "#2dd4bf", "🏡"),
-    "photograph":   ("#4338ca", "#818cf8", "📷"),
-    "avocat":       ("#1e3a8a", "#3b82f6", "⚖️"),
-    "comptab":      ("#1e40af", "#60a5fa", "📊"),
-    "dentist":      ("#0e7490", "#22d3ee", "🦷"),
-    "medecin":      ("#0e7490", "#22d3ee", "🩺"),
-    "veterin":      ("#15803d", "#4ade80", "🐾"),
-    "pharmaci":     ("#047857", "#34d399", "➕"),
-    "coach":        ("#7c3aed", "#a78bfa", "🎯"),
-    "boutique":     ("#9d174d", "#f472b6", "🛍️"),
-    "hotel":        ("#1e40af", "#60a5fa", "🛎️"),
-}
-_DEFAULT_STYLE = ("#4f46e5", "#818cf8", "✦")  # indigo élégant par défaut
-
 
 def _strip_accents(s: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", s or "")
                    if unicodedata.category(c) != "Mn")
+
+
+# ===========================================================================
+#  PARTIE 1 — Aperçu = vrai site de démo Pixel Pros personnalisé
+# ===========================================================================
+
+# Base du site Pixel Pros (les pages de démo y vivent). Surchargée par env si
+# besoin (tests, préprod).
+def _base_url() -> str:
+    return (os.environ.get("APERCU_DEMO_BASE_URL")
+            or os.environ.get("PIXEL_PROS_BASE_URL")
+            or "https://pixel-pros.fr").rstrip("/")
+
+
+# métier (texte libre, sans accent, minuscules) → slug de la page de démo.
+# Ordre = priorité (1er fragment trouvé gagne). On ne mappe QUE des métiers
+# dont la démo correspond vraiment ; le reste retombe sur la maquette.
+_DEMO_MAP: dict[str, str] = {
+    # — Artisans du bâtiment —
+    "plomb": "demo-plombier", "chauffag": "demo-plombier",
+    "electric": "demo-electricien",
+    "peintr": "demo-peintre",
+    "carrel": "demo-carreleur", "faienc": "demo-carreleur",
+    "macon": "demo-macon", "maconn": "demo-macon",
+    "menuis": "demo-menuisier", "ebenist": "demo-menuisier",
+    "charpent": "demo-menuisier", "agenc": "demo-menuisier",
+    "plaquist": "demo-plaquiste", "placo": "demo-plaquiste",
+    "platr": "demo-plaquiste", "plaqu": "demo-plaquiste",
+    "paysag": "demo-paysagiste", "jardin": "demo-paysagiste",
+    "elagag": "demo-paysagiste", "espaces vert": "demo-paysagiste",
+    # — Commerces de bouche (fleur AVANT animal) —
+    "fleur": "demo-fleuriste",
+    "patiss": "demo-patisserie", "boulang": "demo-patisserie",
+    "chocolat": "demo-patisserie", "confis": "demo-patisserie",
+    "cake": "demo-patisserie",
+    "restaur": "demo-restaurant", "pizz": "demo-restaurant",
+    "brasser": "demo-restaurant", "creper": "demo-restaurant",
+    "bistro": "demo-restaurant", "traiteur": "demo-restaurant",
+    "snack": "demo-restaurant", "kebab": "demo-restaurant",
+    # — Beauté / bien-être —
+    "esthet": "demo-beaute", "beaut": "demo-beaute", "ongle": "demo-beaute",
+    "manucur": "demo-beaute", "maquill": "demo-beaute",
+    "institut": "demo-beaute", "cils": "demo-beaute",
+    "massag": "demo-bien-etre", "spa": "demo-bien-etre",
+    "bien-etre": "demo-bien-etre", "bien etre": "demo-bien-etre",
+    "sophro": "demo-bien-etre", "naturopath": "demo-bien-etre",
+    "reflexo": "demo-bien-etre", "yoga": "demo-bien-etre",
+    "hypno": "demo-bien-etre",
+    # — Services —
+    "coach": "demo-coach",
+    "photograph": "demo-photographe", "videast": "demo-photographe",
+    "tatou": "demo-tatoueur", "tattoo": "demo-tatoueur",
+    "piercing": "demo-tatoueur",
+    "toilettag": "demo-animalier", "canin": "demo-animalier",
+    "pension": "demo-animalier", "dressage": "demo-animalier",
+    "educateur canin": "demo-animalier",
+}
+
+# Ville fictive utilisée dans CHAQUE démo (à remplacer par celle du prospect).
+_DEMO_CITY: dict[str, str] = {
+    "demo-fleuriste": "Lyon", "demo-plombier": "Lyon",
+    "demo-patisserie": "Lyon", "demo-electricien": "Lyon",
+    "demo-menuisier": "Lyon", "demo-paysagiste": "Lyon",
+    "demo-photographe": "Lyon", "demo-tatoueur": "Lyon",
+    "demo-beaute": "Lyon", "demo-bien-etre": "Lyon",
+    "demo-animalier": "Lyon", "demo-coach": "Lyon",
+    "demo-restaurant": "Lorient", "demo-plaquiste": "Vannes",
+    "demo-macon": "Quimper", "demo-peintre": "Angers",
+    "demo-carreleur": "La Rochelle",
+}
+
+# Libellé métier propre affiché dans l'en-tête / le bandeau (cohérent quel que
+# soit le texte brut reçu : « Commerce de détail de fleurs » → « Fleuriste »).
+_DEMO_LABEL: dict[str, str] = {
+    "demo-fleuriste": "Fleuriste", "demo-plombier": "Plombier",
+    "demo-patisserie": "Pâtisserie", "demo-electricien": "Électricien",
+    "demo-menuisier": "Menuisier", "demo-paysagiste": "Paysagiste",
+    "demo-photographe": "Photographe", "demo-tatoueur": "Tatoueur",
+    "demo-beaute": "Institut de beauté", "demo-bien-etre": "Bien-être",
+    "demo-animalier": "Toilettage", "demo-coach": "Coach sportif",
+    "demo-restaurant": "Restaurant", "demo-plaquiste": "Plaquiste",
+    "demo-macon": "Maçonnerie", "demo-peintre": "Peintre",
+    "demo-carreleur": "Carreleur",
+}
+
+
+def _demo_slug_for(metier: str) -> str | None:
+    key = _strip_accents((metier or "").lower())
+    for frag, slug in _DEMO_MAP.items():
+        if frag in key:
+            return slug
+    return None
+
+
+# CSS injecté : on masque le décor « démo » et on rend l'en-tête + le bandeau
+# parfaitement lisibles sur n'importe quelle photo.
+_HIDE_CSS = """
+  .demo-bar,.fcall,.fsoc,.annot,.annot-after-hero,.cust-hero-scroll{display:none!important;}
+  .cust-eyebrow{background:rgba(0,0,0,.30)!important;padding:7px 16px!important;
+    border-radius:999px!important;text-shadow:0 1px 6px rgba(0,0,0,.5)!important;
+    color:#fff!important;}
+  .cust-logo-text strong,.cust-logo-text em{text-shadow:0 1px 8px rgba(0,0,0,.35)!important;}
+"""
+
+# Attend que la photo de fond du hero soit chargée (sinon capture sans photo).
+_WAIT_HERO_BG_JS = r"""async () => {
+  const el = document.querySelector('.cust-hero-bg');
+  if (!el) return;
+  const m = getComputedStyle(el).backgroundImage.match(/url\("?(.*?)"?\)/);
+  if (!m) return;
+  await new Promise(res => { const im = new Image();
+    im.onload = res; im.onerror = res; im.src = m[1]; setTimeout(res, 8000); });
+}"""
+
+# Personnalisation du hero : ville réelle + nom + métier·ville du prospect.
+_PERSONALIZE_JS = r"""(args) => {
+  const nom = args[0], label = args[1], ville = args[2], cityDemo = args[3];
+  if (cityDemo && ville) {
+    const esc = cityDemo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rx = new RegExp(esc, 'gi');
+    const hero = document.querySelector('.cust-hero');
+    if (hero) {
+      const walk = n => { for (const c of n.childNodes) {
+        if (c.nodeType === 3) c.nodeValue = c.nodeValue.replace(rx, ville);
+        else walk(c);
+      }};
+      walk(hero);
+    }
+  }
+  const set = (s, t) => { const e = document.querySelector(s); if (e) e.textContent = t; };
+  if (nom) set('.cust-logo-text strong', nom);
+  const sub = [label, ville].filter(Boolean).join(' · ');
+  if (sub) set('.cust-logo-text em', sub);
+  const eb = '★ ' + [(label || '').toUpperCase(),
+                          (ville || '').toUpperCase()].filter(Boolean).join(' · ');
+  if (eb.trim() !== '★') set('.cust-eyebrow', eb);
+}"""
+
+
+# Traceurs / pubs externes : inutiles à l'aperçu et parfois lents → bloqués
+# (rendu plus rapide et plus fiable). On NE bloque PAS le JS du site lui-même
+# (animations d'apparition du hero) ni les photos/polices.
+_BLOCK_FRAGMENTS = (
+    "googlesyndication", "googleadservices", "google-analytics",
+    "googletagmanager", "doubleclick", "facebook.net", "connect.facebook",
+    "fbevents", "/google-ads.js", "meta-pixel", "pp-analytics",
+)
+
+
+def _render_demo_png(nom: str, metier: str, ville: str, slug: str) -> bytes | None:
+    """Capture la 1re vue du vrai site de démo du métier, personnalisée."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        logger.info("apercu_site : Playwright absent — aperçu sauté.")
+        return None
+    url = f"{_base_url()}/{slug}?embed"
+    city_demo = _DEMO_CITY.get(slug, "")
+    label = _DEMO_LABEL.get(slug, (metier or "").strip())
+    png = None
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            try:
+                page = browser.new_page(
+                    viewport={"width": 1280, "height": 760}, device_scale_factor=2)
+
+                def _route(route):
+                    u = route.request.url
+                    if any(s in u for s in _BLOCK_FRAGMENTS):
+                        route.abort()
+                    else:
+                        route.continue_()
+                page.route("**/*", _route)
+
+                page.goto(url, wait_until="domcontentloaded", timeout=35000)
+                page.wait_for_selector(".cust-hero", timeout=15000)
+                page.add_style_tag(content=_HIDE_CSS)
+                try:
+                    page.evaluate(_WAIT_HERO_BG_JS)
+                except Exception:
+                    pass
+                page.evaluate(_PERSONALIZE_JS, [nom, label, ville, city_demo])
+                try:
+                    page.evaluate("async () => { await document.fonts.ready; }")
+                except Exception:
+                    pass
+                page.wait_for_timeout(1000)
+                h = page.evaluate(
+                    "() => { const e = document.querySelector('.cust-hero');"
+                    " return e ? Math.ceil(e.getBoundingClientRect().bottom) : 0; }")
+                if h:
+                    png = page.screenshot(
+                        clip={"x": 0, "y": 0, "width": 1280,
+                              "height": min(int(h), 900)})
+            finally:
+                browser.close()
+    except Exception as exc:
+        logger.warning("apercu_site : démo %s échouée : %s", slug, exc)
+        return None
+    return png
+
+
+# ===========================================================================
+#  PARTIE 2 — Maquette auto-contenue (repli pour les métiers sans démo)
+# ===========================================================================
+
+# Couleur d'accent par famille de métier (maquette de repli uniquement).
+_SECTOR_STYLE: dict[str, tuple[str, str, str]] = {
+    "boulang": ("#b45309", "#f59e0b", "🥖"),
+    "patiss":  ("#be185d", "#f472b6", "🧁"),
+    "boucher": ("#b91c1c", "#ef4444", "🥩"),
+    "fleur":   ("#be185d", "#fb7185", "🌸"),
+    "restaur": ("#9a3412", "#fb923c", "🍽️"),
+    "coiff":   ("#7c3aed", "#c084fc", "✂️"),
+    "beaut":   ("#be185d", "#f9a8d4", "💅"),
+    "plomb":   ("#1d4ed8", "#38bdf8", "🔧"),
+    "electric": ("#a16207", "#facc15", "💡"),
+    "peintr":  ("#7c3aed", "#a78bfa", "🎨"),
+    "menuis":  ("#92400e", "#d97706", "🪚"),
+    "macon":   ("#57534e", "#a8a29e", "🧱"),
+    "garage":  ("#334155", "#64748b", "🚗"),
+    "auto":    ("#334155", "#64748b", "🚗"),
+    "coach":   ("#7c3aed", "#a78bfa", "🎯"),
+    "photograph": ("#4338ca", "#818cf8", "📷"),
+}
+_DEFAULT_STYLE = ("#4f46e5", "#818cf8", "✦")
 
 
 def _style_for(metier: str) -> tuple[str, str, str]:
@@ -85,8 +273,6 @@ def _style_for(metier: str) -> tuple[str, str, str]:
 
 
 def _domain_slug(nom: str) -> str:
-    """« Boulangerie Morvan » → « boulangerie-morvan.fr » (juste pour la
-    barre d'adresse de la maquette — ce n'est pas un vrai domaine)."""
     s = _strip_accents((nom or "votre-entreprise").lower())
     s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
     s = re.sub(r"-+", "-", s) or "votre-entreprise"
@@ -94,21 +280,15 @@ def _domain_slug(nom: str) -> str:
 
 
 def _initials(nom: str) -> str:
-    """Initiales de l'entreprise pour le monogramme (1-2 lettres). Robuste
-    partout (police Poppins) — pas d'emoji, donc jamais de carré vide serveur."""
     skip = {"de", "du", "des", "la", "le", "les", "d", "l", "au", "aux", "et", "a"}
     words = [w for w in re.split(r"[^0-9A-Za-zÀ-ÿ]+", nom or "") if w]
     sig = [w for w in words if _strip_accents(w.lower()) not in skip] or words
     return ("".join(w[0] for w in sig[:2]).upper()) or "✦"
 
 
-# Vraies photos par métier (téléchargées + vérifiées à l'œil le 14/06/2026 ;
-# Unsplash, libres). Embarquées dans la maquette pour faire sérieux — fini
-# l'emoji « jeu vidéo ». Un métier non couvert → photo « default » (devanture
-# élégante neutre, jamais hors-sujet).
+# Vraies photos par métier (téléchargées + vérifiées le 14/06/2026 ; Unsplash).
 _PHOTO_DIR = os.path.join(os.path.dirname(__file__), "apercu_photos")
 _PHOTO_MAP: dict[str, str] = {
-    # Bâtiment — chaque métier a SA photo (ordre = priorité, 1er trouvé gagne).
     "plomb": "plombier.jpg", "chauffag": "plombier.jpg",
     "electric": "electricien.jpg",
     "peintr": "peintre.jpg",
@@ -117,32 +297,25 @@ _PHOTO_MAP: dict[str, str] = {
     "menuis": "menuisier.jpg", "ebenist": "menuisier.jpg", "charpent": "menuisier.jpg",
     "plaquist": "plaquiste.jpg", "placo": "plaquiste.jpg", "platr": "plaquiste.jpg",
     "couvr": "batiment.jpg", "serrur": "batiment.jpg", "terrass": "batiment.jpg",
-    # Jardin / paysage
     "paysag": "paysagiste.jpg", "jardin": "paysagiste.jpg", "elagag": "paysagiste.jpg",
-    # Commerce de bouche (fleur AVANT animal : la fiche fleuriste mentionne
-    # « animaux de compagnie » → ne doit pas partir en animalier).
     "fleur": "fleuriste.jpg",
     "patiss": "patisserie.jpg", "boulang": "patisserie.jpg", "chocolat": "patisserie.jpg",
     "confis": "patisserie.jpg",
     "restaur": "restaurant.jpg", "pizz": "restaurant.jpg", "brasser": "restaurant.jpg",
     "creper": "restaurant.jpg", "bistro": "restaurant.jpg", "traiteur": "restaurant.jpg",
-    # Coiffure / beauté / bien-être (coiff/barbier AVANT beaut)
     "coiff": "coiffeur.jpg", "barbier": "coiffeur.jpg",
     "esthet": "beaute.jpg", "beaut": "beaute.jpg", "ongle": "beaute.jpg",
     "manucur": "beaute.jpg", "maquill": "beaute.jpg", "institut": "beaute.jpg",
     "massag": "bien-etre.jpg", "spa": "bien-etre.jpg", "bien-etre": "bien-etre.jpg",
     "bien etre": "bien-etre.jpg", "sophro": "bien-etre.jpg", "naturopath": "bien-etre.jpg",
     "reflexo": "bien-etre.jpg", "yoga": "bien-etre.jpg", "hypno": "bien-etre.jpg",
-    # Services
     "coach": "coach.jpg",
     "photograph": "photographe.jpg", "photo": "photographe.jpg",
     "tatou": "tatoueur.jpg", "tattoo": "tatoueur.jpg", "piercing": "tatoueur.jpg",
     "animal": "animalier.jpg", "canin": "animalier.jpg", "toilettag": "animalier.jpg",
     "veterin": "animalier.jpg", "chien": "animalier.jpg",
-    # Auto (automobile, pas « auto » seul → trop large)
     "garage": "garage.jpg", "mecanic": "garage.jpg", "carross": "garage.jpg",
     "automobile": "garage.jpg", "pneu": "garage.jpg",
-    # Bâtiment générique (après les métiers précis)
     "renov": "batiment.jpg", "batiment": "batiment.jpg", "travaux": "batiment.jpg",
     "artisan": "batiment.jpg", "isolation": "batiment.jpg",
 }
@@ -158,8 +331,6 @@ def _photo_file_for(metier: str) -> str:
 
 
 def _photo_base64(metier: str) -> str:
-    """Photo du métier encodée en base64 (embarquée dans la maquette). "" si
-    absente — la maquette retombe alors sur un fond dégradé + monogramme."""
     fn = _photo_file_for(metier)
     if fn in _photo_cache:
         return _photo_cache[fn]
@@ -182,8 +353,6 @@ def build_preview_html(nom: str, metier: str = "", ville: str = "") -> str:
     initials = _initials(nom)
     photo_b64 = _photo_base64(metier)
     if photo_b64:
-        # Vraie photo du métier en fond du panneau, avec un léger voile sombre
-        # en bas (lisibilité du badge) + une touche de couleur de marque.
         right_style = (f"background-image:linear-gradient(to top,"
                        f"rgba(0,0,0,.55),rgba(0,0,0,0) 52%),"
                        f"linear-gradient(135deg,{c1}33,transparent 55%),"
@@ -194,11 +363,9 @@ def build_preview_html(nom: str, metier: str = "", ville: str = "") -> str:
         right_style = f"background:linear-gradient(135deg,{c1},{c2});"
         right_inner = f'<div class="mono">{_html.escape(initials)}</div>'
 
-    # Eyebrow : « MÉTIER · VILLE » (ou juste l'un, ou un défaut).
     eyebrow_bits = [b for b in (metier.upper(), ville.upper()) if b]
     eyebrow = " · ".join(eyebrow_bits) or "VOTRE ACTIVITÉ"
-    # Sous-titre simple, jamais mensonger (pas d'avis/chiffres inventés).
-    sub = f"Le site qui donne envie de pousser votre porte"
+    sub = "Le site qui donne envie de pousser votre porte"
     if ville:
         sub += f", à {ville}"
     sub += "."
@@ -317,46 +484,58 @@ def build_preview_html(nom: str, metier: str = "", ville: str = "") -> str:
 </body></html>"""
 
 
-def render_preview_png(nom: str, metier: str = "", ville: str = "",
-                       output_path=None) -> bytes | None:
-    """Rend la maquette en PNG. Renvoie les octets (ou écrit le fichier si
-    output_path est fourni). None si Playwright est indisponible / erreur —
-    le mail part alors simplement sans aperçu (jamais bloquant)."""
+def _render_mockup_png(nom: str, metier: str, ville: str) -> bytes | None:
+    """Rend la maquette auto-contenue en PNG (repli). None si indisponible."""
     html_doc = build_preview_html(nom, metier, ville)
     try:
         from playwright.sync_api import sync_playwright
     except Exception:
-        logger.info("apercu_site : Playwright absent — aperçu sauté.")
+        logger.info("apercu_site : Playwright absent — maquette sautée.")
         return None
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch()
             try:
                 page = browser.new_page(
-                    viewport={"width": 1000, "height": 640},
-                    device_scale_factor=2)
+                    viewport={"width": 1000, "height": 640}, device_scale_factor=2)
                 page.set_content(html_doc, wait_until="domcontentloaded")
                 try:
                     page.evaluate("async () => { await document.fonts.ready; }")
                 except Exception:
                     pass
                 page.wait_for_timeout(700)
-                png = page.screenshot(full_page=True)
+                return page.screenshot(full_page=True)
             finally:
                 browser.close()
-        if output_path:
-            with open(output_path, "wb") as f:
-                f.write(png)
-            return None
-        return png
     except Exception as exc:
-        logger.warning("apercu_site : rendu échoué : %s", exc)
+        logger.warning("apercu_site : maquette échouée : %s", exc)
         return None
 
 
-# ---------------------------------------------------------------------------
-# Hébergement (Supabase Storage) + bloc <img> prêt pour le mail
-# ---------------------------------------------------------------------------
+# ===========================================================================
+#  Orchestration + hébergement
+# ===========================================================================
+
+def render_preview_png(nom: str, metier: str = "", ville: str = "",
+                       output_path=None) -> bytes | None:
+    """Aperçu du futur site, en PNG. D'abord le vrai site de démo du métier
+    (personnalisé) ; à défaut, la maquette auto-contenue. None si rien ne peut
+    être rendu — le mail part alors sans aperçu (jamais bloquant)."""
+    png = None
+    slug = _demo_slug_for(metier)
+    if slug and (ville or "").strip():
+        png = _render_demo_png(nom, metier, ville, slug)
+    if png is None:
+        png = _render_mockup_png(nom, metier, ville)
+    if png is None:
+        return None
+    if output_path:
+        with open(output_path, "wb") as f:
+            f.write(png)
+        return None
+    return png
+
+
 _BUCKET = "pp-client-photos"  # bucket public déjà en place
 
 
@@ -404,7 +583,7 @@ def preview_img_html(nom: str, metier: str = "", ville: str = "") -> str:
     url = preview_image_url(nom, metier, ville)
     if not url:
         return ""
-    return (f'<img src="{url}" alt="Apercu de votre futur site" '
+    return (f'<img src="{url}" alt="Aperçu de votre futur site" '
             'style="max-width:100%;height:auto;border-radius:10px;'
             'border:1px solid #e5e7eb;display:block;margin:0 0 16px;">')
 
