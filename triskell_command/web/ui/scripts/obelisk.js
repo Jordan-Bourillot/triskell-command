@@ -1674,6 +1674,7 @@ const Obelisk = {
         <td>
           <div style="font-weight: 600; color: hsl(var(--text));">${this._esc(p.name || p.handle || p.legal_name || '(sans nom)')}</div>
           ${p.handle ? `<div style="font-size: 11.5px; color: hsl(var(--text-muted)); margin-top: 2px;">@${this._esc(p.handle)}</div>` : ''}
+          ${this._siteBadge(p)}
         </td>
         <td>${platform ? `<span class="ob-pill">${this._esc(platform)}</span>` : '<span style="color: hsl(var(--text-muted));">—</span>'}</td>
         <td style="color: hsl(var(--text-muted)); font-size: 12px;">${p.industry ? this._esc(p.industry) : '—'}</td>
@@ -1687,6 +1688,22 @@ const Obelisk = {
         </td>
       </tr>
     `;
+  },
+
+  // Repère « besoin d'un site » — purement INFORMATIF pour prioriser
+  // (aucun créateur n'est jamais écarté : on leur vend aussi d'autres
+  // produits). Calculé à l'affichage depuis le site connu.
+  _siteBadge(p) {
+    const site = String((p && p.website) || '').toLowerCase();
+    const PLAT = ['linktr.ee', 'beacons', 'bio.link', 'instagram.com',
+      'tiktok.com', 'youtube.com', 'youtu.be', 'twitch.tv', 'facebook.com',
+      'twitter.com', 'x.com', 'amzn.to', 'amazon.', 'linkedin.com',
+      'discord', 't.me', 'snapchat.com'];
+    const hasRealSite = site && !PLAT.some(d => site.includes(d));
+    if (hasRealSite) {
+      return '<div style="margin-top:3px;"><span style="font-size:10.5px;font-weight:600;color:hsl(142 55% 38%);background:hsl(142 55% 38% / .12);padding:1px 6px;border-radius:6px;">🟢 a déjà un site</span></div>';
+    }
+    return '<div style="margin-top:3px;"><span style="font-size:10.5px;font-weight:600;color:hsl(38 92% 42%);background:hsl(38 92% 42% / .14);padding:1px 6px;border-radius:6px;">🔴 besoin d’un site</span></div>';
   },
 
   // ---- Sélection multiple + suppression en masse ----
