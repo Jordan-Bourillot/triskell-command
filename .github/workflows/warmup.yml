@@ -1,0 +1,56 @@
+name: Chauffe des boîtes mail (warm-up)
+
+# Fait circuler de VRAIS échanges entre les boîtes mail de Triskell pour bâtir
+# la réputation des boîtes NEUVES (Google Workspace) avant la prospection à
+# froid, et entretenir les anciennes déjà chaudes. Entièrement autonome (pas
+# besoin que Triskell Command tourne sur le PC de Jordan).
+# Détail : scripts/warmup_tick.py — DRY-RUN par défaut, --apply pour envoyer.
+
+on:
+  schedule:
+    # GitHub exprime TOUJOURS le cron en UTC (l'env TZ ci-dessous ne change que
+    # l'heure vue par Python, pas le déclenchement). 7 passages étalés sur la
+    # journée : 7,9,11,13,15,17,19 h UTC = ~9 h-21 h Paris l'été, 8 h-20 h
+    # l'hiver. Minute 37 (creuse) : GitHub retarde/saute beaucoup les crons des
+    # minutes 0-10. Le script s'auto-limite au quota du jour (J1 bas → S4 ~30).
+    - cron: '37 7,9,11,13,15,17,19 * * *'
+  workflow_dispatch:   # bouton « Run workflow » dans l'onglet Actions
+
+# Évite que deux passages se chevauchent si un précédent traîne.
+concurrency:
+  group: warmup
+  cancel-in-progress: false
+
+jobs:
+  warmup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: Europe/Paris   # le compteur de jour de chauffe raisonne en heure FR
+
+    steps:
+      - name: Checkout Triskell Command
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Clone triskell-core (sibling repo)
+        run: |
+          git clone --depth 1 https://github.com/Jordan-Bourillot/triskell-core.git ../triskell-core
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ../triskell-core
+          pip install -r requirements.txt
+
+      - name: Run warm-up tick
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -X utf8 scripts/warmup_tick.py --apply

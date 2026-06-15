@@ -10129,6 +10129,79 @@ class Api:
         return {"ok": True, "refreshed": refreshed, "skipped": skipped,
                 "details": details[:10]}
 
+    def warmup_status(self, payload: dict | None = None) -> dict:
+        """Compte rendu de la chauffe des boîtes mail (encart Cockpit).
+        Lit shared_settings.warmup_state (écrit par scripts/warmup_tick.py).
+        Renvoie {ok, active, day, goal, boxes:[...], summary}."""
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": True, "active": False, "boxes": [],
+                    "summary": "Base non connectée."}
+        import json as _j
+        from datetime import datetime
+        state = client.get_shared_setting("warmup_state", {}) or {}
+        if isinstance(state, str):
+            try:
+                state = _j.loads(state)
+            except Exception:
+                state = {}
+        accts = state.get("accounts") or {}
+        # On suit TOUTES les boîtes en chauffe : les neuves (role "warm") ET
+        # les anciennes déjà chaudes qu'on entretient (role "established" ;
+        # "helper" = ancien nom, reconnu pour ne rien perdre du suivi).
+        def _is_new(rec):
+            return ((rec or {}).get("role") or "warm") in ("warm", "new")
+        parts = {k: v for k, v in accts.items() if v}
+        if not parts:
+            return {"ok": True, "active": False, "boxes": [],
+                    "summary": "Chauffe pas encore démarrée."}
+        names = {}
+        try:
+            from ..integrations import shared_secrets
+            for a in (shared_secrets.get_all_mail_accounts(client=client) or []):
+                names[a.get("id")] = (a.get("from_email") or a.get("label")
+                                      or a.get("id"))
+        except Exception:
+            pass
+        today = datetime.now().date().isoformat()
+        start = state.get("start") or today
+        try:
+            day = (datetime.fromisoformat(today)
+                   - datetime.fromisoformat(start)).days + 1
+        except Exception:
+            day = 1
+        GOAL = 28
+        boxes, ts, tr, tp = [], 0, 0, 0
+        for aid, r in parts.items():
+            same = (r.get("date") == today)
+            s = r.get("sent", 0) if same else 0
+            rc = r.get("received", 0) if same else 0
+            rp = r.get("replied", 0) if same else 0
+            ts += s; tr += rc; tp += rp
+            if _is_new(r):
+                bday = int(r.get("day") or day)
+                boxes.append({
+                    "email": names.get(aid, aid), "role": "warm",
+                    "day": bday, "goal": GOAL,
+                    "pct": max(3, min(100, round(bday / GOAL * 100))),
+                    "sent_today": s, "received_today": rc, "replied_today": rp,
+                    "ready": bday > GOAL,
+                })
+            else:
+                boxes.append({
+                    "email": names.get(aid, aid), "role": "established",
+                    "day": None, "goal": GOAL, "pct": 100,
+                    "sent_today": s, "received_today": rc, "replied_today": rp,
+                    "ready": True,
+                })
+        boxes.sort(key=lambda b: (b["role"] != "warm", b["email"]))
+        n_new = sum(1 for b in boxes if b["role"] == "warm")
+        summary = (f"{len(boxes)} boîte(s) en chauffe ({n_new} neuve(s)) · "
+                   f"jour J{day}/{GOAL} · aujourd'hui : "
+                   f"{ts} envoyés, {tr} reçus, {tp} réponses")
+        return {"ok": True, "active": True, "day": day, "goal": GOAL,
+                "boxes": boxes, "summary": summary}
+
     def prospection_mission_cancel(self, payload: dict) -> dict:
         """Abandonne le suivi d'une mission (la chasse déjà lancée n'est
         pas tuée, ses résultats restent consultables dans son outil)."""

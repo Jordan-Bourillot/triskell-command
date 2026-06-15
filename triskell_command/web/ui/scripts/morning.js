@@ -163,6 +163,10 @@ const Morning = {
         <div id="m-drafts-batch-live" class="mt-6 hidden"></div>
 
         <div id="m-content" class="mt-6"></div>
+
+        <!-- Encart "chauffe des boîtes mail" : visible UNIQUEMENT pendant
+             une chauffe en cours. Compte rendu quotidien pour Jordan. -->
+        <div id="m-warmup" class="mt-6"></div>
       </section>
     `;
 
@@ -177,6 +181,7 @@ const Morning = {
       this._loadObeliskNotifs();
       this._loadModes();
       this._loadLinkedinActions();
+      this._loadWarmup();
     };
     // Personnalisation du Cockpit (blocs affichés)
     const customizeBtn = document.getElementById('m-customize');
@@ -458,6 +463,7 @@ const Morning = {
     this._loadObeliskNotifs();
     this._loadModes();
     this._loadLinkedinActions();
+    this._loadWarmup();
 
     // Démarre le rafraîchissement automatique des chiffres
     this._startAutoRefresh();
@@ -815,6 +821,7 @@ const Morning = {
       this._loadObeliskNotifs();
       this._loadModes();
       this._loadLinkedinActions();
+      this._loadWarmup();
       return;
     }
 
@@ -913,6 +920,74 @@ const Morning = {
     if (s == null) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
                      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  },
+
+  // -------- Bloc CHAUFFE — état de la chauffe des boîtes mail --------
+  // Compte rendu quotidien demandé par Jordan. L'encart n'apparaît QUE
+  // pendant une chauffe en cours ; sinon il reste invisible (pas de bruit).
+  async _loadWarmup() {
+    const host = document.getElementById('m-warmup');
+    if (!host || !App.api || !App.api.warmup_status) return;
+    let d;
+    try { d = await App.api.warmup_status(); }
+    catch (e) { host.innerHTML = ''; return; }
+    if (!d || !d.ok || !d.active || !(d.boxes || []).length) {
+      host.innerHTML = '';
+      return;
+    }
+    const goal = d.goal || 28;
+    const day = d.day || 1;
+    const plur = (n) => (n > 1 ? 's' : '');
+    const totSent = d.boxes.reduce((a, b) => a + (b.sent_today || 0), 0);
+    const totRec = d.boxes.reduce((a, b) => a + (b.received_today || 0), 0);
+    const totRep = d.boxes.reduce((a, b) => a + (b.replied_today || 0), 0);
+
+    const rows = d.boxes.map((b) => {
+      const established = (b.role === 'established');
+      const ready = !!b.ready;
+      const pct = Math.max(3, Math.min(100, b.pct || 0));
+      const barColor = (established || ready) ? 'hsl(var(--success))' : 'hsl(var(--accent-strong))';
+      let status;
+      if (established) {
+        status = '<span style="color:hsl(var(--success-text));font-weight:600">✓ Déjà chaude</span>';
+      } else if (ready) {
+        status = '<span style="color:hsl(var(--success-text));font-weight:600">✅ Prête</span>';
+      } else {
+        status = `<span style="color:hsl(var(--text-muted))">Jour ${b.day}/${goal}</span>`;
+      }
+      const s = b.sent_today || 0, rc = b.received_today || 0, rp = b.replied_today || 0;
+      return `
+        <div style="padding:12px 0;border-top:1px solid hsl(var(--border))">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">
+            <div style="font-weight:600;color:hsl(var(--text));overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._esc(b.email)}</div>
+            <div style="flex:none;font-size:13px">${status}</div>
+          </div>
+          <div style="height:8px;border-radius:99px;background:hsl(var(--border));overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:${barColor};border-radius:99px;transition:width .4s"></div>
+          </div>
+          <div style="margin-top:7px;font-size:12.5px;color:hsl(var(--text-secondary))">
+            Aujourd'hui : <strong>${s}</strong> envoyé${plur(s)} · <strong>${rc}</strong> reçu${plur(rc)} · <strong>${rp}</strong> réponse${plur(rp)}
+          </div>
+        </div>`;
+    }).join('');
+
+    host.innerHTML = `
+      <div style="border:1px solid hsl(var(--border));background:hsl(var(--surface-elevated));border-radius:14px;padding:18px 20px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+          <div>
+            <div style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:hsl(var(--text-muted));font-weight:600">Délivrabilité</div>
+            <h3 style="margin:2px 0 0;font-size:17px;color:hsl(var(--text))">🔥 Chauffe des boîtes mail</h3>
+          </div>
+          <div style="flex:none;text-align:right">
+            <div style="font-size:22px;font-weight:700;color:hsl(var(--accent-text));line-height:1">J${day}<span style="font-size:14px;color:hsl(var(--text-muted))">/${goal}</span></div>
+          </div>
+        </div>
+        <div style="margin-top:6px;font-size:13px;color:hsl(var(--text-secondary))">
+          Aujourd'hui : <strong>${totSent}</strong> envoyé${plur(totSent)} · <strong>${totRec}</strong> reçu${plur(totRec)} · <strong>${totRep}</strong> réponse${plur(totRep)}
+          <span style="color:hsl(var(--text-muted))"> — ${d.boxes.length} boîte${plur(d.boxes.length)} en chauffe</span>
+        </div>
+        <div style="margin-top:4px">${rows}</div>
+      </div>`;
   },
 
   // -------- Bloc MODES — bascule envoi direct ↔ validation --------
