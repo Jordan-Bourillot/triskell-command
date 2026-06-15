@@ -21,7 +21,7 @@ const Creators = {
 
   async render(container) {
     container.innerHTML = `
-      <section style="max-width:960px;margin:0 auto;padding:24px 20px">
+      <section style="max-width:960px;margin:22px auto;padding:26px;background:#fff;color:#1f2430;border:1px solid #ececf0;border-radius:16px;box-shadow:0 6px 22px rgba(0,0,0,.05)">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px">
           <h1 style="font-size:22px;font-weight:600">Créateurs contactés</h1>
           <button id="cr-add" style="background:#e11d6b;color:#fff;border:0;border-radius:10px;padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer">+ Ajouter un créateur</button>
