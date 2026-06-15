@@ -29,6 +29,7 @@ const ProspecteurGoogle = {
         pays:       document.getElementById('pg-pays')?.value || 'FR',
         num:        document.getElementById('pg-num')?.value || '60',
         onlyNoSite: !!document.getElementById('pg-only-nosite')?.checked,
+        onlyRedo:   !!document.getElementById('pg-only-redo')?.checked,
         // Note : la clé API n'est volontairement PAS mémorisée dans le
         // navigateur (donnée sensible en clair).
       };
@@ -52,6 +53,10 @@ const ProspecteurGoogle = {
     if (f.onlyNoSite != null) {
       const el = document.getElementById('pg-only-nosite');
       if (el) el.checked = !!f.onlyNoSite;
+    }
+    if (f.onlyRedo != null) {
+      const el = document.getElementById('pg-only-redo');
+      if (el) el.checked = !!f.onlyRedo;
     }
   },
 
@@ -189,6 +194,11 @@ const ProspecteurGoogle = {
                 <label class="flex items-center gap-2 text-xs text-text-secondary">
                   <input id="pg-only-nosite" type="checkbox" />
                   Garder seulement les entreprises <b>sans site web</b>
+                </label>
+
+                <label class="flex items-center gap-2 text-xs text-text-secondary">
+                  <input id="pg-only-redo" type="checkbox" />
+                  Garder seulement les <b>sites à refaire</b> 🔧 (pas de vrai site, bricolé ou vieux)
                 </label>
 
                 <div>
@@ -437,6 +447,7 @@ const ProspecteurGoogle = {
     const pays = document.getElementById('pg-pays')?.value || 'FR';
     const num = parseInt(document.getElementById('pg-num').value, 10) || 60;
     const onlyNoSite = document.getElementById('pg-only-nosite').checked;
+    const onlyRedo = !!document.getElementById('pg-only-redo')?.checked;
     const apiKey = document.getElementById('pg-apikey').value.trim();
 
     if (!metier) {
@@ -450,6 +461,7 @@ const ProspecteurGoogle = {
 
     const payload = {
       metier, zone, pays, num_results: num, only_no_site: onlyNoSite,
+      only_redo: onlyRedo,
     };
     if (apiKey) payload.api_key = apiKey;
 

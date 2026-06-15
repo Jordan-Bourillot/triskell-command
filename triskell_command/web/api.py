@@ -10366,6 +10366,8 @@ class Api:
             zone: str (ex "Brest" / "Finistère" / "Bretagne"),
             num_results: int (par défaut 60, max 200),
             only_no_site: bool (filtre boîtes sans site web),
+            only_redo: bool (ne garder QUE les « sites à refaire » : sans vrai
+                       site / bricolé / vieux — la mine d'or qui convertit),
             api_key?: str (surcharge la clé par défaut),
             pays?: str (code ISO francophone — FR par défaut, ALL = tous),
         }
@@ -10380,6 +10382,7 @@ class Api:
         except (TypeError, ValueError):
             return {"ok": False, "error": "Nombre de résultats invalide."}
         only_no_site = bool(p.get("only_no_site", False))
+        only_redo = bool(p.get("only_redo", False))
         pays = (p.get("pays") or "FR").strip().upper() or "FR"
         try:
             from ..integrations import prospecteur_google
@@ -10392,6 +10395,7 @@ class Api:
             hunt = prospecteur_google.start_hunt(
                 metier=metier, zone=zone, num_results=num,
                 only_no_site=only_no_site,
+                only_redo=only_redo,
                 api_key=places_key or None,
                 pays=pays,
             )

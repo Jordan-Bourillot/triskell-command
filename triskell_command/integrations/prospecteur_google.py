@@ -310,15 +310,22 @@ def list_hunts(limit: int = 20) -> list[dict]:
     return items[:limit]
 
 
-def _build_label(metier: str, zone: str, only_no_site: bool) -> str:
+def _build_label(metier: str, zone: str, only_no_site: bool,
+                 only_redo: bool = False) -> str:
     m = (metier or "").strip() or "tous métiers"
     z = (zone or "").strip() or "France"
-    suffix = "  ·  sans site" if only_no_site else ""
+    if only_redo:
+        suffix = "  ·  à refaire uniquement"
+    elif only_no_site:
+        suffix = "  ·  sans site"
+    else:
+        suffix = ""
     return f"{m} — {z}{suffix}"
 
 
 def start_hunt(metier: str, zone: str, num_results: int = 60,
                only_no_site: bool = False,
+               only_redo: bool = False,
                api_key: str | None = None,
                pays: str = "FR",
                progress_cb: Callable[[ProspectHunt], None] | None = None,
@@ -348,13 +355,14 @@ def start_hunt(metier: str, zone: str, num_results: int = 60,
     hunt_id = uuid.uuid4().hex[:12]
     hunt = ProspectHunt(
         id=hunt_id,
-        label=_build_label(metier, zone, only_no_site),
+        label=_build_label(metier, zone, only_no_site, only_redo),
         created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         status="pending",
         progress=0,
         filters={
             "metier": metier, "zone": zone,
             "num_results": num_results, "only_no_site": only_no_site,
+            "only_redo": only_redo,
             "pays": pays,
         },
     )
@@ -364,6 +372,7 @@ def start_hunt(metier: str, zone: str, num_results: int = 60,
         try:
             _run_hunt(hunt, metier=metier, zone=zone,
                       num_results=num_results, only_no_site=only_no_site,
+                      only_redo=only_redo,
                       api_key=_get_api_key(api_key), pays=pays,
                       progress_cb=progress_cb)
             hunt.status = "done"
@@ -473,6 +482,7 @@ def lookup_site_for_company(name: str, city: str, api_key: str = "",
 
 def _run_hunt(hunt: ProspectHunt, metier: str, zone: str, num_results: int,
               only_no_site: bool, api_key: str, pays: str = "FR",
+              only_redo: bool = False,
               progress_cb: Callable[[ProspectHunt], None] | None = None) -> None:
     def log(msg: str) -> None:
         hunt.log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
@@ -569,10 +579,19 @@ def _run_hunt(hunt: ProspectHunt, metier: str, zone: str, num_results: int,
         )
         results.append(prospect)
 
-        # Si only_no_site, on ne garde que celles sans site dans la sortie,
-        # mais on continue à logger toutes les boîtes pour la transparence.
-        retained = ([p for p in results if not p.has_website]
-                    if only_no_site else results)
+        # Filtre de rétention : on continue à logger TOUTES les boîtes pour
+        # la transparence, mais on ne GARDE que celles voulues.
+        #  - only_redo : uniquement les « sites à refaire » (sans vrai site /
+        #    bricolé / vieux) — la mine d'or qui convertit le mieux.
+        #  - only_no_site : uniquement celles sans site web du tout.
+        if only_redo:
+            # « à refaire » = site à refaire (sans vrai site / bricolé / vieux)
+            # OU aucun site du tout. On écarte donc les sites en bon état.
+            retained = [p for p in results if p.site_redo or not p.has_website]
+        elif only_no_site:
+            retained = [p for p in results if not p.has_website]
+        else:
+            retained = results
 
         hunt.prospects = [p.to_dict() for p in retained]
         hunt.progress = int((i + 1) / total * 100)
