@@ -244,7 +244,7 @@ def resolve_smtp_for_send(client=None, app_state=None) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 # Clés API IA — partagées
 # ---------------------------------------------------------------------------
-PROVIDERS = ("google", "anthropic", "openai", "mistral", "xai")
+PROVIDERS = ("google", "anthropic", "openai", "mistral", "xai", "deepseek")
 
 
 def _env_keys() -> dict[str, str]:
@@ -263,6 +263,7 @@ def _env_keys() -> dict[str, str]:
         "google":    ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
         "mistral":   ("MISTRAL_API_KEY",),
         "xai":       ("XAI_API_KEY", "GROK_API_KEY"),
+        "deepseek":  ("DEEPSEEK_API_KEY",),
     }
     out: dict[str, str] = {}
     for provider, vars_ in aliases.items():

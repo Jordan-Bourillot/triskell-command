@@ -294,6 +294,94 @@ check("relectrice : réponse valide → notée",
       _parse_review('{"score": 9, "verdict": "ok", "comment": "bon"}')
       ["score"] == 9)
 
+# --- Bascule automatique entre IA + panne « engine_down » (15/06/2026) ---
+# L'IA qui relit les mails ne doit plus tout bloquer en silence quand elle
+# tombe à sec : elle bascule sur une autre IA enregistrée, et si AUCUNE n'est
+# dispo elle le dit clairement (engine_down) au lieu d'un faux « 0/10 ».
+from triskell_core.ai import providers as _prov  # noqa: E402
+from triskell_core.prospect import quality_reviewer as _qr  # noqa: E402
+
+check("priorité des IA de secours = ordre attendu",
+      _prov.available_providers({"openai": "x", "google": "y"}) == ["openai", "google"]
+      and _prov.available_providers({}) == [])
+check("DeepSeek est une IA de secours connue",
+      "deepseek" in _prov.PROVIDERS and "deepseek" in _prov.DEFAULT_PRIORITY)
+
+_orig_send = _prov.send_to_provider
+try:
+    def _send_anthropic_down(provider_id, model, prompt, api_keys):
+        if provider_id == "anthropic":
+            raise _prov.ProviderError("Anthropic HTTP 400: credit balance too low")
+        if provider_id == "openai":
+            return '{"score": 8, "verdict": "ok", "comment": "relu via secours"}'
+        raise _prov.ProviderError(f"{provider_id} indispo")
+    _prov.send_to_provider = _send_anthropic_down
+    _txt, _used, _mdl = _prov.send_with_fallback(
+        "anthropic", "claude-sonnet-4-5", "p",
+        {"anthropic": "k1", "openai": "k2"})
+    check("bascule auto : Anthropic à sec → relais OpenAI", _used == "openai")
+    _rev = _qr.review_email(subject="s", body="b", prospect_context="c",
+                            provider="anthropic", model="claude-sonnet-4-5",
+                            api_keys={"anthropic": "k1", "openai": "k2"})
+    check("relectrice : bascule → vraie note (pas de panne)",
+          _rev.get("score") == 8 and not _rev.get("engine_down"))
+
+    def _send_all_down(provider_id, model, prompt, api_keys):
+        raise _prov.ProviderError(f"{provider_id} HS (credit balance too low)")
+    _prov.send_to_provider = _send_all_down
+    _rev2 = _qr.review_email(subject="s", body="b", prospect_context="c",
+                             provider="anthropic", model="claude-sonnet-4-5",
+                             api_keys={"anthropic": "k1", "openai": "k2"})
+    check("relectrice : toutes les IA HS → 'en panne' (engine_down)",
+          _rev2.get("engine_down") is True and _rev2.get("verdict") == "draft")
+    check("panne du correcteur → message clair, pas un faux score",
+          ("crédit" in _rev2.get("comment", "").lower())
+          or ("n'a pas pu" in _rev2.get("comment", "")))
+
+    def _send_only_deepseek(provider_id, model, prompt, api_keys):
+        if provider_id == "deepseek":
+            return '{"score": 7, "verdict": "ok", "comment": "relu par deepseek"}'
+        raise _prov.ProviderError(f"{provider_id} HS")
+    _prov.send_to_provider = _send_only_deepseek
+    _txt2, _used2, _mdl2 = _prov.send_with_fallback(
+        "anthropic", "claude-sonnet-4-5", "p",
+        {"anthropic": "k1", "deepseek": "kD"})
+    check("bascule auto : tout HS sauf DeepSeek → relais DeepSeek",
+          _used2 == "deepseek")
+finally:
+    _prov.send_to_provider = _orig_send
+
+_rev3 = _qr.review_email(subject="s", body="b", prospect_context="c",
+                         provider="anthropic", model="claude-sonnet-4-5",
+                         api_keys={})
+check("relectrice : aucune clé IA → 'en panne', mail gardé en brouillon",
+      _rev3.get("engine_down") is True and _rev3.get("verdict") == "draft")
+
+# L'auto-pilote lisait les clés sous le mauvais nom → il ne voyait qu'une IA
+# même quand plusieurs étaient enregistrées (bug remonté par Jordan le
+# 15/06/2026 : « j'ai plusieurs API enregistrées »). On vérifie que le format
+# canonique « {provider}_api_key » (écrit par sync_ai_keys_to_core) est lu.
+import os as _os, tempfile as _tf, pathlib as _pl_path, json as _json_local  # noqa: E402
+import triskell_core.prospect.pipeline as _pl  # noqa: E402
+
+_tmp = _tf.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+_json_local.dump({"google_api_key": "kG", "ai_api_key_mistral": "kM"}, _tmp)
+_tmp.close()
+_orig_cfg = _pl.CONFIG_FILE
+try:
+    _pl.CONFIG_FILE = _pl_path.Path(_tmp.name)
+    _loaded = _pl._load_ai_keys()
+    check("clés IA : format 'google_api_key' enfin lu par l'auto-pilote (bug Jordan)",
+          _loaded.get("google") == "kG")
+    check("clés IA : ancien format 'ai_api_key_mistral' toujours lu",
+          _loaded.get("mistral") == "kM")
+finally:
+    _pl.CONFIG_FILE = _orig_cfg
+    try:
+        _os.unlink(_tmp.name)
+    except OSError:
+        pass
+
 print("4) Relances drip J+7 / J+30…")
 from triskell_command.integrations import drip_runner  # noqa: E402
 

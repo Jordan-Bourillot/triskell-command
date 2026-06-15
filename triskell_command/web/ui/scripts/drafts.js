@@ -430,7 +430,28 @@ const Drafts = {
            </button>
          </div>`
       : '';
-    list.innerHTML = banner
+    // Alerte globale : si des brouillons n'ont pas pu être relus (correcteur
+    // en panne, souvent plus de crédit), on le dit une fois, en clair, en tête
+    // de liste — au lieu de laisser Jordan deviner devant des mails sans note.
+    const nDown = data.rows.filter(r => r && r.review_verdict === 'engine_down').length;
+    const engineBanner = nDown
+      ? `<div class="card p-4 mb-4 border" style="border-color: hsl(var(--warning) / 0.5); background: hsl(var(--warning) / 0.08)">
+           <div class="flex items-start gap-3">
+             <span class="text-xl leading-none">⚙️</span>
+             <div class="text-sm min-w-0">
+               <div class="font-semibold text-warning mb-1">Le correcteur (2è IA) est en panne</div>
+               <p class="text-text-secondary" style="text-wrap: pretty">
+                 ${nDown} mail${nDown > 1 ? 's' : ''} ${nDown > 1 ? 'attendent' : 'attend'} ici parce
+                 qu'aucune IA n'a pu ${nDown > 1 ? 'les' : 'le'} relire (le plus souvent : plus de crédit).
+                 ${nDown > 1 ? 'Ils restent' : 'Il reste'} en brouillon par sécurité — rien n'est perdu.<br>
+                 → Recharge tes crédits, ou ajoute une 2è IA dans <b>Réglages</b> : la relecture
+                 basculera toute seule dessus la prochaine fois.
+               </p>
+             </div>
+           </div>
+         </div>`
+      : '';
+    list.innerHTML = engineBanner + banner
       + data.rows.map((r, i) => this._card(r, i)).join('')
       + sendAllFooter;
     this._bind(data.rows);
@@ -753,7 +774,21 @@ const Drafts = {
   //  - < 5  : rouge (douteux, attention)
   // Renvoie '' si le brouillon n'a pas de review (ex: 2e IA desactivee).
   _reviewBanner(r) {
-    if (!r || r.review_score == null) return '';
+    if (!r) return '';
+    // Panne du correcteur (plus de crédit / coupure) : on n'affiche PAS un
+    // faux « 0/10 ». On explique la panne, sans rouge accusateur : ce n'est
+    // pas le mail qui est mauvais, c'est la relecture qui n'a pas pu se faire.
+    if (r.review_verdict === 'engine_down') {
+      const why = (r.review_comment
+        || 'Aucune IA disponible pour relire (plus de crédit ou coupure).').trim();
+      return `
+        <div class="mb-3 px-3 py-2 rounded-lg border text-xs sm:text-sm bg-warning/10 border-warning/40 text-warning"
+             style="text-wrap: pretty">
+          <span class="font-semibold">⚙️ 2è IA en panne — pas de note</span>
+          <span class="text-text-secondary font-normal"> — ${this._esc(why)}</span>
+        </div>`;
+    }
+    if (r.review_score == null) return '';
     const score = Math.max(0, Math.min(10, parseInt(r.review_score, 10) || 0));
     const comment = (r.review_comment || '').trim();
     let cls = 'bg-success/10 border-success/30 text-success';
