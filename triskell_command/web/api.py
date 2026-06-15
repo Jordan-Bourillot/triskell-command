@@ -5795,228 +5795,51 @@ class Api:
     _CREATOR_STALE_DAYS = 7
 
     def creators_list(self, payload: dict | None = None) -> dict:
-        """Liste les créateurs de prospection (table `prospects`).
+        """Liste le carnet des créateurs contactés (table dédiée).
 
-        Filtres acceptés :
-          - channel  : canal de contact ('instagram'/'tiktok'/'youtube'/
-                       'facebook'/'email'/'autre')
-          - status   : statut CRM exact (new/qualified/contacted/...)
-          - relance  : True → uniquement les créateurs « à relancer »
-                       (prochaine relance échue, OU contactés depuis > N
-                       jours sans relance programmée).
-          - q        : recherche texte libre (nom/pseudo/site…)
-          - limit / offset : pagination (défaut 100 / 0)
-
-        Par défaut, ne renvoie QUE les prospects ayant un canal de contact
-        renseigné (ceux qu'on suit vraiment dans la section Créateurs), sauf
-        si on demande explicitement tout (all=True). Renvoie {ok, rows, count}.
+        payload : {relance?: bool, limit?: int}
+        relance=True → uniquement ceux « à relancer » (date de relance échue).
+        Renvoie {ok, rows, count}.
         """
         p = payload or {}
         try:
-            from ..integrations.obelisk import repo as r
-            relance = bool(p.get("relance"))
-            channel = str(p.get("channel") or "").strip().lower()
-            return r.list_creators(
-                tracked_only=True,
-                status=str(p.get("status") or "").strip(),
-                q=str(p.get("q") or "").strip(),
-                contact_channel=channel,
-                follow_up=relance,
-                follow_up_stale_days=(self._CREATOR_STALE_DAYS if relance else 0),
-                sort_by=str(p.get("sort_by") or "created_desc").strip(),
-                limit=int(p.get("limit") or 100),
-                offset=int(p.get("offset") or 0),
-            )
+            from ..integrations import creators_book as book
+            return book.list_all(relance=bool(p.get("relance")),
+                                  limit=int(p.get("limit") or 300))
         except Exception as exc:
             logger.exception("creators_list failed")
             return {"ok": False, "error": str(exc), "rows": [], "count": 0}
 
     def creators_get(self, payload: dict | None = None) -> dict:
-        """Une fiche créateur + son historique de messages (email_history)."""
-        pid = ((payload or {}).get("id") or "").strip()
-        if not pid:
-            return {"ok": False, "error": "id requis"}
+        """Une fiche du carnet créateurs."""
         try:
-            from ..integrations.obelisk import repo as r
-            res = r.get_creator(pid)
-            if not res.get("ok"):
-                return res
-            history = []
-            client = self._supabase()
-            if client is not None:
-                try:
-                    hres = (client.raw.table("email_history").select("*")
-                            .eq("prospect_id", pid)
-                            .order("ts", desc=True).limit(200).execute())
-                    history = hres.data or []
-                except Exception as exc:
-                    logger.debug("creators_get history KO: %s", exc)
-            res["history"] = history
-            return res
+            from ..integrations import creators_book as book
+            return book.get_one(((payload or {}).get("id") or "").strip())
         except Exception as exc:
             logger.exception("creators_get failed")
             return {"ok": False, "error": str(exc)}
 
     def creators_save(self, payload: dict | None = None) -> dict:
-        """Crée OU met à jour un créateur de prospection.
+        """Crée (sans id) ou met à jour (avec id) un créateur du carnet.
 
-        - Sans `id` → création (insert dans `prospects` via create_creator).
-        - Avec `id` → mise à jour (update_creator étendu aux champs créateurs).
-
-        Champs : name, contact_channel, handle, platform_url, subscribers,
-        status, next_follow_up_at, demo_url, notes, tags, emails,
-        last_contact_at. Renvoie {ok, prospect_id, action}.
+        Champs : name (requis à la création), platform (réseau), handle,
+        contacted_at, message, next_follow_up_at, demo_url, notes.
+        Renvoie {ok, id, action}.
         """
-        p = payload or {}
-        pid = (p.get("id") or "").strip()
         try:
-            from ..integrations.obelisk import repo as r
+            from ..integrations import creators_book as book
+            return book.save(payload or {})
         except Exception as exc:
+            logger.exception("creators_save failed")
             return {"ok": False, "error": str(exc)}
-
-        if pid:
-            # Mise à jour : on ne transmet que les champs réellement fournis,
-            # pour ne pas écraser ce qui n'est pas dans le formulaire.
-            fields: dict = {}
-            for k in ("status", "notes", "contact_channel", "demo_url",
-                      "next_follow_up_at", "last_contact_at", "tags"):
-                if k in p:
-                    fields[k] = p[k]
-            if not fields:
-                return {"ok": False, "error": "aucun champ à mettre à jour"}
-            res = r.update_creator(pid, fields)
-            if res.get("ok"):
-                res.setdefault("action", "updated")
-            return res
-
-        # Création
-        if not (p.get("name") or "").strip():
-            return {"ok": False, "error": "Le nom est obligatoire."}
-        ws_id = ""
-        client = self._supabase()
-        if client is not None:
-            try:
-                ws_id = client._current_workspace_id() or ""
-            except Exception:
-                ws_id = ""
-        return r.create_creator({
-            "name":              p.get("name"),
-            "handle":            p.get("handle"),
-            "platform_url":      p.get("platform_url"),
-            "emails":            p.get("emails") or [],
-            "subscribers":       p.get("subscribers"),
-            "status":            p.get("status") or "new",
-            "contact_channel":   p.get("contact_channel"),
-            "next_follow_up_at": p.get("next_follow_up_at"),
-            "demo_url":          p.get("demo_url"),
-            "last_contact_at":   p.get("last_contact_at"),
-            "notes":             p.get("notes"),
-            "tags":              p.get("tags") or [],
-        }, workspace_id=ws_id)
-
-    def creators_log_message(self, payload: dict | None = None) -> dict:
-        """Enregistre un message envoyé HORS MAIL (DM Instagram, etc.).
-
-        Ajoute une ligne dans email_history (kind='outreach_sent', body = le
-        message, extra = {channel, demo_url?}, ts = maintenant), pose
-        last_contact_at = maintenant et fait passer le statut à 'contacted'
-        s'il est encore en amont (new/qualified). C'est le « quel message,
-        quand, par quel canal ».
-
-        payload = {id, message, channel?, demo_url?, next_follow_up_at?}
-        """
-        p = payload or {}
-        pid = (p.get("id") or "").strip()
-        message = (p.get("message") or "").strip()
-        channel = (p.get("channel") or "").strip().lower()
-        demo_url = (p.get("demo_url") or "").strip()
-        next_fu = (p.get("next_follow_up_at") or "").strip()
-        if not pid:
-            return {"ok": False, "error": "id requis"}
-        if not message:
-            return {"ok": False, "error": "Message vide."}
-
-        client = self._supabase()
-        if client is None:
-            return {"ok": False, "error": "Base partagée non connectée"}
-        sb = client.raw
-        now_iso = self._iso_now()
-
-        # Statut actuel : on ne régresse jamais un statut avancé.
-        status_now = ""
-        try:
-            cur = (sb.table("prospects").select("status")
-                   .eq("id", pid).limit(1).execute().data or [])
-            status_now = (cur[0].get("status") if cur else "") or ""
-        except Exception as exc:
-            logger.debug("creators_log_message status lookup KO: %s", exc)
-
-        # 1) Trace dans l'historique (best-effort : ne bloque pas le reste).
-        extra = {"channel": channel} if channel else {}
-        if demo_url:
-            extra["demo_url"] = demo_url
-        hist_row = {
-            "prospect_id":  pid,
-            "kind":         "outreach_sent",
-            "ts":           now_iso,
-            "subject":      "",
-            "body":         message[:20_000],
-            "extra":        extra,
-        }
-        try:
-            ws_id = None
-            try:
-                ws_id = client._current_workspace_id()
-            except Exception:
-                ws_id = None
-            if ws_id:
-                hist_row["workspace_id"] = ws_id
-            sb.table("email_history").insert(hist_row).execute()
-        except Exception as exc:
-            # Filet : réessaie sans workspace_id si la colonne n'existe pas.
-            try:
-                hist_row.pop("workspace_id", None)
-                sb.table("email_history").insert(hist_row).execute()
-            except Exception as exc2:
-                logger.warning("creators_log_message history KO: %s / %s", exc, exc2)
-
-        # 2) Met à jour le prospect : contacté + date + relance éventuelle.
-        update_row: dict = {"last_contact_at": now_iso}
-        if status_now in ("", "new", "qualified"):
-            update_row["status"] = "contacted"
-        if channel:
-            update_row["contact_channel"] = channel
-        if demo_url:
-            update_row["demo_url"] = demo_url
-        if next_fu:
-            update_row["next_follow_up_at"] = next_fu
-        try:
-            sb.table("prospects").update(update_row).eq("id", pid).execute()
-        except Exception as exc:
-            # Colonnes créateurs absentes → on retente sur le minimum vital.
-            msg = str(exc).lower()
-            if "does not exist" in msg or "column" in msg:
-                safe = {k: v for k, v in update_row.items()
-                        if k in ("last_contact_at", "status")}
-                try:
-                    sb.table("prospects").update(safe).eq("id", pid).execute()
-                    return {"ok": True, "prospect_id": pid,
-                            "warning": "Canal/relance/démo non enregistrés (migration 51 non appliquée)."}
-                except Exception as exc2:
-                    return {"ok": False, "error": str(exc2)}
-            logger.warning("creators_log_message update KO: %s", exc)
-            return {"ok": False, "error": str(exc)}
-        return {"ok": True, "prospect_id": pid}
 
     def creators_delete(self, payload: dict | None = None) -> dict:
-        """Supprime un créateur (réutilise la suppression Obélisk)."""
-        pid = ((payload or {}).get("id") or "").strip()
-        if not pid:
-            return {"ok": False, "error": "id requis"}
+        """Supprime un créateur du carnet."""
         try:
-            from ..integrations.obelisk import repo as r
-            return r.delete_creator(pid)
+            from ..integrations import creators_book as book
+            return book.delete(((payload or {}).get("id") or "").strip())
         except Exception as exc:
+            logger.exception("creators_delete failed")
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------

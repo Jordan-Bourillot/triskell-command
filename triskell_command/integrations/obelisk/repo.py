@@ -160,7 +160,6 @@ def list_creators(*,
                   contact_channel: str = "",
                   follow_up: bool = False,
                   follow_up_stale_days: int = 0,
-                  tracked_only: bool = False,
                   limit: int = 100,
                   offset: int = 0) -> dict:
     """Retourne une page de prospects + le count total filtré.
@@ -290,11 +289,6 @@ def list_creators(*,
             qy = qy.not_.is_("last_contact_at", "null")
         elif contacted == "no":
             qy = qy.is_("last_contact_at", "null")
-        # Section « Créateurs » : ne garder que les créateurs suivis à la main
-        # (tag suivi_createur), pas tout le vivier auto du Chasseur. tags est
-        # une colonne de base → fonctionne même sans la migration 51.
-        if tracked_only:
-            qy = qy.contains("tags", ["suivi_createur"])
         # Filtres « créateurs » (colonnes migration 51) — seulement si le
         # jeu de colonnes étendu est disponible, sinon on les ignore
         # silencieusement (la requête de base reste valide).
@@ -816,10 +810,6 @@ def create_creator(fields: dict, *, workspace_id: str = "") -> dict:
     tags = f.get("tags") or []
     if not isinstance(tags, list):
         tags = []
-    # Marqueur : ce créateur a été ajouté/suivi à la main dans la section
-    # Créateurs (≠ vivier automatique du Chasseur). Sert à n'afficher QUE ceux-là.
-    if "suivi_createur" not in tags:
-        tags.append("suivi_createur")
     subs = f.get("subscribers")
     try:
         subs = int(subs) if subs not in (None, "", []) else None
