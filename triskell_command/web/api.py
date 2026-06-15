@@ -10063,6 +10063,72 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def draft_refresh_apercu(self, payload: dict | None = None) -> dict:
+        """Régénère l'APERÇU (capture du vrai site démo du métier, personnalisé
+        nom + ville) des brouillons de prospection EN ATTENTE. Utile pour les
+        brouillons fabriqués AVANT le remplissage des villes : sans ville, le
+        moteur posait une maquette générique au lieu du vrai démo. On remplace
+        seulement le bloc <img> de l'aperçu dans body_html — ni le texte, ni
+        l'objet ne bougent, et rien n'est envoyé.
+
+        payload optionnel : {id} pour ne traiter qu'un seul brouillon.
+        """
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Base de données indisponible."}
+        try:
+            from ..integrations.apercu_site import preview_img_html
+        except Exception as exc:
+            return {"ok": False, "error": f"module aperçu indisponible: {exc}"}
+        import re as _re
+        sb = client.raw
+        only_id = ((payload or {}).get("id") or "").strip()
+        q = (sb.table("prospect_drafts")
+             .select("id, body_html, "
+                     "prospects:prospect_id(name, legal_name, city, industry)")
+             .eq("status", "pending"))
+        if only_id:
+            q = q.eq("id", only_id)
+        try:
+            rows = q.execute().data or []
+        except Exception as exc:
+            return {"ok": False, "error": f"lecture brouillons KO: {exc}"}
+        rx = _re.compile(r'<img[^>]*alt="Aper[^"]*"[^>]*>', _re.IGNORECASE)
+        refreshed = 0
+        skipped = 0
+        details: list[str] = []
+        for r in rows:
+            pr = r.get("prospects") or {}
+            name = (pr.get("name") or pr.get("legal_name") or "").strip()
+            city = (pr.get("city") or "").strip()
+            metier = (pr.get("industry") or "").strip()
+            html = r.get("body_html") or ""
+            if not (name and city and metier) or not rx.search(html):
+                skipped += 1
+                continue
+            try:
+                new_img = preview_img_html(name, metier, city)
+            except Exception as exc:
+                skipped += 1
+                details.append(f"{name[:30]}: {exc}")
+                continue
+            if not new_img or "<img" not in new_img.lower():
+                skipped += 1
+                details.append(f"{name[:30]}: aperçu vide (démo non capturé)")
+                continue
+            # lambda : évite que d'éventuels \1 dans new_img soient pris pour
+            # des références de capture par re.sub.
+            new_html = rx.sub(lambda _m: new_img, html, count=1)
+            try:
+                sb.table("prospect_drafts").update(
+                    {"body_html": new_html}).eq("id", r.get("id")).execute()
+                refreshed += 1
+            except Exception as exc:
+                skipped += 1
+                details.append(f"{name[:30]}: écriture KO ({exc})")
+        return {"ok": True, "refreshed": refreshed, "skipped": skipped,
+                "details": details[:10]}
+
     def prospection_mission_cancel(self, payload: dict) -> dict:
         """Abandonne le suivi d'une mission (la chasse déjà lancée n'est
         pas tuée, ses résultats restent consultables dans son outil)."""
