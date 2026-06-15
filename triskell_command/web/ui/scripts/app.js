@@ -27,6 +27,7 @@ const VIEW_COLOR_MAP = {
   argus: 'fuchsia',
   eclaireur: 'fuchsia',
   prospect_timeline: 'fuchsia',
+  creators: 'rose',
   // MAILS — sky
   mails: 'sky',
   mail_templates: 'sky',
@@ -62,7 +63,7 @@ const KNOWN_VIEWS = [
   'obelisk', 'prospects_crm', 'catalogue', 'config', 'tutorial',
   'autopilot', 'convoy', 'prospection', 'chasseur', 'chasseur_createurs',
   'prospecteur_google', 'argus', 'eclaireur', 'delivery', 'health',
-  'abtest', 'prospect_timeline',
+  'abtest', 'prospect_timeline', 'creators',
 ];
 
 const App = {
@@ -627,6 +628,7 @@ const App = {
       case 'mail_templates': return MailTemplates.render(target, params);
       case 'obelisk':   return Obelisk.render(target);
       case 'prospects_crm': return Obelisk.renderCreatorsView(target);
+      case 'creators':  return Creators.render(target);
       case 'catalogue': return Catalogue.render(target);
       case 'config':    return Config.render(target, params);
       case 'tutorial':  return Tutorial.render(target);

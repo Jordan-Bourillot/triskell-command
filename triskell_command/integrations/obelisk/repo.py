@@ -97,6 +97,21 @@ def _sb():
 # ---------------------------------------------------------------------------
 ALLOWED_STATUSES = ("new", "qualified", "contacted", "replied", "refused", "won", "lost")
 
+# Colonnes lues pour la liste. Les 3 dernières (contact_channel,
+# next_follow_up_at, demo_url) viennent de la migration 51 : si la base
+# n'est pas encore migrée, le select les incluant échoue → on retombe
+# automatiquement sur le jeu de base (cf. _select_columns / fallback dans
+# list_creators). Le code reste donc fonctionnel sans la migration.
+_LIST_COLUMNS_BASE = (
+    "id, name, handle, legal_name, emails, phones, website, "
+    "city, postal_code, country, industry, description, "
+    "monetized, monetization_reasons, score, score_label, "
+    "subscribers, platform_url, status, tags, notes, "
+    "last_contact_at, exported_at, sources, created_at, updated_at"
+)
+_CREATOR_EXTRA_COLUMNS = "contact_channel, next_follow_up_at, demo_url"
+_LIST_COLUMNS_FULL = _LIST_COLUMNS_BASE + ", " + _CREATOR_EXTRA_COLUMNS
+
 
 def _shift_iso(iso_str: str, *, seconds: int) -> str:
     """Décale un timestamp ISO (de Supabase) de `seconds` secondes.
@@ -142,6 +157,9 @@ def list_creators(*,
                   contacted: str = "",
                   sort_by: str = "score",
                   audience: str = "",
+                  contact_channel: str = "",
+                  follow_up: bool = False,
+                  follow_up_stale_days: int = 0,
                   limit: int = 100,
                   offset: int = 0) -> dict:
     """Retourne une page de prospects + le count total filtré.
@@ -149,6 +167,15 @@ def list_creators(*,
     Filtres :
       - platform   : 'youtube', 'twitch', 'bluesky', etc. (matche dans
                      sources[*].name OU platform_url)
+      - contact_channel : canal de contact exact ('instagram', 'tiktok',
+                     'youtube', 'facebook', 'email', 'autre'). Sert à la
+                     section « Créateurs » (démarchage réseaux sociaux).
+      - follow_up  : True → ne renvoie QUE les créateurs « à relancer » :
+                     next_follow_up_at <= maintenant, OU (si
+                     follow_up_stale_days > 0) statut 'contacted' avec
+                     last_contact_at plus vieux que ce nombre de jours et
+                     aucune relance déjà programmée. Tri par date de
+                     relance la plus ancienne d'abord.
       - status     : status CRM exact ('new', 'qualified', ...)
       - min_score  : score minimal (inclusif)
       - city       : préfixe ville (ilike)
@@ -182,14 +209,16 @@ def list_creators(*,
     sb = _sb()
     if sb is None:
         return {"ok": False, "error": "Supabase non configuré", "rows": [], "count": 0}
-    try:
-        qy = (sb.table("prospects")
-                .select("id, name, handle, legal_name, emails, phones, website, "
-                        "city, postal_code, country, industry, description, "
-                        "monetized, monetization_reasons, score, score_label, "
-                        "subscribers, platform_url, status, tags, notes, "
-                        "last_contact_at, exported_at, sources, created_at, updated_at",
-                        count="exact"))
+
+    chan = (contact_channel or "").strip().lower()
+    follow_up_on = bool(follow_up)
+
+    # Construit la requête. Isolée dans une closure pour pouvoir la rejouer
+    # avec le jeu de colonnes de base si le jeu étendu (colonnes de la
+    # migration 51) n'existe pas encore côté DB → aucun plantage sans la
+    # migration, on perd juste le filtre canal / relance.
+    def _build(columns: str, *, with_creator_cols: bool):
+        qy = sb.table("prospects").select(columns, count="exact")
         if job_id:
             jres = get_search_job(job_id)
             if jres.get("ok"):
@@ -260,9 +289,32 @@ def list_creators(*,
             qy = qy.not_.is_("last_contact_at", "null")
         elif contacted == "no":
             qy = qy.is_("last_contact_at", "null")
-        # Ordre : score (défaut), abonnés desc/asc, arrivée récente
+        # Filtres « créateurs » (colonnes migration 51) — seulement si le
+        # jeu de colonnes étendu est disponible, sinon on les ignore
+        # silencieusement (la requête de base reste valide).
+        if with_creator_cols:
+            if chan:
+                qy = qy.eq("contact_channel", chan)
+            if follow_up_on:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                clauses = [f"next_follow_up_at.lte.{now_iso}"]
+                if follow_up_stale_days and follow_up_stale_days > 0:
+                    from datetime import timedelta
+                    cutoff = (datetime.now(timezone.utc)
+                              - timedelta(days=int(follow_up_stale_days))).isoformat()
+                    # Contactés depuis longtemps, sans relance programmée.
+                    clauses.append(
+                        "and(status.eq.contacted,"
+                        f"last_contact_at.lte.{cutoff},"
+                        "next_follow_up_at.is.null)")
+                qy = qy.or_(",".join(clauses))
+        # Ordre. En mode « à relancer » : la relance la plus en retard
+        # d'abord (next_follow_up_at croissant). Sinon : score (défaut),
+        # abonnés desc/asc, arrivée récente.
         sb_sort = (sort_by or "").strip().lower()
-        if sb_sort == "subs_desc":
+        if follow_up_on and with_creator_cols:
+            qy = qy.order("next_follow_up_at", desc=False, nullsfirst=False)
+        elif sb_sort == "subs_desc":
             qy = qy.order("subscribers", desc=True, nullsfirst=False).order("score", desc=True)
         elif sb_sort == "subs_asc":
             qy = qy.order("subscribers", desc=False, nullsfirst=False).order("score", desc=True)
@@ -271,11 +323,38 @@ def list_creators(*,
         else:
             qy = qy.order("score", desc=True).order("updated_at", desc=True)
         qy = qy.range(offset, offset + max(0, limit - 1))
-        res = qy.execute()
-        return {"ok": True, "rows": res.data or [], "count": getattr(res, "count", None) or len(res.data or [])}
+        return qy
+
+    # 1re tentative avec les colonnes étendues (canal/relance/démo). Si la
+    # base n'est pas migrée, Postgres renvoie une erreur « column does not
+    # exist » → on rejoue avec le jeu de base (sans les filtres créateurs).
+    want_creator_cols = True
+    try:
+        res = _build(_LIST_COLUMNS_FULL, with_creator_cols=True).execute()
+        return {"ok": True, "rows": res.data or [],
+                "count": getattr(res, "count", None) or len(res.data or [])}
     except Exception as exc:
-        logger.warning("obelisk.list_creators: %s", exc)
-        return {"ok": False, "error": str(exc), "rows": [], "count": 0}
+        msg = str(exc).lower()
+        col_missing = ("contact_channel" in msg or "next_follow_up_at" in msg
+                       or "demo_url" in msg or "does not exist" in msg
+                       or "column" in msg)
+        if not col_missing:
+            logger.warning("obelisk.list_creators: %s", exc)
+            return {"ok": False, "error": str(exc), "rows": [], "count": 0}
+        want_creator_cols = False
+    if not want_creator_cols:
+        # Migration 51 pas encore appliquée : on sert quand même la liste,
+        # sans les colonnes/filtres créateurs (dégradé propre).
+        if follow_up_on or chan:
+            logger.info("obelisk.list_creators : colonnes créateurs absentes "
+                        "(migration 51 non appliquée) — filtre relance/canal ignoré")
+        try:
+            res = _build(_LIST_COLUMNS_BASE, with_creator_cols=False).execute()
+            return {"ok": True, "rows": res.data or [],
+                    "count": getattr(res, "count", None) or len(res.data or [])}
+        except Exception as exc:
+            logger.warning("obelisk.list_creators (fallback): %s", exc)
+            return {"ok": False, "error": str(exc), "rows": [], "count": 0}
 
 
 def mark_exported(prospect_ids: list[str]) -> dict:
@@ -636,7 +715,11 @@ def update_creator(prospect_id: str, fields: dict) -> dict:
     sb = _sb()
     if sb is None:
         return {"ok": False, "error": "Supabase non configuré"}
-    ALLOWED = ("status", "tags", "notes", "last_contact_at")
+    # contact_channel / next_follow_up_at / demo_url = colonnes migration 51.
+    ALLOWED = ("status", "tags", "notes", "last_contact_at",
+               "contact_channel", "next_follow_up_at", "demo_url")
+    # Colonnes susceptibles d'être absentes si la base n'est pas migrée.
+    CREATOR_COLS = ("contact_channel", "next_follow_up_at", "demo_url")
     payload: dict = {}
     for k in ALLOWED:
         if k in fields:
@@ -645,6 +728,15 @@ def update_creator(prospect_id: str, fields: dict) -> dict:
         return {"ok": False, "error": "status invalide"}
     if "notes" in payload and isinstance(payload["notes"], str):
         payload["notes"] = payload["notes"][:10_000]
+    if "demo_url" in payload and isinstance(payload["demo_url"], str):
+        payload["demo_url"] = payload["demo_url"].strip()[:2_000]
+    if "contact_channel" in payload and isinstance(payload["contact_channel"], str):
+        payload["contact_channel"] = payload["contact_channel"].strip().lower()[:40]
+    # next_follow_up_at : "" ou None → on remet la colonne à NULL (relance
+    # annulée) ; sinon on passe la valeur telle quelle (ISO attendu).
+    if "next_follow_up_at" in payload:
+        v = payload["next_follow_up_at"]
+        payload["next_follow_up_at"] = (v or None) if not isinstance(v, str) else (v.strip() or None)
     if not payload:
         return {"ok": False, "error": "aucun champ à mettre à jour"}
     payload["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -652,7 +744,128 @@ def update_creator(prospect_id: str, fields: dict) -> dict:
         sb.table("prospects").update(payload).eq("id", prospect_id).execute()
         return {"ok": True, "prospect_id": prospect_id}
     except Exception as exc:
+        msg = str(exc).lower()
+        # Base pas encore migrée (colonnes créateurs absentes) : on réessaie
+        # sans elles plutôt que d'échouer, pour ne pas bloquer la mise à
+        # jour des champs CRM classiques (statut, notes…).
+        if any(c in payload for c in CREATOR_COLS) and (
+                "does not exist" in msg or "column" in msg
+                or any(c in msg for c in CREATOR_COLS)):
+            safe = {k: v for k, v in payload.items() if k not in CREATOR_COLS}
+            if len(safe) <= 1:  # ne reste que updated_at
+                return {"ok": False,
+                        "error": "Colonnes créateurs absentes — applique la migration 51."}
+            try:
+                sb.table("prospects").update(safe).eq("id", prospect_id).execute()
+                return {"ok": True, "prospect_id": prospect_id,
+                        "warning": "Champs créateurs ignorés (migration 51 non appliquée)."}
+            except Exception as exc2:
+                logger.warning("obelisk.update_creator (fallback): %s", exc2)
+                return {"ok": False, "error": str(exc2)}
         logger.warning("obelisk.update_creator: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+def create_creator(fields: dict, *, workspace_id: str = "") -> dict:
+    """Crée un créateur de prospection dans la table `prospects`.
+
+    Pensé pour la saisie manuelle depuis la section « Créateurs » (un
+    YouTubeur/Instagrameur qu'on démarche par réseaux sociaux). Champs
+    acceptés : name (requis), handle, platform_url, subscribers, status,
+    contact_channel, next_follow_up_at, demo_url, notes, tags, emails.
+
+    Dédoublonnage léger : si un platform_url est fourni et qu'un prospect
+    a déjà EXACTEMENT ce platform_url, on renvoie celui-là (action
+    'exists') au lieu d'en créer un doublon. Pas d'email exigé (le cœur du
+    besoin : ces créateurs se démarchent SANS mail).
+
+    Renvoie {ok, prospect_id, action}. Défensif vis-à-vis de la migration
+    51 : si les colonnes créateurs manquent, on insère sans elles.
+    """
+    sb = _sb()
+    if sb is None:
+        return {"ok": False, "error": "Supabase non configuré"}
+    f = fields or {}
+    name = (f.get("name") or "").strip()
+    if not name:
+        return {"ok": False, "error": "name requis"}
+    status = (f.get("status") or "new").strip() or "new"
+    if status not in ALLOWED_STATUSES:
+        status = "new"
+    platform_url = (f.get("platform_url") or "").strip()
+
+    # Dédoublonnage : platform_url identique → on ne recrée pas.
+    if platform_url:
+        try:
+            dup = (sb.table("prospects").select("id")
+                   .eq("platform_url", platform_url).limit(1).execute().data or [])
+            if dup:
+                return {"ok": True, "prospect_id": dup[0]["id"], "action": "exists"}
+        except Exception as exc:
+            logger.debug("create_creator dedup lookup KO: %s", exc)
+
+    emails = f.get("emails") or []
+    if not isinstance(emails, list):
+        emails = []
+    tags = f.get("tags") or []
+    if not isinstance(tags, list):
+        tags = []
+    subs = f.get("subscribers")
+    try:
+        subs = int(subs) if subs not in (None, "", []) else None
+    except (TypeError, ValueError):
+        subs = None
+
+    row: dict = {
+        "name": name,
+        "handle": (f.get("handle") or "").strip(),
+        "platform_url": platform_url,
+        "emails": [str(e).strip() for e in emails if str(e).strip()],
+        "subscribers": subs,
+        "status": status,
+        "notes": (f.get("notes") or "").strip()[:10_000],
+        "tags": tags,
+    }
+    if workspace_id:
+        row["workspace_id"] = workspace_id
+    # Champs CRM « créateurs » (migration 51).
+    creator_extra = {
+        "contact_channel": (f.get("contact_channel") or "").strip().lower()[:40],
+        "demo_url": (f.get("demo_url") or "").strip()[:2_000],
+    }
+    nfu = f.get("next_follow_up_at")
+    if isinstance(nfu, str) and nfu.strip():
+        creator_extra["next_follow_up_at"] = nfu.strip()
+    # last_contact_at : si on saisit une date de contact, on la pose ; sinon
+    # on laisse vide (la création seule ne vaut pas « contacté »).
+    lca = f.get("last_contact_at")
+    if isinstance(lca, str) and lca.strip():
+        row["last_contact_at"] = lca.strip()
+
+    def _insert(full: bool) -> dict:
+        body = dict(row)
+        if full:
+            body.update({k: v for k, v in creator_extra.items() if v not in (None, "")})
+        res = sb.table("prospects").insert(body).execute()
+        new_id = ""
+        if res.data:
+            new_id = (res.data[0] or {}).get("id", "")
+        return {"ok": True, "prospect_id": new_id, "action": "created"}
+
+    try:
+        return _insert(full=True)
+    except Exception as exc:
+        msg = str(exc).lower()
+        if ("does not exist" in msg or "column" in msg
+                or any(c in msg for c in ("contact_channel", "next_follow_up_at", "demo_url"))):
+            try:
+                out = _insert(full=False)
+                out["warning"] = "Champs créateurs ignorés (migration 51 non appliquée)."
+                return out
+            except Exception as exc2:
+                logger.warning("obelisk.create_creator (fallback): %s", exc2)
+                return {"ok": False, "error": str(exc2)}
+        logger.warning("obelisk.create_creator: %s", exc)
         return {"ok": False, "error": str(exc)}
 
 
