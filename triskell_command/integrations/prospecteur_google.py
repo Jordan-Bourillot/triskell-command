@@ -134,6 +134,12 @@ class GoogleProspect:
     emails_extra: list[str] = field(default_factory=list)
     has_website: bool = False
     status: str = ""              # OPERATIONAL / CLOSED_TEMPORARILY / etc.
+    # Qualité du site (levier « site à refaire ») — rempli au scraping.
+    site_redo: bool = False       # True si le site mérite d'être refait
+    site_redo_score: int = 0      # 0-100 (gravité)
+    site_redo_reasons: list[str] = field(default_factory=list)
+    site_redo_category: str = ""  # no_site / free_host / old / down / ok
+    site_redo_label: str = ""     # libellé court ("Pas de vrai site"…)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -189,11 +195,17 @@ class ProspectHunt:
 # ---------------------------------------------------------------------------
 # Helpers scraping site
 # ---------------------------------------------------------------------------
-def _scrape_site_for_emails(url: str) -> set[str]:
-    """Scrape les pages habituelles d'un site pour en extraire des mails."""
+def _scrape_site_for_emails(url: str) -> tuple[set[str], dict]:
+    """Scrape les pages habituelles d'un site pour en extraire des mails.
+
+    Renvoie (emails, quality) où `quality` est la notation « site à refaire »
+    de la page d'accueil (cf. site_quality.score_site_html).
+    """
     emails: set[str] = set()
+    empty_quality = {"score": 0, "to_redo": False, "label": "",
+                     "reasons": [], "signals": {}}
     if not url:
-        return emails
+        return emails, empty_quality
     if not url.startswith("http"):
         url = "https://" + url
     base = url.rstrip("/")
@@ -220,10 +232,24 @@ def _scrape_site_for_emails(url: str) -> set[str]:
     except ImportError:
         clean_email = None
         has_mail_record = None
-    for page in pages:
+    # Notation « site à refaire » sur la PAGE D'ACCUEIL (idx 0) : on a déjà
+    # son HTML sous la main pour les mails → zéro requête réseau en plus.
+    quality = {"score": 0, "to_redo": False, "label": "",
+               "reasons": [], "signals": {}}
+    try:
+        from .site_quality import score_site_html
+    except Exception:
+        score_site_html = None
+
+    for idx, page in enumerate(pages):
         try:
             r = requests.get(page, headers=UA_WEB, timeout=6)
             if r.status_code == 200:
+                if idx == 0 and score_site_html is not None:
+                    try:
+                        quality = score_site_html(r.text, str(r.url))
+                    except Exception:
+                        pass
                 for em in re.findall(EMAIL_REGEX, r.text):
                     em_low = em.lower()
                     if clean_email is not None:
@@ -241,7 +267,7 @@ def _scrape_site_for_emails(url: str) -> set[str]:
         except Exception:
             pass
         time.sleep(random.uniform(0.3, 0.6))
-    return emails
+    return emails, quality
 
 
 # ---------------------------------------------------------------------------
@@ -508,14 +534,24 @@ def _run_hunt(hunt: ProspectHunt, metier: str, zone: str, num_results: int,
             log(f"  📞 {phone}")
 
         emails: list[str] = []
+        quality = {"to_redo": False, "score": 0, "reasons": []}
+        verdict = {"to_redo": False, "score": 0, "reasons": [],
+                   "category": "", "label": ""}
         if website:
             log(f"  🌐 {website}")
-            found = _scrape_site_for_emails(website)
+            found, quality = _scrape_site_for_emails(website)
             emails = sorted(found)
             if emails:
                 log(f"  📧 {len(emails)} mail(s) : {', '.join(emails[:3])}")
             else:
                 log("  📧 aucun mail trouvé sur le site")
+            # Famille « à refaire » : type d'adresse (page sociale / adresse
+            # gratuite) + vétusté technique de la page d'accueil.
+            from .site_quality import assess_from_signals
+            verdict = assess_from_signals(website, quality)
+            if verdict.get("to_redo"):
+                log(f"  🔧 {verdict.get('label')} : "
+                    f"{', '.join(verdict.get('reasons') or [])}")
         else:
             log("  ⚠️ Pas de site web → cible Triskell idéale")
 
@@ -525,6 +561,11 @@ def _run_hunt(hunt: ProspectHunt, metier: str, zone: str, num_results: int,
             emails_extra=emails[1:] if len(emails) > 1 else [],
             has_website=bool(website),
             status=status,
+            site_redo=bool(verdict.get("to_redo")),
+            site_redo_score=int(verdict.get("score") or 0),
+            site_redo_reasons=list(verdict.get("reasons") or []),
+            site_redo_category=verdict.get("category") or "",
+            site_redo_label=verdict.get("label") or "",
         )
         results.append(prospect)
 
@@ -746,6 +787,20 @@ def push_to_prospects(hunt_id: str) -> dict:
         tags = ["prospecteur_google"]
         if not p.get("has_website"):
             tags.append("sans_site")
+        notes = (f"Trouvé via Prospecteur Google ({metier or 'tous métiers'}"
+                 f" — {zone or 'France'})")
+        redo = bool(p.get("site_redo"))
+        redo_score = int(p.get("site_redo_score") or 0) if redo else 0
+        redo_label = ""
+        if redo:
+            from .site_quality import REDO_TAG
+            tags.append(REDO_TAG)
+            cat = (p.get("site_redo_category") or "").strip()
+            if cat:
+                tags.append(f"redo_{cat}")  # redo_no_site / redo_free_host / redo_old / redo_down
+            redo_label = p.get("site_redo_label") or "Site à refaire"
+            reasons = ", ".join(p.get("site_redo_reasons") or [])
+            notes += f" · 🔧 {redo_label} : {reasons}"
         cp = CoreProspect(
             name=(p.get("name") or "").strip(),
             emails=all_emails,
@@ -757,8 +812,9 @@ def push_to_prospects(hunt_id: str) -> dict:
             industry=metier,
             language="fr",
             tags=tags,
-            notes=f"Trouvé via Prospecteur Google ({metier or 'tous métiers'}"
-                  f" — {zone or 'France'})",
+            notes=notes,
+            score=redo_score,
+            score_label=redo_label,
             sources=[Source(
                 name="maps",
                 source_id="",
