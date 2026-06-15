@@ -103,6 +103,10 @@ _DEMO_MAP: dict[str, str] = {
     "esthet": "demo-beaute", "beaut": "demo-beaute", "ongle": "demo-beaute",
     "manucur": "demo-beaute", "maquill": "demo-beaute",
     "institut": "demo-beaute", "cils": "demo-beaute",
+    # Coiffure : pas de démo dédié → univers beauté/salon (le plus proche).
+    # ~130 fiches concernées (coiffeur / coiffeuse / barbier) — premier
+    # métier prospecté sans démo (constaté le 15/06/2026).
+    "coiff": "demo-beaute", "barbier": "demo-beaute", "barber": "demo-beaute",
     "massag": "demo-bien-etre", "spa": "demo-bien-etre",
     "bien-etre": "demo-bien-etre", "bien etre": "demo-bien-etre",
     "sophro": "demo-bien-etre", "naturopath": "demo-bien-etre",
@@ -113,9 +117,10 @@ _DEMO_MAP: dict[str, str] = {
     "photograph": "demo-photographe", "videast": "demo-photographe",
     "tatou": "demo-tatoueur", "tattoo": "demo-tatoueur",
     "piercing": "demo-tatoueur",
-    "toilettag": "demo-animalier", "canin": "demo-animalier",
+    "toilett": "demo-animalier", "canin": "demo-animalier",
     "pension": "demo-animalier", "dressage": "demo-animalier",
-    "educateur canin": "demo-animalier",
+    "educateur canin": "demo-animalier", "animal": "demo-animalier",
+    "chien": "demo-animalier",
 }
 
 # Ville fictive utilisée dans CHAQUE démo (à remplacer par celle du prospect).
