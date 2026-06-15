@@ -382,6 +382,21 @@ finally:
     except OSError:
         pass
 
+# Ville manquante : le modele de fiche deduit ville + code postal depuis
+# l'adresse FR (bug 15/06/2026 : Google Maps versait l'adresse complete mais
+# laissait la ville vide -> mails « … a , … » et personnalisation faible).
+from triskell_core.prospect.core.prospect import (  # noqa: E402
+    split_fr_address as _split_addr, Prospect as _Prospect)
+check("ville deduite de l'adresse FR",
+      _split_addr("65 Rue de Paris, 35000 Rennes") == ("35000", "Rennes"))
+check("ville deduite malgre ', France' final",
+      _split_addr("12 All. du Bosquet, 22410 Tréveneuc, France")[1] == "Tréveneuc")
+_pcity = _Prospect(name="X", address="10 Rue Y, 56550 Belz")
+check("fiche avec adresse sans ville -> ville+CP remplis tout seuls",
+      _pcity.city == "Belz" and _pcity.postal_code == "56550")
+check("ville deja presente jamais ecrasee par la deduction",
+      _Prospect(name="X", address="1 Rue Z, 75001 Paris", city="Lyon").city == "Lyon")
+
 print("4) Relances drip J+7 / J+30…")
 from triskell_command.integrations import drip_runner  # noqa: E402
 
