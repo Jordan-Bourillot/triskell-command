@@ -26,8 +26,10 @@ DOH_ENDPOINTS = (
     "https://dns.google/resolve",
 )
 
-# Sélecteurs DKIM les plus courants (IONOS utilise s1-ionos / s2-ionos).
-DKIM_SELECTORS = ("s1-ionos", "s2-ionos", "default", "s1", "s2",
+# Sélecteurs DKIM les plus courants. « google » en premier : Google Workspace
+# signe avec google._domainkey (nos domaines d'envoi de prospection) ; IONOS
+# utilise s1-ionos / s2-ionos.
+DKIM_SELECTORS = ("google", "s1-ionos", "s2-ionos", "default", "s1", "s2",
                   "mail", "k1", "selector1", "selector2")
 
 
