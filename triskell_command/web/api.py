@@ -5817,6 +5817,7 @@ class Api:
             relance = bool(p.get("relance"))
             channel = str(p.get("channel") or "").strip().lower()
             return r.list_creators(
+                tracked_only=True,
                 status=str(p.get("status") or "").strip(),
                 q=str(p.get("q") or "").strip(),
                 contact_channel=channel,
