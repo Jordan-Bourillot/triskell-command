@@ -38,8 +38,12 @@ const Health = {
     // On saute le tour si une vérification DNS est en cours pour ne pas
     // écraser son état à l'écran.
     App.viewInterval(() => {
-      if (!this._dnsChecking && !this._refreshing && !this._restarting) this.refresh();
+      if (!this._dnsChecking && !this._refreshing && !this._restarting
+          && !this._repLoading) this.refresh();
     }, 15000);
+
+    // Réputation des boîtes : analyse réseau (DNS + base), chargée une fois.
+    this._loadReputation();
   },
 
   _refreshing: false,
@@ -85,6 +89,7 @@ const Health = {
     document.getElementById('h-content').innerHTML =
       this._renderSummary(data.summary || {}) +
       this._renderMailSafety(mailHealth || {}) +
+      this._renderReputation() +
       this._renderDeliverability(data['delivrabilité'] || {}) +
       this._renderDnsCard() +
       this._renderWorkers(workers);
@@ -92,6 +97,7 @@ const Health = {
       if (openDetails.has(d.dataset.w)) d.open = true;
     });
     this._bindDnsCard();
+    this._bindRepCard();
     this._bindRestartButtons();
   },
 
@@ -196,6 +202,131 @@ const Health = {
       }
       await this.refresh();
     };
+  },
+
+  // ---- Réputation & chauffe RÉELLE des boîtes d'envoi ----
+  // Chaque ligne est un FAIT mesuré (authentification du domaine, historique
+  // d'envoi réel, rebonds, chauffe interne) — jamais une supposition sur le
+  // nom de domaine. Analyse réseau (DNS + base) : chargée une seule fois, pas
+  // à chaque rafraîchissement automatique.
+  _repResult: null,
+  _repLoading: false,
+
+  async _loadReputation() {
+    if (!App.api || !App.api.mail_reputation || this._repLoading) return;
+    this._repLoading = true;
+    const host = document.getElementById('h-rep');
+    if (host) host.innerHTML =
+      `<div class="card p-4 text-sm text-text-muted">Analyse des boîtes d'envoi en cours… ` +
+      `(vérification des tampons d'authentification et de l'historique d'envoi réel)</div>`;
+    try {
+      this._repResult = await App.api.mail_reputation({ with_dns: true, with_age: true });
+    } catch (e) {
+      console.warn('mail_reputation:', e);
+      this._repResult = { ok: false, error: String(e) };
+    } finally {
+      this._repLoading = false;
+    }
+    await this.refresh();
+  },
+
+  _renderReputation() {
+    return `
+      <div class="mb-8">
+        <div class="flex items-center justify-between mb-2">
+          <div class="section-label" style="margin:0">Réputation & chauffe de tes boîtes d'envoi</div>
+          <button id="h-rep-refresh" class="text-xs text-accent underline"
+                  ${this._repLoading ? 'disabled' : ''}>${this._repLoading ? 'Analyse…' : 'Réanalyser'}</button>
+        </div>
+        <div id="h-rep">${this._repInner()}</div>
+      </div>`;
+  },
+
+  _repInner() {
+    if (this._repLoading && !this._repResult) {
+      return `<div class="card p-4 text-sm text-text-muted">Analyse des boîtes d'envoi en cours…</div>`;
+    }
+    const r = this._repResult;
+    if (!r) return `<div class="card p-4 text-sm text-text-muted">Analyse à venir…</div>`;
+    if (!r.ok) {
+      return `<div class="card p-4 text-sm text-danger">Analyse impossible pour le moment.
+        <button class="text-accent underline" onclick="Health._loadReputation()">Réessayer</button></div>`;
+    }
+    const boxes = r.boxes || [];
+    if (!boxes.length) {
+      return `<div class="card p-4 text-sm text-text-muted">Aucune boîte d'envoi configurée.
+        Ajoute-en dans <button class="text-accent underline" onclick="App.show('config',{tab:'mails'})">Réglages</button>.</div>`;
+    }
+    const note = (r.history_ok === false)
+      ? `<div class="text-xs text-warning mb-2">⚠ L'historique d'envoi n'a pas pu être lu — les volumes ci-dessous sont peut-être incomplets.</div>`
+      : '';
+    return note + boxes.map(b => this._repCard(b)).join('');
+  },
+
+  _repCard(b) {
+    const tone = b.tone || 'muted';
+    const cVar = { success: '--success', warning: '--warning',
+                   danger: '--danger', muted: '--text-muted' }[tone] || '--text-muted';
+    const m = b.metrics || {};
+    const chips = [];
+    chips.push(this._repChip('Envois réels (30 j)', m.sent_30d != null ? m.sent_30d : '—'));
+    if (m.first_send_days_ago != null && m.sent_window) {
+      chips.push(this._repChip('Envoie depuis', m.first_send_days_ago + ' j'));
+    }
+    if (m.warmup_age_days != null) {
+      chips.push(this._repChip('Chauffe interne', 'J' + m.warmup_age_days + '/' + (m.warmup_goal_days || 28)));
+    }
+    chips.push(this._repChip('Rebonds (30 j)',
+      (m.bounces_30d || 0) + ' (' + (m.bounce_rate_pct || 0) + '%)',
+      b.bounce_alert ? 'danger' : ''));
+    if (m.replies_30d) chips.push(this._repChip('Réponses (30 j)', m.replies_30d, 'success'));
+    if (b.domain_age_days != null) {
+      chips.push(this._repChip('Nom de domaine', 'créé il y a ' + this._repAge(b.domain_age_days)));
+    }
+    let auth = '';
+    if (b.auth && b.auth.checks) {
+      auth = `<div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs">` +
+        b.auth.checks.map(c => {
+          const fr = this._DNS_FR[String(c.id || '').toLowerCase()];
+          const name = fr ? fr.name : c.label;
+          return `<span>${c.ok ? '✅' : '❌'} ${this._esc(name)}</span>`;
+        }).join('') + `</div>`;
+    } else if (b.auth_state === 'inconnu') {
+      auth = `<div class="text-xs text-text-muted mt-2">Authentification du domaine : non vérifiée.</div>`;
+    }
+    return `
+      <article class="card p-4 mb-3">
+        <div class="flex items-start justify-between gap-3 mb-1">
+          <div class="font-semibold text-sm break-all">${this._esc(b.name || b.email)}</div>
+          <span class="inline-flex items-center gap-1.5 text-xs font-semibold shrink-0">
+            <span class="w-2 h-2 rounded-full" style="background:hsl(var(${cVar}))"></span>
+            <span style="color:hsl(var(${cVar}))">${this._esc(b.label || '')}</span>
+          </span>
+        </div>
+        <div class="text-sm" style="text-wrap:pretty">${this._esc(b.summary || '')}</div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2">${chips.join('')}</div>
+        ${auth}
+        ${b.advice ? `<div class="text-xs text-text-muted mt-2" style="text-wrap:pretty">→ ${this._esc(b.advice)}</div>` : ''}
+      </article>`;
+  },
+
+  _repChip(label, value, tone) {
+    const cVar = { success: '--success', warning: '--warning', danger: '--danger' }[tone];
+    const valStyle = cVar ? ` style="color:hsl(var(${cVar}))"` : '';
+    return `<span class="text-xs text-text-muted">${this._esc(label)} : ` +
+           `<span class="font-semibold text-text"${valStyle}>${this._esc(String(value))}</span></span>`;
+  },
+
+  _repAge(days) {
+    days = Number(days) || 0;
+    if (days < 60) return days + ' j';
+    if (days < 730) return Math.round(days / 30) + ' mois';
+    return Math.round(days / 365) + ' an(s)';
+  },
+
+  _bindRepCard() {
+    const btn = document.getElementById('h-rep-refresh');
+    if (btn) btn.onclick = () => this._loadReputation();
   },
 
   _renderMailSafety(mh) {

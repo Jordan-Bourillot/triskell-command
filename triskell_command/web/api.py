@@ -10163,6 +10163,15 @@ class Api:
                                       or a.get("id"))
         except Exception:
             pass
+        # Vérité plutôt que supposition : « établie » se décide sur l'historique
+        # d'envoi RÉEL (mail_reputation), pas sur le rôle stocké qui venait de
+        # l'ancienne règle par domaine. On garde le rôle stocké en repli.
+        established_set = None
+        try:
+            from ..integrations import mail_reputation
+            established_set = mail_reputation.established_addresses(client)
+        except Exception:
+            established_set = None
         today = datetime.now().date().isoformat()
         start = state.get("start") or today
         try:
@@ -10178,7 +10187,12 @@ class Api:
             rc = r.get("received", 0) if same else 0
             rp = r.get("replied", 0) if same else 0
             ts += s; tr += rc; tp += rp
-            if _is_new(r):
+            email_aid = (names.get(aid, aid) or "").strip().lower()
+            if established_set is not None:
+                is_new_box = email_aid not in established_set
+            else:
+                is_new_box = _is_new(r)
+            if is_new_box:
                 bday = int(r.get("day") or day)
                 boxes.append({
                     "email": names.get(aid, aid), "role": "warm",
@@ -10201,6 +10215,32 @@ class Api:
                    f"{ts} envoyés, {tr} reçus, {tp} réponses")
         return {"ok": True, "active": True, "day": day, "goal": GOAL,
                 "boxes": boxes, "summary": summary}
+
+    def mail_reputation(self, payload: dict | None = None) -> dict:
+        """Fiche de réputation & chauffe RÉELLE de chaque boîte d'envoi.
+
+        Zéro affirmation non vérifiée : pour chaque boîte, on renvoie des FAITS
+        mesurés (authentification SPF/DKIM/DMARC/MX du domaine, historique
+        d'envoi réel, rebonds, chauffe interne) et un verdict dérivé de ces
+        faits — jamais du nom de domaine.
+
+        payload.with_dns (défaut True)  : interroge les tampons DNS (réseau).
+        payload.with_age (défaut True)  : interroge l'âge du domaine (RDAP).
+        Mettre les deux à False rend une réponse instantanée (historique seul).
+        """
+        p = payload or {}
+        with_dns = p.get("with_dns", True)
+        with_age = p.get("with_age", True)
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Base non connectée.", "boxes": []}
+        try:
+            from ..integrations import mail_reputation
+            return mail_reputation.assess_all(
+                client, with_dns=bool(with_dns), with_age=bool(with_age))
+        except Exception as exc:
+            logger.warning("mail_reputation endpoint: %s", exc)
+            return {"ok": False, "error": str(exc), "boxes": []}
 
     def prospection_mission_cancel(self, payload: dict) -> dict:
         """Abandonne le suivi d'une mission (la chasse déjà lancée n'est

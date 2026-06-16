@@ -93,9 +93,25 @@ def _gen_mail() -> tuple[str, str]:
     return random.choice(_SUBJECTS), body
 
 
-def _role(email: str) -> str:
+def _role_by_domain(email: str) -> str:
+    """Repli SEULEMENT si l'historique réel est illisible (base injoignable) :
+    ancienne règle par domaine. En marche normale, le rôle est décidé sur le
+    vrai historique d'envoi (voir _established_addresses)."""
     e = (email or "").lower()
     return "warm" if any(e.endswith("@" + d) for d in WARM_DOMAINS) else "established"
+
+
+def _established_addresses(client):
+    """Adresses RÉELLEMENT établies (historique d'envoi solide), mesurées par
+    mail_reputation. Renvoie un set d'adresses, ou None si le calcul est
+    impossible → on retombe alors sur la règle par domaine. Une boîte non
+    établie = à chauffer pour de vrai (et non « entretenue » à tort)."""
+    try:
+        from triskell_command.integrations import mail_reputation
+        return mail_reputation.established_addresses(client)
+    except Exception as exc:
+        print(f"  (réputation illisible, repli sur la règle domaine : {exc})")
+        return None
 
 
 def _accounts(client) -> list[dict]:
@@ -106,6 +122,7 @@ def _accounts(client) -> list[dict]:
     for a in shared_secrets.list_secondary_accounts(client=client):
         raw.append(a)
     out = []
+    established = _established_addresses(client)
     for a in raw:
         acc = {"id": a.get("id"), "from_email": (a.get("from_email") or "").strip(),
                "from_name": a.get("from_name") or "",
@@ -114,7 +131,12 @@ def _accounts(client) -> list[dict]:
                "imap_host": a.get("imap_host") or "", "imap_port": int(a.get("imap_port") or 993),
                "imap_user": a.get("imap_user") or "", "imap_password": a.get("imap_password") or ""}
         if acc["smtp_host"] and acc["smtp_password"] and acc["imap_host"] and acc["from_email"]:
-            acc["role"] = _role(acc["from_email"])
+            if established is None:
+                acc["role"] = _role_by_domain(acc["from_email"])
+            else:
+                acc["role"] = ("established"
+                               if acc["from_email"].strip().lower() in established
+                               else "warm")
             out.append(acc)
     return out
 
