@@ -619,14 +619,17 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         for _ph in ("{secteur}", "{{business_type}}", "{{industry}}", "{{sector}}"):
             text = text.replace("de " + _ph, "d'" + _ph)
             text = text.replace("De " + _ph, "D'" + _ph)
-    # --- Ville inconnue : on retire l'amorce de lieu collée à {ville}.
-    # Sans ça, "Pour un {secteur} à {ville}," devient "Pour un maçon à ,"
-    # (un "à" pendant et une virgule en l'air) quand la fiche n'a pas de ville.
+    # --- Ville inconnue : on retire l'amorce de lieu collée au placeholder
+    # ville. Sans ça, "Pour un {secteur} à {ville}," devient "Pour un maçon
+    # à ," (un "à" pendant + virgule en l'air) quand la fiche n'a pas de
+    # ville. On couvre les DEUX syntaxes : {ville} (FR) ET {{city}} (EN, celle
+    # qu'utilisent réellement les modèles Pixel Pros), version texte ET html
+    # (le placeholder peut être enveloppé de <strong>…</strong>).
     if not ville.strip():
         import re as _re_loc
         text = _re_loc.sub(
             r"\s+(?:à|de|sur|près\s+de|proche\s+de)\s+"
-            r"(?:<strong>\s*)?\{ville\}(?:\s*</strong>)?",
+            r"(?:<strong>\s*)?(?:\{ville\}|\{\{city\}\})(?:\s*</strong>)?",
             "", text, flags=_re_loc.IGNORECASE)
 
     out = text
