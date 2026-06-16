@@ -2915,6 +2915,44 @@ class Api:
                 "counts": {"sure": len(sure), "verify": len(verify)},
                 "sure": sure[:1000], "verify": verify[:1000]}
 
+    def oeil_visuel_dismiss(self, payload: dict | None = None) -> dict:
+        """Écarte un faux positif : retire les étiquettes « à refaire » /
+        « à vérifier » d'une fiche et la marque « écartée » pour qu'elle ne
+        revienne pas. Écriture DIRECTE (l'upsert fusionne, il ne peut pas
+        retirer). Identifie la fiche par son site (colonne texte)."""
+        p = payload or {}
+        website = (p.get("website") or "").strip()
+        if not website:
+            return {"ok": False, "error": "fiche non identifiée (site manquant)"}
+        try:
+            from triskell_core.db import get_client
+            c = get_client()
+            sb = c.raw
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        remove = {"site_a_refaire", "redo_visuel", "a_verifier_look",
+                  "redo_no_site", "redo_free_host", "redo_old", "redo_down"}
+        try:
+            rows = (sb.table("prospects").select("id,tags,notes")
+                    .eq("website", website).execute().data) or []
+            if not rows:
+                return {"ok": False, "error": "fiche introuvable"}
+            n = 0
+            for r in rows:
+                tags = [t for t in (r.get("tags") or []) if t not in remove]
+                for t in ("oeil_ecarte", "oeil_vu"):
+                    if t not in tags:
+                        tags.append(t)
+                notes = "\n".join(
+                    l for l in (r.get("notes") or "").splitlines()
+                    if "[IA visuelle" not in l).strip()
+                sb.table("prospects").update(
+                    {"tags": tags, "notes": notes}).eq("id", r["id"]).execute()
+                n += 1
+            return {"ok": True, "updated": n}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def phare_automerge_get(self) -> dict:
         """Lit l'état de la publication automatique des modifs vérifiées.
         Endpoint dédié (et non un settings_set générique) pour ne JAMAIS

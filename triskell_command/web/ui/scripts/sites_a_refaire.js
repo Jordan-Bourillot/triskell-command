@@ -121,7 +121,38 @@ const SitesARefaire = {
           <span>🔗 ${site}</span>
           ${it.email ? `<span class="text-text-muted">✉️ ${this.esc(it.email)}</span>` : ''}
         </div>
+        ${it.website ? `<div class="mt-2 text-right">
+          <button class="sar-dismiss text-xs px-2 py-1 rounded border border-border text-text-muted hover:text-text"
+                  data-site="${this.esc(it.website)}"
+                  title="Ce site n'est pas à refaire — le retirer de la liste">✕ Écarter</button>
+        </div>` : ''}
       </div>`;
+  },
+
+  _bindDismiss() {
+    const slot = document.getElementById('sar-content');
+    if (!slot) return;
+    slot.querySelectorAll('.sar-dismiss').forEach(btn => {
+      btn.onclick = async () => {
+        const site = btn.dataset.site;
+        if (!site) return;
+        btn.disabled = true; btn.textContent = '…';
+        try {
+          const r = await App.api.oeil_visuel_dismiss({ website: site });
+          if (!r || !r.ok) throw new Error((r && r.error) || 'erreur');
+          this._data.sure = (this._data.sure || []).filter(x => x.website !== site);
+          this._data.verify = (this._data.verify || []).filter(x => x.website !== site);
+          if (this._data.counts) {
+            this._data.counts.sure = this._data.sure.length;
+            this._data.counts.verify = this._data.verify.length;
+          }
+          this._paint();
+        } catch (e) {
+          btn.disabled = false; btn.textContent = '✕ erreur';
+          console.error('[SitesARefaire] écarter', e);
+        }
+      };
+    });
   },
 
   _section(title, items, tier) {
@@ -149,5 +180,6 @@ const SitesARefaire = {
     slot.innerHTML =
       this._section('🔴 À refaire — sûr', d.sure, 'sure') +
       this._section('🟠 À vérifier', d.verify, 'verify');
+    this._bindDismiss();
   },
 };
