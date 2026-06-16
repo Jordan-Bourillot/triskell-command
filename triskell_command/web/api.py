@@ -10134,7 +10134,10 @@ class Api:
             city = (pr.get("city") or "").strip()
             metier = (pr.get("industry") or "").strip()
             html = r.get("body_html") or ""
-            if not (name and city and metier) or not rx.search(html):
+            # La ville n'est plus obligatoire : sans ville, l'aperçu montre
+            # quand même le vrai site de démo (ville fictive retirée), au lieu
+            # de la maquette générique. Il faut juste un nom + un métier.
+            if not (name and metier) or not rx.search(html):
                 skipped += 1
                 continue
             try:

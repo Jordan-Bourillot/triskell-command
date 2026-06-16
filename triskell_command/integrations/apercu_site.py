@@ -400,14 +400,21 @@ _WAIT_HERO_BG_JS = r"""async () => {
 # Personnalisation du hero : ville réelle + nom + métier·ville du prospect.
 _PERSONALIZE_JS = r"""(args) => {
   const nom = args[0], label = args[1], ville = args[2], cityDemo = args[3];
-  if (cityDemo && ville) {
+  if (cityDemo) {
     const esc = cityDemo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const rx = new RegExp(esc, 'gi');
+    // Préposition + ville fictive (« à Quimper », « de Quimper »…) : sert à
+    // retirer proprement la mention quand on ne connaît PAS la ville du
+    // prospect (sinon on afficherait une ville au hasard).
+    const rxPrep = new RegExp('\\s*(?:à|a|de|sur|en)\\s+' + esc, 'gi');
     const hero = document.querySelector('.cust-hero');
     if (hero) {
       const walk = n => { for (const c of n.childNodes) {
-        if (c.nodeType === 3) c.nodeValue = c.nodeValue.replace(rx, ville);
-        else walk(c);
+        if (c.nodeType === 3) {
+          c.nodeValue = ville
+            ? c.nodeValue.replace(rx, ville)
+            : c.nodeValue.replace(rxPrep, '').replace(rx, '');
+        } else walk(c);
       }};
       walk(hero);
     }
@@ -774,7 +781,11 @@ def render_preview_png(nom: str, metier: str = "", ville: str = "",
     slug = _demo_slug_for(metier)
     # Rendu TOUJOURS dans un thread dédié (sync_playwright ne tourne pas dans
     # la boucle asyncio du serveur).
-    if slug and (ville or "").strip():
+    # On montre le VRAI site de démo dès qu'on connaît le métier — même SANS
+    # ville : dans ce cas la personnalisation retire simplement la mention de
+    # ville (cf. _PERSONALIZE_JS) au lieu de retomber sur la maquette générique
+    # « Le site qui donne envie de pousser votre porte » (bien moins crédible).
+    if slug:
         png = _in_thread(_render_demo_png, nom, metier, ville, slug)
     if png is None:
         png = _in_thread(_render_mockup_png, nom, metier, ville)
