@@ -56,7 +56,7 @@ from triskell_command.integrations.pixelpros_pages import (  # noqa: E402
     BASE_URL, KNOWN_SLUGS, pages_for_sector, slug_for_sector,
 )
 
-check("48 pages métier connues", len(KNOWN_SLUGS) == 48,
+check("54 pages métier connues", len(KNOWN_SLUGS) == 54,
       f"-> {len(KNOWN_SLUGS)}")
 
 # Secteurs RÉELS observés dans la base prospects (inventaire 2026-06-12)
@@ -204,6 +204,24 @@ cas_reconnus = {
     "opticien":             "opticien",
     "magasin d'optique":    "opticien",
     "lunetier":             "opticien",
+    # — Les 6 métiers du 16/06 (soir, 2e fournée) —
+    "fromager":             "fromager",
+    "fromagerie":           "fromager",
+    "crémerie":             "fromager",
+    "poissonnier":          "poissonnier",
+    "poissonnerie":         "poissonnier",
+    "fruits de mer":        "poissonnier",
+    "torréfacteur":         "torrefacteur",
+    "brûlerie":             "torrefacteur",
+    "café de spécialité":   "torrefacteur",
+    "microbrasserie":       "microbrasserie",
+    "brasseur artisanal":   "microbrasserie",   # PAS restaurant
+    "brasserie":            "restaurant",        # la brasserie SEULE reste resto
+    "tapissier":            "tapissier",
+    "tapissier-décorateur": "tapissier",         # PAS architecte d'intérieur
+    "homme toutes mains":   "multiservices",
+    "petits travaux":       "multiservices",
+    "bricolage à domicile": "multiservices",
 }
 for secteur, attendu in cas_reconnus.items():
     got = slug_for_sector(secteur)

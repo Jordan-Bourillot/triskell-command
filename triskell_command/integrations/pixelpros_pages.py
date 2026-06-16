@@ -47,6 +47,8 @@ KNOWN_SLUGS = (
     "lavage-auto", "food-truck",
     "demenageur", "boucher", "bijoutier", "domoticien", "diagnostiqueur",
     "veterinaire", "constructeur", "opticien",
+    "fromager", "poissonnier", "torrefacteur", "microbrasserie",
+    "tapissier", "multiservices",
 )
 
 # Règles « préfixe contenu dans le secteur » (ordre = priorité, premier
@@ -106,6 +108,13 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("camion a burger", "food-truck"),
     ("camion-restaurant", "food-truck"),
     ("street food", "food-truck"),
+    # Microbrasserie AVANT restaurant : « microbrasserie » contient « brasserie »
+    # (qui partirait sinon sur restaurant). La « brasserie » seule reste restaurant.
+    ("microbrasserie", "microbrasserie"),
+    ("micro-brasserie", "microbrasserie"),
+    ("brasserie artisanale", "microbrasserie"),
+    ("brasseur",   "microbrasserie"),
+    ("biere artisanale", "microbrasserie"),
     ("restaurant", "restaurant"),
     ("pizzer",     "restaurant"),    # pizzeria / pizzeriste
     ("creper",     "restaurant"),    # crêperie / crêpier
@@ -164,6 +173,9 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("chambre",    "chambres-hotes"), # chambre(s) d'hôtes
     ("gite",       "chambres-hotes"),
     ("hote",       "chambres-hotes"), # maison d'hôtes (restaurant capté plus haut)
+    # Tapissier-décorateur AVANT « decorateur » (sinon il part sur architecte
+    # d'intérieur). Le tapissier travaille les sièges/tissus, pas l'agencement.
+    ("tapiss",     "tapissier"),       # tapissier / tapisserie d'ameublement
     ("architecte d'interieur", "architecte-interieur"),
     ("architecte interieur",   "architecte-interieur"),
     ("decorateur", "architecte-interieur"),
@@ -277,6 +289,29 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("optique",    "opticien"),       # magasin d'optique
     ("lunetier",   "opticien"),
     ("lunetterie", "opticien"),
+    # — 6 métiers de plus (16/06/2026) —
+    ("fromag",     "fromager"),       # fromager / fromagerie
+    ("cremerie",   "fromager"),
+    ("cremier",    "fromager"),
+    ("poissonn",   "poissonnier"),    # poissonnier / poissonnerie
+    ("maree",      "poissonnier"),
+    ("fruits de mer", "poissonnier"),
+    ("ecailler",   "poissonnier"),
+    ("torref",     "torrefacteur"),   # torréfacteur / torréfaction
+    ("brulerie",   "torrefacteur"),
+    ("cafe de specialite", "torrefacteur"),
+    ("coffee shop", "torrefacteur"),
+    ("barista",    "torrefacteur"),
+    # Homme toutes mains / petits travaux (phrases : pas « travaux » seul,
+    # capté ailleurs par le bâtiment).
+    ("homme toutes mains", "multiservices"),
+    ("toutes mains", "multiservices"),
+    ("multiservice", "multiservices"),
+    ("multi-service", "multiservices"),
+    ("petits travaux", "multiservices"),
+    ("petit travaux", "multiservices"),
+    ("factotum",   "multiservices"),
+    ("bricol",     "multiservices"),  # bricolage / bricoleur à domicile
     # Constructeur / maître d'œuvre (phrases : pas « construction » seul).
     ("constructeur de maison", "constructeur"),
     ("constructeur maison", "constructeur"),

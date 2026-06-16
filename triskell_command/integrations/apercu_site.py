@@ -117,6 +117,10 @@ _DEMO_MAP: dict[str, str] = {
     "camion pizza": "demo-food-truck", "camion a pizza": "demo-food-truck",
     "camion restaurant": "demo-food-truck", "camion a burger": "demo-food-truck",
     "street food": "demo-food-truck",
+    # Microbrasserie AVANT restaurant (« microbrasserie » contient « brasserie »)
+    "microbrasserie": "demo-microbrasserie", "micro-brasserie": "demo-microbrasserie",
+    "brasserie artisanale": "demo-microbrasserie", "brasseur": "demo-microbrasserie",
+    "biere artisanale": "demo-microbrasserie",
     "restaur": "demo-restaurant", "pizz": "demo-restaurant",
     "brasser": "demo-restaurant", "creper": "demo-restaurant",
     "bistro": "demo-restaurant",
@@ -164,6 +168,8 @@ _DEMO_MAP: dict[str, str] = {
     "hote": "demo-chambres-hotes",  # « restaur » est capté plus haut
     "architecte d'interieur": "demo-architecte-interieur",
     "architecte interieur": "demo-architecte-interieur",
+    # tapissier AVANT « decorateur » (tapissier-décorateur → tapissier)
+    "tapiss": "demo-tapissier",
     "decorateur": "demo-architecte-interieur",
     "decoratrice": "demo-architecte-interieur",
     "home staging": "demo-architecte-interieur",
@@ -228,6 +234,15 @@ _DEMO_MAP: dict[str, str] = {
     "maison individuelle": "demo-constructeur", "constructeur": "demo-constructeur",
     "opticien": "demo-opticien", "optique": "demo-opticien",
     "lunetier": "demo-opticien", "lunetterie": "demo-opticien",
+    # — 6 métiers de plus (16/06/2026) —
+    "fromag": "demo-fromager", "cremerie": "demo-fromager", "cremier": "demo-fromager",
+    "poissonn": "demo-poissonnier", "maree": "demo-poissonnier",
+    "fruits de mer": "demo-poissonnier", "ecailler": "demo-poissonnier",
+    "torref": "demo-torrefacteur", "brulerie": "demo-torrefacteur",
+    "cafe de specialite": "demo-torrefacteur", "barista": "demo-torrefacteur",
+    "homme toutes mains": "demo-multiservices", "toutes mains": "demo-multiservices",
+    "multiservice": "demo-multiservices", "petits travaux": "demo-multiservices",
+    "factotum": "demo-multiservices", "bricol": "demo-multiservices",
 }
 
 # Ville fictive utilisée dans CHAQUE démo (à remplacer par celle du prospect).
@@ -275,6 +290,13 @@ _DEMO_CITY: dict[str, str] = {
     "demo-veterinaire": "Toulouse",
     "demo-constructeur": "Bordeaux",
     "demo-opticien": "Lille",
+    # — 6 métiers de plus —
+    "demo-fromager": "Clermont-Ferrand",
+    "demo-poissonnier": "Lorient",
+    "demo-torrefacteur": "Lyon",
+    "demo-microbrasserie": "Strasbourg",
+    "demo-tapissier": "Nantes",
+    "demo-multiservices": "Montpellier",
 }
 
 # Libellé métier propre affiché dans l'en-tête / le bandeau (cohérent quel que
@@ -323,6 +345,13 @@ _DEMO_LABEL: dict[str, str] = {
     "demo-veterinaire": "Clinique vétérinaire",
     "demo-constructeur": "Constructeur de maisons",
     "demo-opticien": "Opticien",
+    # — 6 métiers de plus —
+    "demo-fromager": "Fromager-affineur",
+    "demo-poissonnier": "Poissonnier",
+    "demo-torrefacteur": "Torréfacteur",
+    "demo-microbrasserie": "Microbrasserie",
+    "demo-tapissier": "Tapissier-décorateur",
+    "demo-multiservices": "Homme toutes mains",
 }
 
 
