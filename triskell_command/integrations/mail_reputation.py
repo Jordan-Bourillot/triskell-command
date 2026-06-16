@@ -237,7 +237,10 @@ def classify(facts: dict, *, auth: Optional[dict] = None,
     elif warmth == "en_chauffe":
         status, label, tone = "en_chauffe", "En chauffe", "warning"
     else:
-        status, label, tone = "etablie", "Établie", "success"
+        # « Rodée » et non « Établie » : on décrit un état d'ENVOI (la boîte
+        # envoie vraiment, régulièrement, proprement), PAS une réputation
+        # prouvée. La vraie réputation reste la note Gmail (Postmaster).
+        status, label, tone = "etablie", "Rodée", "success"
 
     # --- Phrase de vérité + conseil (français normal, pas de jargon) ---
     summary, advice = _phrase(
@@ -311,9 +314,11 @@ def _phrase(*, status, warmth, sent_30d, sent_window, first_days,
         advice = ("Laisse la chauffe finir et monte le volume progressivement. "
                   "Évite les gros envois d'un coup.")
     elif warmth == "etablie":
-        summary = "Établie : historique d'envoi réel et rebonds maîtrisés. "
-        summary += " · ".join(parts)
-        advice = "Bonne à utiliser. Garde un œil sur le taux de rebond."
+        summary = ("Rodée à l'envoi : " + " · ".join(parts)
+                   + ". Sa réputation réelle = la note Gmail ci-dessous.")
+        advice = ("Bonne base d'envoi. Mais ne te fie pas au seul nombre "
+                  "d'envois : la vraie réputation vient de la note Gmail "
+                  "(elle se remplira quand le volume de prospection montera).")
     else:
         summary = " · ".join(parts)
         advice = ""
