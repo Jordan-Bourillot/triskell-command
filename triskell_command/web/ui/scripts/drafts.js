@@ -33,6 +33,8 @@ const Drafts = {
                     title="Envoie d’un coup tous les brouillons en attente, après confirmation.">
               Tout envoyer
             </button>
+            <button id="d-fast" type="button" class="btn btn-secondary"
+                    title="Vitesse d’envoi des brouillons un par un."></button>
             <button id="d-refresh" class="btn btn-secondary">Rafraîchir</button>
             <button id="d-cleanup" class="btn btn-secondary" title="Supprime les brouillons en attente qui n'ont jamais reçu de contenu (coquilles vides)">Vider les coquilles vides</button>
             <button id="d-cleanup-broken" class="btn btn-secondary"
@@ -57,11 +59,85 @@ const Drafts = {
     document.getElementById('d-cleanup-broken').onclick = () => this._cleanupBroken();
     document.getElementById('d-wipe-all').onclick = () => this._wipeAll();
     document.getElementById('d-send-all').onclick = () => this._sendAll();
+    const fastBtn = document.getElementById('d-fast');
+    if (fastBtn) fastBtn.onclick = () => this._setFast(!this._isFast());
+    this._renderFastBtn();
     // Nouvelle vue : l'éventuel minuteur de suivi d'un envoi groupé a été
     // nettoyé par App.show (viewInterval) — on oublie son ancien id.
     this._batchPollId = null;
     this._batchLocked = false;
     await this.refresh();
+  },
+
+  // --- Envoi rapide (1 clic) vs fenêtre de grâce (5 s pour annuler) ---
+  // Réglage mémorisé dans le navigateur. Défaut = rapide, pour pouvoir
+  // valider plusieurs brouillons à la suite sans attendre à chaque fois.
+  _FAST_KEY: 'triskell.drafts.fastSend',
+  _isFast() {
+    try {
+      const v = localStorage.getItem(this._FAST_KEY);
+      return v === null ? true : v === '1';
+    } catch (e) { return true; }
+  },
+  _setFast(on) {
+    try { localStorage.setItem(this._FAST_KEY, on ? '1' : '0'); } catch (e) {}
+    this._renderFastBtn();
+    Toast.info(on
+      ? 'Envoi rapide activé : les mails partent tout de suite.'
+      : 'Envoi rapide coupé : 5 secondes pour annuler avant chaque envoi.');
+  },
+  _renderFastBtn() {
+    const b = document.getElementById('d-fast');
+    if (!b) return;
+    const on = this._isFast();
+    b.textContent = on ? '⚡ Envoi rapide : activé'
+                       : '⏱ Envoi rapide : coupé';
+    b.title = on
+      ? 'Clic sur « Approuver & envoyer » = le mail part tout de suite. Clique ici pour remettre les 5 s pour annuler.'
+      : 'Clic sur « Approuver & envoyer » = 5 s pour annuler avant l’envoi. Clique ici pour envoyer sans attendre.';
+    b.style.borderColor = on ? 'hsl(var(--success) / 0.6)' : '';
+    b.style.color = on ? 'hsl(var(--success-text))' : '';
+  },
+
+  // Carte « rien à valider » — extraite pour la réutiliser après le dernier
+  // envoi sans recharger toute la liste depuis le serveur.
+  _emptyStateHTML() {
+    return `
+        <div class="card p-6 sm:p-12 text-center">
+          <div class="text-3xl sm:text-4xl mb-3">✓</div>
+          <h2 class="text-xl font-semibold mb-2">Tu es à jour — rien à valider.</h2>
+          <p class="text-text-secondary max-w-lg mx-auto">
+            Quand l'Auto-pilote ou les relances prépareront des mails,
+            ils attendront ton OK ici. Pour en avoir : lance une prospection,
+            les mails arrivent tout seuls derrière.
+          </p>
+          <button class="btn btn-primary mt-6" onclick="App.show('prospection')">🚀 Lancer une prospection</button>
+        </div>
+      `;
+  },
+
+  // Après l'envoi/rejet d'UNE carte : met à jour les compteurs et l'état
+  // « vide » EN PLACE, sans recharger la liste (fluide pour enchaîner).
+  _afterRemoved() {
+    const n = Math.max(0, (this._lastCount || 1) - 1);
+    this._lastCount = n;
+    const top = document.getElementById('d-send-all');
+    const bottom = document.getElementById('d-send-all-bottom');
+    const dropBottom = () => {
+      if (!bottom) return;
+      try { bottom.closest('div').remove(); } catch (e) { bottom.remove(); }
+    };
+    if (n <= 0) {
+      if (top) top.classList.add('hidden');
+      dropBottom();
+      const list = document.getElementById('d-list');
+      if (list) list.innerHTML = this._emptyStateHTML();
+      try { this._syncBatchUI(); } catch (e) {}
+      return;
+    }
+    if (top) { top.classList.remove('hidden'); top.textContent = `Tout envoyer (${n})`; }
+    if (n > 1) { if (bottom) bottom.textContent = `Tout envoyer (${n})`; }
+    else dropBottom();
   },
 
   async _cleanupBroken() {
@@ -393,18 +469,7 @@ const Drafts = {
       // Liste vide → pas de bouton "Tout envoyer" (rien à envoyer).
       this._lastCount = 0;
       if (sendAllTop) sendAllTop.classList.add('hidden');
-      list.innerHTML = `
-        <div class="card p-6 sm:p-12 text-center">
-          <div class="text-3xl sm:text-4xl mb-3">✓</div>
-          <h2 class="text-xl font-semibold mb-2">Tu es à jour — rien à valider.</h2>
-          <p class="text-text-secondary max-w-lg mx-auto">
-            Quand l'Auto-pilote ou les relances prépareront des mails,
-            ils attendront ton OK ici. Pour en avoir : lance une prospection,
-            les mails arrivent tout seuls derrière.
-          </p>
-          <button class="btn btn-primary mt-6" onclick="App.show('prospection')">🚀 Lancer une prospection</button>
-        </div>
-      `;
+      list.innerHTML = this._emptyStateHTML();
       await this._syncBatchUI();
       return;
     }
@@ -654,7 +719,11 @@ const Drafts = {
         card.style.transition = 'opacity 200ms';
         card.style.opacity = '0';
         setTimeout(() => { try { card.remove(); } catch (e) {} }, 220);
-        await this.refresh();
+        // Avant : refresh() complet → toute la liste se vidait en
+        // « Chargement… » puis se reconstruisait (« la page se recharge »),
+        // et un envoi lancé sur une autre carte sautait. Maintenant : on
+        // enlève juste cette carte et on met à jour les compteurs en place.
+        this._afterRemoved();
       };
       if (rejectBtn) {
         rejectBtn.addEventListener('click', async (ev) => {
@@ -695,7 +764,7 @@ const Drafts = {
           card.style.transition = 'opacity 200ms';
           card.style.opacity = '0';
           setTimeout(() => { try { card.remove(); } catch (e) {} }, 220);
-          await this.refresh();
+          this._afterRemoved();
         });
       }
       if (approveBtn) {
@@ -712,7 +781,14 @@ const Drafts = {
             doApprove();
             return;
           }
-          // Fenêtre de grâce : 5 secondes pour annuler avant l'envoi réel.
+          // Envoi rapide (réglage par défaut) : le mail part tout de suite,
+          // sans compte à rebours — pensé pour enchaîner plusieurs validations
+          // sans attendre. Si Jordan a coupé l'envoi rapide, on garde la
+          // fenêtre de grâce de 5 s pour pouvoir annuler.
+          if (this._isFast()) {
+            doApprove();
+            return;
+          }
           this._startGrace(card, doApprove);
         });
       }
