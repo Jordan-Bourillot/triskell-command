@@ -85,7 +85,12 @@ _DEMO_MAP: dict[str, str] = {
     "carrel": "demo-carreleur", "faienc": "demo-carreleur",
     "macon": "demo-macon", "maconn": "demo-macon",
     "menuis": "demo-menuisier", "ebenist": "demo-menuisier",
-    "charpent": "demo-menuisier", "agenc": "demo-menuisier",
+    "agenc": "demo-menuisier",
+    # charpente / toiture → couvreur (16/06/2026)
+    "couvr": "demo-couvreur", "charpent": "demo-couvreur",
+    "toitur": "demo-couvreur", "zinguer": "demo-couvreur",
+    "ardois": "demo-couvreur",
+    "piscin": "demo-pisciniste",
     "plaquist": "demo-plaquiste", "placo": "demo-plaquiste",
     "platr": "demo-plaquiste", "plaqu": "demo-plaquiste",
     "paysag": "demo-paysagiste", "jardin": "demo-paysagiste",
@@ -97,7 +102,8 @@ _DEMO_MAP: dict[str, str] = {
     "cake": "demo-patisserie",
     "restaur": "demo-restaurant", "pizz": "demo-restaurant",
     "brasser": "demo-restaurant", "creper": "demo-restaurant",
-    "bistro": "demo-restaurant", "traiteur": "demo-restaurant",
+    "bistro": "demo-restaurant",
+    "traiteur": "demo-traiteur",  # a sa propre démo depuis le 16/06/2026
     "snack": "demo-restaurant", "kebab": "demo-restaurant",
     # — Beauté / bien-être —
     "esthet": "demo-beaute", "beaut": "demo-beaute", "ongle": "demo-beaute",
@@ -107,6 +113,10 @@ _DEMO_MAP: dict[str, str] = {
     # ~130 fiches concernées (coiffeur / coiffeuse / barbier) — premier
     # métier prospecté sans démo (constaté le 15/06/2026).
     "coiff": "demo-beaute", "barbier": "demo-beaute", "barber": "demo-beaute",
+    # ostéo / kiné = paramédical, AVANT massage (masseur-kiné → ostéo)
+    "osteopath": "demo-osteopathe", "osteo": "demo-osteopathe",
+    "kinesi": "demo-osteopathe", "kine": "demo-osteopathe",
+    "reeduc": "demo-osteopathe",
     "massag": "demo-bien-etre", "spa": "demo-bien-etre",
     "bien-etre": "demo-bien-etre", "bien etre": "demo-bien-etre",
     "sophro": "demo-bien-etre", "naturopath": "demo-bien-etre",
@@ -121,6 +131,19 @@ _DEMO_MAP: dict[str, str] = {
     "pension": "demo-animalier", "dressage": "demo-animalier",
     "educateur canin": "demo-animalier", "animal": "demo-animalier",
     "chien": "demo-animalier",
+    # — Nouveaux métiers (16/06/2026) — (auto-école AVANT garage)
+    "auto-ecole": "demo-auto-ecole", "auto ecole": "demo-auto-ecole",
+    "ecole de conduite": "demo-auto-ecole", "permis": "demo-auto-ecole",
+    "garag": "demo-garagiste", "carross": "demo-garagiste",
+    "mecaniq": "demo-garagiste", "pneu": "demo-garagiste",
+    "automobile": "demo-garagiste",
+    "chambre": "demo-chambres-hotes", "gite": "demo-chambres-hotes",
+    "hote": "demo-chambres-hotes",  # « restaur » est capté plus haut
+    "architecte d'interieur": "demo-architecte-interieur",
+    "architecte interieur": "demo-architecte-interieur",
+    "decorateur": "demo-architecte-interieur",
+    "decoratrice": "demo-architecte-interieur",
+    "home staging": "demo-architecte-interieur",
 }
 
 # Ville fictive utilisée dans CHAQUE démo (à remplacer par celle du prospect).
@@ -134,6 +157,15 @@ _DEMO_CITY: dict[str, str] = {
     "demo-restaurant": "Lorient", "demo-plaquiste": "Vannes",
     "demo-macon": "Quimper", "demo-peintre": "Angers",
     "demo-carreleur": "La Rochelle",
+    # — Nouveaux métiers (villes fictives des démos) —
+    "demo-pisciniste": "Aix-en-Provence",
+    "demo-chambres-hotes": "Lourmarin",
+    "demo-garagiste": "Nantes",
+    "demo-osteopathe": "Montpellier",
+    "demo-auto-ecole": "Rennes",
+    "demo-traiteur": "Toulouse",
+    "demo-couvreur": "Angers",
+    "demo-architecte-interieur": "Bordeaux",
 }
 
 # Libellé métier propre affiché dans l'en-tête / le bandeau (cohérent quel que
@@ -148,6 +180,15 @@ _DEMO_LABEL: dict[str, str] = {
     "demo-restaurant": "Restaurant", "demo-plaquiste": "Plaquiste",
     "demo-macon": "Maçonnerie", "demo-peintre": "Peintre",
     "demo-carreleur": "Carreleur",
+    # — Nouveaux métiers (libellés propres affichés dans l'aperçu) —
+    "demo-pisciniste": "Pisciniste",
+    "demo-chambres-hotes": "Chambres d'hôtes",
+    "demo-garagiste": "Garage",
+    "demo-osteopathe": "Ostéo & kiné",
+    "demo-auto-ecole": "Auto-école",
+    "demo-traiteur": "Traiteur",
+    "demo-couvreur": "Couvreur",
+    "demo-architecte-interieur": "Architecte d'intérieur",
 }
 
 

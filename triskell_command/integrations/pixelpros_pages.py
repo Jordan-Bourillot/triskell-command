@@ -29,14 +29,17 @@ import unicodedata
 
 BASE_URL = "https://pixel-pros.fr"
 
-# Les 12 slugs réellement en ligne (une page <slug>.html + une page
-# demo-<slug>.html chacune). Si une 13e page de pub naît, l'ajouter ici
+# Les slugs réellement en ligne (une page <slug>.html + une page
+# demo-<slug>.html chacune). Si une nouvelle page de pub naît, l'ajouter ici
 # ET dans les règles de correspondance plus bas.
+# (Les 8 derniers — pisciniste → architecte-interieur — datent du 16/06/2026.)
 KNOWN_SLUGS = (
     "animalier", "beaute", "bien-etre", "carreleur", "coach",
     "electricien", "fleuriste", "macon", "menuisier", "patisserie",
     "paysagiste", "peintre", "photographe", "plaquiste", "plombier",
     "restaurant", "tatoueur",
+    "pisciniste", "chambres-hotes", "garagiste", "osteopathe",
+    "auto-ecole", "traiteur", "couvreur", "architecte-interieur",
 )
 
 # Règles « préfixe contenu dans le secteur » (ordre = priorité, premier
@@ -47,7 +50,15 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("electric",   "electricien"),
     ("menuis",     "menuisier"),
     ("ebenist",    "menuisier"),
-    ("charpent",   "menuisier"),     # métier du bois le plus proche
+    # « charpent » bascule sur couvreur depuis le 16/06/2026 : la page
+    # couvreur couvre charpente + toiture. Un menuisier-charpentier tombe
+    # quand même sur « menuis », placé juste au-dessus.
+    ("couvr",      "couvreur"),       # couvreur / couverture
+    ("charpent",   "couvreur"),       # charpente / charpentier
+    ("toitur",     "couvreur"),       # toiture
+    ("zinguer",    "couvreur"),       # zinguerie
+    ("ardois",     "couvreur"),       # ardoise = couverture
+    ("piscin",     "pisciniste"),     # pisciniste / piscine
     ("plaquist",   "plaquiste"),
     ("placo",      "plaquiste"),
     # PAS de règle « plâtrier » → plaquiste : deux métiers distincts
@@ -75,6 +86,13 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("ongler",     "beaute"),        # onglerie
     ("manucur",    "beaute"),
     ("maquill",    "beaute"),
+    # Ostéo / kiné = paramédical (placé AVANT « massag »/« masseur » :
+    # un « masseur-kinésithérapeute » doit tomber sur ostéo, pas bien-être).
+    ("osteopath",  "osteopathe"),
+    ("osteo",      "osteopathe"),
+    ("kinesi",     "osteopathe"),     # kinésithérapeute
+    ("kine",       "osteopathe"),     # masseur-kiné, masso-kiné
+    ("reeduc",     "osteopathe"),     # rééducation (accents déjà retirés)
     ("massag",     "bien-etre"),
     ("masseur",    "bien-etre"),
     ("masseus",    "bien-etre"),
@@ -87,6 +105,26 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("tatou",      "tatoueur"),
     ("tattoo",     "tatoueur"),
     ("piercing",   "tatoueur"),
+    # — Nouveaux métiers (16/06/2026) —
+    # Auto-école AVANT garage (« école de conduite automobile » → auto-école).
+    ("auto-ecole", "auto-ecole"),
+    ("auto ecole", "auto-ecole"),
+    ("ecole de conduite", "auto-ecole"),
+    ("permis",     "auto-ecole"),     # permis de conduire / B / moto
+    ("garag",      "garagiste"),
+    ("carross",    "garagiste"),      # carrosserie
+    ("mecaniq",    "garagiste"),      # mécanique auto
+    ("pneu",       "garagiste"),
+    ("automobile", "garagiste"),
+    ("traiteur",   "traiteur"),
+    ("chambre",    "chambres-hotes"), # chambre(s) d'hôtes
+    ("gite",       "chambres-hotes"),
+    ("hote",       "chambres-hotes"), # maison d'hôtes (restaurant capté plus haut)
+    ("architecte d'interieur", "architecte-interieur"),
+    ("architecte interieur",   "architecte-interieur"),
+    ("decorateur", "architecte-interieur"),
+    ("decoratrice", "architecte-interieur"),
+    ("home staging", "architecte-interieur"),
     ("toilettag",  "animalier"),     # toilettage canin
     ("toiletteu",  "animalier"),
     ("canin",      "animalier"),
