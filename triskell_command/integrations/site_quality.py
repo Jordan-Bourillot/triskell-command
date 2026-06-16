@@ -20,6 +20,15 @@ propriétaire reconnaîtrait lui-même) :
   - Flash                             → techno abandonnée depuis 2020
   - générateur mort (FrontPage,       → outil de création disparu
     Dreamweaver, GoLive, Joomla 1/2…)
+  - pas de balise <title>             → invisible sur Google (sauf appli JS)
+  - « site en construction »          → page pas terminée
+
+Note (essai « à vérifier » du 16/06/2026) : 3 signaux candidats ont été
+TESTÉS sur 200 sites réels puis rejetés car ils s'allument sur des sites
+modernes parfaits — zoom mobile désactivé, « lenteur » réseau, et surtout
+année de copyright ancienne (les gens oublient de l'actualiser). Le
+« moche mais techniquement OK » ne se voit PAS dans le HTML → c'est l'œil
+visuel (capture + IA) qui s'en charge, voir site_vision.py.
 
 Signaux FAIBLES (NE flaguent JAMAIS seuls — ils ne font qu'alourdir le
 score d'un site DÉJÀ flagué par un signal fort) :
@@ -139,11 +148,6 @@ def score_site_html(html: str, final_url: str,
     html = html or ""
     year = now_year or datetime.now().year
 
-    # Page illisible / quasi vide → on ne juge pas (ambigu, pas de risque).
-    if len(html.strip()) < 200:
-        return {"score": 0, "to_redo": False, "label": "",
-                "reasons": [], "signals": {"empty": True}}
-
     low = html.lower()
     # On RETIRE le contenu des <script> et <style> avant d'analyser : du code
     # de bibliothèque JS mentionne souvent de vieilles balises (Flash, frames,
@@ -152,6 +156,23 @@ def score_site_html(html: str, final_url: str,
     # « Flash » à cause d'un plugin média). Précision d'abord.
     low = re.sub(r'<script\b[^>]*>.*?</script>', ' ', low, flags=re.S)
     low = re.sub(r'<style\b[^>]*>.*?</style>', ' ', low, flags=re.S)
+
+    # « En construction » se détecte AVANT le garde « page quasi vide » : ces
+    # pages sont souvent minuscules (« Site en construction »), or c'est
+    # justement un signal fort qu'on veut garder. Formulation STRICTE pour ne
+    # PAS attraper un maçon/constructeur qui parle de « construction ».
+    under = bool(re.search(
+        r'site en (?:construction|cours|maintenance)|page en construction'
+        r'|en cours de construction|coming soon|under construction'
+        r'|site (?:web )?bient[oô]t|bient[oô]t en ligne'
+        r'|page par d[eé]faut|default web page', low))
+
+    # Page illisible / quasi vide SANS rien d'explicite → on ne juge pas
+    # (ambigu, aucun risque de faux positif).
+    if len(html.strip()) < 200 and not under:
+        return {"score": 0, "to_redo": False, "label": "",
+                "reasons": [], "signals": {"empty": True}}
+
     signals: dict = {}
     strong: list[tuple[str, int, str]] = []   # (clé, poids, raison)
     weak: list[tuple[str, int, str]] = []
@@ -203,6 +224,33 @@ def score_site_html(html: str, final_url: str,
     if old_gen:
         strong.append(("old_generator", 50,
                        f"créé avec un outil dépassé ({old_gen})"))
+
+    # Appli qui se dessine en JS (React/Next/Angular/Nuxt…) : le HTML servi
+    # est une coquille, le titre et le contenu arrivent CÔTÉ navigateur. On
+    # ne juge alors NI le titre NI le contenu sur le HTML brut (sinon faux
+    # positif sur un site moderne). Détecté via les marqueurs d'appli.
+    is_spa = bool(re.search(
+        r'id\s*=\s*["\'](?:root|__next|app)["\']|data-reactroot|ng-app'
+        r'|__nuxt|data-server-rendered', html.lower()))
+    signals["spa"] = is_spa
+
+    # 5. Pas de balise <title> = invisible sur Google. Un site fait par un
+    #    pro ou un CMS (Wix/Squarespace/WordPress…) en met TOUJOURS une ;
+    #    son absence = page bricolée à la main ou cassée. (Ignoré sur une
+    #    appli JS, dont le titre est posé côté navigateur.)
+    m_title = re.search(r'<title[^>]*>(.*?)</title>', low, re.S)
+    has_title = bool(m_title and m_title.group(1).strip())
+    signals["title"] = has_title
+    if not has_title and not is_spa:
+        strong.append(("no_title", 40,
+                       "pas de titre — le site est invisible sur Google"))
+
+    # 6. Site « en construction » / pas terminé (détecté plus haut, avant le
+    #    garde « page quasi vide », car ces pages sont souvent minuscules).
+    signals["under_construction"] = under
+    if under:
+        strong.append(("under_construction", 55,
+                       "site en construction / pas terminé"))
 
     # ============ SIGNAUX FAIBLES (jamais seuls — corroborent) ============
 

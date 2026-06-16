@@ -2825,6 +2825,35 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def oeil_visuel_status(self) -> dict:
+        """État de « l'œil » : robot qui repère visuellement les sites à
+        refaire (capture + IA). Léger (statut en mémoire, pas de scan base)."""
+        try:
+            from ..integrations import site_vision_worker
+            return {"ok": True, **site_vision_worker.get_status()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def oeil_visuel_set(self, payload: dict) -> dict:
+        """Active / coupe l'œil (interrupteur shared_settings)."""
+        enabled = bool((payload or {}).get("enabled"))
+        try:
+            from ..integrations import site_vision_worker
+            ok, msg = site_vision_worker.set_enabled(enabled)
+            if not ok:
+                return {"ok": False, "error": msg}
+            return {"ok": True, "enabled": site_vision_worker.is_enabled()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def oeil_visuel_run_now(self) -> dict:
+        """Force un passage tout de suite (un petit paquet) — debug/contrôle."""
+        try:
+            from ..integrations import site_vision_worker
+            return {"ok": True, "result": site_vision_worker.run_now()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def phare_automerge_get(self) -> dict:
         """Lit l'état de la publication automatique des modifs vérifiées.
         Endpoint dédié (et non un settings_set générique) pour ne JAMAIS
@@ -6765,6 +6794,7 @@ class Api:
             ("autopilot_runner",      "Prospection nocturne (3h Paris)"),
             ("pixelpros.auto_builder", "Construction auto des sites payés"),
             ("pixelpros.content_chaser", "Relances des sites payés à compléter"),
+            ("site_vision_worker",    "L'œil — repère les sites à refaire"),
         ]
         for mod_name, label in worker_modules:
             try:
@@ -8344,6 +8374,7 @@ class Api:
             ("autopilot_runner",       "start_worker", "autopilot_nightly"),
             ("pixelpros.auto_builder", "start_worker", "pixelpros_auto_builder"),
             ("pixelpros.content_chaser", "start_worker", "pixelpros_content_chaser"),
+            ("site_vision_worker",      "start_worker", "oeil_visuel"),
         ]:
             try:
                 mod = __import__(
@@ -9888,7 +9919,7 @@ class Api:
                              "post_sale_runner", "lead_to_client",
                              "multichannel_followup", "dormant_recycler",
                              "stripe_poller", "mission_runner",
-                             "autopilot_runner"):
+                             "autopilot_runner", "site_vision_worker"):
                 try:
                     mod = __import__(
                         f"triskell_command.integrations.{mod_name}",
