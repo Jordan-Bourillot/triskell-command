@@ -56,7 +56,7 @@ from triskell_command.integrations.pixelpros_pages import (  # noqa: E402
     BASE_URL, KNOWN_SLUGS, pages_for_sector, slug_for_sector,
 )
 
-check("40 pages métier connues", len(KNOWN_SLUGS) == 40,
+check("48 pages métier connues", len(KNOWN_SLUGS) == 48,
       f"-> {len(KNOWN_SLUGS)}")
 
 # Secteurs RÉELS observés dans la base prospects (inventaire 2026-06-12)
@@ -88,7 +88,7 @@ cas_reconnus = {
     "salon de tatouage":    "tatoueur",
     "toilettage canin":     "animalier",
     "Artisanat — métiers du chien et du chat": "animalier",
-    "vétérinaire":          "animalier",
+    "vétérinaire":          "veterinaire",   # page dédiée depuis le 16/06 (après-midi)
     "massage bien-être":    "bien-etre",
     "sophrologue":          "bien-etre",
     "spa":                  "bien-etre",
@@ -178,6 +178,32 @@ cas_reconnus = {
     "camion pizza":         "food-truck",          # « pizza » ne va PAS sur restaurant
     "camion restaurant":    "food-truck",          # « restaurant » non plus
     "street food":          "food-truck",
+    # — Les 8 métiers du 16/06 (soir) —
+    "déménageur":           "demenageur",
+    "entreprise de déménagement": "demenageur",
+    "garde-meuble":         "demenageur",
+    "boucher":              "boucher",
+    "boucherie-charcuterie": "boucher",
+    "charcutier":           "boucher",
+    "bijoutier":            "bijoutier",
+    "bijouterie":           "bijoutier",
+    "joaillier":            "bijoutier",
+    "horloger":             "bijoutier",
+    "domoticien":           "domoticien",
+    "domotique":            "domoticien",
+    "alarme et vidéosurveillance": "domoticien",
+    "maison connectée":     "domoticien",
+    "diagnostiqueur immobilier": "diagnostiqueur",
+    "diagnostic immobilier": "diagnostiqueur",   # PAS agent immobilier
+    "DPE":                  "diagnostiqueur",
+    "vétérinaire":          "veterinaire",
+    "clinique vétérinaire": "veterinaire",
+    "constructeur de maison": "constructeur",
+    "constructeur de maisons individuelles": "constructeur",
+    "maître d'œuvre":       "constructeur",
+    "opticien":             "opticien",
+    "magasin d'optique":    "opticien",
+    "lunetier":             "opticien",
 }
 for secteur, attendu in cas_reconnus.items():
     got = slug_for_sector(secteur)

@@ -58,7 +58,9 @@ def _in_thread(fn, *args):
 
 
 def _strip_accents(s: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFD", s or "")
+    s = ((s or "").replace("œ", "oe").replace("Œ", "OE")
+                  .replace("æ", "ae").replace("Æ", "AE"))
+    return "".join(c for c in unicodedata.normalize("NFD", s)
                    if unicodedata.category(c) != "Mn")
 
 
@@ -195,6 +197,11 @@ _DEMO_MAP: dict[str, str] = {
     "organisation d evenement": "demo-wedding-planner",
     "organisateur devenement": "demo-wedding-planner",
     "organisation devenement": "demo-wedding-planner",
+    # diagnostiqueur AVANT agent immobilier (« diagnostic immobilier »)
+    "diagnostiqueur": "demo-diagnostiqueur",
+    "diagnostics immobiliers": "demo-diagnostiqueur",
+    "diagnostic immobilier": "demo-diagnostiqueur",
+    "diagnostic immo": "demo-diagnostiqueur",
     "agent immobilier": "demo-agent-immobilier",
     "agence immobiliere": "demo-agent-immobilier",
     "mandataire immo": "demo-agent-immobilier",
@@ -207,6 +214,20 @@ _DEMO_MAP: dict[str, str] = {
     "disc jockey": "demo-dj", "disc-jockey": "demo-dj", "deejay": "demo-dj",
     "sonorisation": "demo-dj", "animation de soiree": "demo-dj",
     "animation musicale": "demo-dj",
+    # — 8 métiers de plus (16/06/2026) —
+    "demenag": "demo-demenageur", "garde-meuble": "demo-demenageur",
+    "boucher": "demo-boucher", "boucherie": "demo-boucher", "charcuti": "demo-boucher",
+    "bijou": "demo-bijoutier", "joaill": "demo-bijoutier", "orfevr": "demo-bijoutier",
+    "horloger": "demo-bijoutier",
+    "domoti": "demo-domoticien", "alarme": "demo-domoticien",
+    "videosurveillance": "demo-domoticien", "video surveillance": "demo-domoticien",
+    "videoprotection": "demo-domoticien", "maison connectee": "demo-domoticien",
+    "veterin": "demo-veterinaire",   # vétérinaire (n'avait pas de démo avant)
+    "constructeur de maison": "demo-constructeur", "constructeur maison": "demo-constructeur",
+    "maitre d'oeuvre": "demo-constructeur", "maitre d oeuvre": "demo-constructeur",
+    "maison individuelle": "demo-constructeur", "constructeur": "demo-constructeur",
+    "opticien": "demo-opticien", "optique": "demo-opticien",
+    "lunetier": "demo-opticien", "lunetterie": "demo-opticien",
 }
 
 # Ville fictive utilisée dans CHAQUE démo (à remplacer par celle du prospect).
@@ -245,6 +266,15 @@ _DEMO_CITY: dict[str, str] = {
     "demo-dieteticien": "Lyon",
     "demo-lavage-auto": "Lille",
     "demo-food-truck": "Marseille",
+    # — 8 métiers de plus —
+    "demo-demenageur": "Lyon",
+    "demo-boucher": "Lyon",
+    "demo-bijoutier": "Bordeaux",
+    "demo-domoticien": "Nantes",
+    "demo-diagnostiqueur": "Tours",
+    "demo-veterinaire": "Toulouse",
+    "demo-constructeur": "Bordeaux",
+    "demo-opticien": "Lille",
 }
 
 # Libellé métier propre affiché dans l'en-tête / le bandeau (cohérent quel que
@@ -284,6 +314,15 @@ _DEMO_LABEL: dict[str, str] = {
     "demo-dieteticien": "Diététicien",
     "demo-lavage-auto": "Lavage auto & detailing",
     "demo-food-truck": "Food truck",
+    # — 8 métiers de plus —
+    "demo-demenageur": "Déménageur",
+    "demo-boucher": "Boucher-charcutier",
+    "demo-bijoutier": "Bijoutier-horloger",
+    "demo-domoticien": "Domotique & sécurité",
+    "demo-diagnostiqueur": "Diagnostics immobiliers",
+    "demo-veterinaire": "Clinique vétérinaire",
+    "demo-constructeur": "Constructeur de maisons",
+    "demo-opticien": "Opticien",
 }
 
 

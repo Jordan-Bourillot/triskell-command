@@ -45,6 +45,8 @@ KNOWN_SLUGS = (
     "facadier", "salle-sport", "agent-immobilier", "chauffage-energies",
     "dj", "vitrier", "portail-cloture", "caviste", "dieteticien",
     "lavage-auto", "food-truck",
+    "demenageur", "boucher", "bijoutier", "domoticien", "diagnostiqueur",
+    "veterinaire", "constructeur", "opticien",
 )
 
 # Règles « préfixe contenu dans le secteur » (ordre = priorité, premier
@@ -220,6 +222,12 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("organisation d evenement", "wedding-planner"),
     ("organisateur devenement", "wedding-planner"),
     ("organisation devenement", "wedding-planner"),
+    # Diagnostiqueur AVANT agent immobilier (« diagnostic immobilier » contient
+    # « immobilier »).
+    ("diagnostiqueur", "diagnostiqueur"),
+    ("diagnostics immobiliers", "diagnostiqueur"),
+    ("diagnostic immobilier", "diagnostiqueur"),
+    ("diagnostic immo", "diagnostiqueur"),
     ("agent immobilier", "agent-immobilier"),
     ("agence immobiliere", "agent-immobilier"),
     ("mandataire immo", "agent-immobilier"),
@@ -245,8 +253,37 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("toilettag",  "animalier"),     # toilettage canin
     ("toiletteu",  "animalier"),
     ("canin",      "animalier"),
-    ("veterin",    "animalier"),
+    # Vétérinaire a sa page dédiée depuis le 16/06/2026 : « veterin » quitte
+    # animalier (qui reste le toilettage/garde) pour sa propre page.
+    ("veterin",    "veterinaire"),    # vétérinaire / clinique vétérinaire
     ("animal",     "animalier"),
+    # — 8 métiers de plus (16/06/2026) —
+    ("demenag",    "demenageur"),     # déménageur / déménagement
+    ("garde-meuble", "demenageur"),
+    ("boucher",    "boucher"),
+    ("boucherie",  "boucher"),
+    ("charcuti",   "boucher"),        # charcutier / charcuterie
+    ("bijou",      "bijoutier"),      # bijou / bijouterie / bijoutier
+    ("joaill",     "bijoutier"),      # joaillier / joaillerie
+    ("orfevr",     "bijoutier"),      # orfèvre / orfèvrerie
+    ("horloger",   "bijoutier"),      # horloger / horlogerie
+    ("domoti",     "domoticien"),     # domotique / domoticien
+    ("alarme",     "domoticien"),
+    ("videosurveillance", "domoticien"),
+    ("video surveillance", "domoticien"),
+    ("videoprotection", "domoticien"),
+    ("maison connectee", "domoticien"),
+    ("opticien",   "opticien"),
+    ("optique",    "opticien"),       # magasin d'optique
+    ("lunetier",   "opticien"),
+    ("lunetterie", "opticien"),
+    # Constructeur / maître d'œuvre (phrases : pas « construction » seul).
+    ("constructeur de maison", "constructeur"),
+    ("constructeur maison", "constructeur"),
+    ("maitre d'oeuvre", "constructeur"),
+    ("maitre d oeuvre", "constructeur"),
+    ("maison individuelle", "constructeur"),
+    ("constructeur",  "constructeur"),
 )
 
 # Mots trop courts ou trop ambigus pour la sous-chaîne (« chat » est
@@ -262,6 +299,7 @@ _WORD_RULES: dict[str, str] = {
     "resto":  "restaurant",
     "dj":     "dj",          # « dj » seul (sous-chaîne de « adjoint » sinon)
     "deejay": "dj",
+    "dpe":    "diagnostiqueur",   # diagnostic de performance énergétique
 }
 
 
@@ -269,6 +307,10 @@ def _normalize(text: str) -> str:
     """minuscules + accents retirés : « Esthétique » → « esthetique »."""
     if not text:
         return ""
+    # Ligatures avalées par l'encodage ASCII (« cœur », « maître d'œuvre »,
+    # « œnologue ») : on les transforme AVANT, sinon le « œ » disparaît.
+    text = (text.replace("œ", "oe").replace("Œ", "OE")
+                .replace("æ", "ae").replace("Æ", "AE"))
     flat = unicodedata.normalize("NFKD", text)
     flat = flat.encode("ascii", "ignore").decode("ascii")
     return flat.lower()
