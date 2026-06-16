@@ -486,29 +486,48 @@ def assess_all(client, *, with_dns: bool = True, with_age: bool = True,
                 "summary": {"total": 0, "etablie": 0, "en_chauffe": 0,
                             "froide": 0, "a_probleme": 0}}
 
-    # DNS / âge : une seule fois par DOMAINE (boîtes du même domaine partagées),
-    # en parallèle car c'est de l'I/O réseau.
+    # Clés « délivrabilité » (note Gmail + listes noires) — lues une fois.
+    dqs_key, pm_creds = "", {}
+    try:
+        from . import shared_secrets
+        keys = shared_secrets.get_deliverability_keys(client) or {}
+        dqs_key = keys.get("spamhaus_dqs_key") or ""
+        pm_creds = keys.get("postmaster") or {}
+    except Exception as exc:
+        logger.debug("mail_reputation clés délivrabilité: %s", exc)
+
+    # Vérifs réseau, une seule fois par DOMAINE (boîtes du même domaine
+    # partagées), en parallèle : tampons DNS + âge + liste noire + note Gmail.
     domains = sorted({_domain_of(a.get("from_email") or "")
                       for a in accounts if a.get("from_email")})
     dns_by_domain: dict[str, dict] = {}
     age_by_domain: dict[str, Optional[int]] = {}
-    if (with_dns or with_age) and domains:
+    bl_by_domain: dict[str, dict] = {}
+    pm_by_domain: dict[str, dict] = {}
+    if with_dns and domains:
         from concurrent.futures import ThreadPoolExecutor
         from .mail_dns_doctor import check_domain
+        from . import mail_blacklist, mail_postmaster
 
         def _one(dom: str):
-            dns = check_domain(dom) if with_dns else None
-            age = domain_age_days(dom) if with_age else None
-            return dom, dns, age
+            return (dom,
+                    check_domain(dom),
+                    domain_age_days(dom) if with_age else None,
+                    mail_blacklist.check_domain(dom, dqs_key),
+                    mail_postmaster.assess_domain(dom, pm_creds))
 
         try:
             with ThreadPoolExecutor(max_workers=min(8, len(domains))) as ex:
-                for dom, dns, age in ex.map(_one, domains):
+                for dom, dns, age, bl, pm in ex.map(_one, domains):
                     if dns is not None:
                         dns_by_domain[dom] = dns
                     age_by_domain[dom] = age
+                    if bl is not None:
+                        bl_by_domain[dom] = bl
+                    if pm is not None:
+                        pm_by_domain[dom] = pm
         except Exception as exc:
-            logger.warning("mail_reputation.assess_all dns pool: %s", exc)
+            logger.warning("mail_reputation.assess_all réseau: %s", exc)
 
     boxes = []
     summ = {"total": 0, "etablie": 0, "en_chauffe": 0, "froide": 0, "a_probleme": 0}
@@ -522,20 +541,33 @@ def assess_all(client, *, with_dns: bool = True, with_age: bool = True,
         auth = dns_by_domain.get(dom)
         verdict = classify(facts, auth=auth, warmup_age_days=warmup_age,
                            history_ok=core["history_ok"], now=now)
+        bl = bl_by_domain.get(dom)
         box = {
             "id": aid, "name": acc.get("label") or addr or aid,
             "email": addr, "domain": dom,
             "is_primary": bool(acc.get("is_primary")),
             "auth": auth,                       # détail des tampons (ou None)
             "domain_age_days": age_by_domain.get(dom),
+            "blacklist": bl,                    # listes noires (ou None)
+            "gmail": pm_by_domain.get(dom),     # note Postmaster (ou None)
             **verdict,
         }
+        # Fait vérifié le plus grave : un domaine RÉELLEMENT sur liste noire.
+        # On l'affiche en alerte rouge, par-dessus le reste.
+        if bl and bl.get("state") == "listed":
+            box["status"] = "risque"
+            box["label"] = "Sur liste noire"
+            box["tone"] = "danger"
+            box["summary"] = ("Domaine sur liste noire (" + (bl.get("detail") or "")
+                              + "). " + box.get("summary", ""))
+            box["advice"] = ("Arrête les envois depuis ce domaine et demande son "
+                             "retrait sur le site de Spamhaus : tes mails sont rejetés.")
         boxes.append(box)
         summ["total"] += 1
-        if verdict["status"] in ("risque", "a_corriger"):
+        if box["status"] in ("risque", "a_corriger"):
             summ["a_probleme"] += 1
-        elif verdict["warmth"] in summ:
-            summ[verdict["warmth"]] += 1
+        elif box["warmth"] in summ:
+            summ[box["warmth"]] += 1
 
     # Les boîtes à problème d'abord, puis froides, puis en chauffe, puis établies.
     order = {"risque": 0, "a_corriger": 1, "froide": 2, "inconnu": 3,

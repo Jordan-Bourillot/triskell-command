@@ -38,8 +38,11 @@ const Health = {
     // On saute le tour si une vérification DNS est en cours pour ne pas
     // écraser son état à l'écran.
     App.viewInterval(() => {
+      // On ne rafraîchit pas si une vérif tourne, ni si le panneau « Activer »
+      // est ouvert (sinon on efface ce que Jordan est en train de taper).
+      const keys = document.getElementById('h-rep-keys');
       if (!this._dnsChecking && !this._refreshing && !this._restarting
-          && !this._repLoading) this.refresh();
+          && !this._repLoading && !(keys && keys.open)) this.refresh();
     }, 15000);
 
     // Réputation des boîtes : analyse réseau (DNS + base), chargée une fois.
@@ -238,8 +241,36 @@ const Health = {
           <button id="h-rep-refresh" class="text-xs text-accent underline"
                   ${this._repLoading ? 'disabled' : ''}>${this._repLoading ? 'Analyse…' : 'Réanalyser'}</button>
         </div>
+        ${this._renderRepKeysForm()}
         <div id="h-rep">${this._repInner()}</div>
       </div>`;
+  },
+
+  // Panneau repliable pour coller les clés (note Gmail + listes noires).
+  // <details> : fermé par défaut, ne gêne pas. Tant qu'il est ouvert, l'écran
+  // ne se rafraîchit pas (cf. le minuteur), donc la saisie n'est jamais effacée.
+  _renderRepKeysForm() {
+    const inp = 'width:100%;padding:8px 10px;border-radius:8px;border:1px solid hsl(var(--border));background:hsl(var(--surface));color:hsl(var(--text));font-size:13px';
+    return `
+      <details id="h-rep-keys" class="card p-4 mb-3">
+        <summary class="text-sm font-semibold cursor-pointer">⚙ Activer la note Gmail & les listes noires</summary>
+        <div class="mt-3 space-y-3">
+          <div>
+            <label class="block text-xs text-text-muted mb-1">Clé Spamhaus (listes noires) — compte gratuit sur spamhaus.com</label>
+            <input id="rep-spamhaus" type="password" autocomplete="off" placeholder="colle ta clé Spamhaus DQS" style="${inp}"/>
+          </div>
+          <div style="border-top:1px solid hsl(var(--border));padding-top:12px">
+            <div class="text-xs text-text-muted mb-1">Note Gmail (Google Postmaster) — 3 valeurs (voir la marche à suivre)</div>
+            <input id="rep-pm-id" autocomplete="off" placeholder="Client ID" style="${inp};margin-bottom:8px"/>
+            <input id="rep-pm-secret" type="password" autocomplete="off" placeholder="Client secret" style="${inp};margin-bottom:8px"/>
+            <input id="rep-pm-refresh" type="password" autocomplete="off" placeholder="Refresh token" style="${inp}"/>
+          </div>
+          <div class="flex items-center gap-3">
+            <button id="rep-keys-save" class="btn btn-primary text-xs">Enregistrer</button>
+            <span class="text-xs text-text-muted">Un champ laissé vide ne change rien.</span>
+          </div>
+        </div>
+      </details>`;
   },
 
   _repInner() {
@@ -306,8 +337,78 @@ const Health = {
         <div class="text-sm" style="text-wrap:pretty">${this._esc(b.summary || '')}</div>
         <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2">${chips.join('')}</div>
         ${auth}
+        ${this._repBlacklistLine(b.blacklist)}
+        ${this._repGmailLine(b.gmail)}
         ${b.advice ? `<div class="text-xs text-text-muted mt-2" style="text-wrap:pretty">→ ${this._esc(b.advice)}</div>` : ''}
       </article>`;
+  },
+
+  // Ligne « listes noires » : seulement des faits. « propre » n'est affiché que
+  // si la vérif a vraiment abouti ; sinon « à activer » ou « non vérifiable ».
+  _repBlacklistLine(bl) {
+    if (!bl) return '';
+    if (bl.state === 'listed') {
+      return `<div class="text-xs mt-1" style="color:hsl(var(--danger))">⛔ Liste noire : ${this._esc(bl.detail || 'domaine signalé')}</div>`;
+    }
+    if (bl.state === 'clean') {
+      return `<div class="text-xs mt-1" style="color:hsl(var(--success-text))">✓ Pas sur liste noire (Spamhaus)</div>`;
+    }
+    if (bl.state === 'unconfigured') {
+      return `<div class="text-xs text-text-muted mt-1">Listes noires : à activer (clé Spamhaus gratuite)</div>`;
+    }
+    return `<div class="text-xs text-text-muted mt-1">Listes noires : non vérifiable — ${this._esc(bl.detail || '')}</div>`;
+  },
+
+  // Ligne « note Gmail » (Postmaster) : la vraie réputation vue par Gmail.
+  _repGmailLine(pm) {
+    if (!pm) return '';
+    if (pm.state === 'unconfigured') {
+      return `<div class="text-xs text-text-muted mt-1">Note Gmail : à activer (Google Postmaster — voir « Activer » plus haut)</div>`;
+    }
+    if (pm.state === 'no_data') {
+      return `<div class="text-xs text-text-muted mt-1">Note Gmail : pas encore de données (volume trop faible pour l'instant)</div>`;
+    }
+    if (pm.state === 'inconclusive') {
+      return `<div class="text-xs text-text-muted mt-1">Note Gmail : connexion à Google à vérifier</div>`;
+    }
+    const d = pm.data || {};
+    const cVar = { success: '--success', warning: '--warning', danger: '--danger' }[d.tone] || '--text';
+    const bits = [];
+    if (d.spam_rate_pct != null) bits.push('spam ' + d.spam_rate_pct + '%');
+    if (d.spf_pct != null) bits.push('SPF ' + d.spf_pct + '%');
+    if (d.dkim_pct != null) bits.push('DKIM ' + d.dkim_pct + '%');
+    if (d.dmarc_pct != null) bits.push('DMARC ' + d.dmarc_pct + '%');
+    const extra = bits.length ? ` · ${this._esc(bits.join(' · '))}` : '';
+    return `<div class="text-xs mt-1">Note Gmail : <span class="font-semibold" style="color:hsl(var(${cVar}))">${this._esc(d.reputation_label || '—')}</span>${extra}</div>`;
+  },
+
+  async _saveRepKeys() {
+    if (!App.api || !App.api.deliverability_keys_save) return;
+    const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    const payload = {
+      spamhaus_dqs_key: val('rep-spamhaus'),
+      postmaster_client_id: val('rep-pm-id'),
+      postmaster_client_secret: val('rep-pm-secret'),
+      postmaster_refresh_token: val('rep-pm-refresh'),
+    };
+    const btn = document.getElementById('rep-keys-save');
+    if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
+    try {
+      const r = await App.api.deliverability_keys_save(payload);
+      if (r && r.ok) {
+        if (window.Toast) Toast.success('Clés enregistrées. Analyse en cours…');
+        const keys = document.getElementById('h-rep-keys');
+        if (keys) keys.open = false;
+        this._loadReputation();
+      } else if (window.Toast) {
+        Toast.error((r && r.error) || 'Enregistrement impossible.');
+      }
+    } catch (e) {
+      if (window.Toast) Toast.friendlyError(e, 'Enregistrement impossible.');
+      else console.warn('deliverability_keys_save:', e);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Enregistrer'; }
+    }
   },
 
   _repChip(label, value, tone) {
@@ -327,6 +428,8 @@ const Health = {
   _bindRepCard() {
     const btn = document.getElementById('h-rep-refresh');
     if (btn) btn.onclick = () => this._loadReputation();
+    const save = document.getElementById('rep-keys-save');
+    if (save) save.onclick = () => this._saveRepKeys();
   },
 
   _renderMailSafety(mh) {

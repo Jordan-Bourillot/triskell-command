@@ -242,6 +242,88 @@ def resolve_smtp_for_send(client=None, app_state=None) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Clés « délivrabilité » — note Gmail (Postmaster) + listes noires (Spamhaus)
+# ---------------------------------------------------------------------------
+# Stockées dans shared_settings.deliverability_keys :
+#   { "spamhaus_dqs_key": "...",
+#     "postmaster": {"client_id": "...", "client_secret": "...",
+#                    "refresh_token": "..."} }
+# Variables d'environnement reconnues (priorité, figées côté hébergeur) :
+#   SPAMHAUS_DQS_KEY, POSTMASTER_CLIENT_ID, POSTMASTER_CLIENT_SECRET,
+#   POSTMASTER_REFRESH_TOKEN.
+DELIVERABILITY_KEY = "deliverability_keys"
+
+
+def get_deliverability_keys(client=None) -> dict:
+    """Renvoie {spamhaus_dqs_key, postmaster:{client_id, client_secret,
+    refresh_token}}. Variables d'environnement prioritaires, puis Supabase."""
+    import os
+    out = {"spamhaus_dqs_key": "",
+           "postmaster": {"client_id": "", "client_secret": "", "refresh_token": ""}}
+    # 1) Supabase
+    if client is not None:
+        try:
+            raw = client.get_shared_setting(DELIVERABILITY_KEY, {}) or {}
+            if isinstance(raw, str):
+                try: raw = json.loads(raw)
+                except Exception: raw = {}
+            if isinstance(raw, dict):
+                out["spamhaus_dqs_key"] = (raw.get("spamhaus_dqs_key") or "").strip()
+                pm = raw.get("postmaster") or {}
+                if isinstance(pm, dict):
+                    for k in ("client_id", "client_secret", "refresh_token"):
+                        out["postmaster"][k] = (pm.get(k) or "").strip()
+        except Exception as exc:
+            logger.debug("get_deliverability_keys supabase: %s", exc)
+    # 2) ENV — priorité absolue (écrase la base)
+    env_map = {
+        "SPAMHAUS_DQS_KEY": ("spamhaus_dqs_key", None),
+        "POSTMASTER_CLIENT_ID": ("postmaster", "client_id"),
+        "POSTMASTER_CLIENT_SECRET": ("postmaster", "client_secret"),
+        "POSTMASTER_REFRESH_TOKEN": ("postmaster", "refresh_token"),
+    }
+    for var, (top, sub) in env_map.items():
+        v = (os.environ.get(var) or "").strip()
+        if not v:
+            continue
+        if sub is None:
+            out[top] = v
+        else:
+            out[top][sub] = v
+    return out
+
+
+def save_deliverability_keys(payload: dict, client=None) -> bool:
+    """Fusionne et sauve les clés délivrabilité. Une valeur vide n'écrase pas
+    l'existant (permet de mettre à jour une seule clé sans tout resaisir)."""
+    if client is None:
+        return False
+    cur = {}
+    try:
+        cur = client.get_shared_setting(DELIVERABILITY_KEY, {}) or {}
+        if isinstance(cur, str):
+            cur = json.loads(cur)
+    except Exception:
+        cur = {}
+    if not isinstance(cur, dict):
+        cur = {}
+    cur.setdefault("postmaster", {})
+    p = payload or {}
+    if (p.get("spamhaus_dqs_key") or "").strip():
+        cur["spamhaus_dqs_key"] = p["spamhaus_dqs_key"].strip()
+    pm = p.get("postmaster") or {}
+    for k in ("client_id", "client_secret", "refresh_token"):
+        if (pm.get(k) or "").strip():
+            cur["postmaster"][k] = pm[k].strip()
+    try:
+        client.set_shared_setting(DELIVERABILITY_KEY, cur)
+        return True
+    except Exception as exc:
+        logger.warning("save_deliverability_keys: %s", exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Clés API IA — partagées
 # ---------------------------------------------------------------------------
 PROVIDERS = ("google", "anthropic", "openai", "mistral", "xai", "deepseek")

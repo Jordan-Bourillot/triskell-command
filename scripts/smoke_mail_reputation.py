@@ -26,6 +26,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT.parent / "triskell-core"))
 
 from triskell_command.integrations import mail_reputation as MR  # noqa: E402
+from triskell_command.integrations import mail_blacklist as BL  # noqa: E402
+from triskell_command.integrations import mail_postmaster as PM  # noqa: E402
 from triskell_command.integrations.mail_dns_doctor import check_domain  # noqa: E402
 
 NOW = datetime(2026, 6, 16, 12, 0, 0, tzinfo=timezone.utc)
@@ -211,6 +213,39 @@ v = MR.classify({"sent_30d": 150, "sent_window": 400, "bounces_30d": 0,
                  "first_seen": NOW - timedelta(days=45)},
                 auth=res, warmup_age_days=None, history_ok=True, now=NOW)
 check("DNS incomplet -> à corriger", v["status"] == "a_corriger")
+
+# ---------------------------------------------------------------------------
+# 5) Listes noires — lecture PURE du code de réponse (sans réseau)
+# ---------------------------------------------------------------------------
+check("NXDOMAIN = pas sur liste noire", BL.interpret_dbl(3, [])["state"] == "clean")
+check("réponse vide = pas sur liste noire", BL.interpret_dbl(0, [])["state"] == "clean")
+check("127.0.1.2 = signalé", BL.interpret_dbl(0, ["127.0.1.2"])["state"] == "listed")
+check("motif de signalement lisible",
+      "spam" in BL.interpret_dbl(0, ["127.0.1.2"])["detail"].lower())
+check("127.255.255.254 = non concluant (jamais 'propre')",
+      BL.interpret_dbl(0, ["127.255.255.254"])["state"] == "inconclusive")
+check("sans clé Spamhaus = à activer (pas de fausse affirmation)",
+      BL.check_domain("triskell-studio.fr", "")["state"] == "unconfigured")
+
+# ---------------------------------------------------------------------------
+# 6) Note Gmail — traduction PURE de la réponse Postmaster (sans réseau)
+# ---------------------------------------------------------------------------
+s = PM.summarize({"domainReputation": "HIGH", "spfSuccessRatio": 0.99,
+                  "dkimSuccessRatio": 1.0, "dmarcSuccessRatio": 0.97,
+                  "userReportedSpamRatio": 0.0005}, date="2026-06-14")
+check("réputation HIGH = Bonne / vert",
+      s["reputation_label"] == "Bonne" and s["tone"] == "success")
+check("taux converti en %", s["spf_pct"] == 99.0)
+check("taux de spam en %", s["spam_rate_pct"] == 0.05)
+sb = PM.summarize({"domainReputation": "BAD"})
+check("réputation BAD = Mauvaise / rouge",
+      sb["reputation_label"] == "Mauvaise" and sb["tone"] == "danger")
+sm = PM.summarize({})
+check("réputation absente = 'non communiquée' (jamais inventée)",
+      sm["reputation_label"] == "non communiquée" and sm["tone"] == "muted")
+check("champ absent = None (jamais 0 inventé)", sm["spf_pct"] is None)
+check("Postmaster sans identifiants = à activer",
+      PM.assess_domain("triskell-studio.fr", {})["state"] == "unconfigured")
 
 # ---------------------------------------------------------------------------
 print("-" * 60)

@@ -10242,6 +10242,46 @@ class Api:
             logger.warning("mail_reputation endpoint: %s", exc)
             return {"ok": False, "error": str(exc), "boxes": []}
 
+    def deliverability_keys_status(self, payload: dict | None = None) -> dict:
+        """Dit ce qui est configuré pour la note Gmail et les listes noires,
+        SANS jamais renvoyer les secrets eux-mêmes."""
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Base non connectée."}
+        try:
+            from ..integrations import shared_secrets
+            k = shared_secrets.get_deliverability_keys(client) or {}
+            pm = k.get("postmaster") or {}
+            return {"ok": True,
+                    "spamhaus_configured": bool((k.get("spamhaus_dqs_key") or "").strip()),
+                    "postmaster_configured": bool(pm.get("client_id")
+                                                   and pm.get("client_secret")
+                                                   and pm.get("refresh_token"))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def deliverability_keys_save(self, payload: dict | None = None) -> dict:
+        """Enregistre les clés délivrabilité (note Gmail + listes noires).
+        Une valeur laissée vide ne touche pas à l'existant."""
+        p = payload or {}
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Base non connectée."}
+        try:
+            from ..integrations import shared_secrets
+            ok = shared_secrets.save_deliverability_keys({
+                "spamhaus_dqs_key": p.get("spamhaus_dqs_key") or "",
+                "postmaster": {
+                    "client_id": p.get("postmaster_client_id") or "",
+                    "client_secret": p.get("postmaster_client_secret") or "",
+                    "refresh_token": p.get("postmaster_refresh_token") or "",
+                },
+            }, client=client)
+            return {"ok": bool(ok)}
+        except Exception as exc:
+            logger.warning("deliverability_keys_save: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def prospection_mission_cancel(self, payload: dict) -> dict:
         """Abandonne le suivi d'une mission (la chasse déjà lancée n'est
         pas tuée, ses résultats restent consultables dans son outil)."""
