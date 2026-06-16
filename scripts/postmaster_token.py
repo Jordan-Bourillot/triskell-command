@@ -43,8 +43,26 @@ def main() -> int:
     print("=" * 64)
     print("  Autorisation Google Postmaster — Triskell")
     print("=" * 64)
-    client_id = input("Client ID     : ").strip()
-    client_secret = input("Client secret : ").strip()
+    print("Glisse-depose ici le fichier JSON telecharge depuis Google (ou colle")
+    print("son chemin), puis Entree. Ou laisse vide pour saisir a la main.")
+    path = input("Fichier JSON : ").strip().strip('"').strip("'")
+    client_id = client_secret = ""
+    if path:
+        try:
+            import json as _json
+            with open(path, "r", encoding="utf-8") as f:
+                data = _json.load(f)
+            node = data.get("installed") or data.get("web") or data
+            client_id = (node.get("client_id") or "").strip()
+            client_secret = (node.get("client_secret") or "").strip()
+            if client_id:
+                print(f"  Lu dans le JSON : {client_id[:28]}...")
+        except Exception as exc:
+            print(f"  Lecture du JSON impossible ({exc}). Saisis a la main.")
+    if not client_id:
+        client_id = input("Client ID     : ").strip()
+    if not client_secret:
+        client_secret = input("Client secret : ").strip()
     if not client_id or not client_secret:
         print("Client ID et Client secret obligatoires.")
         return 1
@@ -125,11 +143,13 @@ def main() -> int:
 
     print()
     print("=" * 64)
-    print("  REFRESH TOKEN (a coller dans Triskell, ecran Sante > Reputation) :")
+    print("  A COLLER DANS TRISKELL (Sante > Reputation > Activer) :")
     print("=" * 64)
-    print(refresh)
+    print("Client ID     :", client_id)
+    print("Client secret :", client_secret)
+    print("Refresh token :", refresh)
     print("=" * 64)
-    print("Garde aussi le Client ID et le Client secret : les 3 vont ensemble.")
+    print("Copie les 3 lignes ci-dessus dans les 3 champs Postmaster.")
     return 0
 
 

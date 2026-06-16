@@ -110,7 +110,6 @@ def aggregate_for_accounts(rows: Iterable[dict], accounts: list[dict],
 
     by_addr: dict[str, str] = {}
     by_id: dict[str, str] = {}
-    primary_id = None
     for a in accounts:
         aid = str(a.get("id") or "").strip()
         if not aid:
@@ -119,8 +118,6 @@ def aggregate_for_accounts(rows: Iterable[dict], accounts: list[dict],
         if addr:
             by_addr[addr] = aid
         by_id[aid] = aid
-        if aid == "primary" or a.get("is_primary"):
-            primary_id = aid
 
     def _blank() -> dict:
         return {"sent_24h": 0, "sent_7d": 0, "sent_30d": 0, "sent_window": 0,
@@ -132,7 +129,12 @@ def aggregate_for_accounts(rows: Iterable[dict], accounts: list[dict],
     for r in rows:
         addr = (r.get("from_email") or "").strip().lower()
         rid = str(r.get("account_id") or "").strip()
-        owner = by_addr.get(addr) or by_id.get(rid) or primary_id
+        # Attribution STRICTE : par adresse expéditrice exacte, sinon par
+        # identifiant de boîte exact. Une ligne sans étiquette reconnue n'est
+        # JAMAIS collée d'office sur la principale — sinon cette boîte ramasse
+        # les rebonds de tout le monde et affiche un faux taux catastrophique
+        # (vécu : 62 rebonds d'une seule adresse morte gonflaient primary à 38 %).
+        owner = by_addr.get(addr) or by_id.get(rid)
         if owner is None or owner not in agg:
             continue
         ts = _parse_ts(r.get("ts") or "")

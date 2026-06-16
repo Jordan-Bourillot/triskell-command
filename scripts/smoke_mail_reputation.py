@@ -78,14 +78,21 @@ rows = [{"ts": iso(2), "kind": "email_sent", "account_id": "lagriffe",
 agg = MR.aggregate_for_accounts(rows, ACCOUNTS, now=NOW)
 check("attribution par identifiant", agg["lagriffe"]["sent_24h"] == 1)
 
-# Ni adresse ni identifiant -> compte principal (jamais perdu).
+# Ni adresse ni identifiant -> NON attribué : jamais collé d'office sur la
+# principale (sinon une boîte ramasse les rebonds de tout le monde = faux taux,
+# vécu le 16/06 avec 62 rebonds d'une seule adresse morte sur primary).
 rows = [{"ts": iso(2), "kind": "email_sent", "account_id": "", "from_email": ""}]
 agg = MR.aggregate_for_accounts(rows, ACCOUNTS, now=NOW)
-check("repli vers le compte principal", agg["primary"]["sent_24h"] == 1)
+check("orphelin non collé sur la principale", agg["primary"]["sent_24h"] == 0)
+check("aucune boîte ne ramasse l'orphelin",
+      sum(a["sent_24h"] for a in agg.values()) == 0)
 
-# Pas de double comptage : une ligne = une seule boîte.
-total = sum(a["sent_24h"] for a in agg.values())
-check("aucun double comptage", total == 1)
+# Pas de double comptage : une ligne étiquetée (adresse + identifiant) compte
+# pour UNE seule boîte.
+rows = [{"ts": iso(2), "kind": "email_sent", "account_id": "lagriffe",
+         "from_email": "contact@lagriffe-studio.fr"}]
+agg = MR.aggregate_for_accounts(rows, ACCOUNTS, now=NOW)
+check("aucun double comptage", sum(a["sent_24h"] for a in agg.values()) == 1)
 
 # Fenêtres 24h / 7j / 30j + jours actifs + premier envoi.
 rows = [
