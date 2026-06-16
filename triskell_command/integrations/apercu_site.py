@@ -403,17 +403,25 @@ _PERSONALIZE_JS = r"""(args) => {
   if (cityDemo) {
     const esc = cityDemo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const rx = new RegExp(esc, 'gi');
-    // Préposition + ville fictive (« à Quimper », « de Quimper »…) : sert à
-    // retirer proprement la mention quand on ne connaît PAS la ville du
-    // prospect (sinon on afficherait une ville au hasard).
-    const rxPrep = new RegExp('\\s*(?:à|a|de|sur|en)\\s+' + esc, 'gi');
+    // Sans ville connue, on retire la ville fictive AVEC sa préposition
+    // (« à Quimper ») ET un éventuel raccord d'aire « & alentours / et ses
+    // environs » qui resterait orphelin, plutôt que d'afficher une ville au
+    // hasard. Un bout de texte qui ne contient plus que de la ponctuation
+    // est vidé (sinon il resterait un « . » ou un « & » solitaire).
+    const conn = '(?:\\s*(?:&|et)\\s+(?:alentours?|alentour|environs|ses\\s+environs))?';
+    const rxPrep = new RegExp('\\s*(?:à|a|de|sur|en)\\s+' + esc + conn, 'gi');
+    const rxCity = new RegExp(esc + conn, 'gi');
     const hero = document.querySelector('.cust-hero');
     if (hero) {
       const walk = n => { for (const c of n.childNodes) {
         if (c.nodeType === 3) {
-          c.nodeValue = ville
-            ? c.nodeValue.replace(rx, ville)
-            : c.nodeValue.replace(rxPrep, '').replace(rx, '');
+          if (ville) {
+            c.nodeValue = c.nodeValue.replace(rx, ville);
+          } else {
+            let v = c.nodeValue.replace(rxPrep, '').replace(rxCity, '')
+                               .replace(/\s{2,}/g, ' ');
+            c.nodeValue = /^[\s.,;:&·\-–—]*$/.test(v) ? '' : v;
+          }
         } else walk(c);
       }};
       walk(hero);
