@@ -10306,16 +10306,25 @@ class Api:
         except Exception:
             established_set = None
         today = datetime.now().date().isoformat()
-        start = state.get("start") or today
+        # Source unique de vérité = ce que le robot (warmup_tick) a écrit, PAS
+        # l'horloge de ce serveur. Le robot tourne ailleurs (GitHub Actions, en
+        # heure de Paris) ; si l'horloge de ce serveur est décalée d'un jour,
+        # recalculer « aujourd'hui » et le numéro de jour ici les fait diverger
+        # (bilan qui retombe à zéro, « J1 » en haut mais « Jour 2 » sur les
+        # lignes). On lit donc le DERNIER jour réellement enregistré par le
+        # robot et on somme l'activité de CE jour-là.
+        dates = [r.get("date") for r in parts.values() if r.get("date")]
+        as_of = max(dates) if dates else today
+        start = state.get("start") or as_of
         try:
-            day = (datetime.fromisoformat(today)
-                   - datetime.fromisoformat(start)).days + 1
+            day_calc = (datetime.fromisoformat(as_of)
+                        - datetime.fromisoformat(start)).days + 1
         except Exception:
-            day = 1
+            day_calc = 1
         GOAL = 28
         boxes, ts, tr, tp = [], 0, 0, 0
         for aid, r in parts.items():
-            same = (r.get("date") == today)
+            same = (r.get("date") == as_of)
             s = r.get("sent", 0) if same else 0
             rc = r.get("received", 0) if same else 0
             rp = r.get("replied", 0) if same else 0
@@ -10326,7 +10335,7 @@ class Api:
             else:
                 is_new_box = _is_new(r)
             if is_new_box:
-                bday = int(r.get("day") or day)
+                bday = int(r.get("day") or day_calc)
                 boxes.append({
                     "email": names.get(aid, aid), "role": "warm",
                     "day": bday, "goal": GOAL,
@@ -10342,11 +10351,21 @@ class Api:
                     "ready": True,
                 })
         boxes.sort(key=lambda b: (b["role"] != "warm", b["email"]))
+        # Numéro de jour affiché = le plus avancé des jours stockés par le robot
+        # pour les boîtes neuves (sa vérité) ; repli sur le calcul par dates si
+        # rien n'est encore stocké. Ainsi le J global ne contredit jamais les
+        # « Jour X » des lignes : ils sortent de la même source.
+        warm_days = [b["day"] for b in boxes
+                     if b["role"] == "warm" and b.get("day")]
+        day = max(warm_days) if warm_days else day_calc
+        as_of_is_today = (as_of == today)
+        when_word = "aujourd'hui" if as_of_is_today else "dernier passage"
         n_new = sum(1 for b in boxes if b["role"] == "warm")
         summary = (f"{len(boxes)} boîte(s) en chauffe ({n_new} neuve(s)) · "
-                   f"jour J{day}/{GOAL} · aujourd'hui : "
+                   f"jour J{day}/{GOAL} · {when_word} : "
                    f"{ts} envoyés, {tr} reçus, {tp} réponses")
         return {"ok": True, "active": True, "day": day, "goal": GOAL,
+                "as_of": as_of, "as_of_is_today": as_of_is_today,
                 "boxes": boxes, "summary": summary}
 
     def mail_reputation(self, payload: dict | None = None) -> dict:

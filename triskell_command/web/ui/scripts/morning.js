@@ -938,36 +938,67 @@ const Morning = {
     const goal = d.goal || 28;
     const day = d.day || 1;
     const plur = (n) => (n > 1 ? 's' : '');
+    const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+                  'juillet', 'août', 'septembre', 'octobre', 'novembre',
+                  'décembre'];
     const totSent = d.boxes.reduce((a, b) => a + (b.sent_today || 0), 0);
-    const totRec = d.boxes.reduce((a, b) => a + (b.received_today || 0), 0);
-    const totRep = d.boxes.reduce((a, b) => a + (b.replied_today || 0), 0);
 
+    // Compteurs d'un coup d'œil (calculés sur l'état réel renvoyé par le robot).
+    const warm = d.boxes.filter((b) => b.role === 'warm');
+    const nbChaude = d.boxes.filter((b) => b.role === 'established').length;
+    const nbPrete = warm.filter((b) => b.ready).length;
+    const nbChauffe = warm.length - nbPrete;
+
+    const gpct = Math.max(3, Math.min(100, Math.round(day / goal * 100)));
+    const remaining = Math.max(0, goal - day);
+    let eta;
+    if (warm.length && nbChauffe === 0) {
+      eta = 'toutes prêtes pour la prospection';
+    } else if (remaining > 0) {
+      const dte = new Date(Date.now() + remaining * 86400000);
+      eta = `prêtes vers le ${dte.getDate()} ${MOIS[dte.getMonth()]}`;
+    } else {
+      eta = 'prêtes très bientôt';
+    }
+
+    // « Aujourd'hui » seulement si le dernier jour enregistré par le robot est
+    // bien la date de ce serveur ; sinon on date le bilan (jamais trompeur).
+    let when = "Aujourd'hui";
+    if (d.as_of && d.as_of_is_today === false) {
+      const p = String(d.as_of).split('-');
+      when = (p.length === 3) ? `Dernier passage · ${p[2]}/${p[1]}`
+                              : 'Dernier passage';
+    }
+    const activity = (totSent > 0)
+      ? `${when} : <strong>${totSent}</strong> mail${plur(totSent)} échangé${plur(totSent)} entre tes boîtes`
+      : `${when} : chauffe au repos pour l'instant`;
+
+    const stat = (label, val) => `
+      <div style="border:1px solid hsl(var(--border));border-radius:10px;padding:10px 12px">
+        <div style="font-size:12px;color:hsl(var(--text-secondary))">${label}</div>
+        <div style="font-size:22px;font-weight:700;color:hsl(var(--text));line-height:1.1;margin-top:2px">${val}</div>
+      </div>`;
+
+    // Liste compacte : une ligne par boîte. Le détail chiffré est caché et
+    // déplié à la demande (bouton « Voir le détail »).
     const rows = d.boxes.map((b) => {
       const established = (b.role === 'established');
       const ready = !!b.ready;
       const pct = Math.max(3, Math.min(100, b.pct || 0));
       const barColor = (established || ready) ? 'hsl(var(--success))' : 'hsl(var(--accent-strong))';
-      let status;
-      if (established) {
-        status = '<span style="color:hsl(var(--success-text));font-weight:600">✓ Déjà chaude</span>';
-      } else if (ready) {
-        status = '<span style="color:hsl(var(--success-text));font-weight:600">✅ Prête</span>';
-      } else {
-        status = `<span style="color:hsl(var(--text-muted))">Jour ${b.day}/${goal}</span>`;
-      }
+      let label, lblColor;
+      if (established) { label = '✓ Déjà chaude'; lblColor = 'hsl(var(--success-text))'; }
+      else if (ready) { label = '✅ Prête'; lblColor = 'hsl(var(--success-text))'; }
+      else { label = `Jour ${b.day}`; lblColor = 'hsl(var(--text-muted))'; }
       const s = b.sent_today || 0, rc = b.received_today || 0, rp = b.replied_today || 0;
       return `
-        <div style="padding:12px 0;border-top:1px solid hsl(var(--border))">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">
-            <div style="font-weight:600;color:hsl(var(--text));overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._esc(b.email)}</div>
-            <div style="flex:none;font-size:13px">${status}</div>
-          </div>
-          <div style="height:8px;border-radius:99px;background:hsl(var(--border));overflow:hidden">
-            <div style="height:100%;width:${pct}%;background:${barColor};border-radius:99px;transition:width .4s"></div>
-          </div>
-          <div style="margin-top:7px;font-size:12.5px;color:hsl(var(--text-secondary))">
-            Aujourd'hui : <strong>${s}</strong> envoyé${plur(s)} · <strong>${rc}</strong> reçu${plur(rc)} · <strong>${rp}</strong> réponse${plur(rp)}
-          </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:7px 0;border-top:1px solid hsl(var(--border))">
+          <div style="flex:1;min-width:0;font-size:13px;color:hsl(var(--text));overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._esc(b.email)}</div>
+          <div style="flex:none;width:110px;height:6px;border-radius:99px;background:hsl(var(--border));overflow:hidden"><div style="height:100%;width:${pct}%;background:${barColor};border-radius:99px;transition:width .4s"></div></div>
+          <div style="flex:none;width:104px;text-align:right;font-size:12px;color:${lblColor}">${label}</div>
+        </div>
+        <div class="m-wu-detail" style="display:none;padding:2px 0 9px;font-size:12px;color:hsl(var(--text-secondary))">
+          ${s} envoyé${plur(s)} · ${rc} reçu${plur(rc)} · ${rp} réponse${plur(rp)}
         </div>`;
     }).join('');
 
@@ -976,18 +1007,42 @@ const Morning = {
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
           <div>
             <div style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:hsl(var(--text-muted));font-weight:600">Délivrabilité</div>
-            <h3 style="margin:2px 0 0;font-size:17px;color:hsl(var(--text))">🔥 Chauffe des boîtes mail</h3>
+            <h3 style="margin:3px 0 0;font-size:17px;color:hsl(var(--text))">🔥 Chauffe des boîtes mail</h3>
           </div>
           <div style="flex:none;text-align:right">
             <div style="font-size:22px;font-weight:700;color:hsl(var(--accent-text));line-height:1">J${day}<span style="font-size:14px;color:hsl(var(--text-muted))">/${goal}</span></div>
           </div>
         </div>
-        <div style="margin-top:6px;font-size:13px;color:hsl(var(--text-secondary))">
-          Aujourd'hui : <strong>${totSent}</strong> envoyé${plur(totSent)} · <strong>${totRec}</strong> reçu${plur(totRec)} · <strong>${totRep}</strong> réponse${plur(totRep)}
-          <span style="color:hsl(var(--text-muted))"> — ${d.boxes.length} boîte${plur(d.boxes.length)} en chauffe</span>
+        <div style="margin-top:14px;height:10px;border-radius:99px;background:hsl(var(--border));overflow:hidden">
+          <div style="height:100%;width:${gpct}%;background:hsl(var(--accent-strong));border-radius:99px;transition:width .4s"></div>
         </div>
-        <div style="margin-top:4px">${rows}</div>
+        <div style="margin-top:7px;font-size:13px;color:hsl(var(--text-secondary))">Jour ${day} sur ${goal} — ${eta}</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px">
+          ${stat('En chauffe', nbChauffe)}
+          ${stat('Déjà chaude', nbChaude)}
+          ${stat('Prête' + plur(nbPrete), nbPrete)}
+        </div>
+        <div style="margin-top:12px;font-size:13px;color:hsl(var(--text-secondary))">${activity}</div>
+        <div style="margin-top:14px">${rows}</div>
+        <button type="button" id="m-wu-toggle" style="margin-top:10px;display:inline-flex;align-items:center;gap:6px;font-size:13px;color:hsl(var(--text-muted));background:none;border:none;cursor:pointer;padding:4px 0">
+          <span id="m-wu-chevron">▾</span><span id="m-wu-toggle-label">Voir le détail par boîte</span>
+        </button>
       </div>`;
+
+    const tg = document.getElementById('m-wu-toggle');
+    if (tg) {
+      tg.addEventListener('click', () => {
+        const open = host.getAttribute('data-wu-open') === '1';
+        host.setAttribute('data-wu-open', open ? '0' : '1');
+        host.querySelectorAll('.m-wu-detail').forEach((el) => {
+          el.style.display = open ? 'none' : 'block';
+        });
+        const lab = document.getElementById('m-wu-toggle-label');
+        const chev = document.getElementById('m-wu-chevron');
+        if (lab) lab.textContent = open ? 'Voir le détail par boîte' : 'Masquer le détail';
+        if (chev) chev.textContent = open ? '▾' : '▴';
+      });
+    }
   },
 
   // -------- Bloc MODES — bascule envoi direct ↔ validation --------
