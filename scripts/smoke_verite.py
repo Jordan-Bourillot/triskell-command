@@ -163,9 +163,11 @@ check("sa vue Argus reste routée (lien direct possible)",
       "case 'argus'" in (ui / "scripts/app.js").read_text(encoding="utf-8"))
 check("bandeau « en pause » sur la vue Argus",
       "en pause" in (ui / "scripts/argus.js").read_text(encoding="utf-8"))
-check("compteur du groupe à jour (4)", 'nav-group-count">4' in html)
-check("Éclaireur renommé « Compléter les fiches »",
-      "<span>Compléter les fiches</span>" in html)
+check("compteur Outils de recherche à jour (3)", 'nav-group-count">3' in html)
+# « Compléter les fiches » (ex-Éclaireur) volontairement HORS menu : outil moot
+# (jamais de prospect sans mail, démarchage mail only — décision Jordan 16/06).
+check("pas de tuile fantôme « Compléter les fiches »",
+      "<span>Compléter les fiches</span>" not in html)
 
 print()
 print(f"{len(PASS)} OK / {len(FAIL)} échec(s)")
