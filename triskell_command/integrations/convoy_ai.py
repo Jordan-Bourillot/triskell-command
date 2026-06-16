@@ -611,6 +611,24 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         "{{example_pain}}":      "",
         "{{competitor_example}}": "",
     }
+    # --- Élision "de" → "d'" devant un secteur commençant par une voyelle.
+    # Sans ça, le modèle "votre site de {secteur}" donne "de électricien"
+    # au lieu de "d'électricien" (faute que la 2e IA sanctionne, à raison).
+    _VOWELS = "aàâäeéèêëiîïoôöuùûühAÀÂÄEÉÈÊËIÎÏOÔÖUÙÛÜH"
+    if secteur and secteur.lstrip()[:1] in _VOWELS:
+        for _ph in ("{secteur}", "{{business_type}}", "{{industry}}", "{{sector}}"):
+            text = text.replace("de " + _ph, "d'" + _ph)
+            text = text.replace("De " + _ph, "D'" + _ph)
+    # --- Ville inconnue : on retire l'amorce de lieu collée à {ville}.
+    # Sans ça, "Pour un {secteur} à {ville}," devient "Pour un maçon à ,"
+    # (un "à" pendant et une virgule en l'air) quand la fiche n'a pas de ville.
+    if not ville.strip():
+        import re as _re_loc
+        text = _re_loc.sub(
+            r"\s+(?:à|de|sur|près\s+de|proche\s+de)\s+"
+            r"(?:<strong>\s*)?\{ville\}(?:\s*</strong>)?",
+            "", text, flags=_re_loc.IGNORECASE)
+
     out = text
     # Les clés longues d'abord : sans ça, "{page_demo}" (1 accolade) se
     # substitue À L'INTÉRIEUR de "{{page_demo}}" (2 accolades) et laisse
