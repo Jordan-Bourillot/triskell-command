@@ -635,6 +635,7 @@ const App = {
       case 'autopilot': return Autopilot.render(target);
       case 'convoy':    return Convoy.render(target);
       case 'prospection': return Prospection.render(target);
+      case 'sites_a_refaire': return SitesARefaire.render(target);
       case 'chasseur':  return Chasseur.render(target);
       case 'chasseur_createurs': return ChasseurCreateurs.render(target);
       case 'prospecteur_google': return ProspecteurGoogle.render(target);

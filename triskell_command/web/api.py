@@ -2854,6 +2854,67 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def oeil_visuel_list(self, payload: dict | None = None) -> dict:
+        """Liste les prospects « à refaire » (sûr) et « à vérifier » avec leur
+        motif, pour l'écran dédié. Charge la base — peut prendre quelques
+        secondes."""
+        try:
+            from ..integrations.site_quality import REDO_TAG
+            from ..integrations.site_vision import VERIFY_CATEGORY
+            from triskell_core.prospect.core.crm import get_crm
+            crm = get_crm()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        labels = {
+            "redo_visuel": "Look daté (vu à l'œil)",
+            "redo_no_site": "Pas de vrai site",
+            "redo_free_host": "Adresse gratuite",
+            "redo_old": "Site techniquement vieux",
+            "redo_down": "Site en panne",
+        }
+
+        def _reason(notes: str) -> str:
+            for ln in reversed((notes or "").splitlines()):
+                if "[IA visuelle" in ln or "(look)" in ln:
+                    return ln.split("—", 1)[-1].split("[", 1)[0].strip(" :—")[:160]
+            return ""
+
+        def _metier(p) -> str:
+            for a in ("sector", "metier", "activite", "category", "activity"):
+                v = getattr(p, a, "") or ""
+                if v:
+                    return str(v)
+            return ""
+
+        sure, verify = [], []
+        try:
+            for p in crm.all():
+                tags = p.tags or []
+                is_sure = REDO_TAG in tags
+                is_verify = (VERIFY_CATEGORY in tags) and not is_sure
+                if not (is_sure or is_verify):
+                    continue
+                emails = getattr(p, "emails", None) or []
+                item = {
+                    "name": p.name or "",
+                    "website": getattr(p, "website", "") or "",
+                    "email": emails[0] if emails else "",
+                    "metier": _metier(p),
+                    "ville": getattr(p, "city", "") or "",
+                    "categories": [labels[t] for t in tags if t in labels],
+                    "reason": _reason(getattr(p, "notes", "") or ""),
+                }
+                (sure if is_sure else verify).append(item)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+        sure.sort(key=lambda x: (x["name"] or "").lower())
+        verify.sort(key=lambda x: (x["name"] or "").lower())
+        return {"ok": True,
+                "counts": {"sure": len(sure), "verify": len(verify)},
+                "sure": sure[:1000], "verify": verify[:1000]}
+
     def phare_automerge_get(self) -> dict:
         """Lit l'état de la publication automatique des modifs vérifiées.
         Endpoint dédié (et non un settings_set générique) pour ne JAMAIS
