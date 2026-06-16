@@ -541,6 +541,14 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
     prenom    = prospect.get("prenom", "") or ""
     nom       = prospect.get("nom", "") or ""
     raison    = prospect.get("raison_sociale", "") or ""
+    # Nettoie un nom du genre "Institut Embellia (Deguilhem Delphine)" : la
+    # parenthèse finale (gérant / sigle / note) sonne comme une variable mal
+    # remplie dans un mail de prospection (l'aperçu fait le même nettoyage).
+    try:
+        from .apercu_site import clean_business_name as _clean_bn
+        raison = _clean_bn(raison)
+    except Exception:
+        pass
     ville     = prospect.get("ville", "") or ""
     secteur   = prospect.get("secteur", "") or ""
     email     = prospect.get("email", "") or ""
@@ -617,6 +625,15 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
     _VOWELS = "aàâäeéèêëiîïoôöuùûühAÀÂÄEÉÈÊËIÎÏOÔÖUÙÛÜH"
     if secteur and secteur.lstrip()[:1] in _VOWELS:
         for _ph in ("{secteur}", "{{business_type}}", "{{industry}}", "{{sector}}"):
+            text = text.replace("de " + _ph, "d'" + _ph)
+            text = text.replace("De " + _ph, "D'" + _ph)
+    # --- Élision "de" → "d'" devant un NOM à voyelle ("le site de Institut
+    # Embellia" → "le site d'Institut Embellia"). On n'élide un placeholder
+    # que si SA valeur commence par une voyelle.
+    for _ph, _val in (("{{name}}", name_any), ("{{company}}", raison),
+                      ("{{company_name}}", raison), ("{raison_sociale}", raison),
+                      ("{{first_name}}", prenom), ("{prenom}", prenom)):
+        if _val and _val.lstrip()[:1] in _VOWELS:
             text = text.replace("de " + _ph, "d'" + _ph)
             text = text.replace("De " + _ph, "D'" + _ph)
     # --- Ville inconnue : on retire l'amorce de lieu collée au placeholder

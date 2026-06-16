@@ -64,6 +64,20 @@ def _strip_accents(s: str) -> str:
                    if unicodedata.category(c) != "Mn")
 
 
+def clean_business_name(name: str) -> str:
+    """Nettoie un nom d'entreprise pour l'afficher dans un mail / un aperçu.
+
+    Retire une parenthèse FINALE (nom du gérant, sigle, note) qui, dans une
+    prose de prospection, sonne comme une « variable mal remplie » :
+        "Institut Embellia (Deguilhem Delphine)" -> "Institut Embellia"
+        "Mr Moustache ( uniquement SANS RENDEZ - VOUS)" -> "Mr Moustache"
+    Garde le nom tel quel si le retrait le viderait (nom = juste « (...) »).
+    """
+    n = (name or "").strip()
+    stripped = re.sub(r"\s*\([^()]*\)\s*$", "", n).strip()
+    return stripped or n
+
+
 # ===========================================================================
 #  PARTIE 1 — Aperçu = vrai site de démo Pixel Pros personnalisé
 # ===========================================================================
@@ -755,6 +769,7 @@ def render_preview_png(nom: str, metier: str = "", ville: str = "",
     """Aperçu du futur site, en PNG. D'abord le vrai site de démo du métier
     (personnalisé) ; à défaut, la maquette auto-contenue. None si rien ne peut
     être rendu — le mail part alors sans aperçu (jamais bloquant)."""
+    nom = clean_business_name(nom)
     png = None
     slug = _demo_slug_for(metier)
     # Rendu TOUJOURS dans un thread dédié (sync_playwright ne tourne pas dans
@@ -815,6 +830,7 @@ def preview_image_url(nom: str, metier: str = "", ville: str = "") -> str:
     """Génère l'aperçu, l'héberge sur Supabase Storage, renvoie l'URL publique.
     Réutilise l'image si elle existe déjà (même prospect) — pas de re-rendu.
     Renvoie "" si indisponible (Playwright/Supabase absents) — jamais bloquant."""
+    nom = clean_business_name(nom)
     key = hashlib.sha1(
         f"{nom}|{metier}|{ville}|v{_DESIGN_VERSION}".encode("utf-8")).hexdigest()[:20]
     path = f"apercus/{key}.png"
