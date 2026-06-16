@@ -32,7 +32,8 @@ BASE_URL = "https://pixel-pros.fr"
 # Les slugs réellement en ligne (une page <slug>.html + une page
 # demo-<slug>.html chacune). Si une nouvelle page de pub naît, l'ajouter ici
 # ET dans les règles de correspondance plus bas.
-# (Les 8 derniers — pisciniste → architecte-interieur — datent du 16/06/2026.)
+# (Les 8 « pisciniste → architecte-interieur » + les 15 « cuisiniste →
+#  food-truck » datent du 16/06/2026 : 40 pages métier au total.)
 KNOWN_SLUGS = (
     "animalier", "beaute", "bien-etre", "carreleur", "coach",
     "electricien", "fleuriste", "macon", "menuisier", "patisserie",
@@ -40,13 +41,30 @@ KNOWN_SLUGS = (
     "restaurant", "tatoueur",
     "pisciniste", "chambres-hotes", "garagiste", "osteopathe",
     "auto-ecole", "traiteur", "couvreur", "architecte-interieur",
+    "cuisiniste", "salle-reception", "wedding-planner", "serrurier",
+    "facadier", "salle-sport", "agent-immobilier", "chauffage-energies",
+    "dj", "vitrier", "portail-cloture", "caviste", "dieteticien",
+    "lavage-auto", "food-truck",
 )
 
 # Règles « préfixe contenu dans le secteur » (ordre = priorité, premier
 # match gagne). Préfixes volontairement longs pour éviter les faux amis.
 _PREFIX_RULES: tuple[tuple[str, str], ...] = (
-    ("plomb",      "plombier"),
-    ("chauffag",   "plombier"),      # plombier-chauffagiste
+    ("plomb",      "plombier"),       # plombier-chauffagiste : « plomb » d'abord
+    # Chauffage nouvelle génération (poêle granulés, pompe à chaleur) a sa page
+    # depuis le 16/06/2026. Le plombier-chauffagiste reste sur plombier (capté
+    # par « plomb » juste au-dessus) ; le reste du chauffage va sur la page dédiée.
+    ("poele",      "chauffage-energies"),   # poêle à granulés / à bois
+    ("granul",     "chauffage-energies"),   # granulés / pellets
+    ("pellet",     "chauffage-energies"),
+    ("pompe a chaleur", "chauffage-energies"),
+    ("aerotherm",  "chauffage-energies"),
+    ("geotherm",   "chauffage-energies"),
+    ("climatis",   "chauffage-energies"),    # clim réversible = PAC air/air
+    ("photovolta", "chauffage-energies"),
+    ("panneau solaire", "chauffage-energies"),
+    ("energies renouvelab", "chauffage-energies"),
+    ("chauffag",   "chauffage-energies"),    # chauffagiste / chauffage
     ("electric",   "electricien"),
     ("menuis",     "menuisier"),
     ("ebenist",    "menuisier"),
@@ -74,6 +92,18 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("boulang",    "patisserie"),    # commerce de bouche le plus proche
     ("chocolat",   "patisserie"),
     ("confis",     "patisserie"),    # confiserie / confiseur
+    # Food truck AVANT restaurant : « camion restaurant », « street food »,
+    # « camion pizza »… doivent partir sur la page food truck, pas restaurant.
+    ("food truck", "food-truck"),
+    ("food-truck", "food-truck"),
+    ("foodtruck",  "food-truck"),
+    ("food trailer", "food-truck"),
+    ("camion pizza", "food-truck"),
+    ("camion a pizza", "food-truck"),
+    ("camion restaurant", "food-truck"),
+    ("camion a burger", "food-truck"),
+    ("camion-restaurant", "food-truck"),
+    ("street food", "food-truck"),
     ("restaurant", "restaurant"),
     ("pizzer",     "restaurant"),    # pizzeria / pizzeriste
     ("creper",     "restaurant"),    # crêperie / crêpier
@@ -111,6 +141,18 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("auto ecole", "auto-ecole"),
     ("ecole de conduite", "auto-ecole"),
     ("permis",     "auto-ecole"),     # permis de conduire / B / moto
+    # Lavage auto / detailing AVANT garage : « lavage automobile » contient
+    # « automobile » (qui partirait sinon sur garagiste).
+    ("lavage auto", "lavage-auto"),
+    ("lavage automobile", "lavage-auto"),
+    ("lavage-auto", "lavage-auto"),
+    ("detailing",  "lavage-auto"),
+    ("detailer",   "lavage-auto"),
+    ("car wash",   "lavage-auto"),
+    ("nettoyage auto", "lavage-auto"),
+    ("nettoyage automobile", "lavage-auto"),
+    ("station de lavage", "lavage-auto"),
+    ("lustrage",   "lavage-auto"),
     ("garag",      "garagiste"),
     ("carross",    "garagiste"),      # carrosserie
     ("mecaniq",    "garagiste"),      # mécanique auto
@@ -125,6 +167,81 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("decorateur", "architecte-interieur"),
     ("decoratrice", "architecte-interieur"),
     ("home staging", "architecte-interieur"),
+    # — 15 nouveaux métiers (16/06/2026) —
+    ("cuisinist",  "cuisiniste"),     # cuisiniste (PAS « cuisine » seul : trop large)
+    ("amenagement de cuisine", "cuisiniste"),
+    ("cuisine equip", "cuisiniste"),
+    ("cuisine amenag", "cuisiniste"),
+    # Serrurier AVANT portail (un serrurier-métallier qui pose des portails
+    # reste serrurier).
+    ("serrur",     "serrurier"),      # serrurier / serrurerie
+    ("metall",     "serrurier"),      # métallier / métallerie / métallique
+    ("ferronn",    "serrurier"),      # ferronnier / ferronnerie d'art
+    ("facad",      "facadier"),       # façadier / façade
+    ("ravalement", "facadier"),
+    ("crepi",      "facadier"),       # crépi
+    ("enduit",     "facadier"),       # enduit de façade
+    ("isolation ext", "facadier"),    # ITE — isolation extérieure
+    ("vitrier",    "vitrier"),
+    ("vitrerie",   "vitrier"),
+    ("vitrag",     "vitrier"),        # vitrage / survitrage / double vitrage
+    ("miroit",     "vitrier"),        # miroitier / miroiterie
+    ("portail",    "portail-cloture"),
+    ("cloture",    "portail-cloture"),
+    ("pergola",    "portail-cloture"),
+    ("brise-vue",  "portail-cloture"),
+    ("brise vue",  "portail-cloture"),
+    ("portillon",  "portail-cloture"),
+    ("store banne", "portail-cloture"),
+    # Salle de sport ≠ salle de réception : on n'utilise JAMAIS « salle » seul.
+    ("salle de sport", "salle-sport"),
+    ("salle de fitness", "salle-sport"),
+    ("fitness",    "salle-sport"),
+    ("crossfit",   "salle-sport"),
+    ("cross-fit",  "salle-sport"),
+    ("musculation", "salle-sport"),
+    ("club de sport", "salle-sport"),
+    ("salle de reception", "salle-reception"),
+    ("salle des fetes", "salle-reception"),
+    ("salle de fete", "salle-reception"),
+    ("domaine de mariage", "salle-reception"),
+    ("domaine de reception", "salle-reception"),
+    ("lieu de reception", "salle-reception"),
+    ("location de salle", "salle-reception"),
+    # Wedding planner = l'organisateur (≠ le lieu).
+    ("wedding",    "wedding-planner"),
+    ("organisateur de mariage", "wedding-planner"),
+    ("organisation de mariage", "wedding-planner"),
+    # « événement » : on couvre apostrophe droite, apostrophe avalée par le
+    # nettoyage (d'→d), et espace — pour ne pas dépendre de la ponctuation.
+    ("organisateur d'evenement", "wedding-planner"),
+    ("organisation d'evenement", "wedding-planner"),
+    ("organisateur d evenement", "wedding-planner"),
+    ("organisation d evenement", "wedding-planner"),
+    ("organisateur devenement", "wedding-planner"),
+    ("organisation devenement", "wedding-planner"),
+    ("agent immobilier", "agent-immobilier"),
+    ("agence immobiliere", "agent-immobilier"),
+    ("mandataire immo", "agent-immobilier"),
+    ("negociateur immo", "agent-immobilier"),
+    ("immobilier", "agent-immobilier"),
+    ("immobiliere", "agent-immobilier"),
+    # Caviste : surtout PAS le bout « vin » (vintage, vinaigre, ravin…).
+    ("caviste",    "caviste"),
+    ("cave a vin", "caviste"),
+    ("vins et spiritueux", "caviste"),
+    ("marchand de vin", "caviste"),
+    ("oenolog",    "caviste"),         # œnologue / œnothèque
+    ("dieteti",    "dieteticien"),     # diététicien / diététique
+    ("nutrition",  "dieteticien"),     # nutritionniste
+    # DJ : prefixes longs seulement (« dj » seul = règle mot entier plus bas,
+    # sinon « adjoint » matcherait).
+    ("disc jockey", "dj"),
+    ("disc-jockey", "dj"),
+    ("deejay",     "dj"),
+    ("sonorisation", "dj"),
+    ("animation de soiree", "dj"),
+    ("animation musicale", "dj"),
     ("toilettag",  "animalier"),     # toilettage canin
     ("toiletteu",  "animalier"),
     ("canin",      "animalier"),
@@ -143,6 +260,8 @@ _WORD_RULES: dict[str, str] = {
     "ongles": "beaute",
     "photo":  "photographe",
     "resto":  "restaurant",
+    "dj":     "dj",          # « dj » seul (sous-chaîne de « adjoint » sinon)
+    "deejay": "dj",
 }
 
 

@@ -56,7 +56,7 @@ from triskell_command.integrations.pixelpros_pages import (  # noqa: E402
     BASE_URL, KNOWN_SLUGS, pages_for_sector, slug_for_sector,
 )
 
-check("17 pages métier connues", len(KNOWN_SLUGS) == 17,
+check("40 pages métier connues", len(KNOWN_SLUGS) == 40,
       f"-> {len(KNOWN_SLUGS)}")
 
 # Secteurs RÉELS observés dans la base prospects (inventaire 2026-06-12)
@@ -108,6 +108,76 @@ cas_reconnus = {
     "brasserie":            "restaurant",
     "bistrot":              "restaurant",
     "resto":                "restaurant",
+    # — Les 8 métiers du 16/06 (matin) —
+    "pisciniste":           "pisciniste",
+    "construction de piscine": "pisciniste",
+    "chambres d'hôtes":     "chambres-hotes",
+    "gîte rural":           "chambres-hotes",
+    "garagiste":            "garagiste",
+    "garage automobile":    "garagiste",
+    "carrosserie":          "garagiste",
+    "ostéopathe":           "osteopathe",
+    "masseur-kinésithérapeute": "osteopathe",   # paramédical → ostéo, pas bien-être
+    "kinésithérapeute":     "osteopathe",
+    "auto-école":           "auto-ecole",
+    "école de conduite":    "auto-ecole",
+    "traiteur":             "traiteur",          # a sa page depuis le 16/06
+    "couvreur":             "couvreur",
+    "charpentier":          "couvreur",          # charpente → couvreur
+    "couvreur-zingueur":    "couvreur",
+    "architecte d'intérieur": "architecte-interieur",
+    "décorateur d'intérieur": "architecte-interieur",
+    "home staging":         "architecte-interieur",
+    # — Les 15 métiers du 16/06 (après-midi) —
+    "cuisiniste":           "cuisiniste",
+    "aménagement de cuisine": "cuisiniste",
+    "salle de réception":   "salle-reception",
+    "salle des fêtes":      "salle-reception",
+    "domaine de mariage":   "salle-reception",
+    "wedding planner":      "wedding-planner",
+    "organisateur de mariage": "wedding-planner",
+    "organisation d'événements": "wedding-planner",
+    "serrurier":            "serrurier",
+    "serrurier-métallier":  "serrurier",
+    "métallier":            "serrurier",
+    "ferronnier d'art":     "serrurier",
+    "façadier":             "facadier",
+    "ravalement de façade": "facadier",
+    "isolation extérieure": "facadier",
+    "salle de sport":       "salle-sport",
+    "fitness":              "salle-sport",
+    "crossfit":             "salle-sport",
+    "salle de musculation": "salle-sport",
+    "agent immobilier":     "agent-immobilier",
+    "agence immobilière":   "agent-immobilier",
+    "Immobilier":           "agent-immobilier",   # avant : tombait en générique
+    "chauffagiste":         "chauffage-energies",  # plombier-chauffagiste reste plombier
+    "poêle à granulés":     "chauffage-energies",
+    "pompe à chaleur":      "chauffage-energies",
+    "DJ":                   "dj",
+    "dj":                   "dj",
+    "disc-jockey":          "dj",
+    "sonorisation":         "dj",
+    "vitrier":              "vitrier",
+    "vitrier-miroitier":    "vitrier",
+    "miroitier":            "vitrier",
+    "double vitrage":       "vitrier",
+    "portail":              "portail-cloture",
+    "clôtures et portails": "portail-cloture",
+    "pergola bioclimatique": "portail-cloture",
+    "caviste":              "caviste",
+    "cave à vin":           "caviste",
+    "marchand de vin":      "caviste",
+    "diététicien":          "dieteticien",
+    "nutritionniste":       "dieteticien",
+    "lavage auto":          "lavage-auto",
+    "lavage automobile":    "lavage-auto",         # « automobile » ne va PAS sur garage
+    "detailing automobile": "lavage-auto",
+    "station de lavage":    "lavage-auto",
+    "food truck":           "food-truck",
+    "camion pizza":         "food-truck",          # « pizza » ne va PAS sur restaurant
+    "camion restaurant":    "food-truck",          # « restaurant » non plus
+    "street food":          "food-truck",
 }
 for secteur, attendu in cas_reconnus.items():
     got = slug_for_sector(secteur)
@@ -116,8 +186,8 @@ for secteur, attendu in cas_reconnus.items():
 # Secteurs qu'on ne doit PAS mapper (pas de page dédiée → générique).
 # « achat » contient « chat » : le mot court ne doit matcher qu'entier.
 # « restauration de meubles » ne doit PAS tomber sur la page restaurant.
-cas_generiques = ["formation", "Immobilier", "traiteur",
-                  "restauration de meubles anciens",
+cas_generiques = ["formation",
+                  "restauration de meubles anciens",  # « restaur » ≠ « restaurant »
                   "plâtrier",   # métier distinct du plaquiste (Jordan 12/06)
                   "achat-revente de maisons", "", "   "]
 for secteur in cas_generiques:

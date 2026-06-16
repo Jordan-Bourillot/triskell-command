@@ -40,7 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG TRISKELL_CORE_REF=main
 # Cache-bust : bump cette valeur à chaque déploiement qui doit récupérer une
 # nouvelle version de triskell-core (sinon Docker garde l'ancien clone en cache).
-ARG CORE_BUILD_REV=2026-06-16-8metiers
+ARG CORE_BUILD_REV=2026-06-16-23metiers
 RUN echo "triskell-core build rev ${CORE_BUILD_REV}" \
  && git clone --depth=1 --branch ${TRISKELL_CORE_REF} \
     https://github.com/Jordan-Bourillot/triskell-core.git \

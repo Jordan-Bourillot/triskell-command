@@ -79,7 +79,16 @@ def _base_url() -> str:
 # dont la démo correspond vraiment ; le reste retombe sur la maquette.
 _DEMO_MAP: dict[str, str] = {
     # — Artisans du bâtiment —
-    "plomb": "demo-plombier", "chauffag": "demo-plombier",
+    "plomb": "demo-plombier",
+    # Chauffage nouvelle génération a sa démo (16/06/2026). Le plombier-
+    # chauffagiste reste sur plombier (capté par « plomb » au-dessus).
+    "poele": "demo-chauffage-energies", "granul": "demo-chauffage-energies",
+    "pellet": "demo-chauffage-energies", "pompe a chaleur": "demo-chauffage-energies",
+    "aerotherm": "demo-chauffage-energies", "geotherm": "demo-chauffage-energies",
+    "climatis": "demo-chauffage-energies", "photovolta": "demo-chauffage-energies",
+    "panneau solaire": "demo-chauffage-energies",
+    "energies renouvelab": "demo-chauffage-energies",
+    "chauffag": "demo-chauffage-energies",
     "electric": "demo-electricien",
     "peintr": "demo-peintre",
     "carrel": "demo-carreleur", "faienc": "demo-carreleur",
@@ -100,6 +109,12 @@ _DEMO_MAP: dict[str, str] = {
     "patiss": "demo-patisserie", "boulang": "demo-patisserie",
     "chocolat": "demo-patisserie", "confis": "demo-patisserie",
     "cake": "demo-patisserie",
+    # Food truck AVANT restaurant (« camion pizza/restaurant », « street food »).
+    "food truck": "demo-food-truck", "food-truck": "demo-food-truck",
+    "foodtruck": "demo-food-truck", "food trailer": "demo-food-truck",
+    "camion pizza": "demo-food-truck", "camion a pizza": "demo-food-truck",
+    "camion restaurant": "demo-food-truck", "camion a burger": "demo-food-truck",
+    "street food": "demo-food-truck",
     "restaur": "demo-restaurant", "pizz": "demo-restaurant",
     "brasser": "demo-restaurant", "creper": "demo-restaurant",
     "bistro": "demo-restaurant",
@@ -134,6 +149,12 @@ _DEMO_MAP: dict[str, str] = {
     # — Nouveaux métiers (16/06/2026) — (auto-école AVANT garage)
     "auto-ecole": "demo-auto-ecole", "auto ecole": "demo-auto-ecole",
     "ecole de conduite": "demo-auto-ecole", "permis": "demo-auto-ecole",
+    # Lavage auto / detailing AVANT garage (« lavage automobile » contient
+    # « automobile »).
+    "lavage auto": "demo-lavage-auto", "lavage automobile": "demo-lavage-auto",
+    "detailing": "demo-lavage-auto", "car wash": "demo-lavage-auto",
+    "nettoyage auto": "demo-lavage-auto", "station de lavage": "demo-lavage-auto",
+    "lustrage": "demo-lavage-auto",
     "garag": "demo-garagiste", "carross": "demo-garagiste",
     "mecaniq": "demo-garagiste", "pneu": "demo-garagiste",
     "automobile": "demo-garagiste",
@@ -144,6 +165,48 @@ _DEMO_MAP: dict[str, str] = {
     "decorateur": "demo-architecte-interieur",
     "decoratrice": "demo-architecte-interieur",
     "home staging": "demo-architecte-interieur",
+    # — 15 nouveaux métiers (16/06/2026) —
+    "cuisinist": "demo-cuisiniste", "amenagement de cuisine": "demo-cuisiniste",
+    "cuisine equip": "demo-cuisiniste", "cuisine amenag": "demo-cuisiniste",
+    # serrurier AVANT portail
+    "serrur": "demo-serrurier", "metall": "demo-serrurier", "ferronn": "demo-serrurier",
+    "facad": "demo-facadier", "ravalement": "demo-facadier", "crepi": "demo-facadier",
+    "enduit": "demo-facadier", "isolation ext": "demo-facadier",
+    "vitrier": "demo-vitrier", "vitrerie": "demo-vitrier", "vitrag": "demo-vitrier",
+    "miroit": "demo-vitrier",
+    "portail": "demo-portail-cloture", "cloture": "demo-portail-cloture",
+    "pergola": "demo-portail-cloture", "brise-vue": "demo-portail-cloture",
+    "brise vue": "demo-portail-cloture", "portillon": "demo-portail-cloture",
+    "store banne": "demo-portail-cloture",
+    "salle de sport": "demo-salle-sport", "salle de fitness": "demo-salle-sport",
+    "fitness": "demo-salle-sport", "crossfit": "demo-salle-sport",
+    "cross-fit": "demo-salle-sport", "musculation": "demo-salle-sport",
+    "club de sport": "demo-salle-sport",
+    "salle de reception": "demo-salle-reception", "salle des fetes": "demo-salle-reception",
+    "salle de fete": "demo-salle-reception", "domaine de mariage": "demo-salle-reception",
+    "domaine de reception": "demo-salle-reception", "lieu de reception": "demo-salle-reception",
+    "location de salle": "demo-salle-reception",
+    "wedding": "demo-wedding-planner",
+    "organisateur de mariage": "demo-wedding-planner",
+    "organisation de mariage": "demo-wedding-planner",
+    "organisateur d'evenement": "demo-wedding-planner",
+    "organisation d'evenement": "demo-wedding-planner",
+    "organisateur d evenement": "demo-wedding-planner",
+    "organisation d evenement": "demo-wedding-planner",
+    "organisateur devenement": "demo-wedding-planner",
+    "organisation devenement": "demo-wedding-planner",
+    "agent immobilier": "demo-agent-immobilier",
+    "agence immobiliere": "demo-agent-immobilier",
+    "mandataire immo": "demo-agent-immobilier",
+    "negociateur immo": "demo-agent-immobilier",
+    "immobilier": "demo-agent-immobilier", "immobiliere": "demo-agent-immobilier",
+    "caviste": "demo-caviste", "cave a vin": "demo-caviste",
+    "vins et spiritueux": "demo-caviste", "marchand de vin": "demo-caviste",
+    "oenolog": "demo-caviste",
+    "dieteti": "demo-dieteticien", "nutrition": "demo-dieteticien",
+    "disc jockey": "demo-dj", "disc-jockey": "demo-dj", "deejay": "demo-dj",
+    "sonorisation": "demo-dj", "animation de soiree": "demo-dj",
+    "animation musicale": "demo-dj",
 }
 
 # Ville fictive utilisée dans CHAQUE démo (à remplacer par celle du prospect).
@@ -166,6 +229,22 @@ _DEMO_CITY: dict[str, str] = {
     "demo-traiteur": "Toulouse",
     "demo-couvreur": "Angers",
     "demo-architecte-interieur": "Bordeaux",
+    # — 15 nouveaux métiers (villes exactes telles qu'écrites dans le hero) —
+    "demo-cuisiniste": "Annecy",
+    "demo-salle-reception": "Saint-Émilion",
+    "demo-wedding-planner": "Aix-en-Provence",
+    "demo-serrurier": "Marseille",
+    "demo-facadier": "Nîmes",
+    "demo-salle-sport": "Paris",
+    "demo-agent-immobilier": "Nantes",
+    "demo-chauffage-energies": "Grenoble",
+    "demo-dj": "Strasbourg",
+    "demo-vitrier": "Tours",
+    "demo-portail-cloture": "Perpignan",
+    "demo-caviste": "Bordeaux",
+    "demo-dieteticien": "Lyon",
+    "demo-lavage-auto": "Lille",
+    "demo-food-truck": "Marseille",
 }
 
 # Libellé métier propre affiché dans l'en-tête / le bandeau (cohérent quel que
@@ -189,6 +268,22 @@ _DEMO_LABEL: dict[str, str] = {
     "demo-traiteur": "Traiteur",
     "demo-couvreur": "Couvreur",
     "demo-architecte-interieur": "Architecte d'intérieur",
+    # — 15 nouveaux métiers —
+    "demo-cuisiniste": "Cuisiniste",
+    "demo-salle-reception": "Salle de réception",
+    "demo-wedding-planner": "Wedding planner",
+    "demo-serrurier": "Serrurier-métallier",
+    "demo-facadier": "Façadier",
+    "demo-salle-sport": "Salle de sport",
+    "demo-agent-immobilier": "Agent immobilier",
+    "demo-chauffage-energies": "Chauffage & énergies",
+    "demo-dj": "DJ & animation",
+    "demo-vitrier": "Vitrier-miroitier",
+    "demo-portail-cloture": "Portails & clôtures",
+    "demo-caviste": "Caviste",
+    "demo-dieteticien": "Diététicien",
+    "demo-lavage-auto": "Lavage auto & detailing",
+    "demo-food-truck": "Food truck",
 }
 
 
