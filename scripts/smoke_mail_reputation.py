@@ -127,6 +127,13 @@ v = MR.classify(dict(FROIDE), auth=None, warmup_age_days=None,
 check("0 envoi = froide (jamais 'chaude')", v["warmth"] == "froide")
 check("froide -> libellé 'Jamais utilisée'", v["label"] == "Jamais utilisée")
 
+# 0 envoi réel MAIS chauffe interne démarrée (même au jour 1) -> en chauffe,
+# surtout pas « jamais utilisée » (corrige l'affichage trompeur du 16/06).
+v = MR.classify(dict(FROIDE), auth=None, warmup_age_days=1,
+                history_ok=True, now=NOW)
+check("chauffe jour 1 sans envoi = en chauffe (pas 'jamais utilisée')",
+      v["warmth"] == "en_chauffe")
+
 # Boîte d'1-2 mois qui n'envoie pas, chauffe interne juste commencée -> en chauffe.
 v = MR.classify(dict(FROIDE, sent_window=4, sent_30d=4,
                      first_seen=NOW - timedelta(days=8)),

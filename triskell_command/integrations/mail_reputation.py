@@ -214,11 +214,15 @@ def classify(facts: dict, *, auth: Optional[dict] = None,
 
     if not history_ok:
         warmth = "inconnu"
-    elif sent_window <= COLD_MAX_SENT and not (warmup_age_days and warmup_age_days > 1):
+    elif sent_window <= COLD_MAX_SENT and not warmup_age_days:
+        # 0 envoi réel ET pas en chauffe interne → jamais utilisée. Mais une
+        # boîte qu'on chauffe (même au jour 1) n'est PAS « jamais utilisée » :
+        # elle tombe dans « en chauffe » plus bas.
         warmth = "froide"
     elif warmed_up or real_track_record:
         warmth = "etablie"
     else:
+        # soit quelques envois réels, soit chauffe interne en cours (même J1).
         warmth = "en_chauffe"
 
     # --- Statut global affiché (le plus prudent l'emporte) ---
