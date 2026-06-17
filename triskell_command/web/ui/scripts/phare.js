@@ -452,8 +452,12 @@ const Phare = {
     // Si le robot a déjà regardé et conclu « à faire à la main », on ne
     // repropose pas « OK, fais-le » : retour aux boutons humains, avec
     // le bandeau 🛠️ qui explique pourquoi.
+    // Un refus passé (apply_state=manual) ne gèle PLUS le bouton : si le robot
+    // est désormais capable (apply.can), on lui laisse sa chance — ses capacités
+    // ont grandi (FAQ, préchargement…). Les cartes vraiment manuelles ont
+    // apply.can=false → pas de faux bouton vert.
     const robotDeclined = applyState === 'manual';
-    const canRobot = !isAuto && !!apply.can && !robotDeclined;
+    const canRobot = !isAuto && !!apply.can;
     const robotBusy = applyState === 'queued' || applyState === 'running';
     const simpleWhat = (a.simple_what || '').trim();
     const detailFull = a.detail_md || a.summary || '';

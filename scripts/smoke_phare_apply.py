@@ -1238,5 +1238,19 @@ check("FAQ + préchargement = invisible → pas bloqué par le diff visuel",
       executor._is_metadata_only({"title": "Ajouter une FAQ structurée sur /x"})
       and executor._is_metadata_only({"title": "Précharger l'image de la home"}))
 
+# Le classement reconnaît les nouvelles capacités → bouton « OK, fais-le »
+check("carte FAQ → le robot peut le faire (bouton vert)",
+      pl.classify_for_apply(
+          {"status": "draft", "title": "Ajouter une FAQ structurée sur /x"}, site_ok)["can"])
+check("carte préchargement → le robot peut le faire",
+      pl.classify_for_apply(
+          {"status": "draft", "title": "Précharger l'image principale de la home"}, site_ok)["can"])
+check("écrire du contenu → reste à toi (pas de faux bouton vert)",
+      not pl.classify_for_apply(
+          {"status": "draft", "title": "Rédiger une page de service"}, site_ok)["can"])
+check("convertir les images en WebP → reste à toi",
+      not pl.classify_for_apply(
+          {"status": "draft", "title": "Convertir les images en WebP/AVIF"}, site_ok)["can"])
+
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)

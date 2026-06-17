@@ -183,6 +183,15 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
     if special:
         return {"can": False, "mode": special[1], "why": special[0]}
 
+    # Capacités apprises au robot le 17/06 (il lit la page en direct) : FAQ
+    # structurée + préchargement de l'image principale → faisables tout seul.
+    title_low = (action.get("title") or "").lower()
+    if ("faq" in title_low
+            or any(k in title_low for k in ("précharg", "precharg", "preload"))):
+        if (site.get("repo_github") or "").strip():
+            return {"can": True, "mode": "code",
+                    "why": "Le robot lit ta page et s'en charge."}
+
     fams = _families_of(action)
     code_fams = fams & set(_CODE_FAMILIES)
     tool_fams = fams & set(_TOOL_FAMILIES)
@@ -205,7 +214,18 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
                             "à brancher dans « Réglages du site ».")}
         return {"can": True, "mode": "code",
                 "why": "Le robot prépare la modification, la vérifie et la publie."}
-    # Famille inconnue : on laisse l'IA exécutrice regarder si le site est relié
+    # Famille inconnue MAIS travail clairement humain (écrire du contenu,
+    # alléger le poids des images, compte Google, backlinks) → pas de faux
+    # bouton vert. (Les cartes faisables ont une famille et ne passent pas ici.)
+    if any(k in title_low for k in
+           ("rédiger", "rediger", "rédige", "rédaction", "redaction", "écrire",
+            "ecrire", "créer une page", "creer une page", "contenu", "webp",
+            "avif", "convertir les image", "compresser", "search console",
+            "backlink")):
+        return {"can": False, "mode": "manual",
+                "why": ("Celle-ci, c'est un travail à faire ensemble — le robot "
+                        "ne peut pas s'en charger tout seul.")}
+    # Sinon : on laisse l'IA exécutrice regarder si le site est relié.
     if (site.get("repo_github") or "").strip():
         return {"can": True, "mode": "code",
                 "why": ("Le robot va regarder si cette proposition peut se "
