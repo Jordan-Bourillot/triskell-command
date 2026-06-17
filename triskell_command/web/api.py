@@ -1191,6 +1191,188 @@ class Api:
             })
         return {"ok": True, "rows": rows}
 
+    def prospect_drafts_rereview(self, payload: dict | None = None) -> dict:
+        """Re-passe les brouillons prospects DÉJÀ en base dans la nouvelle 2e IA
+        (relecture + retouche unique : 1 petite modif, on relit, on renote, et
+        on garde la retouche seulement si elle améliore la note). Met à jour le
+        mail (texte + HTML régénéré) et les notes avant/après + le type de
+        retouche. Sert à tester la retouche sur les brouillons existants sans
+        attendre de nouveaux mails. (Jordan, 17/06/2026.)
+        """
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Base indisponible."}
+        try:
+            from triskell_core.prospect.pipeline import (
+                _load_ai_keys, _retouche_keeps, PipelineConfig)
+            from triskell_core.prospect.quality_reviewer import review_email
+        except Exception as exc:
+            return {"ok": False, "error": f"Moteur de relecture indisponible : {exc}"}
+        try:
+            cfg = PipelineConfig.load()
+            provider = (getattr(cfg, "ai_provider", "") or "anthropic").strip()
+            model = (getattr(cfg, "ai_model", "") or "").strip()
+        except Exception:
+            provider, model = "anthropic", ""
+        api_keys = _load_ai_keys() or {}
+        p = payload or {}
+        limit = max(1, min(100, int(p.get("limit") or 50)))
+        only_id = (p.get("draft_id") or "").strip()
+        sb = client.raw
+        _embeds = (
+            "name, legal_name, city, industry, description, platform_url",
+            "name, legal_name, city, platform_url",
+        )
+        rows = None
+        for _emb in _embeds:
+            try:
+                cols = ("id, subject, body, body_html, template_key, status, "
+                        f"prospects:prospect_id({_emb})")
+                res = (sb.table("prospect_drafts").select(cols)
+                         .eq("status", "pending")
+                         .order("created_at", desc=True).limit(limit).execute())
+                rows = res.data or []
+                break
+            except Exception:
+                rows = None
+        if rows is None:
+            return {"ok": False, "error": "Lecture des brouillons impossible."}
+        if only_id:
+            rows = [r for r in rows if str(r.get("id")) == only_id]
+        processed = retouched = engine_down = skipped = 0
+        details = []
+        for r in rows:
+            body = (r.get("body") or "").strip()
+            subject = (r.get("subject") or "").strip()
+            if not body:
+                skipped += 1
+                continue
+            pr = r.get("prospects") or {}
+            ctx = (f"Nom: {pr.get('name') or pr.get('legal_name') or '?'}\n"
+                   f"Ville: {pr.get('city') or '?'}\n"
+                   f"Secteur: {pr.get('industry') or '?'}\n"
+                   f"Description: {(pr.get('description') or '')[:200]}")
+            audience = self._audience_from_platform_url(pr.get("platform_url") or "")
+            try:
+                rev = review_email(subject=subject, body=body, prospect_context=ctx,
+                                   provider=provider, model=model,
+                                   api_keys=api_keys, audience=audience)
+            except Exception:
+                engine_down += 1
+                continue
+            if rev.get("engine_down"):
+                engine_down += 1
+                continue
+            score_before = int(rev.get("score") or 0)
+            score_after = None
+            modif_type = str(rev.get("modif_type") or "").strip()[:80]
+            applied = False
+            final_score = score_before
+            final_verdict = str(rev.get("verdict") or "")
+            final_comment = str(rev.get("comment") or "")[:300]
+            new_body = body
+            revised = (rev.get("body_revised") or "").strip()
+            if revised and revised != body:
+                try:
+                    rev2 = review_email(subject=subject, body=revised,
+                                        prospect_context=ctx, provider=provider,
+                                        model=model, api_keys=api_keys,
+                                        audience=audience)
+                except Exception:
+                    rev2 = {"engine_down": True}
+                if not rev2.get("engine_down"):
+                    score_after = int(rev2.get("score") or 0)
+                    if _retouche_keeps(score_before, score_after):
+                        new_body = revised
+                        applied = True
+                        final_score = score_after
+                        final_verdict = str(rev2.get("verdict") or final_verdict)
+                        final_comment = str(rev2.get("comment") or final_comment)[:300]
+            # Régénère le HTML seulement si le corps a vraiment changé (même
+            # logique que la validation manuelle d'un brouillon).
+            final_body, new_html, _regen = self._resolve_draft_html(
+                body, r.get("body_html") or "", new_body)
+            upd_full = {
+                "body": final_body, "body_html": new_html,
+                "review_score": final_score, "review_verdict": final_verdict,
+                "review_comment": final_comment,
+                "review_score_before": score_before,
+                "review_score_after": score_after,
+                "review_modif_type": modif_type, "review_modif_applied": applied,
+            }
+            upd_base = {"body": final_body, "body_html": new_html,
+                        "review_score": final_score, "review_verdict": final_verdict,
+                        "review_comment": final_comment}
+            try:
+                sb.table("prospect_drafts").update(upd_full).eq(
+                    "id", r.get("id")).execute()
+            except Exception:
+                try:
+                    sb.table("prospect_drafts").update(upd_base).eq(
+                        "id", r.get("id")).execute()
+                except Exception:
+                    skipped += 1
+                    continue
+            processed += 1
+            if applied:
+                retouched += 1
+                details.append({
+                    "name": pr.get("name") or pr.get("legal_name") or "?",
+                    "before": score_before, "after": score_after,
+                    "modif_type": modif_type,
+                    "template": r.get("template_key") or "",
+                })
+        return {"ok": True, "processed": processed, "retouched": retouched,
+                "engine_down": engine_down, "skipped": skipped, "details": details}
+
+    def review_retouche_patterns(self, payload: dict | None = None) -> dict:
+        """Quels TYPES de retouche de la 2e IA reviennent souvent, et sur quels
+        modèles de mail. Si un même type de retouche revient souvent sur les
+        mails d'un même modèle, c'est que ce modèle a une faiblesse récurrente
+        → on suggère de revoir ce modèle. (Jordan, 17/06/2026.)
+        """
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Base indisponible."}
+        from collections import Counter
+        sb = client.raw
+        p = payload or {}
+        threshold = max(2, int(p.get("threshold") or 3))
+        by_type: Counter = Counter()
+        by_template_type: Counter = Counter()
+        sample: dict = {}
+        try:
+            res = (sb.table("prospect_drafts")
+                     .select("template_key, review_modif_type, "
+                             "review_modif_applied, subject")
+                     .eq("status", "pending").limit(2000).execute())
+            rows = res.data or []
+        except Exception:
+            rows = []
+        for r in rows:
+            mt = (r.get("review_modif_type") or "").strip()
+            if not mt or not r.get("review_modif_applied"):
+                continue
+            tk = (r.get("template_key") or "").strip() or "(sans modèle)"
+            by_type[mt] += 1
+            by_template_type[(tk, mt)] += 1
+            sample.setdefault((tk, mt), r.get("subject") or "")
+        patterns = []
+        for (tk, mt), n in by_template_type.most_common():
+            if n >= threshold:
+                patterns.append({
+                    "template": tk, "modif_type": mt, "count": n,
+                    "exemple": sample.get((tk, mt), ""),
+                    "conseil": (f"La 2e IA corrige souvent « {mt} » sur ce modèle "
+                                f"({n}×) → envisage de revoir ce modèle."),
+                })
+        return {
+            "ok": True, "seuil": threshold, "patterns": patterns,
+            "par_type": [{"modif_type": mt, "count": n}
+                         for mt, n in by_type.most_common(20)],
+            "total_retouches": sum(by_type.values()),
+        }
+
     def draft_approve(self, payload: dict) -> dict:
         p = payload or {}
         source = (p.get("source") or "").strip()
