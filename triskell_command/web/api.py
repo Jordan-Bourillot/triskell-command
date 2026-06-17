@@ -1887,12 +1887,14 @@ class Api:
             na, na2 = creator_mail.accent_from_notes(notes)
             acc = accent or na or "#6366F1"
             acc2 = accent2 or na2 or acc
+            ang = creator_mail.angle_from_notes(notes)
             return creator_mail.render(
                 name=cr.get("name") or "",
                 demo_url=cr.get("demo_url") or "",
                 accent=acc,
                 accent2=acc2,
                 tu=tu,
+                angle=ang,
             )
         except Exception:
             return ""
@@ -1921,7 +1923,9 @@ class Api:
                 continue
             from ..integrations import creator_mail
             tu = "vouvoiement" not in (cr.get("notes") or "").lower()
-            body = creator_mail.render_text(cr.get("name") or "", demo, tu)
+            ang = creator_mail.angle_from_notes(cr.get("notes") or "")
+            body = creator_mail.render_text(cr.get("name") or "", demo, tu,
+                                            angle=ang)
             body_html = self._creator_mail_html(
                 cr, d.get("accent") or "", d.get("accent2") or "")
             out.append({
@@ -1977,8 +1981,10 @@ class Api:
         else:
             from ..integrations import creator_mail
             _tu = "vouvoiement" not in (cr.get("notes") or "").lower()
+            _ang = creator_mail.angle_from_notes(cr.get("notes") or "")
             final_body = creator_mail.render_text(
-                cr.get("name") or "", (cr.get("demo_url") or "").strip(), _tu)
+                cr.get("name") or "", (cr.get("demo_url") or "").strip(),
+                _tu, angle=_ang)
         final_body = (final_body or "").strip()
 
         _safe = PS.mail_is_safe_to_send(subject, final_body)

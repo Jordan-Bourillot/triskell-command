@@ -20,7 +20,7 @@ def _esc(s: str) -> str:
 
 
 def render(name: str, demo_url: str, accent: str = "#6366F1",
-           accent2: str = "#4F46E5", tu: bool = True) -> str:
+           accent2: str = "#4F46E5", tu: bool = True, angle: str = "") -> str:
     """Retourne le corps HTML du mail pour un créateur."""
     base = (demo_url or "").rstrip("/")
     name = _esc(name)
@@ -85,6 +85,10 @@ def render(name: str, demo_url: str, accent: str = "#6366F1",
                       "plaisir."),
         }
 
+    angle = (angle or "").strip()
+    if angle:
+        t["d3"] = "💰 &nbsp;" + _esc(angle)
+
     return f"""<!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#eef1f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
@@ -128,13 +132,18 @@ def render(name: str, demo_url: str, accent: str = "#6366F1",
 </body></html>"""
 
 
-def render_text(name: str, demo_url: str, tu: bool = True) -> str:
+def render_text(name: str, demo_url: str, tu: bool = True,
+                angle: str = "") -> str:
     """Version TEXTE BRUT du mail (secours `text/plain`), cohérente avec le
     rendu HTML et sans tic d'IA (pas de « : » d'annonce, pas de tiret
-    cadratin, pas de « sans pression »)."""
+    cadratin, pas de « sans pression »). `angle` remplace la 3e ligne pour
+    les créateurs qui vendent déjà (pitch complémentaire)."""
     base = (demo_url or "").rstrip("/")
     url = base + "/accueil.html"
+    angle = (angle or "").strip()
     if tu:
+        d3 = angle or ("De quoi monétiser ton audience, avec un abonnement "
+                       "pour ta communauté dont tu touches une part")
         return (
             f"Salut {name},\n\n"
             "J'ai regardé ta chaîne et j'ai préparé tout un espace à ta "
@@ -146,8 +155,7 @@ def render_text(name: str, demo_url: str, tu: bool = True) -> str:
             "- Un quiz « teste ton niveau » qui amuse ta communauté et la "
             "ramène vers toi\n"
             "- Une analyse de ta chaîne et 10 idées de vidéos, offertes\n"
-            "- De quoi monétiser ton audience, avec un abonnement pour ta "
-            "communauté dont tu touches une part\n\n"
+            "- " + d3 + "\n\n"
             "Tu peux tout découvrir ici.\n"
             f"{url}\n\n"
             "Tout est déjà prêt, à ta marque, fait à partir de tes vidéos. "
@@ -155,6 +163,8 @@ def render_text(name: str, demo_url: str, tu: bool = True) -> str:
             "plaît, je t'explique tout avec plaisir.\n\n"
             "Au plaisir,\nTriskell Studio"
         )
+    d3 = angle or ("De quoi monétiser votre audience, avec un abonnement "
+                   "pour votre communauté dont vous touchez une part")
     return (
         f"Bonjour {name},\n\n"
         "J'ai regardé votre chaîne et j'ai préparé tout un espace à votre "
@@ -166,8 +176,7 @@ def render_text(name: str, demo_url: str, tu: bool = True) -> str:
         "- Un quiz « testez votre niveau » qui amuse votre communauté et la "
         "ramène vers vous\n"
         "- Une analyse de votre chaîne et 10 idées de vidéos, offertes\n"
-        "- De quoi monétiser votre audience, avec un abonnement pour votre "
-        "communauté dont vous touchez une part\n\n"
+        "- " + d3 + "\n\n"
         "Vous pouvez tout découvrir ici.\n"
         f"{url}\n\n"
         "Tout est déjà prêt, à votre marque, fait à partir de vos vidéos. "
@@ -184,3 +193,11 @@ def accent_from_notes(notes: str):
     m = re.search(r"\[brand:(#[0-9A-Fa-f]{3,8}),\s*(#[0-9A-Fa-f]{3,8})\]",
                   notes or "")
     return (m.group(1), m.group(2)) if m else ("", "")
+
+
+def angle_from_notes(notes: str) -> str:
+    """Phrase d'angle personnalisée rangée dans les notes de la fiche, au
+    format `[angle: ...]` (jusqu'au `]`). Retourne "" si absent."""
+    import re
+    m = re.search(r"\[angle:\s*(.+?)\]", notes or "", re.DOTALL)
+    return m.group(1).strip() if m else ""
