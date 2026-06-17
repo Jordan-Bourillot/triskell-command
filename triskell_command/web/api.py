@@ -6237,7 +6237,9 @@ class Api:
             done = []
             try:
                 M.login(imap_user, imap_pwd)
-                folder = self._imap_find_drafts_folder(M)
+                candidates = self._imap_drafts_candidates(M)
+                working = None
+                tried = {}
                 for r in targets:
                     to_addr = (r.get("handle") or "").strip()
                     body = (r.get("message") or "").strip()
@@ -6252,11 +6254,28 @@ class Api:
                     msg["Message-ID"] = make_msgid(domain=from_email.split("@", 1)[1])
                     msg["Reply-To"] = from_email
                     msg.set_content(body)
-                    # date_time : imaplib applique lui-même Time2Internaldate
-                    # → passer le float brut (le double-formatage casse APPEND).
-                    M.append(folder, "(\\Draft)", _time.time(), msg.as_bytes())
+                    raw = msg.as_bytes()
+                    if working is not None:
+                        M.append('"%s"' % working, "(\\Draft)", _time.time(), raw)
+                    else:
+                        # 1er depot : on essaie chaque dossier candidat (le nom
+                        # exact varie selon la boite) jusqu'a ce qu'un APPEND passe.
+                        placed = False
+                        for f in candidates:
+                            try:
+                                M.append('"%s"' % f, "(\\Draft)", _time.time(), raw)
+                                working = f
+                                placed = True
+                                break
+                            except Exception as e:
+                                tried[f] = str(e)[:100]
+                        if not placed:
+                            return {"ok": False, "account": from_email,
+                                    "error": "Aucun dossier Brouillons n'a accepte le depot.",
+                                    "tried": tried}
                     done.append({"id": r.get("id"), "name": (r.get("name") or "").strip(),
                                  "to": to_addr})
+                folder = working
             finally:
                 try:
                     M.logout()
@@ -6269,26 +6288,39 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     @staticmethod
-    def _imap_find_drafts_folder(M) -> str:
-        """Repere le dossier Brouillons d'une connexion IMAP (attribut special
-        \\Drafts, sinon noms usuels). 'Drafts' par defaut."""
+    def _imap_drafts_candidates(M):
+        """Liste ordonnee de dossiers « Brouillons » a essayer : celui marque
+        \\Drafts (parse robuste de la reponse LIST), les dossiers dont le nom
+        finit par drafts/brouillons, puis les noms usuels IONOS/Dovecot. Le
+        1er qu'un APPEND accepte est retenu par l'appelant."""
+        import re
+        found, names = [], []
         try:
             typ, data = M.list()
             if typ == "OK" and data:
-                names = []
+                pat = re.compile(
+                    rb'\((?P<flags>[^)]*)\)\s+(?:"[^"]*"|NIL)\s+'
+                    rb'(?:"(?P<q>[^"]*)"|(?P<u>[^\s]+))\s*$')
                 for raw in data:
-                    line = (raw.decode(errors="ignore")
-                            if isinstance(raw, (bytes, bytearray)) else str(raw))
-                    nm = line.split(' "')[-1].strip().strip('"') if '"' in line else line.split()[-1]
-                    names.append(nm)
-                    if "\\Drafts" in line:
-                        return nm
-                for cand in ("Drafts", "INBOX.Drafts", "Brouillons", "INBOX.Brouillons"):
-                    if cand in names:
-                        return cand
+                    if not isinstance(raw, (bytes, bytearray)):
+                        raw = str(raw).encode("utf-8", "replace")
+                    m = pat.search(raw)
+                    if not m:
+                        continue
+                    name = (m.group("q") or m.group("u") or b"").decode("utf-8", "replace")
+                    names.append(name)
+                    if b"\\Drafts" in (m.group("flags") or b""):
+                        found.append(name)
         except Exception:
             pass
-        return "Drafts"
+        out = []
+        ordered = (found
+                   + [x for x in names if x.lower().endswith(("drafts", "brouillons"))]
+                   + ["INBOX.Drafts", "Drafts", "INBOX.Brouillons", "Brouillons"])
+        for n in ordered:
+            if n and n not in out:
+                out.append(n)
+        return out
 
     # ------------------------------------------------------------------
     # Activité agrégée des 4 pipelines sites (Lagriffe / RankUs / WoW /
