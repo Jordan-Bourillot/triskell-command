@@ -6252,8 +6252,9 @@ class Api:
                     msg["Message-ID"] = make_msgid(domain=from_email.split("@", 1)[1])
                     msg["Reply-To"] = from_email
                     msg.set_content(body)
-                    M.append(folder, "(\\Draft)",
-                             imaplib.Time2Internaldate(_time.time()), msg.as_bytes())
+                    # date_time : imaplib applique lui-même Time2Internaldate
+                    # → passer le float brut (le double-formatage casse APPEND).
+                    M.append(folder, "(\\Draft)", _time.time(), msg.as_bytes())
                     done.append({"id": r.get("id"), "name": (r.get("name") or "").strip(),
                                  "to": to_addr})
             finally:
