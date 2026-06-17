@@ -323,6 +323,17 @@ def process_apply_queue(*, app_state=None, max_items: int = QUEUE_BATCH) -> dict
 
     results = []
     for action in queued:
+        # Ceinture ET bretelles sur l'accueil : même une carte déjà en file
+        # (mise là AVANT le garde-fou du 17/06) ne publie jamais l'accueil
+        # toute seule — on la ressort de la file. Un clic humain, lui, passe
+        # par un thread direct (request_apply), pas par cette file.
+        try:
+            from . import orchestrator
+            if orchestrator._targets_home(action):
+                _update(action["id"], {"apply_state": ""})
+                continue
+        except Exception as exc:
+            logger.debug("process_apply_queue home guard: %s", exc)
         results.append(_process_safely(action["id"], app_state=app_state))
     return {"ok": True, "processed": len(results), "results": results}
 
