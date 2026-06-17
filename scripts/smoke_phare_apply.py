@@ -1233,6 +1233,19 @@ with mock.patch.object(pe, "fetch_page", return_value=SAMPLE_FAQ):
         {"title": "Précharger l'image de la home"}, SITE_X)
     check("grande image trouvée → préchargement préparé",
           out["mode"] == "patches" and "preload" in out["patches"][0]["new"])
+check("page sans vraie grande image (icône + fond CSS) → le robot s'abstient",
+      pe.find_hero_image('<html><body><img src="/apple-touch-icon.png">'
+                         '<div style="background-image:url(/img/x.jpg)"></div>'
+                         '</body></html>', "https://x.fr/") is None)
+check("jamais précharger l'image de PARTAGE (og:image) toute seule",
+      pe.find_hero_image('<html><head><meta property="og:image" content="/og.png">'
+                         '</head><body><img src="/favicon.ico"></body></html>',
+                         "https://x.fr/") is None)
+with mock.patch.object(pe, "fetch_page",
+                       return_value='<html><body><img src="/favicon.ico"></body></html>'):
+    out = executor._build_preload_out({"title": "Précharger l'image de la home"}, SITE_X)
+    check("pas d'image classique → manuel propre, sans forcer",
+          out["mode"] == "manual" and not pl.has_jargon(out["manual_reason"]))
 
 check("FAQ + préchargement = invisible → pas bloqué par le diff visuel",
       executor._is_metadata_only({"title": "Ajouter une FAQ structurée sur /x"})

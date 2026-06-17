@@ -177,8 +177,9 @@ def _build_preload_out(action: dict, site: dict) -> dict:
     hero = page_extract.find_hero_image(html, url)
     if not hero:
         return {"mode": "manual", "manual_reason":
-                "Je n'ai pas trouvé de grande image principale à mettre en "
-                "priorité sur cette page."}
+                "Cette page n'a pas de grande image principale classique à "
+                "mettre en priorité — elle utilise sans doute des images de "
+                "fond. Pas la peine de forcer un préchargement."}
     if page_extract.already_preloads(html, hero):
         return {"mode": "manual", "manual_reason":
                 "C'est déjà fait sur cette page — rien à changer."}

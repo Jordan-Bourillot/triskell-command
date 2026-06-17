@@ -125,20 +125,21 @@ def _is_non_hero(src: str) -> bool:
 
 
 def find_hero_image(html: str, page_url: str) -> Optional[str]:
-    """L'URL de la grande image affichée en premier (best-effort)."""
+    """L'URL de la grande image AFFICHÉE en premier sur la page (le « héros »).
+
+    On NE renvoie QUE de vraies images de contenu visibles — jamais l'image de
+    partage (og:image), qui n'est pas affichée et ne sert à rien à précharger
+    (vécu le 17/06 : préchargement d'og-image.png sur une home dont les visuels
+    étaient des images de fond CSS). Pas de vraie grande image ? → None, et le
+    robot s'abstient au lieu de deviner."""
     try:
         soup = BeautifulSoup(html or "", "html.parser")
     except Exception:
         return None
-    # 1) la 1re vraie <img> du corps (hors icônes/logos/pixels)
     for img in soup.find_all("img"):
         src = img.get("src") or img.get("data-src") or ""
         if not _is_non_hero(src):
             return urljoin(page_url, src)
-    # 2) repli : og:image
-    og = soup.find("meta", attrs={"property": "og:image"})
-    if og and og.get("content"):
-        return urljoin(page_url, og["content"])
     return None
 
 
