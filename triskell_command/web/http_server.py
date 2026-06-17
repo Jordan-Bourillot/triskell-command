@@ -263,6 +263,37 @@ def create_app() -> FastAPI:
             headers={"Cache-Control": "private, max-age=86400"},
         )
 
+    @app.post("/api/perceval_pulse")
+    async def perceval_pulse(request: Request) -> JSONResponse:
+        """Le « cerveau » de Perceval : renvoie UNE remarque d'associé
+        (avis + éventuelle action) générée par l'IA, à partir de l'écran
+        courant, de ce qui vient de se passer et de l'état réel. Exécuté
+        dans un threadpool pour ne pas bloquer le serveur pendant l'appel
+        IA. Échec → {ok:false} : le navigateur retombe sur ses remarques
+        toutes faites (gratuites)."""
+        try:
+            payload = (await request.json()) or {}
+        except Exception:
+            payload = {}
+        view = str(payload.get("view") or "")
+        event = str(payload.get("event") or "")[:200]
+        last_said = payload.get("last_said") or []
+        if not isinstance(last_said, list):
+            last_said = []
+        last_said = [str(x) for x in last_said][-6:]
+        from ..integrations import claude_advisor
+        from starlette.concurrency import run_in_threadpool
+        try:
+            res = await run_in_threadpool(
+                claude_advisor.perceval_take,
+                api_instance._app_state,
+                view=view, last_said=last_said, event=event,
+            )
+        except Exception as exc:
+            logger.warning("perceval_pulse: %s", exc)
+            return JSONResponse(content={"ok": False, "error": "pulse_failed"})
+        return JSONResponse(content=res if isinstance(res, dict) else {"ok": False})
+
     # ---------------- Auth : login / logout / me ----------------
 
     @app.post("/api/login")

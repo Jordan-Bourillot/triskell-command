@@ -1027,3 +1027,111 @@ def ask_claude(app_state, *, mode: str = "interactive",
     out["suggested_action_label"] = (
         data.get("suggested_action_label") or "").strip()
     return out
+
+
+# ---------------------------------------------------------------------------
+# Perceval — la « tête » de l'associé incarné (bulle + voix, pas le chat).
+# Génère UNE remarque courte et vivante à partir de l'écran courant, de ce
+# que Jordan vient de faire, et de l'état réel de l'app. C'est ce qui donne
+# la sensation d'un binôme qui regarde par-dessus l'épaule.
+# ---------------------------------------------------------------------------
+PERCEVAL_SYSTEM = """Tu es Perceval, le binôme de travail de Jordan dans
+Triskell Command (son outil de prospection commerciale). Tu n'es PAS un
+assistant distant : tu bosses À CÔTÉ de lui, tu regardes ce qu'il fait, et
+tu réagis comme un associé qui pense tout haut.
+
+Ton job : à partir de l'écran où il est, de ce qu'il vient de faire et de
+l'état réel de l'app, lâcher UNE remarque — ton avis, une idée, un coup à
+jouer, un encouragement franc, une alerte, ou une vraie question. Comme un
+collègue de confiance, pas comme un manuel.
+
+Style (impératif) :
+- Français parlé, chaleureux, direct. Tu tutoies Jordan.
+- TRÈS COURT : 1 à 2 phrases, 220 caractères grand maximum.
+- Un avis tranché et honnête, jamais de flatterie creuse, jamais de jargon.
+- Varie : tantôt tu commentes, tantôt tu proposes un coup, tantôt tu poses
+  une question. Sois naturel, vivant, jamais robotique.
+- Ne répète JAMAIS une de tes remarques récentes (on te les donne).
+- Appuie-toi sur les CHIFFRES réels de l'app (sois concret), jamais d'invention.
+- Si vraiment rien d'utile ou d'intéressant à dire maintenant, renvoie say vide.
+
+Tu peux proposer d'aller sur un écran si c'est utile (sinon view = null).
+Écrans possibles : prospection, prospects_crm, drafts, replies, autopilot,
+funnel, revenue, health, clients, geo, phare, mails, catalogue.
+
+Format de sortie : UN SEUL bloc JSON valide, rien avant ni après.
+{
+  "say": "ta remarque (ou chaine vide si rien a dire)",
+  "view": "<id ecran a proposer>" ou null,
+  "label": "<texte court du bouton, <=24 caracteres>" ou null
+}
+"""
+
+
+def perceval_take(app_state, *, view: str = "", last_said=None,
+                   event: str = "") -> dict[str, Any]:
+    """Renvoie {ok, say, view, label, error} : la prochaine remarque de
+    Perceval. Réutilise le même socle IA que `ask_claude` (clé, contexte,
+    provider). `say` peut être vide = il n'a rien à dire maintenant."""
+    out = {"ok": False, "say": "", "view": None, "label": "", "error": ""}
+
+    ai = _resolve_ai(app_state)
+    if not ai.get("api_key"):
+        out["error"] = "ai_not_configured"
+        return out
+
+    try:
+        context = gather_context(app_state)
+    except Exception as exc:
+        out["error"] = f"context_error: {exc}"
+        return out
+
+    parts: list[str] = []
+    parts.append(f"Écran courant de Jordan : {view or 'inconnu'}.")
+    if event:
+        parts.append(f"Ce qui vient de se passer : {event}.")
+    said = [str(s).strip() for s in (last_said or []) if str(s).strip()][-6:]
+    if said:
+        parts.append("Tes dernières remarques (NE les répète pas, varie) :\n"
+                     + "\n".join(f"- {s}" for s in said))
+    parts.append("État réel de l'app (JSON) :")
+    parts.append(json.dumps(context, ensure_ascii=False, default=str))
+    user_msg = "\n\n".join(parts)
+
+    try:
+        from triskell_core.ai.providers import send_to_provider, ProviderError
+    except ImportError:
+        out["error"] = "core_unavailable"
+        return out
+
+    try:
+        prompt = PERCEVAL_SYSTEM + "\n\n---\n\n" + user_msg
+        text = send_to_provider(
+            ai["provider"], ai.get("model") or "", prompt,
+            {ai["provider"]: ai["api_key"]},
+        )
+        text = (text or "").strip()
+    except ProviderError as exc:
+        out["error"] = f"ai_error: {exc}"
+        return out
+    except Exception as exc:
+        out["error"] = f"ai_exception: {exc}"
+        return out
+
+    m = re.search(r"\{[\s\S]*\}", text)
+    if not m:
+        out["error"] = f"no_json: {text[:160]}"
+        return out
+    try:
+        data = json.loads(m.group(0))
+    except Exception as exc:
+        out["error"] = f"bad_json: {exc}"
+        return out
+
+    out["ok"] = True
+    out["say"] = (data.get("say") or "").strip()
+    v = data.get("view")
+    if isinstance(v, str) and v.strip():
+        out["view"] = v.strip()
+        out["label"] = (data.get("label") or "Voir").strip()[:24]
+    return out

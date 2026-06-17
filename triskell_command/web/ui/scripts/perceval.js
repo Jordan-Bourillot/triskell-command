@@ -47,6 +47,9 @@ const Perceval = {
   _lastNudgeAt: 0,              // dernière relance proactive
   _lastNudgeKey: '',            // sujet de la dernière relance (jamais 2× d'affilée)
   _lastPick: '',                // dernière phrase tirée (variété)
+  _recentSaid: [],              // dernières remarques de l'IA (anti-répétition)
+  _lastPulseAt: 0,              // dernier appel au cerveau (IA)
+  _pulseInFlight: false,        // un appel au cerveau est en cours
   mood: 'observe',
   _speaking: false,
   _lastSpoken: '',
@@ -144,7 +147,10 @@ const Perceval = {
       }
       this.visits = visits;
       this.met = localStorage.getItem(this.LS.met) === '1';
-      this.voiceOn = localStorage.getItem(this.LS.voice) === '1';
+      // La voix est active par défaut (un associé, ça parle) ; on respecte
+      // un choix explicite de la couper.
+      const vset = localStorage.getItem(this.LS.voice);
+      this.voiceOn = (vset === null) ? true : (vset === '1');
       this.voice = localStorage.getItem(this.LS.voicename) || 'fr-FR-HenriNeural';
       this.presence = localStorage.getItem(this.LS.presence) || 'equilibre';
     } catch (e) { this.visits = 1; /* stockage indisponible : mode sans mémoire */ }
@@ -181,7 +187,7 @@ const Perceval = {
     // Première visite d'un écran → présentation. Sinon → un mot sur place,
     // avec son avis selon l'état réel (mode équilibré/binôme).
     const introduced = this._maybeIntroduceView(viewId);
-    if (!introduced) this._maybeViewRemark(viewId);
+    if (!introduced) this._scheduleViewPulse(viewId);
     this._renderBubble();
     this._poll(); // l'état a pu changer suite à une action
   },
@@ -365,6 +371,64 @@ const Perceval = {
     ]);
   },
 
+  // ---------- le cerveau : un vrai avis d'associé, via l'IA ----------
+  _pulseGap() {
+    const p = this._presence();
+    if (p === 'discret') return Infinity;   // pas d'IA en mode discret
+    if (p === 'binome') return 90 * 1000;
+    return 180 * 1000;                       // équilibré : ~ toutes les 3 min
+  },
+  // Demande une remarque au cerveau. event = ce qui vient de se passer
+  // (facultatif). opts.minGap = délai mini depuis le dernier appel.
+  // Renvoie true (a parlé), 'silent' (l'IA n'a rien à dire) ou false (indispo).
+  async _pulse(event, opts = {}) {
+    if (this._presence() === 'discret') return false;
+    if (this.collapsed || this.eventMsg || this._chatOpen() || this._pulseInFlight) return false;
+    if (this._dbDown()) return false;
+    const minGap = (opts.minGap != null) ? opts.minGap : this._pulseGap();
+    if (!isFinite(minGap)) return false;
+    if (Date.now() - (this._lastPulseAt || 0) < minGap) return false;
+    this._pulseInFlight = true;
+    this._lastPulseAt = Date.now();
+    try {
+      const r = await fetch('/api/perceval_pulse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          view: this.view,
+          event: event || '',
+          last_said: this._recentSaid.slice(-6),
+        }),
+      });
+      if (!r.ok) return false;
+      const d = await r.json();
+      if (!d || !d.ok) return false;
+      if (!d.say) return 'silent';            // l'IA a choisi de se taire
+      this._recentSaid.push(d.say);
+      if (this._recentSaid.length > 10) this._recentSaid.shift();
+      this._lastSpontaneousAt = Date.now();
+      const choices = d.view ? [{ label: d.label || 'Voir', view: d.view }] : null;
+      this.say(d.say, 12000, { speak: this._presenceSpeaks(), choices });
+      return true;
+    } catch (e) {
+      return false;                           // hors-ligne / erreur → secours règle
+    } finally {
+      this._pulseInFlight = false;
+    }
+  },
+  // À l'arrivée sur un écran : le cerveau commente (petit délai pour ne pas
+  // réagir à une navigation éclair). Secours règle si l'IA est muette.
+  _scheduleViewPulse(viewId) {
+    if (this._viewPulseTimer) clearTimeout(this._viewPulseTimer);
+    this._viewPulseTimer = setTimeout(async () => {
+      if (this.view !== viewId) return;
+      const res = await this._pulse('Jordan vient d’ouvrir l’écran « ' + viewId + ' »',
+                                    { minGap: 45 * 1000 });
+      if (res === false) this._maybeViewRemark(viewId); // IA indispo → règle
+    }, 1200);
+  },
+
   // ---------- niveau d'accompagnement ----------
   // découverte : statut + action + conseil d'écran (les ~5 premiers jours)
   // habitué    : statut + action
@@ -384,7 +448,11 @@ const Perceval = {
     this.snap = s;
     const evt = this._detectEvent(this.prevSnap, s);
     if (evt) this.say(evt);
-    else { this._refreshMood(); this._renderBubble(); this._maybeIdleNudge(); }
+    else {
+      this._refreshMood(); this._renderBubble();
+      // Le cerveau prend l'initiative (espacé) ; secours règle si IA muette.
+      this._pulse('').then(res => { if (res === false) this._maybeIdleNudge(); });
+    }
     // Bonjour du jour : une fois le premier instantané en main.
     this._maybeGreet();
   },
