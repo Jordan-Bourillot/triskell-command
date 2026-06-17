@@ -1877,15 +1877,20 @@ class Api:
         return m.group(0) if m else ""
 
     @staticmethod
-    def _creator_html(body: str) -> str:
-        """Met le message créateur en HTML propre (paragraphes + lien en
-        bouton), comme les mails de prospection. Vide si indispo."""
+    def _creator_mail_html(cr: dict, accent: str = "", accent2: str = "") -> str:
+        """Mail HTML riche d'un créateur (accroche globale, aperçus, détail,
+        bouton). Tutoiement par défaut, vouvoiement si la fiche le précise."""
         try:
-            from ..integrations.convoy_ai import (
-                text_to_email_html, _first_url_in)
-            return text_to_email_html(
-                body, primary_url=_first_url_in(body),
-                primary_label="Voir ce que j'ai préparé")
+            from ..integrations import creator_mail
+            notes = (cr.get("notes") or "").lower()
+            tu = "vouvoiement" not in notes
+            return creator_mail.render(
+                name=cr.get("name") or "",
+                demo_url=cr.get("demo_url") or "",
+                accent=accent or "#6366F1",
+                accent2=accent2 or accent or "#4F46E5",
+                tu=tu,
+            )
         except Exception:
             return ""
 
@@ -1911,7 +1916,8 @@ class Api:
             body = (cr.get("message") or "").strip()
             if not email or not body:
                 continue
-            body_html = self._creator_html(body)
+            body_html = self._creator_mail_html(
+                cr, d.get("accent") or "", d.get("accent2") or "")
             out.append({
                 "source": "creator",
                 "id": d.get("id") or "",
@@ -1997,7 +2003,9 @@ class Api:
         try:
             msg_id = send_email(smtp_cfg, to=to, subject=subject,
                                 body=final_body,
-                                body_html=self._creator_html(final_body))
+                                body_html=self._creator_mail_html(
+                                    cr, d.get("accent") or "",
+                                    d.get("accent2") or ""))
         except Exception as exc:
             return {"ok": False, "error": f"envoi KO : {exc}"}
 
@@ -6530,7 +6538,10 @@ class Api:
                 vouvoie = "tutoiement" not in (r.get("notes") or "").lower()
                 poss = "votre" if vouvoie else "ta"
                 subject = f"Un assistant à {poss} marque, pour {poss} communauté"
-                d = CD.queue(sb, r.get("id") or "", subject)
+                p = payload or {}
+                d = CD.queue(sb, r.get("id") or "", subject,
+                             accent=p.get("accent", ""),
+                             accent2=p.get("accent2", ""))
                 if d:
                     queued.append({"name": r.get("name") or "?", "to": email})
             return {"ok": True, "count": len(queued),

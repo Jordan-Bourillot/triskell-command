@@ -61,7 +61,8 @@ def get(sb, draft_id: str) -> dict | None:
     return None
 
 
-def queue(sb, creator_id: str, subject: str, sender_address: str = "") -> dict | None:
+def queue(sb, creator_id: str, subject: str, sender_address: str = "",
+          accent: str = "", accent2: str = "") -> dict | None:
     """Met (ou remplace) un brouillon `pending` pour ce créateur."""
     if sb is None or not creator_id:
         return None
@@ -75,6 +76,8 @@ def queue(sb, creator_id: str, subject: str, sender_address: str = "") -> dict |
         "creator_id": creator_id,
         "subject": (subject or "").strip(),
         "sender_address": (sender_address or "").strip(),
+        "accent": (accent or "").strip(),
+        "accent2": (accent2 or "").strip(),
         "status": "pending",
         "created_at": _now(),
     }

@@ -1,0 +1,128 @@
+"""Génère le mail HTML « riche » envoyé aux créateurs (validé par Jordan 17/06).
+
+Structure : accroche globale → aperçu de l'assistant → le détail (quiz, analyse,
+monétisation) → aperçu du quiz → bouton → offre. Deux aperçus images pour
+intriguer. Gère tutoiement / vouvoiement. Style « zéro tic d'IA » : pas de
+deux-points d'annonce, pas de tiret cadratin, pas de « sans pression »
+(cf. feedback Jordan).
+
+Les images (avatar + 2 aperçus) sont servies depuis le site du créateur :
+  <demo_url>/brand_avatar.jpg, /_mail_assistant.png, /_mail_quiz.png
+(elles doivent y être déployées — voir scripts/… côté Operateur-Croissance).
+"""
+from __future__ import annotations
+
+import html as _html
+
+
+def _esc(s: str) -> str:
+    return _html.escape(str(s or ""))
+
+
+def render(name: str, demo_url: str, accent: str = "#6366F1",
+           accent2: str = "#4F46E5", tu: bool = True) -> str:
+    """Retourne le corps HTML du mail pour un créateur."""
+    base = (demo_url or "").rstrip("/")
+    name = _esc(name)
+    acc = accent or "#6366F1"
+    acc2 = accent2 or "#4F46E5"
+    url_accueil = base + "/accueil.html"
+    url_quiz = base + "/quiz.html"
+    img_avatar = base + "/brand_avatar.jpg"
+    img_assistant = base + "/_mail_assistant.png"
+    img_quiz = base + "/_mail_quiz.png"
+
+    if tu:
+        t = {
+            "hello": "Salut " + name + " 👋",
+            "h1b": "j'ai construit tout un espace à ta marque.",
+            "intro": ("J'ai regardé ta chaîne, et j'ai préparé un moyen de "
+                      "<b>transformer ton audience en revenus</b>, sans que tu "
+                      "aies rien à gérer. Le plus simple, c'est de te montrer "
+                      "ça en images."),
+            "hero": ("<b>Ton assistant IA, à ta marque.</b> Il répond à ta "
+                     "communauté <b>24h/24</b>, avec ta méthode, tirée de tes "
+                     "vidéos."),
+            "detail": "Et autour, j'ai aussi préparé tout ça pour toi.",
+            "d1": ("🎮 &nbsp;<b>Un quiz</b> « teste ton niveau » qui amuse ta "
+                   "communauté et la ramène vers toi"),
+            "d2": ("🔍 &nbsp;<b>Une analyse de ta chaîne</b> et <b>10 idées de "
+                   "vidéos</b>, offertes, rien que pour toi"),
+            "d3": ("💰 &nbsp;<b>De quoi monétiser ton audience</b>, avec un "
+                   "abonnement pour ta communauté dont tu touches une part"),
+            "quizcap": ("Un aperçu du quiz, à ta marque, avec tes vraies "
+                        "vidéos et tes couleurs."),
+            "cta": "Découvrir tout ton espace →",
+            "offer": ("Tout est déjà prêt, à ta marque, fait à partir de tes "
+                      "vidéos. Toi tu fais ton contenu, je m'occupe du reste. "
+                      "Si l'idée te plaît, je t'explique tout avec plaisir."),
+        }
+    else:
+        t = {
+            "hello": "Bonjour " + name + " 👋",
+            "h1b": "j'ai construit tout un espace à votre marque.",
+            "intro": ("J'ai regardé votre chaîne, et j'ai préparé un moyen de "
+                      "<b>transformer votre audience en revenus</b>, sans que "
+                      "vous ayez rien à gérer. Le plus simple, c'est de vous "
+                      "montrer ça en images."),
+            "hero": ("<b>Votre assistant IA, à votre marque.</b> Il répond à "
+                     "votre communauté <b>24h/24</b>, avec votre méthode, "
+                     "tirée de vos vidéos."),
+            "detail": "Et autour, j'ai aussi préparé tout ça pour vous.",
+            "d1": ("🎮 &nbsp;<b>Un quiz</b> « testez votre niveau » qui amuse "
+                   "votre communauté et la ramène vers vous"),
+            "d2": ("🔍 &nbsp;<b>Une analyse de votre chaîne</b> et <b>10 idées "
+                   "de vidéos</b>, offertes, rien que pour vous"),
+            "d3": ("💰 &nbsp;<b>De quoi monétiser votre audience</b>, avec un "
+                   "abonnement pour votre communauté dont vous touchez une "
+                   "part"),
+            "quizcap": ("Un aperçu du quiz, à votre marque, avec vos vraies "
+                        "vidéos et vos couleurs."),
+            "cta": "Découvrir tout votre espace →",
+            "offer": ("Tout est déjà prêt, à votre marque, fait à partir de "
+                      "vos vidéos. Vous faites votre contenu, je m'occupe du "
+                      "reste. Si l'idée vous plaît, je vous explique tout avec "
+                      "plaisir."),
+        }
+
+    return f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef1f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#eef1f5;">
+<tr><td align="center" style="padding:30px 12px;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 10px 34px rgba(15,23,42,.10);">
+    <tr><td style="padding:34px 38px 6px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td style="padding-right:13px;"><img src="{img_avatar}" width="52" height="52" alt="" style="border-radius:50%;display:block;border:2px solid {acc};"></td>
+        <td style="font-size:14px;color:#6b7280;line-height:1.3;">Préparé pour vous par<br><b style="color:#111827;font-size:15px;">Triskell Studio</b></td>
+      </tr></table>
+      <h1 style="margin:22px 0 10px;font-size:25px;line-height:1.25;color:#0f172a;">{t['hello']}<br>{t['h1b']}</h1>
+      <p style="margin:0;font-size:16px;line-height:1.6;color:#374151;">{t['intro']}</p>
+    </td></tr>
+    <tr><td style="padding:24px 38px 0;">
+      <a href="{url_accueil}" style="text-decoration:none;"><img src="{img_assistant}" width="524" alt="" style="width:100%;display:block;border-radius:12px;border:1px solid #e5e7eb;"></a>
+      <p style="margin:14px 0 0;font-size:15.5px;line-height:1.55;color:#374151;">{t['hero']}</p>
+    </td></tr>
+    <tr><td style="padding:22px 38px 0;">
+      <p style="margin:0 0 12px;font-size:15.5px;color:#0f172a;font-weight:700;">{t['detail']}</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr><td style="padding:9px 0;font-size:15px;color:#374151;line-height:1.5;">{t['d1']}</td></tr>
+        <tr><td style="padding:9px 0;font-size:15px;color:#374151;line-height:1.5;">{t['d2']}</td></tr>
+        <tr><td style="padding:9px 0;font-size:15px;color:#374151;line-height:1.5;">{t['d3']}</td></tr>
+      </table>
+    </td></tr>
+    <tr><td style="padding:18px 38px 0;">
+      <a href="{url_quiz}" style="text-decoration:none;"><img src="{img_quiz}" width="524" alt="" style="width:100%;display:block;border-radius:12px;border:1px solid #e5e7eb;"></a>
+      <p style="margin:10px 0 0;font-size:13px;color:#6b7280;text-align:center;">{t['quizcap']}</p>
+    </td></tr>
+    <tr><td align="center" style="padding:28px 38px 6px;">
+      <a href="{url_accueil}" style="display:inline-block;background:linear-gradient(135deg,{acc},{acc2});color:#fff;padding:15px 30px;border-radius:10px;text-decoration:none;font-weight:800;font-size:16px;">{t['cta']}</a>
+    </td></tr>
+    <tr><td style="padding:18px 38px 34px;">
+      <p style="margin:0;font-size:14.5px;line-height:1.6;color:#6b7280;">{t['offer']}</p>
+      <p style="margin:16px 0 0;font-size:14.5px;color:#374151;">Au plaisir,<br><b>Triskell Studio</b></p>
+    </td></tr>
+  </table>
+</td></tr>
+</table>
+</body></html>"""
