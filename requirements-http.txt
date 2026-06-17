@@ -33,3 +33,6 @@ reportlab>=4.0   # Génération PDF côté serveur (export Obelisk + bulletins P
 
 # --- Web Push notifications (mobile/desktop) ---
 pywebpush>=2.0
+
+# --- Voix de Perceval (synthèse neurale Microsoft, gratuite, sans clé) ---
+edge-tts>=6.1

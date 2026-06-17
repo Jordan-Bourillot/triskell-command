@@ -40,6 +40,8 @@ const Perceval = {
   visits: 0,
   met: false,            // a déjà rencontré Perceval (carte de présentation)
   voiceOn: false,
+  voice: 'fr-FR-HenriNeural',   // voix choisie (id edge-tts, voir VOICES)
+  _audio: null,                 // élément <audio> en cours de lecture
   mood: 'observe',
   _speaking: false,
   _lastSpoken: '',
@@ -56,7 +58,18 @@ const Perceval = {
     met: 'triskell.perceval.met',
     voice: 'triskell.perceval.voice',
     greetDay: 'triskell.perceval.greetday',
+    voicename: 'triskell.perceval.voicename',
   },
+
+  // Voix proposées dans le menu (neurales, françaises). Doit rester aligné
+  // avec la liste blanche serveur (integrations/voice_tts.py → VOICES).
+  VOICES: [
+    { id: 'fr-FR-HenriNeural',                label: 'Henri (homme)' },
+    { id: 'fr-FR-RemyMultilingualNeural',     label: 'Rémy (homme)' },
+    { id: 'fr-FR-DeniseNeural',               label: 'Denise (femme)' },
+    { id: 'fr-FR-VivienneMultilingualNeural', label: 'Vivienne (femme)' },
+    { id: 'fr-FR-EloiseNeural',               label: 'Éloïse (femme)' },
+  ],
 
   // ---------- textes par écran : « tu es ici » + geste attendu ----------
   // Une ligne courte, concrète, dans la langue de tous les jours.
@@ -126,6 +139,7 @@ const Perceval = {
       this.visits = visits;
       this.met = localStorage.getItem(this.LS.met) === '1';
       this.voiceOn = localStorage.getItem(this.LS.voice) === '1';
+      this.voice = localStorage.getItem(this.LS.voicename) || 'fr-FR-HenriNeural';
     } catch (e) { this.visits = 1; /* stockage indisponible : mode sans mémoire */ }
 
     this._injectStyles();
@@ -526,17 +540,51 @@ const Perceval = {
   // ---------- la voix ----------
   _speak(text) {
     if (!this.voiceOn) return;
+    const t = String(text == null ? '' : text)
+      .replace(/[✓⚠👋🧭💬]/g, '').replace(/\s+/g, ' ').trim();
+    if (!t) return;
+    // Anti-bégaiement : jamais deux fois la même phrase en moins de 30 s.
+    const now = Date.now();
+    if (t === this._lastSpoken && (now - this._lastSpokenAt) < 30000) return;
+    this._lastSpoken = t;
+    this._lastSpokenAt = now;
+    // Voix naturelle d'abord (serveur) ; voix du navigateur en secours.
+    this._speakServer(t).catch(() => this._speakBrowser(t));
+  },
+
+  // Voix naturelle : le serveur fabrique le son (voix neurale Microsoft).
+  async _speakServer(t) {
+    this._stopAudio(); // il ne parle jamais par-dessus lui-même
+    const r = await fetch('/api/perceval_voice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ text: t, voice: this.voice }),
+    });
+    if (!r.ok) throw new Error('voix serveur ' + r.status);
+    const ct = r.headers.get('content-type') || '';
+    if (ct.indexOf('audio') === -1) throw new Error('réponse non audio');
+    const blob = await r.blob();
+    if (!blob || !blob.size) throw new Error('son vide');
+    const url = URL.createObjectURL(blob);
+    const a = new Audio(url);
+    this._audio = a;
+    a.onplay = () => { this._speaking = true; this._applyMood(); };
+    const done = () => {
+      if (this._audio === a) this._audio = null;
+      this._speaking = false; this._refreshMood();
+      try { URL.revokeObjectURL(url); } catch (e) {}
+    };
+    a.onended = done;
+    a.onerror = done;
+    await a.play(); // rejette si l'autoplay est bloqué → on bascule en secours
+  },
+
+  // Secours : la voix du navigateur (moins belle, mais toujours dispo).
+  _speakBrowser(t) {
     try {
       if (!('speechSynthesis' in window)) return;
-      const t = String(text == null ? '' : text)
-        .replace(/[✓⚠👋🧭💬]/g, '').replace(/\s+/g, ' ').trim();
-      if (!t) return;
-      // Anti-bégaiement : jamais deux fois la même phrase en moins de 30 s.
-      const now = Date.now();
-      if (t === this._lastSpoken && (now - this._lastSpokenAt) < 30000) return;
-      this._lastSpoken = t;
-      this._lastSpokenAt = now;
-      window.speechSynthesis.cancel(); // il ne parle pas par-dessus lui-même
+      window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(t);
       u.lang = 'fr-FR'; u.rate = 1.0; u.pitch = 0.9; // timbre posé
       u.onstart = () => { this._speaking = true; this._applyMood(); };
@@ -556,6 +604,12 @@ const Perceval = {
         };
       }
     } catch (e) { /* la voix ne casse jamais rien */ }
+  },
+
+  _stopAudio() {
+    try { if (this._audio) { this._audio.pause(); this._audio = null; } } catch (e) {}
+    try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch (e) {}
+    this._speaking = false;
   },
 
   _pickFrVoice() {
@@ -578,10 +632,56 @@ const Perceval = {
       this._lastSpoken = '';
       this._speak('Je suis là.');
     } else {
-      try { window.speechSynthesis.cancel(); } catch (e) {}
-      this._speaking = false;
+      this._stopAudio();
     }
     this._renderBubble();
+  },
+
+  // ---------- choix de la voix ----------
+  _toggleVoiceMenu() {
+    const existing = document.getElementById('pv-voice-menu');
+    if (existing) { existing.remove(); return; }
+    const host = document.getElementById('perceval-host');
+    if (!host) return;
+    const menu = document.createElement('div');
+    menu.id = 'pv-voice-menu';
+    menu.innerHTML = `
+      <div class="pv-vm-title">La voix de ${this.name}</div>
+      ${this.VOICES.map(v => `
+        <button type="button" class="pv-vm-item${v.id === this.voice ? ' is-on' : ''}" data-voice="${this._esc(v.id)}">
+          <span class="pv-vm-dot" aria-hidden="true"></span>
+          <span class="pv-vm-name">${this._esc(v.label)}</span>
+          <span class="pv-vm-try">écouter ▶</span>
+        </button>`).join('')}
+      <div class="pv-vm-foot">Clique une voix pour l’écouter et la garder.</div>`;
+    host.appendChild(menu);
+    menu.querySelectorAll('.pv-vm-item').forEach(btn => {
+      btn.onclick = () => {
+        menu.querySelectorAll('.pv-vm-item').forEach(b => b.classList.toggle('is-on', b === btn));
+        this._setVoiceName(btn.getAttribute('data-voice'));
+      };
+    });
+    // Referme au clic ailleurs (mais pas sur le bouton qui l'ouvre).
+    setTimeout(() => {
+      const off = (e) => {
+        if (menu.contains(e.target)) return;
+        const pick = document.getElementById('pv-voice-pick');
+        if (pick && pick.contains(e.target)) return;
+        menu.remove();
+        document.removeEventListener('click', off, true);
+      };
+      document.addEventListener('click', off, true);
+    }, 0);
+  },
+
+  _setVoiceName(id) {
+    this.voice = id || 'fr-FR-HenriNeural';
+    try { localStorage.setItem(this.LS.voicename, this.voice); } catch (e) {}
+    // Choisir une voix = vouloir l'entendre : si elle était coupée, on
+    // l'allume (ce qui joue déjà un essai). Sinon, petit essai immédiat.
+    this._lastSpoken = '';
+    if (!this.voiceOn) this._setVoice(true);
+    else this._speak('Voilà ma voix.');
   },
 
   // ---------- humeurs ----------
@@ -638,6 +738,8 @@ const Perceval = {
         </form>
         <button id="pv-voice-btn" type="button" class="pv-tool-btn"
                 aria-label="Voix de ${this.name}">🔇</button>
+        <button id="pv-voice-pick" type="button" class="pv-tool-btn"
+                title="Choisir la voix de ${this.name}" aria-label="Choisir la voix">🎙️</button>
         <button id="pv-min-btn" type="button" class="pv-tool-btn"
                 title="Réduire ${this.name} (il reste en petit)" aria-label="Réduire">▾</button>
       </div>
@@ -649,6 +751,7 @@ const Perceval = {
       </button>`;
     document.body.appendChild(host);
     document.getElementById('pv-voice-btn').onclick = () => this._setVoice(!this.voiceOn);
+    document.getElementById('pv-voice-pick').onclick = () => this._toggleVoiceMenu();
     document.getElementById('pv-min-btn').onclick = () => this._setCollapsed(true);
     document.getElementById('pv-body').onclick = () => {
       if (this.collapsed) { this._setCollapsed(false); return; }
@@ -985,6 +1088,49 @@ const Perceval = {
       #perceval-host.pv-mini #pv-askbar { display: none; }
       @media (max-width: 640px) {
         #pv-askbar { display: none; }
+      }
+
+      /* -- menu de choix de la voix -- */
+      #pv-voice-menu {
+        position: fixed; z-index: 60;
+        right: 18px;
+        bottom: calc(152px + env(safe-area-inset-bottom, 0px));
+        width: min(248px, calc(100vw - 36px));
+        background: hsl(var(--surface-elevated, var(--surface)) / .98);
+        backdrop-filter: blur(10px);
+        border: 1px solid hsl(var(--border-strong));
+        border-radius: 14px; padding: 7px;
+        box-shadow: 0 10px 30px rgba(15,23,42,.22);
+        animation: pvRise .18s ease-out;
+      }
+      .pv-vm-title {
+        font-size: 11px; font-weight: 800; text-transform: uppercase;
+        letter-spacing: .04em; color: hsl(var(--text-muted));
+        padding: 4px 8px 6px;
+      }
+      .pv-vm-item {
+        display: flex; align-items: center; gap: 9px; width: 100%;
+        border: 0; background: transparent; cursor: pointer;
+        padding: 8px; border-radius: 9px; text-align: left;
+        color: hsl(var(--text-secondary)); font-size: 13px;
+      }
+      .pv-vm-item:hover { background: hsl(var(--border) / .55); }
+      .pv-vm-dot {
+        flex-shrink: 0; width: 12px; height: 12px; border-radius: 50%;
+        border: 2px solid hsl(var(--border-strong));
+      }
+      .pv-vm-item.is-on .pv-vm-dot {
+        border-color: hsl(var(--accent));
+        background: hsl(var(--accent));
+        box-shadow: inset 0 0 0 2px hsl(var(--surface));
+      }
+      .pv-vm-item.is-on { color: hsl(var(--text)); font-weight: 700; }
+      .pv-vm-name { flex: 1; }
+      .pv-vm-try { font-size: 11px; color: hsl(var(--text-muted)); }
+      .pv-vm-item:hover .pv-vm-try { color: hsl(var(--accent)); }
+      .pv-vm-foot {
+        font-size: 11px; color: hsl(var(--text-muted));
+        padding: 6px 8px 3px; line-height: 1.4;
       }
 
       /* -- la bulle : épisodique et compacte, ancrée au-dessus de la barre -- */

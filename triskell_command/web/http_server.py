@@ -236,6 +236,33 @@ def create_app() -> FastAPI:
     async def health() -> dict:
         return {"ok": True, "service": "triskell-command-http", "methods": method_count}
 
+    @app.post("/api/perceval_voice")
+    async def perceval_voice(request: Request) -> Response:
+        """Voix de Perceval : texte → MP3 (voix neurale Microsoft via
+        edge-tts). En cas d'échec (paquet absent, service muet), renvoie une
+        erreur JSON → le navigateur reprend avec sa propre voix."""
+        try:
+            payload = (await request.json()) or {}
+        except Exception:
+            payload = {}
+        text = str((payload or {}).get("text") or "")
+        voice = str((payload or {}).get("voice") or "")
+        if not text.strip():
+            return JSONResponse(status_code=400, content={"ok": False, "error": "no_text"})
+        try:
+            from ..integrations import voice_tts
+            audio = await voice_tts.synthesize(text, voice)
+        except Exception as exc:
+            logger.warning("perceval_voice indisponible : %s", exc)
+            return JSONResponse(status_code=502, content={"ok": False, "error": "tts_unavailable"})
+        if not audio:
+            return JSONResponse(status_code=502, content={"ok": False, "error": "tts_empty"})
+        return Response(
+            content=audio,
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "private, max-age=86400"},
+        )
+
     # ---------------- Auth : login / logout / me ----------------
 
     @app.post("/api/login")
