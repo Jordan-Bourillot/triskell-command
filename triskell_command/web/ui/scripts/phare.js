@@ -258,13 +258,14 @@ const Phare = {
     const s = data.site || {};
     const kpis = data.kpis || {};
     const toReview = data.to_review || [];
+    const advice = data.advice || [];
     const done = data.recently_done || [];
     const bull = data.bulletin || null;
     this._selectedSiteName = s.name || s.domain || '';
 
-    // Indexer les propositions pour la modale d'aperçu
+    // Indexer les propositions (pile + conseils) pour la modale d'aperçu
     this._currentActions = {};
-    toReview.forEach(a => { if (a && a.id) this._currentActions[a.id] = a; });
+    [...toReview, ...advice].forEach(a => { if (a && a.id) this._currentActions[a.id] = a; });
 
     document.getElementById('ph-site-body').innerHTML = `
       <header class="phare-site-hero">
@@ -315,6 +316,20 @@ const Phare = {
             : toReview.map(a => this._actionCard(a, 'todo')).join('')}
         </div>
       </div>
+
+      <!-- CONSEILS (à lire / à faire toi-même) — hors de la pile, repliable -->
+      ${advice.length === 0 ? '' : `
+      <div class="phare-section">
+        <details>
+          <summary style="cursor:pointer;">
+            <strong style="font-size:1.05rem;">💡 Conseils (${advice.length})</strong>
+            <span class="phare-section-sub" style="display:block;margin-top:4px;">À lire ou à faire toi-même — le robot ne peut pas s’en charger. Rien d’urgent, déplie si tu veux.</span>
+          </summary>
+          <div id="ph-advice-list" style="margin-top:12px;">
+            ${advice.map(a => this._actionCard(a, 'todo')).join('')}
+          </div>
+        </details>
+      </div>`}
 
       <!-- CE QUI A ÉTÉ FAIT -->
       <div class="phare-section">

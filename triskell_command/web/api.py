@@ -2994,7 +2994,11 @@ class Api:
             for a in actions:
                 st = (a.get("status") or "").lower()
                 if st in ("draft", "pending_review", "preview"):
-                    to_review.append(a)
+                    # Les bulletins (Analyste) sont des CHIFFRES À LIRE, pas
+                    # des actions : servis à part (champ `bulletin`), jamais
+                    # dans la pile « à toi de jouer ».
+                    if (a.get("agent") or "") != "analyste":
+                        to_review.append(a)
                 elif st == "merged":
                     done.append(a)
                 elif st == "rejected":
@@ -3010,6 +3014,7 @@ class Api:
             # chaque carte reçoit `simple_what` (phrase sans jargon) et
             # `apply` ({can, mode, why}) calculés côté serveur — l'UI ne
             # devine rien.
+            advice = []
             try:
                 from ..integrations.phare import plain_language
                 for a in to_review:
@@ -3018,6 +3023,15 @@ class Api:
                 for a in done:
                     if a.get("simple_md"):
                         a["simple_what"] = a["simple_md"]
+                # Écran épuré (17/06) : on sort de la pile « à toi de jouer »
+                # les conseils que le robot ne peut PAS faire (à lire / à faire
+                # toi-même) → volet « Conseils ». Ne restent dans la pile que
+                # les vraies décisions (le robot peut agir, ou une modif est
+                # déjà prête à publier).
+                advice = [a for a in to_review
+                          if (a.get("apply") or {}).get("mode") in ("manual", "info")]
+                to_review = [a for a in to_review
+                             if (a.get("apply") or {}).get("mode") not in ("manual", "info")]
             except Exception as exc:
                 logger.debug("phare_site_dashboard plain_language: %s", exc)
             # Tone santé
@@ -3043,6 +3057,7 @@ class Api:
                     "delta_pct": delta_pct,
                 },
                 "to_review": to_review[:20],
+                "advice": advice[:20],
                 "recently_done": done[:10],
                 "rejected_recent": rejected[:5],
                 "bulletin": bulletin,
