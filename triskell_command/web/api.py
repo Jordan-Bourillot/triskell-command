@@ -1882,13 +1882,16 @@ class Api:
         bouton). Tutoiement par défaut, vouvoiement si la fiche le précise."""
         try:
             from ..integrations import creator_mail
-            notes = (cr.get("notes") or "").lower()
-            tu = "vouvoiement" not in notes
+            notes = (cr.get("notes") or "")
+            tu = "vouvoiement" not in notes.lower()
+            na, na2 = creator_mail.accent_from_notes(notes)
+            acc = accent or na or "#6366F1"
+            acc2 = accent2 or na2 or acc
             return creator_mail.render(
                 name=cr.get("name") or "",
                 demo_url=cr.get("demo_url") or "",
-                accent=accent or "#6366F1",
-                accent2=accent2 or accent or "#4F46E5",
+                accent=acc,
+                accent2=acc2,
                 tu=tu,
             )
         except Exception:
@@ -1913,9 +1916,12 @@ class Api:
             if not cr:
                 continue
             email = self._creator_email(cr)
-            body = (cr.get("message") or "").strip()
-            if not email or not body:
+            demo = (cr.get("demo_url") or "").strip()
+            if not email or not demo:
                 continue
+            from ..integrations import creator_mail
+            tu = "vouvoiement" not in (cr.get("notes") or "").lower()
+            body = creator_mail.render_text(cr.get("name") or "", demo, tu)
             body_html = self._creator_mail_html(
                 cr, d.get("accent") or "", d.get("accent2") or "")
             out.append({
@@ -1966,7 +1972,13 @@ class Api:
         if not to:
             return {"ok": False, "error": "pas d'email sur ce créateur"}
         subject = d.get("subject") or ""
-        final_body = body if body is not None else (cr.get("message") or "")
+        if body is not None:
+            final_body = (body or "").strip()
+        else:
+            from ..integrations import creator_mail
+            _tu = "vouvoiement" not in (cr.get("notes") or "").lower()
+            final_body = creator_mail.render_text(
+                cr.get("name") or "", (cr.get("demo_url") or "").strip(), _tu)
         final_body = (final_body or "").strip()
 
         _safe = PS.mail_is_safe_to_send(subject, final_body)

@@ -126,3 +126,61 @@ def render(name: str, demo_url: str, accent: str = "#6366F1",
 </td></tr>
 </table>
 </body></html>"""
+
+
+def render_text(name: str, demo_url: str, tu: bool = True) -> str:
+    """Version TEXTE BRUT du mail (secours `text/plain`), cohérente avec le
+    rendu HTML et sans tic d'IA (pas de « : » d'annonce, pas de tiret
+    cadratin, pas de « sans pression »)."""
+    base = (demo_url or "").rstrip("/")
+    url = base + "/accueil.html"
+    if tu:
+        return (
+            f"Salut {name},\n\n"
+            "J'ai regardé ta chaîne et j'ai préparé tout un espace à ta "
+            "marque, pour transformer ton audience en revenus sans que tu "
+            "aies rien à gérer.\n\n"
+            "Le cœur, c'est un assistant IA à ta marque. Il répond à ta "
+            "communauté 24h/24, avec ta méthode tirée de tes vidéos.\n\n"
+            "Et autour, j'ai aussi préparé tout ça pour toi.\n"
+            "- Un quiz « teste ton niveau » qui amuse ta communauté et la "
+            "ramène vers toi\n"
+            "- Une analyse de ta chaîne et 10 idées de vidéos, offertes\n"
+            "- De quoi monétiser ton audience, avec un abonnement pour ta "
+            "communauté dont tu touches une part\n\n"
+            "Tu peux tout découvrir ici.\n"
+            f"{url}\n\n"
+            "Tout est déjà prêt, à ta marque, fait à partir de tes vidéos. "
+            "Toi tu fais ton contenu, je m'occupe du reste. Si l'idée te "
+            "plaît, je t'explique tout avec plaisir.\n\n"
+            "Au plaisir,\nTriskell Studio"
+        )
+    return (
+        f"Bonjour {name},\n\n"
+        "J'ai regardé votre chaîne et j'ai préparé tout un espace à votre "
+        "marque, pour transformer votre audience en revenus sans que vous "
+        "ayez rien à gérer.\n\n"
+        "Le cœur, c'est un assistant IA à votre marque. Il répond à votre "
+        "communauté 24h/24, avec votre méthode tirée de vos vidéos.\n\n"
+        "Et autour, j'ai aussi préparé tout ça pour vous.\n"
+        "- Un quiz « testez votre niveau » qui amuse votre communauté et la "
+        "ramène vers vous\n"
+        "- Une analyse de votre chaîne et 10 idées de vidéos, offertes\n"
+        "- De quoi monétiser votre audience, avec un abonnement pour votre "
+        "communauté dont vous touchez une part\n\n"
+        "Vous pouvez tout découvrir ici.\n"
+        f"{url}\n\n"
+        "Tout est déjà prêt, à votre marque, fait à partir de vos vidéos. "
+        "Vous faites votre contenu, je m'occupe du reste. Si l'idée vous "
+        "plaît, je vous explique tout avec plaisir.\n\n"
+        "Au plaisir,\nTriskell Studio"
+    )
+
+
+def accent_from_notes(notes: str):
+    """Couleurs de marque rangées dans les notes de la fiche créateur, au
+    format `[brand:#22B8CF,#0E8C9E]`. Retourne ("", "") si absent."""
+    import re
+    m = re.search(r"\[brand:(#[0-9A-Fa-f]{3,8}),\s*(#[0-9A-Fa-f]{3,8})\]",
+                  notes or "")
+    return (m.group(1), m.group(2)) if m else ("", "")
