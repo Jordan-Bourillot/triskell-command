@@ -888,11 +888,9 @@ const Drafts = {
     const modifType = (r.review_modif_type || '').trim();
     let scoreLabel = `${score}/10`;
     let editPart = '';
-    if (applied && before != null && after != null) {
-      scoreLabel = `${before} → ${after}/10`;
+    if (applied) {
+      if (before != null && after != null) scoreLabel = `${before} → ${after}/10`;
       editPart = ` <span class="font-semibold">· ✏️ retouché${modifType ? ' : ' + this._esc(modifType) : ''}</span>`;
-    } else if (!applied && after != null && modifType) {
-      editPart = ` <span class="text-text-secondary font-normal">· retouche testée, écartée (n’améliorait pas)</span>`;
     }
     const commentPart = comment
       ? ` <span class="text-text-secondary font-normal">— ${this._esc(comment)}</span>`

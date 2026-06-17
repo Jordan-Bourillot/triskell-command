@@ -1204,7 +1204,7 @@ class Api:
             return {"ok": False, "error": "Base indisponible."}
         try:
             from triskell_core.prospect.pipeline import (
-                _load_ai_keys, _retouche_keeps, PipelineConfig)
+                _load_ai_keys, PipelineConfig)
             from triskell_core.prospect.quality_reviewer import review_email
         except Exception as exc:
             return {"ok": False, "error": f"Moteur de relecture indisponible : {exc}"}
@@ -1273,6 +1273,11 @@ class Api:
             new_body = body
             revised = (rev.get("body_revised") or "").strip()
             if revised and revised != body:
+                # Décision Jordan (17/06) : on applique la retouche dès qu'elle
+                # est proposée, même si la note ne monte pas. On relit juste
+                # pour afficher la nouvelle note (avant → après).
+                new_body = revised
+                applied = True
                 try:
                     rev2 = review_email(subject=subject, body=revised,
                                         prospect_context=ctx, provider=provider,
@@ -1282,12 +1287,9 @@ class Api:
                     rev2 = {"engine_down": True}
                 if not rev2.get("engine_down"):
                     score_after = int(rev2.get("score") or 0)
-                    if _retouche_keeps(score_before, score_after):
-                        new_body = revised
-                        applied = True
-                        final_score = score_after
-                        final_verdict = str(rev2.get("verdict") or final_verdict)
-                        final_comment = str(rev2.get("comment") or final_comment)[:300]
+                    final_score = score_after
+                    final_verdict = str(rev2.get("verdict") or final_verdict)
+                    final_comment = str(rev2.get("comment") or final_comment)[:300]
             # Régénère le HTML seulement si le corps a vraiment changé (même
             # logique que la validation manuelle d'un brouillon).
             final_body, new_html, _regen = self._resolve_draft_html(
