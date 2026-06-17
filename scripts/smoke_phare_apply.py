@@ -576,16 +576,43 @@ check("mesure de vitesse indisponible → publie quand même (clic = validation)
       r.get("ok") and final.get("status") == "merged"
       and final.get("apply_state") == "done")
 
-# Une VRAIE régression mesurée, elle, bloque toujours
+# Un gros changement VISUEL sur une modif VISIBLE (h1) bloque toujours
 r = run_apply({"mode": "patches", "simple_md": "x",
-               "patches": [{"field": "title", "page_path": "/", "old": "a", "new": "b"}]},
+               "patches": [{"field": "h1", "page_path": "/services", "old": "a", "new": "b"}]},
+              action_extra={"title": "Réécrire le H1 de /services",
+                            "detail_md": "Changer le grand titre visible."},
               site_extra={"netlify_site_id": "nl-123"},
               verify_out={"ok": False, "decision": "hold", "checks": {
                   "blockers": ["diff visuel 42.0% > seuil 5.0%"]}})
 final = updates[-1]
-check("gros changement visuel mesuré → publication bloquée",
+check("gros changement visuel sur du VISIBLE (h1) → publication bloquée",
       not r.get("ok") and final.get("apply_state") == "failed"
       and "diff visuel" in final.get("apply_error", ""))
+
+# Modif INVISIBLE (titre) : un « diff visuel » est un faux positif → publiée
+r = run_apply({"mode": "patches", "simple_md": "x",
+               "patches": [{"field": "title", "page_path": "/realisations", "old": "a", "new": "b"}]},
+              action_extra={"title": "Enrichir le titre de /realisations",
+                            "detail_md": "Mettre à jour le titre Google."},
+              site_extra={"netlify_site_id": "nl-123"},
+              verify_out={"ok": False, "decision": "hold", "checks": {
+                  "blockers": ["diff visuel 8.9% > seuil 5.0%"]}})
+final = updates[-1]
+check("titre (invisible) + faux diff visuel → publié quand même",
+      r.get("ok") and final.get("status") == "merged"
+      and final.get("apply_state") == "done")
+
+# … mais une modif invisible avec un VRAI danger (vitesse) reste bloquée
+r = run_apply({"mode": "patches", "simple_md": "x",
+               "patches": [{"field": "title", "page_path": "/contact", "old": "a", "new": "b"}]},
+              action_extra={"title": "Enrichir le titre de /contact",
+                            "detail_md": "Mettre à jour le titre Google."},
+              site_extra={"netlify_site_id": "nl-123"},
+              verify_out={"ok": False, "decision": "hold", "checks": {
+                  "blockers": ["perf preview 30 < plancher 55"]}})
+final = updates[-1]
+check("titre invisible mais VITESSE en chute → bloquée quand même",
+      not r.get("ok") and final.get("apply_state") == "failed")
 
 # Reprise d'une modification déjà préparée (PR ouverte au tour d'avant) :
 # pas de refabrication — re-vérification puis publication directe

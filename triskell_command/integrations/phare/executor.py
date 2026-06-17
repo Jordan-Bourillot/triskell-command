@@ -511,6 +511,21 @@ def _apply_one(action_id: str, *, app_state=None) -> dict:
         shutil.rmtree(workdir_root, ignore_errors=True)
 
 
+# Familles « invisibles » : elles ne changent PAS l'apparence de la page
+# (le <title>, la méta, le canonical, le noindex, les données structurées, le
+# texte alt, le sitemap vivent dans le <head> ou hors écran). Un contrôle
+# « diff visuel » sur ce genre de modif est un faux positif — vécu le 17/06 :
+# un simple changement de <title> bloqué à 8,92 % de « diff visuel ».
+_INVISIBLE_FAMILIES = {"title", "meta", "canonical", "noindex", "schema",
+                       "alt", "sitemap"}
+
+
+def _is_metadata_only(action: dict) -> bool:
+    """La modif ne touche QUE des métadonnées invisibles (pas le visuel) ?"""
+    fams = plain_language._families_of(action)
+    return bool(fams) and fams.issubset(_INVISIBLE_FAMILIES)
+
+
 def _verify_and_merge(action_id: str, action: dict, site: dict, *,
                       pr_number: int, branch: str, pr_url: str,
                       simple_md: str = "", files: Optional[list] = None) -> dict:
@@ -530,6 +545,12 @@ def _verify_and_merge(action_id: str, action: dict, site: dict, *,
         blockers = [b for b in (checks.get("blockers") or [])
                     if "Netlify non configuré" not in b
                     and "PSI indisponible" not in b]
+        # Modif invisible (titre, méta, canonical, données structurées, alt,
+        # sitemap) : elle ne peut PAS changer l'apparence → le « diff visuel »
+        # est un faux positif, on ne bloque pas dessus. Les autres contrôles
+        # (page cassée 4xx, vitesse) restent, eux, bloquants.
+        if _is_metadata_only(action):
+            blockers = [b for b in blockers if "diff visuel" not in b]
     if blockers:
         _update(action_id, {
             "status": "preview",
