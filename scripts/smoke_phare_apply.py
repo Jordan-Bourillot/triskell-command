@@ -1264,6 +1264,12 @@ check("écrire du contenu → reste à toi (pas de faux bouton vert)",
 check("convertir les images en WebP → reste à toi",
       not pl.classify_for_apply(
           {"status": "draft", "title": "Convertir les images en WebP/AVIF"}, site_ok)["can"])
+fp = pl.classify_for_apply(
+    {"status": "draft", "kind": "recommandation",
+     "title": "Ajouter fetchpriority='high' sur l'image hero de la home",
+     "detail_md": "Vérifier le gain LCP dans PageSpeed après déploiement."}, site_ok)
+check("carte « fetchpriority » → à voir ensemble (pas de faux bouton « relance la mesure »)",
+      fp["can"] is False and fp["mode"] == "manual")
 
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)

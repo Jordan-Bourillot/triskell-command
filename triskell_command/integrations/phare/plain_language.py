@@ -192,6 +192,18 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
             return {"can": True, "mode": "code",
                     "why": "Le robot lit ta page et s'en charge."}
 
+    # Changer la PRIORITÉ ou le mode de chargement d'une image (fetchpriority,
+    # lazy-load) : le robot ne sait pas encore toucher aux attributs d'une
+    # image. Sans ce garde-fou, ces cartes citent « PageSpeed » dans leur détail
+    # et tombaient en mode « outil » (« le robot relance la mesure ») → un faux
+    # bouton vert qui ne pose JAMAIS le fetchpriority promis (constaté le
+    # 17/06 sur la home Pixel Pros, dont l'image principale est un fond CSS).
+    if any(k in title_low for k in ("fetchpriority", "fetch-priority",
+                                    "lazy-load", "lazyload", "lazy load")):
+        return {"can": False, "mode": "manual",
+                "why": ("Changer la priorité de chargement des images, le robot "
+                        "ne sait pas encore le faire tout seul — à voir ensemble.")}
+
     fams = _families_of(action)
     code_fams = fams & set(_CODE_FAMILIES)
     tool_fams = fams & set(_TOOL_FAMILIES)
