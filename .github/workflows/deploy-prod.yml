@@ -1,12 +1,19 @@
 name: Deploy prod (Coolify)
 
 # Auto-déclenche un redéploiement Coolify à chaque push sur main.
-# Remplace l'ancien webhook GitHub→Coolify qui ne fonctionnait pas.
+# Le bouton "Run workflow" permet EN PLUS de forcer une reconstruction
+# complète (force=true) — utile quand un déploiement ne part pas tout seul
+# (ex: après un disque plein qui a fait sauter le repère git de Coolify).
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:  # bouton "Run workflow" manuel possible aussi
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Forcer une reconstruction complète (true/false)"
+        default: "false"
+        type: string
 
 jobs:
   trigger:
@@ -14,9 +21,11 @@ jobs:
     steps:
       - name: Ping Coolify deploy webhook
         run: |
+          FORCE="${{ github.event.inputs.force }}"
+          FORCE="${FORCE:-false}"
           curl -fsSL -X GET \
-            "http://91.99.227.241:8000/api/v1/deploy?uuid=f2l1b3v08gcoftnf631djuxn&force=false" \
+            "http://91.99.227.241:8000/api/v1/deploy?uuid=f2l1b3v08gcoftnf631djuxn&force=${FORCE}" \
             ${COOLIFY_TOKEN:+-H "Authorization: Bearer $COOLIFY_TOKEN"} \
-            && echo "Deploy déclenché ✓"
+            && echo "Deploy déclenché ✓ (force=${FORCE})"
         env:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
