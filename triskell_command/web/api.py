@@ -1877,9 +1877,11 @@ class Api:
         return m.group(0) if m else ""
 
     @staticmethod
-    def _creator_mail_html(cr: dict, accent: str = "", accent2: str = "") -> str:
+    def _creator_mail_html(cr: dict, accent: str = "", accent2: str = "",
+                           angle: str = "") -> str:
         """Mail HTML riche d'un créateur (accroche globale, aperçus, détail,
-        bouton). Tutoiement par défaut, vouvoiement si la fiche le précise."""
+        bouton). Tutoiement par défaut, vouvoiement si la fiche le précise.
+        `angle` (s'il est fourni) prime sur celui rangé dans la fiche."""
         try:
             from ..integrations import creator_mail
             notes = (cr.get("notes") or "")
@@ -1887,7 +1889,7 @@ class Api:
             na, na2 = creator_mail.accent_from_notes(notes)
             acc = accent or na or "#6366F1"
             acc2 = accent2 or na2 or acc
-            ang = creator_mail.angle_from_notes(notes)
+            ang = (angle or "").strip() or creator_mail.angle_from_notes(notes)
             return creator_mail.render(
                 name=cr.get("name") or "",
                 demo_url=cr.get("demo_url") or "",
@@ -1922,12 +1924,16 @@ class Api:
             if not email or not demo:
                 continue
             from ..integrations import creator_mail
-            tu = "vouvoiement" not in (cr.get("notes") or "").lower()
-            ang = creator_mail.angle_from_notes(cr.get("notes") or "")
+            notes = cr.get("notes") or ""
+            tu = "vouvoiement" not in notes.lower()
+            if d.get("review_modif_applied") and (d.get("angle_revised") or "").strip():
+                ang = d.get("angle_revised").strip()
+            else:
+                ang = creator_mail.angle_from_notes(notes)
             body = creator_mail.render_text(cr.get("name") or "", demo, tu,
                                             angle=ang)
             body_html = self._creator_mail_html(
-                cr, d.get("accent") or "", d.get("accent2") or "")
+                cr, d.get("accent") or "", d.get("accent2") or "", angle=ang)
             out.append({
                 "source": "creator",
                 "id": d.get("id") or "",
@@ -1940,6 +1946,13 @@ class Api:
                 "body": body,
                 "body_html": body_html,
                 "sender_address": d.get("sender_address") or "",
+                "review_score": d.get("review_score"),
+                "review_verdict": d.get("review_verdict") or "",
+                "review_comment": d.get("review_comment") or "",
+                "review_score_before": d.get("review_score_before"),
+                "review_score_after": d.get("review_score_after"),
+                "review_modif_type": d.get("review_modif_type") or "",
+                "review_modif_applied": bool(d.get("review_modif_applied")),
                 "ts": (d.get("created_at") or "")[:19],
                 "provider": "", "model": "", "kind": "creator",
                 "prospect_sources": [],
@@ -1976,12 +1989,15 @@ class Api:
         if not to:
             return {"ok": False, "error": "pas d'email sur ce créateur"}
         subject = d.get("subject") or ""
+        from ..integrations import creator_mail
+        if d.get("review_modif_applied") and (d.get("angle_revised") or "").strip():
+            _ang = d.get("angle_revised").strip()
+        else:
+            _ang = creator_mail.angle_from_notes(cr.get("notes") or "")
         if body is not None:
             final_body = (body or "").strip()
         else:
-            from ..integrations import creator_mail
             _tu = "vouvoiement" not in (cr.get("notes") or "").lower()
-            _ang = creator_mail.angle_from_notes(cr.get("notes") or "")
             final_body = creator_mail.render_text(
                 cr.get("name") or "", (cr.get("demo_url") or "").strip(),
                 _tu, angle=_ang)
@@ -2023,7 +2039,7 @@ class Api:
                                 body=final_body,
                                 body_html=self._creator_mail_html(
                                     cr, d.get("accent") or "",
-                                    d.get("accent2") or ""))
+                                    d.get("accent2") or "", angle=_ang))
         except Exception as exc:
             return {"ok": False, "error": f"envoi KO : {exc}"}
 
@@ -2041,6 +2057,128 @@ class Api:
         from ..integrations import creator_drafts as CD
         CD.set_status(client.raw, draft_id, "rejected")
         return {"ok": True}
+
+    def creator_drafts_rereview(self, payload: dict | None = None) -> dict:
+        """2e IA pour les brouillons créateurs : note le pitch de monétisation
+        de chaque mail (l'angle, la 3e ligne) et le peaufine si elle fait mieux
+        (retouche unique, appliquée dès qu'elle est proposée — décision Jordan
+        17/06). Ne touche jamais au reste du template (validé). La note et
+        l'avant→après s'affichent sur le brouillon, comme en prospection.
+
+        payload = {limit?: int, draft_id?: str}
+        """
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Base indisponible."}
+        try:
+            from triskell_core.prospect.pipeline import (
+                _load_ai_keys, PipelineConfig)
+        except Exception as exc:
+            return {"ok": False,
+                    "error": f"Moteur de relecture indisponible : {exc}"}
+        try:
+            cfg = PipelineConfig.load()
+            provider = (getattr(cfg, "ai_provider", "") or "anthropic").strip() \
+                or "anthropic"
+            model = (getattr(cfg, "ai_model", "") or "").strip()
+        except Exception:
+            provider, model = "anthropic", ""
+        api_keys = _load_ai_keys() or {}
+        p = payload or {}
+        limit = max(1, min(100, int(p.get("limit") or 50)))
+        only_id = (p.get("draft_id") or "").strip()
+
+        import re as _re
+        from ..integrations import creator_drafts as CD
+        from ..integrations import creators_book as book
+        from ..integrations import creator_mail
+        from ..integrations import creator_review
+        sb = client.raw
+        pend = CD.list_all(sb, status="pending")
+        if not pend:
+            return {"ok": True, "processed": 0, "retouched": 0,
+                    "engine_down": 0, "skipped": 0, "details": []}
+        try:
+            rows = book.list_all(limit=500).get("rows") or []
+        except Exception:
+            rows = []
+        by_id = {r.get("id"): r for r in rows}
+
+        processed = retouched = engine_down = skipped = 0
+        details = []
+        for d in pend[:limit]:
+            if only_id and d.get("id") != only_id:
+                continue
+            cr = by_id.get(d.get("creator_id"))
+            if not cr:
+                skipped += 1
+                continue
+            demo = (cr.get("demo_url") or "").strip()
+            if not demo:
+                skipped += 1
+                continue
+            notes = cr.get("notes") or ""
+            tu = "vouvoiement" not in notes.lower()
+            angle0 = (creator_mail.angle_from_notes(notes)
+                      or creator_mail.default_pitch(tu))
+            ctx_notes = _re.sub(r"\[(?:brand|angle):[^\]]*\]", "", notes).strip()
+            ctx = (f"Créateur : {cr.get('name') or '?'} "
+                   f"({cr.get('platform') or '?'}). {ctx_notes[:280]}")
+            name = cr.get("name") or ""
+            mail_text = creator_mail.render_text(name, demo, tu, angle=angle0)
+            try:
+                rev = creator_review.review_creator(
+                    mail_text=mail_text, pitch=angle0, context=ctx,
+                    provider=provider, model=model, api_keys=api_keys)
+            except Exception:
+                engine_down += 1
+                continue
+            if rev.get("engine_down"):
+                engine_down += 1
+                CD.set_review(sb, d.get("id"), {
+                    "review_verdict": "engine_down",
+                    "review_comment": (rev.get("comment") or "")[:300]})
+                continue
+            score_before = int(rev.get("score") or 0)
+            score_after = None
+            modif_type = str(rev.get("modif_type") or "").strip()[:80]
+            applied = False
+            final_score = score_before
+            comment = str(rev.get("comment") or "")[:300]
+            angle_revised = ""
+            revised = (rev.get("pitch_revised") or "").strip()
+            if revised and revised != angle0.strip():
+                angle_revised = revised
+                applied = True
+                mail2 = creator_mail.render_text(name, demo, tu, angle=revised)
+                try:
+                    rev2 = creator_review.review_creator(
+                        mail_text=mail2, pitch=revised, context=ctx,
+                        provider=provider, model=model, api_keys=api_keys)
+                except Exception:
+                    rev2 = {"engine_down": True}
+                if not rev2.get("engine_down"):
+                    score_after = int(rev2.get("score") or 0)
+                    final_score = score_after
+                    comment = str(rev2.get("comment") or comment)[:300]
+            verdict = "ok" if final_score >= 7 else "draft"
+            CD.set_review(sb, d.get("id"), {
+                "review_score": final_score, "review_verdict": verdict,
+                "review_comment": comment,
+                "review_score_before": score_before,
+                "review_score_after": score_after,
+                "review_modif_type": modif_type,
+                "review_modif_applied": applied,
+                "angle_revised": angle_revised if applied else ""})
+            processed += 1
+            if applied:
+                retouched += 1
+                details.append({"name": cr.get("name") or "?",
+                                "before": score_before, "after": score_after,
+                                "modif_type": modif_type})
+        return {"ok": True, "processed": processed, "retouched": retouched,
+                "engine_down": engine_down, "skipped": skipped,
+                "details": details}
 
     # ----- ménage : supprime les coquilles pending sans contenu ---------
     def cleanup_empty_drafts(self, payload: dict | None = None) -> dict:

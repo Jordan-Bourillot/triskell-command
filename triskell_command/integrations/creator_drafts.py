@@ -80,6 +80,15 @@ def queue(sb, creator_id: str, subject: str, sender_address: str = "",
         "accent2": (accent2 or "").strip(),
         "status": "pending",
         "created_at": _now(),
+        # Relecture 2e IA (renseignée par creator_drafts_rereview).
+        "review_score": None,
+        "review_verdict": "",
+        "review_comment": "",
+        "review_score_before": None,
+        "review_score_after": None,
+        "review_modif_type": "",
+        "review_modif_applied": False,
+        "angle_revised": "",
     }
     items.append(draft)
     return draft if _write(sb, items) else None
@@ -93,6 +102,22 @@ def set_status(sb, draft_id: str, status: str) -> bool:
             d["status"] = status
             if status == "sent":
                 d["sent_at"] = _now()
+            found = True
+    if found:
+        _write(sb, items)
+    return found
+
+
+def set_review(sb, draft_id: str, review: dict) -> bool:
+    """Renseigne les champs de relecture (note, retouche, angle révisé) d'un
+    brouillon, posés par la 2e IA. Ne lève jamais."""
+    if sb is None or not draft_id or not isinstance(review, dict):
+        return False
+    items = _read(sb)
+    found = False
+    for d in items:
+        if d.get("id") == draft_id:
+            d.update(review)
             found = True
     if found:
         _write(sb, items)

@@ -214,3 +214,14 @@ def angle_from_notes(notes: str) -> str:
     import re
     m = re.search(r"\[angle:\s*(.+?)\]", notes or "", re.DOTALL)
     return m.group(1).strip() if m else ""
+
+
+def default_pitch(tu: bool = True) -> str:
+    """Phrase de monétisation standard (la 3e ligne du mail), en texte brut.
+    Sert de base à la 2e IA pour noter / peaufiner le pitch des créateurs qui
+    n'ont pas d'angle propre."""
+    if tu:
+        return ("De quoi monétiser ton audience, avec un abonnement pour ta "
+                "communauté dont tu touches une part")
+    return ("De quoi monétiser votre audience, avec un abonnement pour votre "
+            "communauté dont vous touchez une part")
