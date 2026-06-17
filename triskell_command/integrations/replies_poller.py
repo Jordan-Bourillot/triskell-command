@@ -54,6 +54,15 @@ _LAST_SUCCESSFUL_POLL: dict[str, str] = {}
 _LAST_ERROR_PER_ACCOUNT: dict[str, str] = {}
 HEALTH_ALERT_THRESHOLD = 2  # >= N cycles consecutifs en erreur => alerte
 
+# Index prospects (email->id, msgid->id) mis en cache au niveau module.
+# Avant : reconstruit a CHAQUE cycle (toutes les 5 min) en relisant TOUTE la
+# base prospects + tout l'historique des envois -> des Go d'egress Supabase
+# par mois pour rien (la plupart des cycles n'ont aucun nouveau mail).
+# Maintenant : construit A LA DEMANDE (seulement si un cycle a du courrier)
+# et reutilise pendant _INDEX_TTL_SEC.
+_INDEX_CACHE: dict = {"at": 0.0, "msgid": None, "from": None}
+_INDEX_TTL_SEC = 600  # 10 min
+
 
 def start_poller(app_state) -> bool:
     """Lance le poller en background. Idempotent."""
@@ -188,8 +197,10 @@ def _do_one_poll(app_state) -> dict:
         _LAST_RUN_AT = datetime.now().isoformat(timespec="seconds")
         return counters
 
-    # Index prospects + AI settings — communs à tous les comptes
-    msgid_to_prospect, from_to_prospect = _build_prospect_index(client)
+    # AI settings — commun à tous les comptes. L'index prospects, lui, n'est
+    # PLUS construit ici : il l'est à la demande dans _poll_one_account, et
+    # seulement si un compte a effectivement du courrier à traiter (sinon on
+    # relisait toute la base pour rien à chaque cycle, à vide).
     ai_settings = _resolve_ai_settings(app_state, client)
 
     for acc in accounts:
@@ -197,7 +208,6 @@ def _do_one_poll(app_state) -> dict:
         try:
             sub = _poll_one_account(
                 client, app_state, acc, ai_settings,
-                msgid_to_prospect, from_to_prospect,
             )
         except Exception as exc:
             logger.warning("poll account %s failed: %s", aid, exc)
@@ -316,8 +326,7 @@ def _list_imap_accounts_to_scan(app_state, client) -> list[dict]:
     return out
 
 
-def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
-                       msgid_to_prospect: dict, from_to_prospect: dict) -> dict:
+def _poll_one_account(client, app_state, account: dict, ai_settings: dict) -> dict:
     """Scanne UNE boîte IMAP. Renvoie les compteurs locaux.
 
     Ne lève pas — toute erreur est capturée et renvoyée dans counters['error'].
@@ -342,8 +351,21 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                 counters["error"] = f"imap_search_{typ}"
                 return counters
             uids = data[0].split() if data and data[0] else []
+            # Quirk IMAP : pour une plage "N:*" sans nouveau mail, beaucoup de
+            # serveurs renvoient quand meme le DERNIER UID existant (le "*"
+            # accroche le plus haut). On ecarte donc tout UID deja traite
+            # (<= last_uid) : sinon on refait un fetch ET on reconstruit
+            # l'index prospects (toute la base) a CHAQUE cycle pour un mail
+            # deja vu. C'est la cause n1 de l'egress du poller.
+            if last_uid:
+                uids = [u for u in uids if int(u) > last_uid]
             if not uids:
                 return counters
+
+            # Il y a du VRAI courrier nouveau -> on a (enfin) besoin de
+            # l'index prospects. Construit a la demande + mis en cache (voir
+            # _get_prospect_index) pour ne plus relire toute la base a vide.
+            msgid_to_prospect, from_to_prospect = _get_prospect_index(client)
 
             max_uid_seen = last_uid
 
@@ -817,6 +839,21 @@ def _build_prospect_index(client) -> tuple[dict, dict]:
                     msgid_to[clean] = pid
     except Exception as exc:
         logger.warning("build_prospect_index: %s", exc)
+    return msgid_to, from_to
+
+
+def _get_prospect_index(client) -> tuple[dict, dict]:
+    """Renvoie l'index (msgid->id, email->id) en le construisant A LA DEMANDE
+    et en le gardant en cache _INDEX_TTL_SEC. Appele uniquement quand un
+    compte a du courrier -> on ne relit plus toute la base a vide."""
+    now = time.time()
+    if (_INDEX_CACHE.get("from") is not None
+            and (now - _INDEX_CACHE.get("at", 0.0)) < _INDEX_TTL_SEC):
+        return _INDEX_CACHE["msgid"], _INDEX_CACHE["from"]
+    msgid_to, from_to = _build_prospect_index(client)
+    _INDEX_CACHE["at"] = now
+    _INDEX_CACHE["msgid"] = msgid_to
+    _INDEX_CACHE["from"] = from_to
     return msgid_to, from_to
 
 
