@@ -414,7 +414,24 @@ const App = {
       const wanted = new URLSearchParams(window.location.search).get('view');
       if (wanted && KNOWN_VIEWS.includes(wanted)) initialView = wanted;
     } catch (e) { /* on retombe sur le Cockpit */ }
-    this.show(initialView);
+
+    // Bouton « Précédent / Suivant » du navigateur : on rejoue l'écran
+    // mémorisé dans l'entrée d'historique au lieu de laisser le navigateur
+    // quitter le site. La fenêtre de chat Thomas a SON propre handler
+    // popstate ; pour ne pas se marcher dessus, on ne réagit qu'à NOS
+    // entrées (`_tc`) et on ignore un retour qui retombe sur l'écran déjà
+    // affiché (cas typique : une fenêtre par-dessus qui se referme).
+    window.addEventListener('popstate', (e) => {
+      const st = e.state;
+      if (!st || !st._tc) return;
+      const sameView = st.view === this.currentView;
+      const sameParams = JSON.stringify(st.params || null)
+                       === JSON.stringify(this.currentParams || null);
+      if (sameView && sameParams) return;
+      this.show(st.view, st.params || null, { fromHistory: true });
+    });
+
+    this.show(initialView, null, { replace: true });
 
     // Polling claude attention (la veille proactive)
     setInterval(() => Claude.checkPending(), 60_000);
@@ -566,7 +583,7 @@ const App = {
   },
 
   // ---- Routing entre vues ----
-  show(viewId, params) {
+  show(viewId, params, opts) {
     // Démonte proprement la vue qu'on quitte (minuteurs, écouteurs…).
     const cleanups = this._viewCleanups.splice(0);
     cleanups.forEach(fn => { try { fn(); } catch (e) { /* jamais bloquant */ } });
@@ -577,6 +594,10 @@ const App = {
     }
     this.currentView = viewId;
     this.currentParams = params || null;
+    // Bouton « Précédent » du navigateur : on empile une entrée d'historique
+    // par navigation pour qu'il revienne à l'écran d'avant, au lieu de sortir
+    // carrément du site (appli d'une seule page). Voir _syncHistory + popstate.
+    this._syncHistory(viewId, this.currentParams, opts);
     // Prévient le serveur de l'écran ouvert (sans attendre la réponse) :
     // l'assistant s'en sert pour situer ses réponses. Avant le 10/06/2026
     // la version web ne l'envoyait jamais — il croyait Jordan toujours
@@ -648,6 +669,43 @@ const App = {
         return ProspectTimeline.render(target, params || {});
       default: return this._renderPlaceholder(target, viewId, "Cette vue arrive bientôt.");
     }
+  },
+
+  // ---- Historique du navigateur (bouton « Précédent / Suivant ») ----
+  // Appli d'une seule page : sans ça, le navigateur ne connaît qu'UNE entrée
+  // et « Précédent » fait sortir du site. On dépose une entrée par écran ; le
+  // retour la dépile et le handler popstate (init) réaffiche le bon écran.
+  _syncHistory(viewId, params, opts) {
+    opts = opts || {};
+    // Navigation déclenchée PAR le bouton retour : l'historique a déjà bougé
+    // tout seul, on ne réempile rien (sinon on ne pourrait jamais reculer).
+    if (opts.fromHistory) return;
+    if (typeof history === 'undefined' || !history.pushState) return;
+    // On ne garde que des paramètres « simples » (sérialisables) dans l'entrée.
+    let safeParams = null;
+    try { safeParams = params ? JSON.parse(JSON.stringify(params)) : null; }
+    catch (e) { safeParams = null; }
+    const state = { _tc: true, view: viewId, params: safeParams };
+    // Reflète l'écran dans l'adresse (?view=…), comme les raccourcis d'icône :
+    // un rechargement de page retombe alors sur le bon écran.
+    let url = null;
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.set('view', viewId);
+      url = u.pathname + u.search + u.hash;
+    } catch (e) { url = null; }
+    try {
+      const cur = history.state;
+      const sameAsCurrent = cur && cur._tc && cur.view === viewId
+        && JSON.stringify(cur.params || null) === JSON.stringify(safeParams);
+      // Première vue (replace) ou simple re-rendu du même écran : on remplace
+      // l'entrée courante au lieu d'en empiler une (pas de doublons à reculer).
+      if (opts.replace || sameAsCurrent) {
+        history.replaceState(state, '', url);
+      } else {
+        history.pushState(state, '', url);
+      }
+    } catch (e) { /* jamais bloquant */ }
   },
 
   _renderEliksStudio(target) {
