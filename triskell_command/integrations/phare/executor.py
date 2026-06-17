@@ -536,13 +536,15 @@ def _verify_and_merge(action_id: str, action: dict, site: dict, *,
 
     if not git_pipeline.merge_pr(site["repo_github"], pr_number,
                                  commit_title=f"phare: {action.get('title') or ''}"):
+        why = git_pipeline.last_merge_error or "raison inconnue"
         _update(action_id, {
             "status": "preview", "kind": "pr_modif",
             "branch": branch,
             "github_pr_url": pr_url,
             "apply_state": "failed",
             "apply_error": ("La modification est prête mais la publication "
-                            "a échoué — réessaie, ou publie-la depuis la carte."),
+                            f"a échoué ({why}) — réessaie, ou publie-la "
+                            "depuis la carte."),
             "simple_md": simple_md,
         })
         return {"ok": False, "action_id": action_id, "error": "merge KO"}

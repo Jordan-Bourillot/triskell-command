@@ -907,5 +907,64 @@ check("redirection côté hébergeur → manuel propre, jamais d'échec",
       r.get("ok") and final.get("apply_state") == "manual"
       and "hébergeur" in final.get("apply_error", ""))
 
+# ===========================================================================
+# Section ajoutée le 17/06/2026 : publication qui attend la vérif GitHub
+# (course async sur mergeable → 405 « not mergeable » sur les modifs de pages).
+print("\n— publication : attendre la vérif GitHub avant de fusionner (17/06) —")
+
+
+def _section_merge_race():
+    gp = git_pipeline
+
+    class Resp:
+        def __init__(s, status, payload=None, text=""):
+            s.status_code = status
+            s._p = payload or {}
+            s.text = text
+
+        def json(s):
+            return s._p
+
+    class FakeReq:
+        RequestException = Exception
+
+        def __init__(s, gets, puts):
+            s.gets = list(gets)
+            s.puts = list(puts)
+
+        def get(s, *a, **k):
+            return s.gets.pop(0)
+
+        def put(s, *a, **k):
+            return s.puts.pop(0)
+
+    with mock.patch.object(gp, "_github_token", return_value="tok"), \
+         mock.patch.object(gp.time, "sleep", lambda *a, **k: None):
+        # GitHub calcule encore (null) puis devient fusionnable → publication OK
+        fake = FakeReq(gets=[Resp(200, {"mergeable": None}),
+                             Resp(200, {"mergeable": True})],
+                       puts=[Resp(200, {})])
+        with mock.patch.object(gp, "requests", fake):
+            ok = gp.merge_pr("o/r", 12)
+        check("publication : attend la vérif GitHub, puis publie", ok is True)
+
+        # 405 persistant → échec propre AVEC la vraie raison
+        fake = FakeReq(gets=[Resp(200, {"mergeable": True})] * 5,
+                       puts=[Resp(405, {"message": "Pull Request is not mergeable"})] * 3)
+        with mock.patch.object(gp, "requests", fake):
+            ok = gp.merge_pr("o/r", 12)
+        check("publication : 405 persistant → échec + vraie raison remontée",
+              ok is False and "405" in gp.last_merge_error)
+
+        # conflit réel → on ne publie pas à l'aveugle
+        fake = FakeReq(gets=[Resp(200, {"mergeable": False})], puts=[])
+        with mock.patch.object(gp, "requests", fake):
+            ok = gp.merge_pr("o/r", 12)
+        check("publication : conflit réel → refus clair, pas de publication à l'aveugle",
+              ok is False and "conflit" in gp.last_merge_error)
+
+
+_section_merge_race()
+
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)

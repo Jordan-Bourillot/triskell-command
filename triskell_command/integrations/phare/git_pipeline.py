@@ -104,6 +104,49 @@ def push_branch(workdir: str, branch: str) -> bool:
 # Raison du dernier échec d'open_pr — lue par les appelants pour donner
 # des messages de carte utiles (un seul worker applique à la fois).
 last_pr_error: str = ""
+# Idem pour merge_pr : la vraie raison du dernier échec de publication.
+last_merge_error: str = ""
+
+
+def _pr_mergeable_state(repo_full: str, pr_number: int) -> tuple[Optional[bool], str]:
+    """(mergeable, mergeable_state). mergeable=None → GitHub calcule encore."""
+    token = _github_token()
+    if not token:
+        return None, "no_token"
+    try:
+        r = requests.get(
+            f"{GH_API}/repos/{repo_full}/pulls/{pr_number}",
+            headers={"Authorization": f"Bearer {token}",
+                     "Accept": "application/vnd.github+json"},
+            timeout=15)
+    except requests.RequestException as exc:
+        return None, str(exc)[:120]
+    if r.status_code >= 400:
+        return None, f"HTTP {r.status_code}"
+    j = r.json()
+    return j.get("mergeable"), (j.get("mergeable_state") or "")
+
+
+def wait_pr_mergeable(repo_full: str, pr_number: int, *,
+                      timeout_s: int = 30, poll_s: int = 3) -> Optional[bool]:
+    """Attend que GitHub ait calculé la fusionnabilité de la PR.
+
+    GitHub calcule `mergeable` de façon ASYNCHRONE après l'ouverture : juste
+    après, il renvoie null, et fusionner pendant ce calcul renvoie un 405
+    « PR not mergeable ». C'est ce qui faisait échouer la publication des
+    modifs de pages (titres, métas) alors qu'un sitemap — fichier neuf,
+    calcul instantané — passait sans souci (constaté le 17/06/2026).
+
+    Renvoie True (fusionnable), False (conflit), None (toujours inconnu)."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        mergeable, _ = _pr_mergeable_state(repo_full, pr_number)
+        if mergeable is True:
+            return True
+        if mergeable is False:
+            return False
+        time.sleep(poll_s)
+    return None
 
 
 def open_pr(repo_full: str, *, head: str, base: str = "main",
@@ -150,26 +193,47 @@ def open_pr(repo_full: str, *, head: str, base: str = "main",
 def merge_pr(repo_full: str, pr_number: int, *,
              commit_title: str = "", commit_message: str = "",
              merge_method: str = "squash") -> bool:
+    global last_merge_error
+    last_merge_error = ""
     token = _github_token()
     if not token:
+        last_merge_error = "jeton GitHub manquant"
         return False
-    try:
-        r = requests.put(
-            f"{GH_API}/repos/{repo_full}/pulls/{pr_number}/merge",
-            headers={"Authorization": f"Bearer {token}",
-                     "Accept": "application/vnd.github+json"},
-            json={"commit_title": commit_title or "Le Phare auto-merge",
-                  "commit_message": commit_message,
-                  "merge_method": merge_method},
-            timeout=20,
-        )
-    except requests.RequestException as exc:
-        logger.warning("merge_pr: %s", exc)
+    # On attend que GitHub ait fini de vérifier la modif avant de publier,
+    # sinon il répond « pas encore fusionnable » (405) sur les modifs de
+    # fichiers existants — le bug de publication des titres du 17/06/2026.
+    if wait_pr_mergeable(repo_full, pr_number) is False:
+        last_merge_error = ("la modification est en conflit avec une autre "
+                            "modif du site — à revoir")
         return False
-    if r.status_code >= 400:
-        logger.warning("merge_pr HTTP %s: %s", r.status_code, r.text[:200])
+    headers = {"Authorization": f"Bearer {token}",
+               "Accept": "application/vnd.github+json"}
+    url = f"{GH_API}/repos/{repo_full}/pulls/{pr_number}/merge"
+    body = {"commit_title": commit_title or "Le Phare auto-merge",
+            "commit_message": commit_message, "merge_method": merge_method}
+    for attempt in range(3):
+        try:
+            r = requests.put(url, headers=headers, json=body, timeout=20)
+        except requests.RequestException as exc:
+            last_merge_error = f"réseau : {str(exc)[:140]}"
+            time.sleep(2)
+            continue
+        if r.status_code < 400:
+            last_merge_error = ""
+            return True
+        try:
+            detail = r.json().get("message") or ""
+        except Exception:
+            detail = r.text[:140]
+        last_merge_error = f"GitHub {r.status_code} : {detail[:160]}"
+        logger.warning("merge_pr HTTP %s: %s", r.status_code, detail[:200])
+        # 405/409 = souvent « pas encore fusionnable » → on patiente et retente
+        if r.status_code in (405, 409) and attempt < 2:
+            wait_pr_mergeable(repo_full, pr_number, timeout_s=15)
+            time.sleep(2)
+            continue
         return False
-    return True
+    return False
 
 
 def close_pr(repo_full: str, pr_number: int, reason: str = "") -> bool:
