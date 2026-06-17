@@ -376,7 +376,7 @@ html {
   border-bottom-color: hsl(var(--accent));
   font-weight: 600;
 }
-.cfg-panels { max-width: 48rem; }
+.cfg-panels { max-width: none; }
 
 /* ============================
  * Cards & blocs

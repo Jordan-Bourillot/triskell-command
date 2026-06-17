@@ -11,7 +11,7 @@ const Config = {
   async render(container, params) {
     this._pendingTab = (params && params.tab) || null;
     container.innerHTML = `
-      <section class="animate-slide-up">
+      <section class="animate-slide-up max-w-5xl mx-auto">
         <div class="mb-10">
           <div class="flex items-start justify-between gap-3">
             <div>
@@ -23,7 +23,7 @@ const Config = {
           </div>
         </div>
 
-        <div id="cfg-content" class="space-y-12 max-w-3xl"></div>
+        <div id="cfg-content" class="space-y-12"></div>
       </section>
     `;
     await this.refresh();
