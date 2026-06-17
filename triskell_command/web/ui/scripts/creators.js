@@ -1,6 +1,7 @@
-/* Carnet des créateurs — vue claire en cartes, avec familles (vierge / physique /
+/* Carnet des créateurs — vue en cartes, avec familles (vierge / physique /
    services-digital / marque) lues depuis le tag en tête des notes (🟢🔵🟠⚫).
-   Filtres par famille + statut + démo + message. Données via App.api.creators_*. */
+   Filtres par famille + statut + démo + message. Données via App.api.creators_*.
+   Couleurs : jetons de thème uniquement (lisible en clair / mid / sombre). */
 const Creators = {
   state: { rows: [], due: [], editing: null, q: '', fam: '' },
 
@@ -40,13 +41,13 @@ const Creators = {
       <section style="max-width:1080px;margin:22px auto;padding:0 18px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px">
           <div>
-            <h1 style="font-size:24px;font-weight:700;margin:0;color:#1f2430">🎯 Créateurs</h1>
-            <p style="font-size:13.5px;color:#8a8f9a;margin:5px 0 0">Ton carnet de prospection : famille, démo, message prêt, suivi des relances.</p>
+            <h1 style="font-size:24px;font-weight:700;margin:0;color:hsl(var(--text))">🎯 Créateurs</h1>
+            <p style="font-size:13.5px;color:hsl(var(--text-muted));margin:5px 0 0">Ton carnet de prospection : famille, démo, message prêt, suivi des relances.</p>
           </div>
           <button id="cr-add" style="background:#e11d6b;color:#fff;border:0;border-radius:10px;padding:10px 17px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap">+ Ajouter un créateur</button>
         </div>
         <div id="cr-stats" style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 2px"></div>
-        <input id="cr-search" placeholder="🔎 Rechercher un créateur…" style="width:100%;border:1px solid #e2e2e6;border-radius:10px;padding:10px 13px;font-size:14px;margin:10px 0 12px;box-sizing:border-box">
+        <input id="cr-search" placeholder="🔎 Rechercher un créateur…" style="width:100%;border:1px solid hsl(var(--border-strong));border-radius:10px;padding:10px 13px;font-size:14px;margin:10px 0 12px;box-sizing:border-box;background:hsl(var(--surface));color:hsl(var(--text));-webkit-text-fill-color:hsl(var(--text))">
         <div id="cr-filters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px"></div>
         <div id="cr-due"></div>
         <div id="cr-form-host"></div>
@@ -75,12 +76,12 @@ const Creators = {
     const contacted = rows.filter(c => c.contacted_at).length;
     const due = this.state.due.length;
     const pill = (label, val, color) =>
-      `<div style="background:#fff;border:1px solid #ececf0;border-radius:12px;padding:8px 15px"><span style="font-size:20px;font-weight:700;color:${color}">${val}</span> <span style="font-size:12.5px;color:#888">${label}</span></div>`;
+      `<div style="background:hsl(var(--surface-elevated));border:1px solid hsl(var(--border));border-radius:12px;padding:8px 15px"><span style="font-size:20px;font-weight:700;color:${color}">${val}</span> <span style="font-size:12.5px;color:hsl(var(--text-muted))">${label}</span></div>`;
     host.innerHTML =
-      pill('créateurs', rows.length, '#1f2430') +
-      pill('contactés', contacted, '#16a34a') +
-      pill('à contacter', rows.length - contacted, '#d97706') +
-      (due ? pill('à relancer', due, '#e11d6b') : '');
+      pill('créateurs', rows.length, 'hsl(var(--text))') +
+      pill('contactés', contacted, 'hsl(var(--success-text))') +
+      pill('à contacter', rows.length - contacted, 'hsl(var(--warning-text))') +
+      (due ? pill('à relancer', due, 'hsl(var(--danger-text))') : '');
   },
 
   renderFilters() {
@@ -91,9 +92,9 @@ const Creators = {
     const chip = (k, label) => {
       const active = this.state.fam === k;
       const f = this.FAMILIES[k];
-      const col = f ? f.color : '#1f2430';
+      const col = f ? f.color : 'hsl(var(--accent-strong))';
       const e = f ? f.e + ' ' : '';
-      return `<button data-fam="${k}" style="border:1px solid ${active ? col : '#e2e2e6'};background:${active ? col : '#fff'};color:${active ? '#fff' : '#555'};border-radius:999px;padding:6px 13px;font-size:13px;font-weight:600;cursor:pointer">${e}${label} (${count(k)})</button>`;
+      return `<button data-fam="${k}" style="border:1px solid ${active ? col : 'hsl(var(--border-strong))'};background:${active ? col : 'hsl(var(--surface))'};color:${active ? '#fff' : 'hsl(var(--text-secondary))'};border-radius:999px;padding:6px 13px;font-size:13px;font-weight:600;cursor:pointer">${e}${label} (${count(k)})</button>`;
     };
     host.innerHTML = chip('', 'Tous') + chip('vierge', 'Vierges') + chip('physique', 'Physiques') + chip('digital', 'Services') + (count('marque') ? chip('marque', 'Marques') : '');
     host.querySelectorAll('[data-fam]').forEach(b => b.addEventListener('click', () => {
@@ -109,16 +110,16 @@ const Creators = {
     const due = this.state.due;
     if (!due.length) { host.innerHTML = ''; return; }
     host.innerHTML = `
-      <div style="background:#fff4f8;border:1px solid #f4c4d8;border-radius:14px;padding:14px 16px;margin-bottom:18px">
-        <div style="font-weight:700;color:#b81e5b;margin-bottom:8px">⏰ À relancer (${due.length})</div>
+      <div style="background:hsl(var(--danger) / 0.10);border:1px solid hsl(var(--danger) / 0.30);border-radius:14px;padding:14px 16px;margin-bottom:18px">
+        <div style="font-weight:700;color:hsl(var(--danger-text));margin-bottom:8px">⏰ À relancer (${due.length})</div>
         ${due.map(c => `
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 0;border-top:1px solid #f6dbe6">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 0;border-top:1px solid hsl(var(--border))">
             <b>${this.esc(c.name)}</b>
-            <span style="font-size:12px;color:#888">${this.esc(c.platform || '')}</span>
-            <span style="font-size:12px;color:#b81e5b">prévue le ${this.fmtDate(c.next_follow_up_at)}</span>
+            <span style="font-size:12px;color:hsl(var(--text-muted))">${this.esc(c.platform || '')}</span>
+            <span style="font-size:12px;color:hsl(var(--danger-text))">prévue le ${this.fmtDate(c.next_follow_up_at)}</span>
             <span style="flex:1"></span>
-            <button data-act="done" data-id="${c.id}" style="font-size:12.5px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;padding:5px 10px;cursor:pointer">Relancé ✓</button>
-            <button data-act="snooze" data-id="${c.id}" style="font-size:12.5px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;padding:5px 10px;cursor:pointer">+7 j</button>
+            <button data-act="done" data-id="${c.id}" style="font-size:12.5px;border:1px solid hsl(var(--border-strong));background:hsl(var(--surface));color:hsl(var(--text));border-radius:8px;padding:5px 10px;cursor:pointer">Relancé ✓</button>
+            <button data-act="snooze" data-id="${c.id}" style="font-size:12.5px;border:1px solid hsl(var(--border-strong));background:hsl(var(--surface));color:hsl(var(--text));border-radius:8px;padding:5px 10px;cursor:pointer">+7 j</button>
           </div>`).join('')}
       </div>`;
     host.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => {
@@ -132,7 +133,7 @@ const Creators = {
     const host = document.getElementById('cr-grid');
     if (!host) return;
     if (!this.state.rows.length) {
-      host.innerHTML = `<div style="text-align:center;color:#999;padding:50px 20px;border:1px dashed #ddd;border-radius:14px">
+      host.innerHTML = `<div style="text-align:center;color:hsl(var(--text-muted));padding:50px 20px;border:1px dashed hsl(var(--border));border-radius:14px">
         Ton carnet est vide. Clique « + Ajouter un créateur » pour noter ton premier contact.</div>`;
       return;
     }
@@ -141,7 +142,7 @@ const Creators = {
     if (this.state.q) rows = rows.filter(c =>
       (c.name || '').toLowerCase().includes(this.state.q) || (c.notes || '').toLowerCase().includes(this.state.q));
     if (!rows.length) {
-      host.innerHTML = `<div style="text-align:center;color:#999;padding:30px">Aucun créateur ne correspond à ce filtre.</div>`;
+      host.innerHTML = `<div style="text-align:center;color:hsl(var(--text-muted));padding:30px">Aucun créateur ne correspond à ce filtre.</div>`;
       return;
     }
     host.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px">${rows.map(c => this.card(c)).join('')}</div>`;
@@ -172,41 +173,41 @@ const Creators = {
     const fam = this.FAMILIES[fk];
     const famBadge = fam
       ? `<span style="background:${fam.color}1a;color:${fam.color};font-size:11px;font-weight:700;padding:2px 9px;border-radius:6px;white-space:nowrap">${fam.e} ${fam.label}</span>`
-      : `<span style="background:#f0f0f3;color:#999;font-size:11px;font-weight:600;padding:2px 9px;border-radius:6px">à classer</span>`;
+      : `<span style="background:hsl(var(--surface));color:hsl(var(--text-muted));font-size:11px;font-weight:600;padding:2px 9px;border-radius:6px">à classer</span>`;
     const statut = contacted
-      ? `<span style="background:#dcfce7;color:#15803d;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px">✅ Contacté le ${this.fmtDate(c.contacted_at)}</span>`
-      : `<span style="background:#fef3c7;color:#b45309;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px">🟡 À contacter</span>`;
+      ? `<span style="background:hsl(var(--success) / 0.15);color:hsl(var(--success-text));font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px">✅ Contacté le ${this.fmtDate(c.contacted_at)}</span>`
+      : `<span style="background:hsl(var(--warning) / 0.15);color:hsl(var(--warning-text));font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px">🟡 À contacter</span>`;
     const contact = c.handle
       ? (this.isEmail(c.handle)
-        ? `<a href="mailto:${this.esc(c.handle)}" style="color:#e11d6b;text-decoration:none;font-weight:600">✉️ ${this.esc(c.handle)}</a>`
-        : `<a href="${this.esc(c.handle)}" target="_blank" rel="noopener" style="color:#3b6cb7;text-decoration:none">${this.esc(c.platform || 'Lien')} ↗</a>`)
-      : `<span style="color:#aaa">pas de contact noté</span>`;
+        ? `<a href="mailto:${this.esc(c.handle)}" style="color:hsl(var(--accent-text));text-decoration:none;font-weight:600">✉️ ${this.esc(c.handle)}</a>`
+        : `<a href="${this.esc(c.handle)}" target="_blank" rel="noopener" style="color:hsl(var(--info-text));text-decoration:none">${this.esc(c.platform || 'Lien')} ↗</a>`)
+      : `<span style="color:hsl(var(--text-muted))">pas de contact noté</span>`;
     const relance = c.next_follow_up_at
-      ? `<div style="font-size:12px;color:${this.isOverdue(c.next_follow_up_at) ? '#e11d6b' : '#888'};margin-top:6px">⏰ Relance le ${this.fmtDate(c.next_follow_up_at)}</div>` : '';
+      ? `<div style="font-size:12px;color:${this.isOverdue(c.next_follow_up_at) ? 'hsl(var(--danger-text))' : 'hsl(var(--text-muted))'};margin-top:6px">⏰ Relance le ${this.fmtDate(c.next_follow_up_at)}</div>` : '';
     const demo = c.demo_url
-      ? `<a href="${this.esc(c.demo_url)}" target="_blank" rel="noopener" style="flex:1;text-align:center;background:#1f2430;color:#fff;text-decoration:none;font-size:13px;font-weight:600;padding:8px;border-radius:9px">▶ Démo</a>` : '';
+      ? `<a href="${this.esc(c.demo_url)}" target="_blank" rel="noopener" style="flex:1;text-align:center;background:hsl(var(--accent-strong));color:#fff;text-decoration:none;font-size:13px;font-weight:600;padding:8px;border-radius:9px">▶ Démo</a>` : '';
     const copy = c.message
-      ? `<button data-copy="${c.id}" style="flex:1;background:#fce7f0;color:#b81e5b;border:0;font-size:13px;font-weight:600;padding:8px;border-radius:9px;cursor:pointer">📋 Copier le message</button>` : '';
+      ? `<button data-copy="${c.id}" style="flex:1;background:hsl(var(--danger) / 0.15);color:hsl(var(--danger-text));border:0;font-size:13px;font-weight:600;padding:8px;border-radius:9px;cursor:pointer">📋 Copier le message</button>` : '';
     const hasMail = this.isEmail(c.handle) || /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/.test(c.notes || '');
     const draft = (c.message && hasMail && !contacted)
-      ? `<button data-queue="${c.id}" style="flex:1;background:#e7f0fc;color:#1d5bb8;border:0;font-size:13px;font-weight:600;padding:8px;border-radius:9px;cursor:pointer">📥 Mettre dans les brouillons</button>` : '';
+      ? `<button data-queue="${c.id}" style="flex:1;background:hsl(var(--info) / 0.15);color:hsl(var(--info-text));border:0;font-size:13px;font-weight:600;padding:8px;border-radius:9px;cursor:pointer">📥 Mettre dans les brouillons</button>` : '';
     return `
-      <div style="background:#fff;border:1px solid #ececf0;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 3px 12px rgba(0,0,0,.04)">
+      <div style="background:hsl(var(--surface-elevated));border:1px solid hsl(var(--border));border-radius:14px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 3px 12px rgba(0,0,0,.18)">
         <div style="height:4px;background:${bar}"></div>
         <div style="padding:14px 16px 15px;display:flex;flex-direction:column;gap:7px;flex:1">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
             ${famBadge}
-            <button data-del="${c.id}" title="Supprimer" style="border:0;background:none;cursor:pointer;font-size:15px;color:#c9ccd2">🗑</button>
+            <button data-del="${c.id}" title="Supprimer" style="border:0;background:none;cursor:pointer;font-size:15px;color:hsl(var(--text-muted))">🗑</button>
           </div>
-          <div style="font-size:16.5px;font-weight:700;color:#1f2430;line-height:1.25">${this.esc(c.name)}</div>
+          <div style="font-size:16.5px;font-weight:700;color:hsl(var(--text));line-height:1.25">${this.esc(c.name)}</div>
           <div>${statut}</div>
           <div style="font-size:13px;word-break:break-word">${contact}</div>
-          ${c.notes ? `<div style="font-size:12.5px;color:#777;line-height:1.5">${this.esc((c.notes || '').slice(0, 170))}${(c.notes || '').length > 170 ? '…' : ''}</div>` : ''}
+          ${c.notes ? `<div style="font-size:12.5px;color:hsl(var(--text-secondary));line-height:1.5">${this.esc((c.notes || '').slice(0, 170))}${(c.notes || '').length > 170 ? '…' : ''}</div>` : ''}
           ${relance}
           <div style="flex:1"></div>
           <div style="display:flex;gap:8px;margin-top:10px">${demo}${copy}</div>
           ${draft ? `<div style="display:flex;margin-top:8px">${draft}</div>` : ''}
-          <button data-edit="${c.id}" style="background:none;border:1px solid #e2e2e6;color:#555;font-size:12.5px;padding:7px;border-radius:9px;cursor:pointer;margin-top:2px">✎ Éditer / noter le contact</button>
+          <button data-edit="${c.id}" style="background:none;border:1px solid hsl(var(--border-strong));color:hsl(var(--text-secondary));font-size:12.5px;padding:7px;border-radius:9px;cursor:pointer;margin-top:2px">✎ Éditer / noter le contact</button>
         </div>
       </div>`;
   },
@@ -225,12 +226,12 @@ const Creators = {
     const host = document.getElementById('cr-form-host');
     const v = c || {};
     const opts = this.PLATFORMS.map(p => `<option ${(v.platform || '') === p ? 'selected' : ''}>${p}</option>`).join('');
-    const fld = 'width:100%;border:1px solid #d6d6da;border-radius:9px;padding:9px 11px;font-size:14px;margin-top:4px;box-sizing:border-box';
-    const lbl = 'font-size:12.5px;color:#666;font-weight:600';
+    const fld = 'width:100%;border:1px solid hsl(var(--border-strong));border-radius:9px;padding:9px 11px;font-size:14px;margin-top:4px;box-sizing:border-box;background:hsl(var(--surface));color:hsl(var(--text));-webkit-text-fill-color:hsl(var(--text))';
+    const lbl = 'font-size:12.5px;color:hsl(var(--text-secondary));font-weight:600';
     host.innerHTML = `
-      <div style="background:#fff;border:1px solid #e6e6e8;border-radius:14px;padding:20px;margin-bottom:20px;box-shadow:0 8px 24px rgba(0,0,0,.06)">
+      <div style="background:hsl(var(--surface-elevated));border:1px solid hsl(var(--border));border-radius:14px;padding:20px;margin-bottom:20px;color:hsl(var(--text));box-shadow:0 8px 24px rgba(0,0,0,.22)">
         <div style="font-weight:700;margin-bottom:6px;font-size:15px">${c ? 'Modifier' : 'Ajouter'} un créateur</div>
-        <div style="font-size:12px;color:#999;margin-bottom:14px">Astuce : commence les notes par 🟢 (vierge), 🔵 (produits physiques), 🟠 (services/digital) ou ⚫ (marque) pour le ranger en famille.</div>
+        <div style="font-size:12px;color:hsl(var(--text-muted));margin-bottom:14px">Astuce : commence les notes par 🟢 (vierge), 🔵 (produits physiques), 🟠 (services/digital) ou ⚫ (marque) pour le ranger en famille.</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div><label style="${lbl}">Nom du créateur *</label><input id="f-name" style="${fld}" value="${this.esc(v.name)}"></div>
           <div><label style="${lbl}">Réseau</label><select id="f-platform" style="${fld}">${opts}</select></div>
@@ -241,9 +242,9 @@ const Creators = {
           <div><label style="${lbl}">À relancer le</label><input id="f-followup" type="date" style="${fld}" value="${(v.next_follow_up_at || '').slice(0, 10)}"></div>
           <div style="grid-column:1/3"><label style="${lbl}">Notes</label><textarea id="f-notes" rows="2" style="${fld};resize:vertical">${this.esc(v.notes)}</textarea></div>
         </div>
-        <div id="f-err" style="color:#e11d6b;font-size:13px;margin-top:10px;display:none"></div>
+        <div id="f-err" style="color:hsl(var(--danger-text));font-size:13px;margin-top:10px;display:none"></div>
         <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end">
-          <button id="f-cancel" style="border:1px solid #d6d6da;background:#fff;border-radius:9px;padding:9px 16px;font-size:14px;cursor:pointer">Annuler</button>
+          <button id="f-cancel" style="border:1px solid hsl(var(--border-strong));background:hsl(var(--surface));color:hsl(var(--text));border-radius:9px;padding:9px 16px;font-size:14px;cursor:pointer">Annuler</button>
           <button id="f-save" style="background:#e11d6b;color:#fff;border:0;border-radius:9px;padding:9px 18px;font-size:14px;font-weight:600;cursor:pointer">Enregistrer</button>
         </div>
       </div>`;
