@@ -2034,16 +2034,20 @@ class Api:
             return {"ok": False,
                     "error": "config SMTP introuvable — rien envoyé"}
 
+        body_html = self._creator_mail_html(
+            cr, d.get("accent") or "", d.get("accent2") or "", angle=_ang)
         try:
             msg_id = send_email(smtp_cfg, to=to, subject=subject,
-                                body=final_body,
-                                body_html=self._creator_mail_html(
-                                    cr, d.get("accent") or "",
-                                    d.get("accent2") or "", angle=_ang))
+                                body=final_body, body_html=body_html)
         except Exception as exc:
             return {"ok": False, "error": f"envoi KO : {exc}"}
 
         CD.set_status(sb, draft_id, "sent")
+        # Trace dans « Messages envoyés » (email_history). Tolérant : le mail
+        # est déjà parti, un échec de log ne doit rien casser.
+        self._log_creator_email_sent(
+            client, draft_id, cr, to, subject, final_body, body_html,
+            msg_id, smtp_cfg.get("from_email", ""))
         try:
             book.save({"id": cr.get("id"), "contacted_at": self._iso_now()})
         except Exception as exc:
@@ -2179,6 +2183,96 @@ class Api:
         return {"ok": True, "processed": processed, "retouched": retouched,
                 "engine_down": engine_down, "skipped": skipped,
                 "details": details}
+
+    def _log_creator_email_sent(self, client, draft_id, cr, to, subject,
+                                body, body_html, msg_id, from_email, ts=None):
+        """Trace un mail créateur envoyé dans email_history (kind=email_sent)
+        pour qu'il apparaisse dans « Messages envoyés ». Pose aussi le flag
+        email_logged sur le brouillon (anti-doublon du rattrapage). Tolérant :
+        le mail est déjà parti, un échec de log ne casse rien."""
+        from ..integrations import creator_drafts as CD
+        try:
+            row = {
+                "kind": "email_sent",
+                "ts": ts or self._iso_now(),
+                "subject": (subject or "")[:200],
+                "body": (body or "")[:5000],
+                "message_id": msg_id or "",
+                "extra": {"to": to or "",
+                          "from": from_email or "",
+                          "creator": (cr or {}).get("name") or "",
+                          "audience": "créateur",
+                          "from_creator_draft_id": draft_id or "",
+                          "has_html": bool(body_html),
+                          "body_html": (body_html or "")[:80000]},
+                "created_by": getattr(client, "user_id", None),
+            }
+            try:
+                from ..integrations.multi_tenant import with_workspace
+                row = with_workspace(client, row)
+            except Exception:
+                pass
+            client.raw.table("email_history").insert(row).execute()
+            try:
+                CD.set_review(client.raw, draft_id, {"email_logged": True})
+            except Exception:
+                pass
+            return True
+        except Exception as exc:
+            logger.warning("log email_history créateur KO (mail parti) : %s", exc)
+            return False
+
+    def creator_sent_backfill(self, payload: dict | None = None) -> dict:
+        """Rattrape dans « Messages envoyés » les mails créateurs déjà partis
+        mais jamais tracés (flux additif d'avant le correctif). Régénère le
+        mail tel qu'envoyé (angle révisé inclus) et l'insère dans
+        email_history. Idempotent : flag email_logged sur le brouillon."""
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Base indisponible."}
+        from ..integrations import creator_drafts as CD
+        from ..integrations import creators_book as book
+        from ..integrations import creator_mail
+        sb = client.raw
+        sent = CD.list_all(sb, status="sent")
+        if not sent:
+            return {"ok": True, "logged": 0, "skipped": 0}
+        try:
+            rows = book.list_all(limit=500).get("rows") or []
+        except Exception:
+            rows = []
+        by_id = {r.get("id"): r for r in rows}
+        logged = skipped = 0
+        for d in sent:
+            if d.get("email_logged"):
+                continue
+            cr = by_id.get(d.get("creator_id"))
+            if not cr:
+                skipped += 1
+                continue
+            to = self._creator_email(cr)
+            demo = (cr.get("demo_url") or "").strip()
+            if not to or not demo:
+                skipped += 1
+                continue
+            notes = cr.get("notes") or ""
+            tu = "vouvoiement" not in notes.lower()
+            if d.get("review_modif_applied") and (d.get("angle_revised") or "").strip():
+                ang = d.get("angle_revised").strip()
+            else:
+                ang = creator_mail.angle_from_notes(notes)
+            body = creator_mail.render_text(cr.get("name") or "", demo, tu,
+                                            angle=ang)
+            body_html = self._creator_mail_html(
+                cr, d.get("accent") or "", d.get("accent2") or "", angle=ang)
+            ok = self._log_creator_email_sent(
+                client, d.get("id"), cr, to, d.get("subject") or "",
+                body, body_html, "", "", ts=d.get("sent_at"))
+            if ok:
+                logged += 1
+            else:
+                skipped += 1
+        return {"ok": True, "logged": logged, "skipped": skipped}
 
     # ----- ménage : supprime les coquilles pending sans contenu ---------
     def cleanup_empty_drafts(self, payload: dict | None = None) -> dict:
