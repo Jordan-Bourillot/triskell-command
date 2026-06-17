@@ -52,6 +52,7 @@ const Perceval = {
   _pulseInFlight: false,        // un appel au cerveau est en cours
   _bubbleFresh: false,          // la bulle vient d'apparaître (anim « il parle »)
   _bubbleDismissed: false,      // l'utilisateur a fermé la bulle (croix)
+  _replying: false,             // l'utilisateur est en train de lui répondre
   mood: 'observe',
   _speaking: false,
   _lastSpoken: '',
@@ -241,7 +242,7 @@ const Perceval = {
   },
   // Peut-il parler de sa propre initiative, là, maintenant ?
   _canSpeakSpontaneous() {
-    if (this.collapsed || this._bubbleFresh || this._chatOpen()) return false;
+    if (this.collapsed || this._bubbleFresh || this._replying || this._chatOpen()) return false;
     const gap = this._spontaneousGap();
     if (!isFinite(gap)) return false;
     return (Date.now() - (this._lastSpontaneousAt || 0)) >= gap;
@@ -388,7 +389,7 @@ const Perceval = {
   // Renvoie true (a parlé), 'silent' (l'IA n'a rien à dire) ou false (indispo).
   async _pulse(event, opts = {}) {
     if (this._presence() === 'discret') return false;
-    if (this.collapsed || this._bubbleFresh || this._chatOpen() || this._pulseInFlight) return false;
+    if (this.collapsed || this._bubbleFresh || this._replying || this._chatOpen() || this._pulseInFlight) return false;
     if (this._dbDown()) return false;
     const minGap = (opts.minGap != null) ? opts.minGap : this._pulseGap();
     if (!isFinite(minGap)) return false;
@@ -1140,6 +1141,16 @@ const Perceval = {
         mid += `<div class="pv-actions">${this.eventChoices.map((c, i) =>
           `<button class="pv-chip" data-go-choice="${i}">${this._esc(c.label)} →</button>`).join('')}</div>`;
       }
+      // On peut lui RÉPONDRE (sauf simple confirmation ✓/⚠) : un petit champ
+      // qui bascule la discussion dans le volet de chat, avec le contexte.
+      const canReply = !/^[✓⚠]/.test(this.eventMsg)
+        && typeof Copilot !== 'undefined' && Copilot.askFromOutside;
+      if (canReply) {
+        mid += `<form class="pv-reply" autocomplete="off">
+          <input type="text" maxlength="500" placeholder="Réponds-lui…" aria-label="Répondre à ${this.name}"/>
+          <button type="submit" title="Envoyer" aria-label="Envoyer">➤</button>
+        </form>`;
+      }
       // La bulle reste affichée : une croix permet de la fermer à la main.
       closeBtn = `<button class="pv-close" type="button" aria-label="Fermer" title="Fermer">✕</button>`;
     } else if (this._dbDown()) {
@@ -1176,10 +1187,34 @@ const Perceval = {
       this.eventMsg = null;
       this.eventChoices = null;
       this._bubbleFresh = false;
+      this._replying = false;
       this._bubbleDismissed = true;   // masquée jusqu'à la prochaine parole
       this._refreshMood();
       this._renderBubble();
     };
+    // Réponse directe à la bulle → on bascule dans le chat avec le contexte.
+    const reply = bubble.querySelector('.pv-reply');
+    if (reply) {
+      const inp = reply.querySelector('input');
+      inp.onfocus = () => { this._replying = true; };
+      inp.oninput = () => { this._replying = !!inp.value.trim(); };
+      reply.onsubmit = (e) => {
+        e.preventDefault();
+        const q = (inp.value || '').trim();
+        if (!q) return;
+        const ctx = this.eventMsg || '';
+        this._replying = false;
+        this.eventMsg = null;
+        this.eventChoices = null;
+        this._bubbleFresh = false;
+        this._stopAudio();
+        if (typeof Copilot !== 'undefined' && Copilot.askFromOutside) {
+          Copilot.askFromOutside(ctx ? `À propos de ta remarque « ${ctx} » : ${q}` : q);
+        }
+        this._refreshMood();
+        this._renderBubble();
+      };
+    }
     const go = bubble.querySelector('.pv-chip[data-go]');
     if (go) go.onclick = () => {
       const v = go.dataset.go;
@@ -1447,6 +1482,23 @@ const Perceval = {
         font-size: 11px; display: flex; align-items: center; justify-content: center;
       }
       .pv-close:hover { background: hsl(var(--border)); color: hsl(var(--text)); }
+      .pv-reply {
+        display: flex; align-items: center; gap: 4px; margin-top: 8px;
+        border: 1px solid hsl(var(--border-strong)); border-radius: 999px;
+        padding: 3px 3px 3px 11px; background: hsl(var(--surface) / .6);
+      }
+      .pv-reply:focus-within { border-color: hsl(var(--accent) / .6); }
+      .pv-reply input {
+        flex: 1; min-width: 0; border: 0; background: transparent;
+        font-size: 12.5px; color: hsl(var(--text)); outline: none; padding: 4px 0;
+      }
+      .pv-reply input::placeholder { color: hsl(var(--text-muted)); }
+      .pv-reply button {
+        flex-shrink: 0; border: 0; cursor: pointer;
+        width: 24px; height: 24px; border-radius: 50%;
+        background: hsl(var(--accent)); color: #fff; font-size: 11px; line-height: 1;
+      }
+      .pv-reply button:hover { transform: scale(1.06); }
       .pv-event { color: hsl(var(--success)); font-weight: 600;
                   animation: pvFade .3s ease-out; }
       .pv-actions { margin-top: 7px; }
