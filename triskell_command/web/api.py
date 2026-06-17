@@ -1428,21 +1428,25 @@ class Api:
                             templates_by_key[k] = t
         except Exception as exc:
             return {"ok": False, "error": f"Lecture des modèles KO : {exc}"}
+        only_id = ((payload or {}).get("id") or "").strip()
         sb = client.raw
         cols = ("id, subject, body, body_html, template_key, "
                 "prospects:prospect_id(name, legal_name, emails, city, "
                 "industry, description)")
         try:
-            res = (sb.table("prospect_drafts").select(cols)
-                     .eq("status", "pending").limit(200).execute())
+            _q = (sb.table("prospect_drafts").select(cols)
+                    .eq("status", "pending"))
+            if only_id:
+                _q = _q.eq("id", only_id)
+            res = _q.limit(200).execute()
             rows = res.data or []
         except Exception as exc:
             return {"ok": False, "error": f"Lecture brouillons KO : {exc}"}
         import re as _re
         restored, skipped, no_template = [], 0, 0
         for r in rows:
-            if _re.search(r'alt="Aper', r.get("body_html") or "", _re.I):
-                continue  # aperçu déjà présent -> rien à faire
+            if not only_id and _re.search(r'alt="Aper', r.get("body_html") or "", _re.I):
+                continue  # aperçu déjà présent -> rien à faire (sauf forçage par id)
             tpl = templates_by_key.get((r.get("template_key") or "").strip())
             if not tpl:
                 no_template += 1

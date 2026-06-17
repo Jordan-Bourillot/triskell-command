@@ -850,8 +850,12 @@ def preview_image_url(nom: str, metier: str = "", ville: str = "") -> str:
     Réutilise l'image si elle existe déjà (même prospect) — pas de re-rendu.
     Renvoie "" si indisponible (Playwright/Supabase absents) — jamais bloquant."""
     nom = clean_business_name(nom)
+    # La DÉMO choisie entre dans la clé : si le métier→démo change (ex. coiffeur
+    # passé de l'institut beauté à sa propre démo le 17/06/2026), la clé change
+    # et on RE-CAPTURE au lieu de resservir l'ancienne image en cache.
+    _slug = _demo_slug_for(metier) or "maquette"
     key = hashlib.sha1(
-        f"{nom}|{metier}|{ville}|v{_DESIGN_VERSION}".encode("utf-8")).hexdigest()[:20]
+        f"{nom}|{metier}|{_slug}|{ville}|v{_DESIGN_VERSION}".encode("utf-8")).hexdigest()[:20]
     path = f"apercus/{key}.png"
     url = _public_url(path)
     if url and _object_exists(url):
