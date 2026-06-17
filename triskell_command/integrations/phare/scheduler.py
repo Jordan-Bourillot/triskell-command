@@ -170,6 +170,17 @@ def _tick(app_state) -> dict:
 
     actions_done: list[dict] = []
 
+    # « Le robot agit seul » : si l'interrupteur est allumé, on met en file les
+    # corrections SÛRES en attente AVANT de vider la file, pour qu'elles soient
+    # publiées dans ce même passage (Jordan n'a rien à cliquer).
+    try:
+        aa = orchestrator.auto_apply_safe(app_state=app_state)
+        if aa.get("enqueued"):
+            actions_done.append({"mission": "auto_apply",
+                                 "enqueued": len(aa["enqueued"])})
+    except Exception as exc:
+        logger.warning("phare auto_apply: %s", exc)
+
     # File « OK, fais-le » : toujours en tête de cycle — un clic de Jordan
     # passe avant les missions planifiées. Le clic web déclenche aussi un
     # workflow_dispatch, donc ce passage arrive en général ~2 min après.

@@ -688,6 +688,72 @@ def auto_merge_verified(*, max_merges: int = 3,
             "pending_seen": len(pending)}
 
 
+# Familles que le robot peut appliquer SEUL en sécurité : métadonnées, <head>,
+# liens — jamais le contenu visible ni le design. On exclut volontairement les
+# cartes « famille inconnue » (le filet optimiste de classify_for_apply) :
+# elles peuvent échouer ou demander un humain → pas d'auto-application.
+_AUTO_SAFE_AGENTS = ("sitemap_builder", "image_seo", "redirect_fixer")
+_AUTO_SAFE_FAMILIES = {"title", "meta", "canonical", "noindex", "h1",
+                       "schema", "alt", "sitemap"}
+
+
+def _is_auto_safe(action: dict) -> bool:
+    """Le robot peut-il appliquer cette carte SANS demander à Jordan ?"""
+    agent = (action.get("agent") or "").lower()
+    if agent in _AUTO_SAFE_AGENTS:
+        return True
+    from . import plain_language
+    fams = plain_language._families_of(action)
+    return bool(fams) and fams.issubset(_AUTO_SAFE_FAMILIES)
+
+
+def auto_apply_safe(*, max_apply: int = 8, app_state=None) -> dict:
+    """« Le robot agit seul » : met en file les corrections SÛRES en attente
+    (toutes sites), sans attendre le clic de Jordan. process_apply_queue les
+    prépare, vérifie et publie ensuite — le reste attend une décision humaine.
+
+    Garde-fous :
+      - même interrupteur que l'auto-publication (phare_config.auto_merge_enabled,
+        défaut False) : un seul réglage = « le robot agit seul » ;
+      - familles connues sûres uniquement (jamais le contenu/le design) ;
+      - plafond par passage ; une carte déjà en file/préparée n'est jamais reprise ;
+      - chaque modif passe par les vérifs de l'Exécuteur + reste annulable
+        (rollback_watch surveille le trafic 14 j).
+    """
+    cfg = repo.get_config()
+    if not cfg.get("auto_merge_enabled", False):
+        return {"ok": True, "skipped": "disabled"}
+    from . import plain_language
+    drafts = repo.list_actions(status="draft", limit=200)
+    enqueued: list[dict] = []
+    sites_cache: dict[str, dict] = {}
+    for a in drafts:
+        if len(enqueued) >= max_apply:
+            break
+        if (a.get("apply_state") or ""):          # déjà en file / préparée / échec
+            continue
+        if not _is_auto_safe(a):
+            continue
+        sid = a.get("site_id") or ""
+        site = sites_cache.get(sid)
+        if site is None:
+            site = repo.get_site(sid) or {}
+            sites_cache[sid] = site
+        if not (site.get("repo_github") or "").strip():
+            continue
+        verdict = plain_language.classify_for_apply(a, site)
+        if not (verdict.get("can") and verdict.get("mode") == "code"):
+            continue
+        if repo.update_action(a["id"], {
+                "apply_state": "queued",
+                "apply_requested_at": datetime.now().isoformat()}):
+            enqueued.append({"id": a["id"], "title": a.get("title", ""),
+                             "site_id": sid})
+    if enqueued:
+        logger.info("phare auto_apply: %d corrections mises en file", len(enqueued))
+    return {"ok": True, "enqueued": enqueued, "drafts_seen": len(drafts)}
+
+
 def reject_action(action_id: str, reason: str = "") -> dict:
     repo.update_action(action_id, {
         "status": "rejected",

@@ -966,5 +966,89 @@ def _section_merge_race():
 
 _section_merge_race()
 
+# ===========================================================================
+# Section ajoutée le 17/06/2026 : « le robot agit seul » — auto-application
+# des corrections SÛRES (sans le clic de Jordan), même interrupteur que l'auto-
+# publication. Refonte demandée par Jordan (outil trop complexe / trop à faire).
+print("\n— le robot agit seul : auto-application des corrections sûres (17/06) —")
+from triskell_command.integrations.phare import orchestrator as orch
+
+check("titre → auto-applicable",
+      orch._is_auto_safe({"agent": "auditeur", "title": "Réécrire le title de /demo"}))
+check("redirection → auto-applicable",
+      orch._is_auto_safe({"agent": "redirect_fixer", "title": "Lien direct"}))
+check("plan du site → auto-applicable",
+      orch._is_auto_safe({"agent": "sitemap_builder", "title": "Sitemap.xml généré (12 URLs)"}))
+check("images → auto-applicable",
+      orch._is_auto_safe({"agent": "image_seo", "title": "Image SEO : 3 alts"}))
+check("maillage interne → PAS auto (touche le contenu)",
+      not orch._is_auto_safe({"agent": "tisseur",
+                              "title": "Renforcer le maillage interne",
+                              "detail_md": "Ajouter des liens internes vers /x"}))
+check("Search Console → PAS auto (besoin d'un humain)",
+      not orch._is_auto_safe({"agent": "auditeur",
+                              "title": "Vérifier la couverture dans Search Console",
+                              "detail_md": "Ouvrir la Search Console"}))
+check("conseil flou sans famille → PAS auto (jamais à l'aveugle)",
+      not orch._is_auto_safe({"agent": "auditeur", "title": "Améliorer le contenu",
+                              "detail_md": "Rendre la page plus riche et utile"}))
+
+DRAFTS = [
+    {"id": "t1", "site_id": "s1", "agent": "auditeur", "status": "draft",
+     "apply_state": "", "title": "Réécrire le title de la home"},
+    {"id": "m1", "site_id": "s1", "agent": "tisseur", "status": "draft",
+     "apply_state": "", "title": "Maillage interne", "detail_md": "liens internes"},
+    {"id": "t2", "site_id": "s1", "agent": "auditeur", "status": "draft",
+     "apply_state": "queued", "title": "Title déjà en file"},
+    {"id": "r1", "site_id": "s2", "agent": "redirect_fixer", "status": "draft",
+     "apply_state": "", "title": "Lien direct",
+     "detail_md": "Source : https://x.fr/a\nDestination finale : https://x.fr/b"},
+    {"id": "a1", "site_id": "s3", "agent": "image_seo", "status": "draft",
+     "apply_state": "", "title": "Image SEO : 2 alts"},
+]
+SITES_AA = {"s1": {"id": "s1", "repo_github": "o/r1"},
+            "s2": {"id": "s2", "repo_github": "o/r2"},
+            "s3": {"id": "s3", "repo_github": ""}}     # s3 pas relié au code
+aa_calls = []
+
+
+def _aa_upd(aid, patch):
+    aa_calls.append((aid, patch))
+    return True
+
+
+with mock.patch.object(orch.repo, "get_config",
+                       return_value={"auto_merge_enabled": False}):
+    r = orch.auto_apply_safe()
+    check("interrupteur éteint → le robot n'agit pas seul",
+          r.get("skipped") == "disabled")
+
+with mock.patch.object(orch.repo, "get_config",
+                       return_value={"auto_merge_enabled": True}), \
+     mock.patch.object(orch.repo, "list_actions",
+                       return_value=[dict(d) for d in DRAFTS]), \
+     mock.patch.object(orch.repo, "get_site",
+                       side_effect=lambda sid: SITES_AA.get(sid)), \
+     mock.patch.object(orch.repo, "update_action", side_effect=_aa_upd):
+    r = orch.auto_apply_safe()
+    ids = {e["id"] for e in r["enqueued"]}
+    check("interrupteur allumé → met en file le titre + la redirection",
+          "t1" in ids and "r1" in ids)
+    check("ignore le maillage (contenu)", "m1" not in ids)
+    check("ignore une carte déjà en file", "t2" not in ids)
+    check("ignore une image sur un site non relié au code", "a1" not in ids)
+    check("met bien les cartes en file (apply_state=queued)",
+          bool(aa_calls) and all(p.get("apply_state") == "queued" for _, p in aa_calls))
+
+with mock.patch.object(orch.repo, "get_config",
+                       return_value={"auto_merge_enabled": True}), \
+     mock.patch.object(orch.repo, "list_actions",
+                       return_value=[dict(d) for d in DRAFTS]), \
+     mock.patch.object(orch.repo, "get_site",
+                       side_effect=lambda sid: SITES_AA.get(sid)), \
+     mock.patch.object(orch.repo, "update_action", side_effect=_aa_upd):
+    r = orch.auto_apply_safe(max_apply=1)
+    check("plafond par passage respecté (max_apply)", len(r["enqueued"]) == 1)
+
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)
