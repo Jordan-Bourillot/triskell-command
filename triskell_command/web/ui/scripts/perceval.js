@@ -42,6 +42,11 @@ const Perceval = {
   voiceOn: false,
   voice: 'fr-FR-HenriNeural',   // voix choisie (id edge-tts, voir VOICES)
   _audio: null,                 // élément <audio> en cours de lecture
+  presence: 'equilibre',        // discret | equilibre | binome (à quel point il s'invite)
+  _lastSpontaneousAt: 0,        // dernière prise de parole de SA propre initiative
+  _lastNudgeAt: 0,              // dernière relance proactive
+  _lastNudgeKey: '',            // sujet de la dernière relance (jamais 2× d'affilée)
+  _lastPick: '',                // dernière phrase tirée (variété)
   mood: 'observe',
   _speaking: false,
   _lastSpoken: '',
@@ -59,6 +64,7 @@ const Perceval = {
     voice: 'triskell.perceval.voice',
     greetDay: 'triskell.perceval.greetday',
     voicename: 'triskell.perceval.voicename',
+    presence: 'triskell.perceval.presence',
   },
 
   // Voix proposées dans le menu (neurales, françaises). Doit rester aligné
@@ -140,6 +146,7 @@ const Perceval = {
       this.met = localStorage.getItem(this.LS.met) === '1';
       this.voiceOn = localStorage.getItem(this.LS.voice) === '1';
       this.voice = localStorage.getItem(this.LS.voicename) || 'fr-FR-HenriNeural';
+      this.presence = localStorage.getItem(this.LS.presence) || 'equilibre';
     } catch (e) { this.visits = 1; /* stockage indisponible : mode sans mémoire */ }
 
     this._injectStyles();
@@ -171,7 +178,10 @@ const Perceval = {
     if (this._thinkTimer) clearTimeout(this._thinkTimer);
     this._thinkTimer = setTimeout(() => this._refreshMood(), 900);
     this._trackWandering(viewId);
-    this._maybeIntroduceView(viewId);
+    // Première visite d'un écran → présentation. Sinon → un mot sur place,
+    // avec son avis selon l'état réel (mode équilibré/binôme).
+    const introduced = this._maybeIntroduceView(viewId);
+    if (!introduced) this._maybeViewRemark(viewId);
     this._renderBubble();
     this._poll(); // l'état a pu changer suite à une action
   },
@@ -200,6 +210,161 @@ const Perceval = {
     if (opts.speak || spoken) this._speak(msg);
   },
 
+  // ---------- présence : à quel point il s'invite de lui-même ----------
+  // discret : il se fait oublier (confirmations + bonjour seulement).
+  // equilibre : il commente ton écran et relance, mais choisit ses moments.
+  // binome : il parle plus souvent, collé à toi.
+  _presence() {
+    return (this.presence === 'discret' || this.presence === 'binome')
+      ? this.presence : 'equilibre';
+  },
+  _spontaneousGap() {
+    const p = this._presence();
+    if (p === 'discret') return Infinity;   // ne prend jamais la parole seul
+    if (p === 'binome') return 75 * 1000;    // proche binôme : il s'exprime souvent
+    return 165 * 1000;                       // équilibré : il choisit ses moments
+  },
+  _chatOpen() {
+    const p = document.getElementById('copilot-panel');
+    return !!(p && p.classList.contains('cop-visible'));
+  },
+  // Peut-il parler de sa propre initiative, là, maintenant ?
+  _canSpeakSpontaneous() {
+    if (this.collapsed || this.eventMsg || this._chatOpen()) return false;
+    const gap = this._spontaneousGap();
+    if (!isFinite(gap)) return false;
+    return (Date.now() - (this._lastSpontaneousAt || 0)) >= gap;
+  },
+  // Voix sur les interventions spontanées : oui dès l'équilibré (si la voix
+  // est activée par ailleurs ; sinon c'est juste la bulle).
+  _presenceSpeaks() { return this._presence() !== 'discret'; },
+  // Tire une phrase au hasard sans répéter la précédente (variété = vie).
+  _pick(arr) {
+    if (!Array.isArray(arr) || !arr.length) return '';
+    let i = Math.floor(Math.random() * arr.length);
+    if (arr.length > 1 && arr[i] === this._lastPick) i = (i + 1) % arr.length;
+    this._lastPick = arr[i];
+    return arr[i];
+  },
+  // Dit quelque chose de lui-même, avec tous les garde-fous + voix selon niveau.
+  _sayProactive(msg, ms = 8000) {
+    if (!msg || !this._canSpeakSpontaneous()) return false;
+    this._lastSpontaneousAt = Date.now();
+    this.say(msg, ms, { speak: this._presenceSpeaks() });
+    return true;
+  },
+
+  // ---------- il commente l'écran sur lequel tu arrives ----------
+  _maybeViewRemark(viewId) {
+    if (this._remarkTimer) clearTimeout(this._remarkTimer);
+    // petite latence : il « regarde » ton écran, puis réagit (effet binôme)
+    this._remarkTimer = setTimeout(() => {
+      if (this.view !== viewId) return;          // déjà reparti ailleurs
+      this._sayProactive(this._viewRemark(viewId), 8000);
+    }, 800);
+  },
+  _viewRemark(viewId) {
+    const s = this.snap || {};
+    if (this._dbDown()) return '';
+    const val = (k) => (s[k] == null ? null : s[k]);
+    switch (viewId) {
+      case 'drafts': {
+        const d = val('drafts_pending');
+        if (d && d > 0) return this._pick([
+          `On a ${d} brouillon(s) à valider. On les passe ensemble ?`,
+          `${d} mail(s) attendent ton feu vert — autant les sortir maintenant.`,
+          `Y’a ${d} brouillon(s) en attente. Je te les ouvre ?`,
+        ]);
+        return this._pick([
+          `Côté brouillons, on est à jour — rien à valider.`,
+          `Boîte vide ici, tout est traité. Beau travail.`,
+        ]);
+      }
+      case 'replies': {
+        const r = val('replies_unhandled');
+        if (r && r > 0) return this._pick([
+          `${r} réponse(s) à traiter. C’est là que ça se joue — on commence ?`,
+          `Des prospects t’ont répondu (${r}). Je m’en occuperais avant tout le reste.`,
+        ]);
+        return this._pick([
+          `Pas de réponse en attente — on a tout traité.`,
+          `Rien de neuf côté réponses pour l’instant.`,
+        ]);
+      }
+      case 'prospection': return this._pick([
+        `C’est d’ici que tout part. On lance une cible ?`,
+        `Prêt à chasser : tu choisis le métier et la zone, je m’occupe du reste.`,
+      ]);
+      case 'prospects_crm': {
+        const t = val('prospects_total');
+        if (t != null) return this._pick([
+          `Ta base : ${t} prospect(s), rangés sans doublon.`,
+          `${t} prospect(s) en stock. Clique une ligne pour la fiche complète.`,
+        ]);
+        return '';
+      }
+      case 'autopilot':
+        if (s.autopilot_enabled === false && (val('prospects_new') || 0) > 0)
+          return this._pick([
+            `T’as ${s.prospects_new} prospect(s) qui attendent. On allume l’Auto-pilote ?`,
+            `L’Auto-pilote est éteint et y’a du monde dans la base. On le lance ?`,
+          ]);
+        return '';
+      case 'health': {
+        const w = s.workers || {};
+        if ((w.error || 0) > 0) return this._pick([
+          `${w.error} robot(s) à terre. On répare ça avant d’envoyer quoi que ce soit.`,
+          `Attention : ${w.error} robot(s) en panne. C’est la priorité du moment.`,
+        ]);
+        return this._pick([`Tout tourne côté robots — bon signe.`, `Les robots sont au vert.`]);
+      }
+      default: return '';
+    }
+  },
+
+  // ---------- relance proactive : rare, jamais le même sujet d'affilée ----------
+  _maybeIdleNudge() {
+    if (!this._canSpeakSpontaneous()) return;
+    const minGap = this._presence() === 'binome' ? 4 * 60 * 1000 : 7 * 60 * 1000;
+    if (Date.now() - (this._lastNudgeAt || 0) < minGap) return;
+    const rec = this._recommend();
+    if (!rec || rec.soft || rec.view === this.view) return; // net, et ailleurs
+    const key = rec.view + ':' + rec.label;
+    if (key === this._lastNudgeKey) return;
+    if (this._sayProactive(this._nudgeText(rec), 9000)) {
+      this._lastNudgeAt = Date.now();
+      this._lastNudgeKey = key;
+    }
+  },
+  _nudgeText(rec) {
+    const map = {
+      replies: [`Dis, ${rec.why} — on va voir les réponses ?`,
+                `Tes prospects t’ont répondu. On s’en occupe ?`],
+      drafts:  [`Au fait, ${rec.why}. On valide les brouillons ?`,
+                `Y’a des brouillons qui dorment. On les sort ?`],
+      health:  [`Attention : ${rec.why}. On file voir la Santé ?`],
+      prospection: [`On manque de cibles — je lancerais bien une prospection. Tu me dis ?`],
+    };
+    return this._pick(map[rec.view] || [`${rec.label} — ${rec.why}. On y va ?`]);
+  },
+
+  // Avis sur une fin de chasse (parlé : commence par ✓).
+  _chaseEndedMsg(pushed) {
+    if (typeof pushed !== 'number') return '✓ Chasse terminée — les prospects sont dans ta base.';
+    if (pushed === 0) return this._pick([
+      '✓ Chasse finie, mais rien de neuf (déjà connus ou sans mail). On changera de cible.',
+      '✓ Chasse bouclée — bredouille cette fois. Faudra viser ailleurs.',
+    ]);
+    if (pushed <= 3) return this._pick([
+      `✓ Chasse finie — ${pushed} prospect(s). Maigre, mais c’est ça de pris.`,
+      `✓ ${pushed} prospect(s) versés. Petite récolte ; on affinera la cible.`,
+    ]);
+    return this._pick([
+      `✓ Chasse terminée — ${pushed} prospects dans ta base. Belle prise !`,
+      `✓ ${pushed} prospects de plus. Joli — l’Auto-pilote a de quoi faire.`,
+    ]);
+  },
+
   // ---------- niveau d'accompagnement ----------
   // découverte : statut + action + conseil d'écran (les ~5 premiers jours)
   // habitué    : statut + action
@@ -219,7 +384,7 @@ const Perceval = {
     this.snap = s;
     const evt = this._detectEvent(this.prevSnap, s);
     if (evt) this.say(evt);
-    else { this._refreshMood(); this._renderBubble(); }
+    else { this._refreshMood(); this._renderBubble(); this._maybeIdleNudge(); }
     // Bonjour du jour : une fois le premier instantané en main.
     this._maybeGreet();
   },
@@ -242,11 +407,7 @@ const Perceval = {
           if (m.status === 'error') {
             return `⚠ Une prospection s’est arrêtée en erreur — détails sur l’écran Prospection.`;
           }
-          if (m.status === 'handed') {
-            return (typeof m.pushed === 'number')
-              ? `✓ Chasse terminée — ${m.pushed} prospect(s) versés dans ta base.`
-              : '✓ Chasse terminée — les prospects sont dans ta base.';
-          }
+          if (m.status === 'handed') return this._chaseEndedMsg(m.pushed);
           // Statut inconnu ou abandon volontaire → pas de fausse fanfare.
         }
       }
@@ -385,15 +546,16 @@ const Perceval = {
   // À la PREMIÈRE visite d'un écran d'action, il se présente : à quoi sert
   // l'écran, et l'invitation à lui parler. Une fois par écran, pour toujours.
   _maybeIntroduceView(viewId) {
-    if (!this.met || this.collapsed || this.eventMsg) return;
+    if (!this.met || this.collapsed || this.eventMsg) return false;
     const vt = this.VIEW_TEXTS[viewId] || {};
-    if (!vt.here || !vt.inview) return; // réservé aux écrans d'action
+    if (!vt.here || !vt.inview) return false; // réservé aux écrans d'action
     let seen = {};
     try { seen = JSON.parse(localStorage.getItem('triskell.perceval.seenviews') || '{}'); } catch (e) {}
-    if (seen[viewId]) return;
+    if (seen[viewId]) return false;
     seen[viewId] = 1;
     try { localStorage.setItem('triskell.perceval.seenviews', JSON.stringify(seen)); } catch (e) {}
     this.say(`Première fois ici ? ${vt.here} Dis-moi ce que tu veux faire — je peux le faire pour toi, ou te montrer.`, 9000);
+    return true;
   },
 
   // ---------- la main tendue quand on tourne en rond ----------
@@ -643,22 +805,40 @@ const Perceval = {
     if (existing) { existing.remove(); return; }
     const host = document.getElementById('perceval-host');
     if (!host) return;
+    const PRES = [
+      { id: 'discret',   label: 'Discret',       hint: 'il se fait oublier' },
+      { id: 'equilibre', label: 'Équilibré',     hint: 'il choisit ses moments' },
+      { id: 'binome',    label: 'Proche binôme', hint: 'collé à toi' },
+    ];
     const menu = document.createElement('div');
     menu.id = 'pv-voice-menu';
     menu.innerHTML = `
-      <div class="pv-vm-title">La voix de ${this.name}</div>
+      <div class="pv-vm-title">Sa voix</div>
       ${this.VOICES.map(v => `
         <button type="button" class="pv-vm-item${v.id === this.voice ? ' is-on' : ''}" data-voice="${this._esc(v.id)}">
           <span class="pv-vm-dot" aria-hidden="true"></span>
           <span class="pv-vm-name">${this._esc(v.label)}</span>
           <span class="pv-vm-try">écouter ▶</span>
         </button>`).join('')}
-      <div class="pv-vm-foot">Clique une voix pour l’écouter et la garder.</div>`;
+      <div class="pv-vm-sep"></div>
+      <div class="pv-vm-title">Sa présence</div>
+      ${PRES.map(p => `
+        <button type="button" class="pv-vm-item${p.id === this._presence() ? ' is-on' : ''}" data-presence="${p.id}">
+          <span class="pv-vm-dot" aria-hidden="true"></span>
+          <span class="pv-vm-name">${p.label}<span class="pv-vm-hint"> — ${p.hint}</span></span>
+        </button>`).join('')}
+      <div class="pv-vm-foot">Clique une voix pour l’écouter. Règle sa présence selon ton envie.</div>`;
     host.appendChild(menu);
-    menu.querySelectorAll('.pv-vm-item').forEach(btn => {
+    menu.querySelectorAll('[data-voice]').forEach(btn => {
       btn.onclick = () => {
-        menu.querySelectorAll('.pv-vm-item').forEach(b => b.classList.toggle('is-on', b === btn));
+        menu.querySelectorAll('[data-voice]').forEach(b => b.classList.toggle('is-on', b === btn));
         this._setVoiceName(btn.getAttribute('data-voice'));
+      };
+    });
+    menu.querySelectorAll('[data-presence]').forEach(btn => {
+      btn.onclick = () => {
+        menu.querySelectorAll('[data-presence]').forEach(b => b.classList.toggle('is-on', b === btn));
+        this._setPresence(btn.getAttribute('data-presence'));
       };
     });
     // Referme au clic ailleurs (mais pas sur le bouton qui l'ouvre).
@@ -682,6 +862,18 @@ const Perceval = {
     this._lastSpoken = '';
     if (!this.voiceOn) this._setVoice(true);
     else this._speak('Voilà ma voix.');
+  },
+
+  _setPresence(level) {
+    this.presence = (level === 'discret' || level === 'binome') ? level : 'equilibre';
+    try { localStorage.setItem(this.LS.presence, this.presence); } catch (e) {}
+    this._lastSpontaneousAt = 0; // il peut réagir tout de suite au nouveau réglage
+    const note = this.presence === 'discret'
+      ? 'Je me fais discret — je te préviens juste pour l’essentiel.'
+      : this.presence === 'binome'
+      ? 'Je reste collé à toi — on bosse ensemble.'
+      : 'Je choisis mes moments, mais je suis là.';
+    this.say(note, 6000, { speak: this._presenceSpeaks() });
   },
 
   // ---------- humeurs ----------
@@ -739,7 +931,7 @@ const Perceval = {
         <button id="pv-voice-btn" type="button" class="pv-tool-btn"
                 aria-label="Voix de ${this.name}">🔇</button>
         <button id="pv-voice-pick" type="button" class="pv-tool-btn"
-                title="Choisir la voix de ${this.name}" aria-label="Choisir la voix">🎙️</button>
+                title="Réglages de ${this.name} : sa voix et sa présence" aria-label="Réglages de la voix et de la présence">🎙️</button>
         <button id="pv-min-btn" type="button" class="pv-tool-btn"
                 title="Réduire ${this.name} (il reste en petit)" aria-label="Réduire">▾</button>
       </div>
@@ -1132,6 +1324,8 @@ const Perceval = {
         font-size: 11px; color: hsl(var(--text-muted));
         padding: 6px 8px 3px; line-height: 1.4;
       }
+      .pv-vm-sep { height: 1px; background: hsl(var(--border)); margin: 7px 6px; }
+      .pv-vm-hint { color: hsl(var(--text-muted)); font-weight: 400; font-size: 11.5px; }
 
       /* -- la bulle : épisodique et compacte, ancrée au-dessus de la barre -- */
       #pv-bubble {
