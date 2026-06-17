@@ -150,6 +150,18 @@ def gather_context(app_state) -> dict[str, Any]:
                 "replies": d["replies"]["yesterday_total"],
                 "replies_breakdown": d["replies"]["yesterday_breakdown"] or {},
             }
+            # « sent » ci-dessus = PROSPECTION uniquement (mails de démarchage
+            # liés à un prospect). On donne aussi la vue 7 jours avec, à côté,
+            # le total tous mails confondus pour que Perceval ne confonde
+            # JAMAIS la prospection avec les alertes internes / mails clients.
+            ctx["envois_7j"] = {
+                "prospection": d["sent"].get("last_7d", 0),
+                "tous_mails_confondus": d["sent"].get("last_7d_all", 0),
+                "note": ("« prospection » = démarchage de prospects (attend "
+                         "une réponse). Le reste (alertes Phare SEO, chauffe "
+                         "des boîtes, mails clients) n'est PAS de la "
+                         "prospection et n'attend aucune réponse."),
+            }
             ctx["queue"] = d.get("queue", {})
             ctx["alerts"] = d.get("alerts", {})
             ctx["totals"] = d.get("totals", {})
@@ -1066,6 +1078,15 @@ Exemples UTILES (le bon niveau) :
   pilote convertira peu, vise des contacts nominatifs la prochaine fois. »
 - « Auto-pilote éteint avec 37 prospects neufs en attente : tu perds des
   jours d'envoi. Tu l'allumes ? »
+
+CHIFFRES D'ENVOI — NE MÉLANGE JAMAIS LES CATÉGORIES : le champ `sent`
+(today/yesterday) et `envois_7j.prospection` ne comptent QUE les mails de
+PROSPECTION (démarchage de prospects, en attente d'une réponse). Ils
+EXCLUENT déjà les alertes internes du Phare (SEO), la chauffe des boîtes et
+les mails clients/transactionnels (regroupés dans `tous_mails_confondus`).
+Donc quand tu parles d'« envoyés sans réponse », c'est forcément de la
+prospection — ne dis jamais « X mails envoyés, 0 réponse » en additionnant
+des mails qui n'attendent aucune réponse.
 
 Tu peux proposer un écran à ouvrir si ça aide (sinon view = null).
 Écrans : prospection, prospects_crm, drafts, replies, autopilot, funnel,

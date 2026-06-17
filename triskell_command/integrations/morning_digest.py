@@ -41,15 +41,23 @@ def _bounds(d: date) -> tuple[str, str]:
     return start, end
 
 
-def _count_history(client, kind: str, day_start: str, day_end: str) -> int:
+def _count_history(client, kind: str, day_start: str, day_end: str,
+                   *, prospect_only: bool = False) -> int:
     try:
         sb = client.raw
-        res = (sb.table("email_history")
+        q = (sb.table("email_history")
                .select("id", count="exact")
                .eq("kind", kind)
                .gte("ts", day_start)
-               .lt("ts", day_end)
-               .limit(1).execute())
+               .lt("ts", day_end))
+        if prospect_only:
+            # « Prospection » = mail rattaché à un prospect (auto-pilote,
+            # relances J+7/J+30, réponses auto). Exclut les alertes internes
+            # du Phare (SEO), la chauffe des boîtes et les mails clients —
+            # tous envoyés SANS prospect_id, donc jamais en attente d'une
+            # réponse de prospect. Évite le faux « X envoyés, 0 réponse ».
+            q = q.not_.is_("prospect_id", "null")
+        res = q.limit(1).execute()
         return int(res.count or 0)
     except Exception as exc:
         logger.debug("count_history(%s): %s", kind, exc)
@@ -167,7 +175,8 @@ def _count_failed_convoy_drafts(client, day_start: str, day_end: str) -> int:
         return 0
 
 
-def _daily_history_last_7d(client, kind: str) -> list[int]:
+def _daily_history_last_7d(client, kind: str,
+                            *, prospect_only: bool = False) -> list[int]:
     """Renvoie 7 entiers : nombre d'événements `kind` par jour, du
     plus ancien au plus récent (J-6 ... J).
 
@@ -182,10 +191,12 @@ def _daily_history_last_7d(client, kind: str) -> list[int]:
                                   datetime.min.time()).isoformat()
         end = datetime.combine(today + timedelta(days=1),
                                 datetime.min.time()).isoformat()
-        res = (sb.table("email_history").select("ts")
+        q = (sb.table("email_history").select("ts")
                .eq("kind", kind)
-               .gte("ts", start).lt("ts", end)
-               .limit(2000).execute())
+               .gte("ts", start).lt("ts", end))
+        if prospect_only:
+            q = q.not_.is_("prospect_id", "null")
+        res = q.limit(2000).execute()
         for r in res.data or []:
             ts = r.get("ts") or ""
             if not ts:
@@ -219,7 +230,8 @@ def compute_digest() -> dict[str, Any]:
         "today": date.today().isoformat(),
         "yesterday": (date.today() - timedelta(days=1)).isoformat(),
         "sent": {"yesterday": 0, "today": 0, "last_7d": 0,
-                  "daily_last_7d": [0] * 7},
+                  "daily_last_7d": [0] * 7,
+                  "today_all": 0, "last_7d_all": 0},
         "replies": {
             "yesterday_total": 0,
             "yesterday_breakdown": {},
@@ -258,10 +270,15 @@ def compute_digest() -> dict[str, Any]:
     t_start, t_end = _bounds(today)
     w_start, _ = _bounds(week_start)
 
-    out["sent"]["yesterday"] = _count_history(client, "email_sent", y_start, y_end)
-    out["sent"]["today"] = _count_history(client, "email_sent", t_start, t_end)
-    out["sent"]["last_7d"] = _count_history(client, "email_sent", w_start, t_end)
-    out["sent"]["daily_last_7d"] = _daily_history_last_7d(client, "email_sent")
+    # Envois de PROSPECTION (prospect_only) : c'est le chiffre qui a un sens
+    # face aux réponses. On compte aussi le total TOUS mails (_all) pour
+    # info/transparence, sans jamais le confondre avec la prospection.
+    out["sent"]["yesterday"] = _count_history(client, "email_sent", y_start, y_end, prospect_only=True)
+    out["sent"]["today"] = _count_history(client, "email_sent", t_start, t_end, prospect_only=True)
+    out["sent"]["last_7d"] = _count_history(client, "email_sent", w_start, t_end, prospect_only=True)
+    out["sent"]["daily_last_7d"] = _daily_history_last_7d(client, "email_sent", prospect_only=True)
+    out["sent"]["today_all"] = _count_history(client, "email_sent", t_start, t_end)
+    out["sent"]["last_7d_all"] = _count_history(client, "email_sent", w_start, t_end)
 
     out["replies"]["yesterday_total"] = _count_history(
         client, "reply_received", y_start, y_end)
