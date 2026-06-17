@@ -1874,6 +1874,19 @@ class Api:
                       row.get("notes") or "")
         return m.group(0) if m else ""
 
+    @staticmethod
+    def _creator_html(body: str) -> str:
+        """Met le message créateur en HTML propre (paragraphes + lien en
+        bouton), comme les mails de prospection. Vide si indispo."""
+        try:
+            from ..integrations.convoy_ai import (
+                text_to_email_html, _first_url_in)
+            return text_to_email_html(
+                body, primary_url=_first_url_in(body),
+                primary_label="Voir ce que j'ai préparé")
+        except Exception:
+            return ""
+
     def _creator_draft_rows(self, client) -> list:
         """Brouillons créateurs en attente, au format de l'écran Brouillons."""
         from ..integrations import creator_drafts as CD
@@ -1896,6 +1909,7 @@ class Api:
             body = (cr.get("message") or "").strip()
             if not email or not body:
                 continue
+            body_html = self._creator_html(body)
             out.append({
                 "source": "creator",
                 "id": d.get("id") or "",
@@ -1906,11 +1920,11 @@ class Api:
                 "city": "",
                 "subject": d.get("subject") or "",
                 "body": body,
-                "body_html": "",
+                "body_html": body_html,
                 "sender_address": d.get("sender_address") or "",
                 "ts": (d.get("created_at") or "")[:19],
                 "provider": "", "model": "", "kind": "creator",
-                "prospect_sources": ["créateur"],
+                "prospect_sources": [],
                 "platform_url": cr.get("handle") or "",
                 "audience": "créateur",
                 "email_meta": None,
@@ -1980,7 +1994,8 @@ class Api:
 
         try:
             msg_id = send_email(smtp_cfg, to=to, subject=subject,
-                                body=final_body)
+                                body=final_body,
+                                body_html=self._creator_html(final_body))
         except Exception as exc:
             return {"ok": False, "error": f"envoi KO : {exc}"}
 
