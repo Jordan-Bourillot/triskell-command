@@ -311,6 +311,19 @@ check("catégorie : 'formulation précisée' → clarté",
       normalize_modif_type("formulation précisée") == "clarté")
 check("catégorie : vide → reste vide", normalize_modif_type("") == "")
 
+# Retouche DANS le HTML, sur place (Jordan 17/06) : on ne régénère PAS le HTML
+# (sinon l'aperçu du site saute) ; on remplace juste la phrase, sinon rien.
+from triskell_core.prospect.quality_reviewer import apply_retouche_to_html  # noqa: E402
+_h = '<p>Bonjour, je vous écris au sujet de votre site.</p><img alt="Aperçu" src="x">'
+_o, _ap = apply_retouche_to_html(
+    "Bonjour, je vous écris au sujet de votre site.",
+    "Bonjour, je vous contacte au sujet de votre site.", _h)
+check("retouche HTML : phrase remplacée sur place", _ap and "je vous contacte" in _o)
+check("retouche HTML : l'aperçu du site est PRÉSERVÉ", 'alt="Aperçu"' in _o)
+check("retouche HTML : morceau introuvable → on ne touche à rien",
+      apply_retouche_to_html("Phrase ABC introuvable.", "Phrase XYZ.",
+                             '<p>Rien.</p><img alt="Aperçu">')[1] is False)
+
 # --- Bascule automatique entre IA + panne « engine_down » (15/06/2026) ---
 # L'IA qui relit les mails ne doit plus tout bloquer en silence quand elle
 # tombe à sec : elle bascule sur une autre IA enregistrée, et si AUCUNE n'est

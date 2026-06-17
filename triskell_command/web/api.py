@@ -1205,7 +1205,8 @@ class Api:
         try:
             from triskell_core.prospect.pipeline import (
                 _load_ai_keys, PipelineConfig)
-            from triskell_core.prospect.quality_reviewer import review_email
+            from triskell_core.prospect.quality_reviewer import (
+                review_email, apply_retouche_to_html)
         except Exception as exc:
             return {"ok": False, "error": f"Moteur de relecture indisponible : {exc}"}
         try:
@@ -1290,10 +1291,15 @@ class Api:
                     final_score = score_after
                     final_verdict = str(rev2.get("verdict") or final_verdict)
                     final_comment = str(rev2.get("comment") or final_comment)[:300]
-            # Régénère le HTML seulement si le corps a vraiment changé (même
-            # logique que la validation manuelle d'un brouillon).
-            final_body, new_html, _regen = self._resolve_draft_html(
-                body, r.get("body_html") or "", new_body)
+            # On ne RÉGÉNÈRE PLUS le HTML (ça faisait sauter l'aperçu du site).
+            # Si une retouche a été appliquée, on remplace la phrase SUR PLACE
+            # dans le HTML ; introuvable ou pas de retouche -> HTML inchangé.
+            old_html = r.get("body_html") or ""
+            final_body = new_body
+            if applied:
+                new_html, _ = apply_retouche_to_html(body, new_body, old_html)
+            else:
+                new_html = old_html
             upd_full = {
                 "body": final_body, "body_html": new_html,
                 "review_score": final_score, "review_verdict": final_verdict,
@@ -1379,6 +1385,103 @@ class Api:
                          for mt, n in by_type.most_common(20)],
             "total_retouches": sum(by_type.values()),
         }
+
+    def prospect_drafts_restore_apercu(self, payload: dict | None = None) -> dict:
+        """Répare les brouillons dont l'APERÇU du site a sauté (suite à une
+        régénération de HTML) en RE-FABRIQUANT le mail depuis son modèle
+        d'origine (texte + HTML + aperçu propres). Jordan, 17/06/2026.
+        """
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Base indisponible."}
+        try:
+            from triskell_core.prospect.pipeline import _load_ai_keys, PipelineConfig
+            from triskell_command.integrations.convoy_ai import (
+                generate_message_from_templates)
+            from triskell_command.integrations.prospection_templates import (
+                list_prospection_templates)
+            from triskell_command.integrations import catalog_central
+        except Exception as exc:
+            return {"ok": False, "error": f"Moteur indisponible : {exc}"}
+        try:
+            cfg = PipelineConfig.load()
+            provider = (getattr(cfg, "ai_provider", "") or "anthropic").strip()
+            model = (getattr(cfg, "ai_model", "") or "").strip()
+            sender_name = getattr(cfg, "sender_mon_prenom", "") or ""
+        except Exception:
+            provider, model, sender_name = "anthropic", "", ""
+        api_keys = _load_ai_keys() or {}
+        # Modèles de prospection des produits actifs, indexés par clé.
+        templates_by_key: dict = {}
+        try:
+            full = catalog_central.get_full() or {}
+            for prod in (full.get("products") or []):
+                if not (prod.get("is_active") and prod.get("id")):
+                    continue
+                pid = str(prod.get("id"))
+                for aud in ("creator", "pro", ""):
+                    for t in (list_prospection_templates(pid, aud) or []):
+                        k = t.get("key")
+                        if k and k not in templates_by_key:
+                            t = dict(t)
+                            t["product_label"] = prod.get("label") or pid
+                            templates_by_key[k] = t
+        except Exception as exc:
+            return {"ok": False, "error": f"Lecture des modèles KO : {exc}"}
+        sb = client.raw
+        cols = ("id, subject, body, body_html, template_key, "
+                "prospects:prospect_id(name, legal_name, emails, city, "
+                "industry, description)")
+        try:
+            res = (sb.table("prospect_drafts").select(cols)
+                     .eq("status", "pending").limit(200).execute())
+            rows = res.data or []
+        except Exception as exc:
+            return {"ok": False, "error": f"Lecture brouillons KO : {exc}"}
+        import re as _re
+        restored, skipped, no_template = [], 0, 0
+        for r in rows:
+            if _re.search(r'alt="Aper', r.get("body_html") or "", _re.I):
+                continue  # aperçu déjà présent -> rien à faire
+            tpl = templates_by_key.get((r.get("template_key") or "").strip())
+            if not tpl:
+                no_template += 1
+                continue
+            pr = r.get("prospects") or {}
+            emails = pr.get("emails") or []
+            pdict = {
+                "raison_sociale": pr.get("name") or pr.get("legal_name") or "",
+                "prenom": "", "nom": "",
+                "email": emails[0] if emails else "",
+                "ville": pr.get("city") or "", "code_postal": "",
+                "secteur": pr.get("industry") or "",
+                "notes": (pr.get("description") or "")[:300],
+            }
+            try:
+                gen = generate_message_from_templates(
+                    pdict, templates=[tpl],
+                    template_product=tpl.get("product_label") or "",
+                    sender_name=sender_name, user_brief="",
+                    provider=provider, model=model, api_keys=api_keys)
+            except Exception:
+                skipped += 1
+                continue
+            new_html = gen.get("body_html") or ""
+            new_body = gen.get("body") or ""
+            # On n'écrase QUE si la re-fabrication a bien remis un aperçu.
+            if not new_html or not _re.search(r'alt="Aper', new_html, _re.I):
+                skipped += 1
+                continue
+            try:
+                sb.table("prospect_drafts").update({
+                    "subject": (gen.get("subject") or r.get("subject") or "")[:200],
+                    "body": new_body, "body_html": new_html,
+                }).eq("id", r.get("id")).execute()
+                restored.append(pr.get("name") or pr.get("legal_name") or "?")
+            except Exception:
+                skipped += 1
+        return {"ok": True, "count": len(restored), "restored": restored,
+                "skipped": skipped, "sans_modele": no_template}
 
     def draft_approve(self, payload: dict) -> dict:
         p = payload or {}
