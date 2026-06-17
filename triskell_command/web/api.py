@@ -6167,6 +6167,123 @@ class Api:
             logger.exception("creators_delete failed")
             return {"ok": False, "error": str(exc)}
 
+    def creators_make_draft(self, payload: dict | None = None) -> dict:
+        """Dépose un brouillon d'e-mail prêt à envoyer dans la boîte d'envoi
+        (dossier Brouillons, via IMAP). Un seul créateur si `id` est fourni ;
+        sinon tous les non contactés dont le contact est une adresse e-mail.
+
+        Le brouillon reprend le message déjà rédigé dans la fiche : Jordan
+        n'a plus qu'à le relire et l'envoyer depuis sa messagerie. RIEN n'est
+        envoyé ici, on ne fait que déposer le brouillon.
+
+        payload = {id?: str, account_id?: str (défaut 'primary')}
+        """
+        try:
+            from ..integrations import creators_book as book
+            from ..integrations import shared_secrets
+            import imaplib, ssl, time as _time
+            from email.message import EmailMessage
+            from email.utils import formatdate, make_msgid
+
+            p = payload or {}
+            account_id = (p.get("account_id") or "primary").strip() or "primary"
+            acc = shared_secrets.get_account_by_id(
+                account_id, client=self._supabase(), app_state=self._app_state)
+            if not acc:
+                return {"ok": False, "error": f"Boite d'envoi '{account_id}' introuvable."}
+            imap_host = acc.get("imap_host", "")
+            imap_port = int(acc.get("imap_port") or 993)
+            imap_user = acc.get("imap_user", "")
+            imap_pwd = acc.get("imap_password", "")
+            from_email = acc.get("from_email", "")
+            from_name = acc.get("from_name", "") or from_email
+            if not (imap_host and imap_user and imap_pwd and from_email):
+                return {"ok": False, "error": f"Acces IMAP non configure pour '{account_id}'."}
+
+            def _is_email(s: str) -> bool:
+                s = (s or "").strip()
+                return ("@" in s and " " not in s and not s.startswith("http")
+                        and "." in s.rsplit("@", 1)[-1])
+
+            cid = (p.get("id") or "").strip()
+            if cid:
+                one = book.get_one(cid)
+                if not one.get("ok"):
+                    return {"ok": False, "error": one.get("error", "Createur introuvable.")}
+                rows = [one["row"]]
+            else:
+                rows = book.list_all().get("rows") or []
+
+            targets = []
+            for r in rows:
+                if not _is_email(r.get("handle") or ""):
+                    continue
+                if not (r.get("message") or "").strip():
+                    continue
+                if not cid and r.get("contacted_at"):
+                    continue
+                targets.append(r)
+            if not targets:
+                return {"ok": False,
+                        "error": "Aucun createur avec une adresse e-mail et un message a preparer."}
+
+            ctx = ssl.create_default_context()
+            M = imaplib.IMAP4_SSL(imap_host, imap_port, ssl_context=ctx)
+            done = []
+            try:
+                M.login(imap_user, imap_pwd)
+                folder = self._imap_find_drafts_folder(M)
+                for r in targets:
+                    to_addr = (r.get("handle") or "").strip()
+                    body = (r.get("message") or "").strip()
+                    vouvoie = "tutoiement" not in (r.get("notes") or "").lower()
+                    poss = "votre" if vouvoie else "ta"
+                    subject = f"Un assistant a {poss} marque, pour {poss} communaute"
+                    msg = EmailMessage()
+                    msg["From"] = f"{from_name} <{from_email}>" if from_name else from_email
+                    msg["To"] = to_addr
+                    msg["Subject"] = subject
+                    msg["Date"] = formatdate(localtime=True)
+                    msg["Message-ID"] = make_msgid(domain=from_email.split("@", 1)[1])
+                    msg["Reply-To"] = from_email
+                    msg.set_content(body)
+                    M.append(folder, "(\\Draft)",
+                             imaplib.Time2Internaldate(_time.time()), msg.as_bytes())
+                    done.append({"id": r.get("id"), "name": (r.get("name") or "").strip(),
+                                 "to": to_addr})
+            finally:
+                try:
+                    M.logout()
+                except Exception:
+                    pass
+            return {"ok": True, "count": len(done), "folder": folder,
+                    "account": from_email, "drafts": done}
+        except Exception as exc:
+            logger.exception("creators_make_draft failed")
+            return {"ok": False, "error": str(exc)}
+
+    @staticmethod
+    def _imap_find_drafts_folder(M) -> str:
+        """Repere le dossier Brouillons d'une connexion IMAP (attribut special
+        \\Drafts, sinon noms usuels). 'Drafts' par defaut."""
+        try:
+            typ, data = M.list()
+            if typ == "OK" and data:
+                names = []
+                for raw in data:
+                    line = (raw.decode(errors="ignore")
+                            if isinstance(raw, (bytes, bytearray)) else str(raw))
+                    nm = line.split(' "')[-1].strip().strip('"') if '"' in line else line.split()[-1]
+                    names.append(nm)
+                    if "\\Drafts" in line:
+                        return nm
+                for cand in ("Drafts", "INBOX.Drafts", "Brouillons", "INBOX.Brouillons"):
+                    if cand in names:
+                        return cand
+        except Exception:
+            pass
+        return "Drafts"
+
     # ------------------------------------------------------------------
     # Activité agrégée des 4 pipelines sites (Lagriffe / RankUs / WoW /
     # Pixel Pros) — utilisée par la sidebar (badge "il a bougé X trucs

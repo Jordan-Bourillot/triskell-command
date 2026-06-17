@@ -156,6 +156,13 @@ const Creators = {
     host.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => {
       const c = this.state.rows.find(x => x.id === b.getAttribute('data-copy')); if (c) this.copyMsg(c.message, b);
     }));
+    host.querySelectorAll('[data-draft]').forEach(b => b.addEventListener('click', async () => {
+      const id = b.getAttribute('data-draft');
+      const old = b.textContent; b.disabled = true; b.textContent = '⏳ Préparation…';
+      const res = await this._api('make_draft', { id });
+      if (res && res.ok) { b.textContent = '✓ Brouillon prêt'; }
+      else { b.textContent = old; b.disabled = false; alert((res && res.error) || 'Échec de la préparation.'); }
+    }));
   },
 
   card(c) {
@@ -180,6 +187,8 @@ const Creators = {
       ? `<a href="${this.esc(c.demo_url)}" target="_blank" rel="noopener" style="flex:1;text-align:center;background:#1f2430;color:#fff;text-decoration:none;font-size:13px;font-weight:600;padding:8px;border-radius:9px">▶ Démo</a>` : '';
     const copy = c.message
       ? `<button data-copy="${c.id}" style="flex:1;background:#fce7f0;color:#b81e5b;border:0;font-size:13px;font-weight:600;padding:8px;border-radius:9px;cursor:pointer">📋 Copier le message</button>` : '';
+    const draft = (c.message && this.isEmail(c.handle) && !contacted)
+      ? `<button data-draft="${c.id}" style="flex:1;background:#e7f0fc;color:#1d5bb8;border:0;font-size:13px;font-weight:600;padding:8px;border-radius:9px;cursor:pointer">✉️ Préparer le brouillon</button>` : '';
     return `
       <div style="background:#fff;border:1px solid #ececf0;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 3px 12px rgba(0,0,0,.04)">
         <div style="height:4px;background:${bar}"></div>
@@ -195,6 +204,7 @@ const Creators = {
           ${relance}
           <div style="flex:1"></div>
           <div style="display:flex;gap:8px;margin-top:10px">${demo}${copy}</div>
+          ${draft ? `<div style="display:flex;margin-top:8px">${draft}</div>` : ''}
           <button data-edit="${c.id}" style="background:none;border:1px solid #e2e2e6;color:#555;font-size:12.5px;padding:7px;border-radius:9px;cursor:pointer;margin-top:2px">✎ Éditer / noter le contact</button>
         </div>
       </div>`;
