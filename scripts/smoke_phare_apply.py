@@ -1090,5 +1090,67 @@ with mock.patch.object(orch.repo, "get_config",
     r = orch.auto_apply_safe(max_apply=1)
     check("plafond par passage respecté (max_apply)", len(r["enqueued"]) == 1)
 
+# ===========================================================================
+# Section ajoutée le 17/06/2026 : boutons « Réessayer » / « Publier sur le
+# site » réparés (modif déjà préparée qui ne se republiait pas + diff visuel
+# faux positif côté publication manuelle).
+print("\n— boutons « Réessayer » / « Publier sur le site » réparés (17/06) —")
+
+ru = []
+with mock.patch.object(executor, "_get_action",
+        return_value={"id": "p1", "apply_state": "failed", "status": "preview",
+                      "github_pr_url": "https://github.com/x/y/pull/3"}), \
+     mock.patch.object(executor, "_update",
+        side_effect=lambda aid, patch: (ru.append(patch), True)[1]), \
+     mock.patch.object(executor, "request_apply",
+        side_effect=lambda aid, **k: {"ok": True, "mode": "server"}):
+    r = executor.retry_apply("p1")
+    check("Réessayer (PR déjà préparée) → ne vide pas l'état, relance bien",
+          r.get("ok") and all("apply_state" not in p for p in ru))
+
+ru2 = []
+with mock.patch.object(executor, "_get_action",
+        return_value={"id": "n1", "apply_state": "failed", "status": "draft",
+                      "github_pr_url": ""}), \
+     mock.patch.object(executor, "_update",
+        side_effect=lambda aid, patch: (ru2.append(patch), True)[1]), \
+     mock.patch.object(executor, "request_apply",
+        side_effect=lambda aid, **k: {"ok": True}):
+    executor.retry_apply("n1")
+    check("Réessayer (sans PR) → remise à zéro complète",
+          any(p.get("apply_state") == "" for p in ru2))
+
+ma_db = {"rows": [{"id": "mp1", "site_id": "s1", "branch": "b",
+                   "github_pr_url": "https://github.com/x/y/pull/9",
+                   "title": "Enrichir le titre de /realisations",
+                   "detail_md": "Mettre à jour le titre Google."}], "inserts": []}
+ma_site = {"id": "s1", "repo_github": "x/y", "netlify_site_id": "nl"}
+
+merged_n = []
+with mock.patch.object(orch.repo, "_sb", return_value=FakeSB(ma_db)), \
+     mock.patch.object(orch.repo, "get_site", return_value=ma_site), \
+     mock.patch.object(orch.repo, "update_action", side_effect=lambda aid, p: True), \
+     mock.patch.object(orch.git_pipeline, "verify_pr",
+        return_value={"ok": False, "decision": "hold",
+                      "checks": {"blockers": ["diff visuel 8.9% > seuil 5.0%"]}}), \
+     mock.patch.object(orch.git_pipeline, "merge_pr",
+        side_effect=lambda repo, n, **k: (merged_n.append(n), True)[1]):
+    r = orch.merge_action("mp1", force=False)
+    check("« Publier sur le site » titre + faux diff visuel → publié",
+          r.get("ok") and 9 in merged_n)
+
+merged_n2 = []
+with mock.patch.object(orch.repo, "_sb", return_value=FakeSB(ma_db)), \
+     mock.patch.object(orch.repo, "get_site", return_value=ma_site), \
+     mock.patch.object(orch.repo, "update_action", side_effect=lambda aid, p: True), \
+     mock.patch.object(orch.git_pipeline, "verify_pr",
+        return_value={"ok": False, "decision": "hold",
+                      "checks": {"blockers": ["perf preview 30 < plancher 55"]}}), \
+     mock.patch.object(orch.git_pipeline, "merge_pr",
+        side_effect=lambda repo, n, **k: (merged_n2.append(n), True)[1]):
+    r = orch.merge_action("mp1", force=False)
+    check("« Publier sur le site » + vitesse en chute → bloqué (pas publié)",
+          not r.get("ok") and not merged_n2)
+
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)

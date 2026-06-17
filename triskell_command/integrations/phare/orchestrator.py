@@ -617,8 +617,18 @@ def merge_action(action_id: str, *, force: bool = False,
     if not force:
         v = git_pipeline.verify_pr(site=site, pr_number=pr_number,
                                     branch=action.get("branch", ""))
-        if v["decision"] != "merge":
-            return {"ok": False, "checks": v["checks"], "decision": v["decision"]}
+        blockers = [b for b in ((v.get("checks") or {}).get("blockers") or [])
+                    if "Netlify non configuré" not in b
+                    and "PSI indisponible" not in b]
+        # Modif invisible (titre, méta, données structurées, alt, sitemap) :
+        # le « diff visuel » est un faux positif — même règle que la publication
+        # automatique. Page cassée (4xx) et vitesse restent, elles, bloquantes.
+        from . import executor
+        if executor._is_metadata_only(action):
+            blockers = [b for b in blockers if "diff visuel" not in b]
+        if blockers:
+            return {"ok": False, "checks": v.get("checks") or {},
+                    "decision": "hold"}
     ok = git_pipeline.merge_pr(site["repo_github"], pr_number,
                                 commit_title=action.get("title", ""))
     if ok:

@@ -260,7 +260,15 @@ def retry_apply(action_id: str, *, app_state=None) -> dict:
         return {"ok": False, "error": "Action introuvable."}
     if (action.get("apply_state") or "") not in ("failed", "manual"):
         return {"ok": False, "error": "Cette carte n'est pas en échec."}
-    _update(action_id, {"apply_state": "", "apply_error": ""})
+    # Modif déjà préparée (PR ouverte) : request_apply ne la re-vérifie et
+    # re-publie QUE si l'état est encore "failed" → on ne le remet PAS à ""
+    # (sinon il répond « déjà préparée, utilise Publier » et ne fait rien —
+    # bug constaté le 17/06). On nettoie juste l'erreur. Sans PR : remise à
+    # zéro complète pour tout refabriquer.
+    if (action.get("github_pr_url") or "").strip():
+        _update(action_id, {"apply_error": ""})
+    else:
+        _update(action_id, {"apply_state": "", "apply_error": ""})
     return request_apply(action_id, app_state=app_state)
 
 
