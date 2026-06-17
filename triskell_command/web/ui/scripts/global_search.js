@@ -87,7 +87,7 @@ const GlobalSearch = {
       keywords: 'lagriffe griffe studio demandes sites etapes étapes pipeline chaine chaîne fabrication' },
     { view: 'phare',       label: 'Le Phare (SEO)', kind: 'view', icon: '🗼',
       keywords: 'phare seo referencement référencement audits robots sites google' },
-    { view: 'geo',         label: 'Le GEO · cité par les IA', kind: 'view', icon: '🌍',
+    { view: 'geo',         label: 'Le GEO · IA', kind: 'view', icon: '🌍',
       keywords: 'geo géo ia chatgpt perplexity cite cité visibilite visibilité' },
     // — Atelier —
     { view: 'catalogue',   label: 'Catalogue', kind: 'view', icon: '📚',
