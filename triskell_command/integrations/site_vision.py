@@ -127,7 +127,14 @@ def _in_thread(fn, *args):
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
-    t.join()
+    # ⚠️ Limite DURE : une capture qui se fige (Playwright/chromium bloqué sur
+    # un site) ne doit JAMAIS geler le robot entier. Sans ce délai, le worker
+    # serveur restait coincé pour toujours sur UN site (constaté le 17/06 :
+    # robot figé à 01:36). Au-delà, on abandonne ce site et on continue.
+    t.join(90)
+    if t.is_alive():
+        logger.warning("site_vision : capture bloquée >90s — abandonnée")
+        return None
     if "e" in box:
         logger.warning("site_vision : capture (thread) échouée : %s", box["e"])
         return None
