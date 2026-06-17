@@ -5199,9 +5199,16 @@ class Api:
             # n'a pas ete declenche ailleurs. On utilise client.raw qui
             # garantit l'init du SDK.
             sb = client.raw
+            is_sent = (kind == "sent")
+            # Pour « envoyés » : on récupère une petite marge en plus pour
+            # pouvoir écarter les notifications internes (le Phare s'envoie
+            # « publié tout seul » à lui-même) sans vider la page. Ce ne sont
+            # pas de vrais mails sortants. On n'exclut PAS « tout ce qui a une
+            # source » : les mails de l'autopilote en ont une légitime.
+            fetch_n = min(limit + 40, 150) if is_sent else limit
             q = (sb.table("email_history")
                  .select("id,kind,ts,subject,body,prospect_id,message_id,extra")
-                 .order("ts", desc=True).limit(limit))
+                 .order("ts", desc=True).limit(fetch_n))
             if offset:
                 # Pagination : appliquée après le tri, avant le limit
                 # (offset=0 ou absent → requête identique à avant).
@@ -5217,6 +5224,11 @@ class Api:
                 # PostgREST : filtre sur un champ d'un JSON column
                 q = q.eq("extra->>account_id", account_id)
             mails = q.execute().data or []
+            if is_sent:
+                _internal = {"phare_alert"}  # notifs système, pas des envois
+                mails = [m for m in mails
+                         if ((m.get("extra") or {}).get("source") or "")
+                         not in _internal][:limit]
             return {"ok": True, "mails": mails}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
