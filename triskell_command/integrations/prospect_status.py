@@ -266,6 +266,47 @@ def mark_refused(client, prospect_id: str, reason: str = "") -> None:
         logger.warning("mark_refused KO: %s", exc)
 
 
+def extract_bounce_reason(body: str) -> str:
+    """Devine une raison LISIBLE (français simple) du rebond à partir du
+    corps de l'avis de non-délivrance (DSN). Renvoie "" si rien de
+    reconnaissable — l'appelant met alors un libellé générique. Heuristique
+    volontairement tolérante : un nouveau motif → on enrichit ICI."""
+    b = (body or "").lower()
+    if not b:
+        return ""
+
+    def has(*keys: str) -> bool:
+        return any(k in b for k in keys)
+
+    if has("user unknown", "no such user", "does not exist", "doesn't exist",
+           "recipient address rejected", "unknown recipient", "no mailbox",
+           "mailbox unavailable", "address not found", "recipient not found",
+           "user not found", "550 5.1.1", "utilisateur inconnu",
+           "adresse inconnue", "n'existe pas", "destinataire inconnu"):
+        return "Adresse qui n'existe pas (boîte introuvable)"
+    if has("mailbox full", "over quota", "insufficient storage", "552 5.2.2",
+           "boîte pleine", "quota exceeded", "mailbox is full"):
+        return "Boîte pleine (saturée)"
+    if has("domain not found", "no such domain", "host not found", "nxdomain",
+           "5.4.4", "domain does not exist", "domaine introuvable", "no mx"):
+        return "Domaine introuvable (le serveur mail n'existe plus)"
+    if has("blocked", "blacklist", "spam", "reputation", "policy reasons",
+           "rejected due to", "554 5.7", "5.7.1", "access denied",
+           "bloqué", "refusé", "spamhaus", "barracuda"):
+        return "Bloqué par leur serveur (filtre anti-spam / réputation)"
+    if has("disabled", "inactive", "suspended", "no longer", "account closed",
+           "désactivé", "compte fermé", "compte désactivé"):
+        return "Compte fermé ou désactivé"
+
+    m = re.search(r"diagnostic-code:\s*(.+)", body, re.IGNORECASE)
+    if m:
+        return "Erreur du serveur : " + m.group(1).strip()[:160]
+    m = re.search(r"\b5\d\d[ \-]\d\.\d\.\d.*", body)
+    if m:
+        return "Erreur du serveur : " + m.group(0).strip()[:160]
+    return ""
+
+
 def mark_bounced(client, prospect_id: str, bounced_address: str = "",
                   reason: str = "", account_id: str = "") -> None:
     """Passe en 'bounced' : adresse morte, on ne tape plus dedans.
@@ -277,21 +318,39 @@ def mark_bounced(client, prospect_id: str, bounced_address: str = "",
     if not prospect_id:
         return
     try:
-        client.raw.table("prospects").update({
+        patch = {
             "status": "bounced",
             "last_contact_at": datetime.now().isoformat(timespec="seconds"),
             "updated_by": client.user_id,
-        }).eq("id", prospect_id).execute()
+        }
+        # Garde la raison LISIBLE sur la fiche (visible direct dans la liste
+        # « Adresses mortes »), sans jamais écraser la note existante ni la
+        # dupliquer si la fiche a déjà rebondi.
+        if reason:
+            try:
+                cur = (client.raw.table("prospects").select("notes")
+                       .eq("id", prospect_id).limit(1).execute().data or [{}])[0]
+                old = (cur.get("notes") or "").strip()
+                if "Adresse morte" not in old:
+                    tag = f"📭 Adresse morte : {reason}"
+                    patch["notes"] = ((old + "\n" if old else "") + tag)[:2000]
+            except Exception:
+                pass
+        client.raw.table("prospects").update(patch).eq(
+            "id", prospect_id).execute()
         _audit("bounced", client, prospect_id,
                (reason or "") + (f" addr={bounced_address}" if bounced_address else ""),
-               extra_fields={"account_id": account_id})
+               extra_fields={"account_id": account_id},
+               body=reason or "")
     except Exception as exc:
         logger.warning("mark_bounced KO: %s", exc)
 
 
 def _audit(kind: str, client, prospect_id: str, reason: str,
-           extra_fields: dict | None = None) -> None:
-    """Trace l'evenement dans email_history (best-effort)."""
+           extra_fields: dict | None = None, body: str = "") -> None:
+    """Trace l'evenement dans email_history (best-effort). `body` =
+    texte lisible affiché dans la timeline de la fiche (ex. la raison
+    d'un rebond)."""
     try:
         extra = {"reason": (reason or "")[:500], "auto": True}
         if extra_fields:
@@ -301,7 +360,7 @@ def _audit(kind: str, client, prospect_id: str, reason: str,
             "kind": f"status_{kind}",
             "ts": datetime.now().isoformat(timespec="seconds"),
             "subject": f"[auto] prospect marque {kind}",
-            "body": "",
+            "body": (body or "")[:1000],
             "extra": extra,
             "created_by": client.user_id,
         })).execute()

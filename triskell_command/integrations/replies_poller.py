@@ -445,10 +445,14 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict) -> di
                         if target_pid:
                             # account_id = la boîte d'ENVOI (le DSN revient
                             # chez l'expéditeur) → la rampe de montée auto
-                            # sait quelle boîte freiner.
+                            # sait quelle boîte freiner. On extrait AUSSI la
+                            # raison lisible (adresse inexistante, boîte
+                            # pleine, bloqué…) pour la garder sur la fiche.
+                            reason_human = PS.extract_bounce_reason(body)
                             PS.mark_bounced(client, target_pid,
                                             bounced_address=bounced_addr,
-                                            reason=f"DSN from {from_addr}",
+                                            reason=(reason_human
+                                                    or f"Rebond (avis de {from_addr})"),
                                             account_id=account_id)
                             counters["matched"] += 1
                             counters["written"] += 1
