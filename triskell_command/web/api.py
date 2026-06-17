@@ -3270,9 +3270,15 @@ class Api:
                 for a in to_review:
                     a["simple_what"] = plain_language.explain(a)
                     a["apply"] = plain_language.classify_for_apply(a, site)
+                    # Vieux jargon stocké (« le robot a regardé : … ») →
+                    # nettoyé À L'AFFICHAGE, sans toucher la base.
+                    if plain_language.has_jargon(a.get("apply_error") or ""):
+                        a["apply_error"] = plain_language.CLEAN_MANUAL_FALLBACK
                 for a in done:
                     if a.get("simple_md"):
                         a["simple_what"] = a["simple_md"]
+                    if plain_language.has_jargon(a.get("apply_error") or ""):
+                        a["apply_error"] = plain_language.CLEAN_MANUAL_FALLBACK
                 # Écran épuré (17/06) : on sort de la pile « à toi de jouer »
                 # les conseils que le robot ne peut PAS faire (à lire / à faire
                 # toi-même) → volet « Conseils ». Ne restent dans la pile que
@@ -3595,7 +3601,9 @@ class Api:
                     "id": a.get("id"),
                     "status": a.get("status"),
                     "apply_state": a.get("apply_state") or "",
-                    "apply_error": a.get("apply_error") or "",
+                    "apply_error": (plain_language.CLEAN_MANUAL_FALLBACK
+                                    if plain_language.has_jargon(a.get("apply_error") or "")
+                                    else (a.get("apply_error") or "")),
                     "github_pr_url": a.get("github_pr_url") or "",
                     "simple_what": plain_language.explain(a)}
         except Exception as exc:
