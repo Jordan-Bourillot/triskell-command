@@ -539,7 +539,9 @@ const Drafts = {
     // Jordan voit AVANT d'approuver depuis quelle boîte le mail partira.
     if (r.sender_address) meta.push('départ : ' + this._esc(r.sender_address));
     let badge = '';
-    if (r.source === 'convoy') {
+    if (r.source === 'creator') {
+      badge = `<span class="text-xs px-2 py-0.5 rounded-full bg-accent/15 text-accent">🎬 Créateur</span>`;
+    } else if (r.source === 'convoy') {
       const camp = r.campaign_name || r.offer_name || 'Convoi';
       badge = `<span class="text-xs px-2 py-0.5 rounded-full bg-accent/15 text-accent">${this._esc(camp)}</span>`;
     } else if (r.kind && r.kind !== 'first_contact') {

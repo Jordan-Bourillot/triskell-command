@@ -1130,6 +1130,13 @@ class Api:
         except Exception as exc:
             logger.debug("get_drafts: merge local KO: %s", exc)
 
+        # ---- creator_drafts (carnet créateurs → source "creator") --------
+        # Purement additif : n'impacte en rien prospect/convoy/local au-dessus.
+        try:
+            rows.extend(self._creator_draft_rows(client))
+        except Exception as exc:
+            logger.warning("get_drafts: creator_drafts KO: %s", exc)
+
         return {"ok": True, "rows": rows, "truncated": truncated,
                 "limit_per_source": self._DRAFTS_LIMIT_PER_SOURCE}
 
@@ -1496,6 +1503,8 @@ class Api:
         # Fallback ancien front (pas de source) → on tente Supabase, sinon
         # CRM local. Le "key" envoyé est soit un uuid (nouveau), soit un
         # match_key (ancien).
+        if source == "creator":
+            return self._approve_creator_draft(draft_id, body)
         if source == "prospect" or (not source and self._looks_like_uuid(draft_id)):
             return self._approve_prospect_draft(draft_id, body)
         if source == "convoy":
@@ -1508,6 +1517,8 @@ class Api:
         source = (p.get("source") or "").strip()
         draft_id = (p.get("id") or p.get("key") or "").strip()
 
+        if source == "creator":
+            return self._reject_creator_draft(draft_id)
         if source == "prospect" or (not source and self._looks_like_uuid(draft_id)):
             return self._reject_supabase_draft("prospect_drafts", draft_id)
         if source == "convoy":
@@ -1848,6 +1859,145 @@ class Api:
             return {"ok": True, "queued": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    # ----- créateurs : source "creator" dans Brouillons à valider -------
+    @staticmethod
+    def _creator_email(row: dict) -> str:
+        """Email d'un créateur : le handle si c'en est un, sinon le 1er email
+        trouvé dans les notes (Récifal, Bougies… ont l'adresse rangée là)."""
+        import re
+        h = (row.get("handle") or "").strip()
+        if ("@" in h and " " not in h and not h.startswith("http")
+                and "." in h.rsplit("@", 1)[-1]):
+            return h
+        m = re.search(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}",
+                      row.get("notes") or "")
+        return m.group(0) if m else ""
+
+    def _creator_draft_rows(self, client) -> list:
+        """Brouillons créateurs en attente, au format de l'écran Brouillons."""
+        from ..integrations import creator_drafts as CD
+        from ..integrations import creators_book as book
+        sb = client.raw
+        out: list = []
+        pend = CD.list_all(sb, status="pending")
+        if not pend:
+            return out
+        try:
+            rows = book.list_all(limit=500).get("rows") or []
+        except Exception:
+            rows = []
+        by_id = {r.get("id"): r for r in rows}
+        for d in pend:
+            cr = by_id.get(d.get("creator_id"))
+            if not cr:
+                continue
+            email = self._creator_email(cr)
+            body = (cr.get("message") or "").strip()
+            if not email or not body:
+                continue
+            out.append({
+                "source": "creator",
+                "id": d.get("id") or "",
+                "key": d.get("id") or "",
+                "prospect_id": "",
+                "name": cr.get("name") or "(sans nom)",
+                "email": email,
+                "city": "",
+                "subject": d.get("subject") or "",
+                "body": body,
+                "body_html": "",
+                "sender_address": d.get("sender_address") or "",
+                "ts": (d.get("created_at") or "")[:19],
+                "provider": "", "model": "", "kind": "creator",
+                "prospect_sources": ["créateur"],
+                "platform_url": cr.get("handle") or "",
+                "audience": "créateur",
+                "email_meta": None,
+            })
+        return out
+
+    def _approve_creator_draft(self, draft_id: str, body) -> dict:
+        """Valide + envoie un brouillon créateur (SMTP direct, sans les
+        gardiens prospection : ni notion de client, ni désinscrit). Mail
+        individuel de prise de contact, pas une campagne de masse."""
+        if not draft_id:
+            return {"ok": False, "error": "id manquant"}
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Supabase non connecté"}
+        from ..integrations import creator_drafts as CD
+        from ..integrations import creators_book as book
+        from ..integrations import shared_secrets
+        from ..integrations import prospect_status as PS
+        from triskell_core.prospect.outreach.smtp_sender import send_email
+        sb = client.raw
+
+        d = CD.get(sb, draft_id)
+        if not d:
+            return {"ok": False, "error": "brouillon introuvable"}
+        cr_res = book.get_one(d.get("creator_id") or "")
+        if not cr_res.get("ok"):
+            return {"ok": False, "error": "créateur introuvable"}
+        cr = cr_res["row"]
+        to = self._creator_email(cr)
+        if not to:
+            return {"ok": False, "error": "pas d'email sur ce créateur"}
+        subject = d.get("subject") or ""
+        final_body = body if body is not None else (cr.get("message") or "")
+        final_body = (final_body or "").strip()
+
+        _safe = PS.mail_is_safe_to_send(subject, final_body)
+        if not _safe.get("ok"):
+            return {"ok": False, "blocked": "unrendered",
+                    "error": ("variable non remplie ("
+                              + ", ".join(_safe.get("unrendered") or [])
+                              + ") — rien envoyé")}
+
+        _wanted = (d.get("sender_address") or "").strip()
+        if _wanted:
+            _acc = shared_secrets.get_account_by_address(
+                _wanted, client=client, app_state=self._app_state)
+            _req = ("smtp_host", "smtp_user", "smtp_password", "from_email")
+            if not _acc or any(not _acc.get(k) for k in _req):
+                return {"ok": False, "blocked": "sender",
+                        "error": (f"adresse {_wanted} introuvable dans tes "
+                                  f"adresses d'envoi — rien envoyé")}
+            smtp_cfg = {
+                "smtp_host":     _acc.get("smtp_host"),
+                "smtp_port":     int(_acc.get("smtp_port") or 587),
+                "smtp_user":     _acc.get("smtp_user"),
+                "smtp_password": _acc.get("smtp_password"),
+                "from_email":    _acc.get("from_email"),
+                "from_name":     _acc.get("from_name", ""),
+            }
+        else:
+            smtp_cfg = shared_secrets.resolve_smtp_for_send(
+                client=client, app_state=self._app_state)
+        if not smtp_cfg:
+            return {"ok": False,
+                    "error": "config SMTP introuvable — rien envoyé"}
+
+        try:
+            msg_id = send_email(smtp_cfg, to=to, subject=subject,
+                                body=final_body)
+        except Exception as exc:
+            return {"ok": False, "error": f"envoi KO : {exc}"}
+
+        CD.set_status(sb, draft_id, "sent")
+        try:
+            book.save({"id": cr.get("id"), "contacted_at": self._iso_now()})
+        except Exception as exc:
+            logger.debug("approve creator draft: contacted_at KO: %s", exc)
+        return {"ok": True, "message_id": msg_id}
+
+    def _reject_creator_draft(self, draft_id: str) -> dict:
+        client = self._supabase_client_or_none()
+        if client is None:
+            return {"ok": False, "error": "Supabase non connecté"}
+        from ..integrations import creator_drafts as CD
+        CD.set_status(client.raw, draft_id, "rejected")
+        return {"ok": True}
 
     # ----- ménage : supprime les coquilles pending sans contenu ---------
     def cleanup_empty_drafts(self, payload: dict | None = None) -> dict:
@@ -6295,6 +6445,51 @@ class Api:
             return book.delete(((payload or {}).get("id") or "").strip())
         except Exception as exc:
             logger.exception("creators_delete failed")
+            return {"ok": False, "error": str(exc)}
+
+    def creators_queue_draft(self, payload: dict | None = None) -> dict:
+        """Met un créateur (ou tous les non contactés prêts) dans l'écran
+        « Brouillons à valider » comme source 'creator'. Le mail part ensuite
+        en 1 clic depuis cet écran (envoi SMTP), exactement comme un prospect.
+
+        payload = {id?: str}  (sans id = tous les non contactés avec email+message)
+        """
+        try:
+            from ..integrations import creators_book as book
+            from ..integrations import creator_drafts as CD
+            client = self._supabase_client_or_none()
+            if client is None:
+                return {"ok": False, "error": "Supabase non connecté"}
+            sb = client.raw
+            cid = ((payload or {}).get("id") or "").strip()
+            if cid:
+                one = book.get_one(cid)
+                if not one.get("ok"):
+                    return {"ok": False,
+                            "error": one.get("error", "Créateur introuvable.")}
+                rows = [one["row"]]
+            else:
+                rows = book.list_all(limit=500).get("rows") or []
+
+            queued, skipped = [], []
+            for r in rows:
+                email = self._creator_email(r)
+                msg = (r.get("message") or "").strip()
+                if not email or not msg:
+                    skipped.append(r.get("name") or "?")
+                    continue
+                if not cid and r.get("contacted_at"):
+                    continue  # en masse : on saute les déjà contactés
+                vouvoie = "tutoiement" not in (r.get("notes") or "").lower()
+                poss = "votre" if vouvoie else "ta"
+                subject = f"Un assistant à {poss} marque, pour {poss} communauté"
+                d = CD.queue(sb, r.get("id") or "", subject)
+                if d:
+                    queued.append({"name": r.get("name") or "?", "to": email})
+            return {"ok": True, "count": len(queued),
+                    "queued": queued, "skipped": skipped}
+        except Exception as exc:
+            logger.exception("creators_queue_draft failed")
             return {"ok": False, "error": str(exc)}
 
     def creators_make_draft(self, payload: dict | None = None) -> dict:
