@@ -1160,12 +1160,12 @@ const Phare = {
         <div class="phare-automerge ${on ? 'is-on' : ''}">
           <div class="phare-automerge-text">
             <div class="phare-automerge-title">
-              ${on ? '🟢' : '⚪'} Publication automatique des modifs vérifiées
+              ${on ? '🟢' : '⚪'} Le robot agit seul (corrections sûres)
             </div>
             <p class="phare-automerge-desc">
               ${on
-                ? 'Chaque jour à 15h, les améliorations qui passent toutes les vérifications (vitesse, rendu, aucun lien cassé) sont mises en ligne toutes seules. Tu es prévenu à chaque publication, et la surveillance continue 14 jours après.'
-                : 'Aujourd’hui, chaque amélioration attend ton OK. Active pour que celles qui passent toutes les vérifications (vitesse, rendu, aucun lien cassé) partent toutes seules — tu gardes la matinée pour mettre ton veto, et tu es prévenu à chaque publication.'}
+                ? 'Le robot applique ET publie tout seul les corrections sûres (titres de pages internes, descriptions, images, plan du site, redirections) — jamais ta page d’accueil, jamais le design. Au fil de l’eau, quelques-unes par heure au maximum. Tu es prévenu à chaque fois, et tout reste annulable (surveillance du trafic 14 jours).'
+                : 'Aujourd’hui, chaque correction attend ton OK. Active pour que le robot applique ET publie tout seul les corrections sûres (titres de pages internes, descriptions, images, plan du site, redirections) — jamais ta page d’accueil, jamais le design. Il avance en douceur, te prévient à chaque fois, et tout est annulable.'}
             </p>
           </div>
           <button class="btn ${on ? 'btn-secondary' : 'btn-primary'}" data-act="toggle" ${busy ? 'disabled' : ''}>
@@ -1176,12 +1176,13 @@ const Phare = {
         const next = !on;
         if (next) {
           const sure = await Dialog.confirm(
-            'Les améliorations préparées par les robots seront mises en ligne ' +
-            'toutes seules UNIQUEMENT si toutes les vérifications passent ' +
-            '(vitesse, rendu visuel, aucun lien cassé). Maximum 3 par jour.\n\n' +
-            'Tu seras prévenu à chaque publication, et si le trafic d’un site ' +
-            'décroche dans les 14 jours, tu seras alerté pour retour arrière.',
-            { title: 'Activer la publication automatique ?', okLabel: 'Activer',
+            'Le robot va APPLIQUER et PUBLIER tout seul les corrections sûres ' +
+            '(titres de pages internes, descriptions, images, plan du site, ' +
+            'redirections) — jamais ta page d’accueil, jamais le design.\n\n' +
+            'Il avance en douceur (quelques-unes par heure au maximum), te ' +
+            'prévient à chaque fois, et tout est annulable — si le trafic d’un ' +
+            'site décroche dans les 14 jours, tu es alerté pour revenir en arrière.',
+            { title: 'Laisser le robot agir seul ?', okLabel: 'Activer',
               cancelLabel: 'Annuler', danger: true });
           if (!sure) return;
         }
@@ -1191,8 +1192,8 @@ const Phare = {
           if (r && r.ok) {
             paint(!!r.enabled, false);
             Toast.success(r.enabled
-              ? 'Publication automatique activée (passage chaque jour à 15h)'
-              : 'Publication automatique coupée — tout repasse par ton OK');
+              ? 'C’est parti — le robot agit seul sur les corrections sûres'
+              : 'Robot autonome coupé — tout repasse par ton OK');
           } else {
             paint(on, false);
             Toast.friendlyError(r && r.error, 'Le réglage n’a pas pu être enregistré. Réessaie dans un instant.');
