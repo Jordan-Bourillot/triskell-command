@@ -699,6 +699,13 @@ _AUTO_SAFE_FAMILIES = {"title", "meta", "canonical", "noindex", "h1",
 
 def _is_auto_safe(action: dict) -> bool:
     """Le robot peut-il appliquer cette carte SANS demander à Jordan ?"""
+    from . import dedup
+    # La page d'accueil (la vitrine) reste TOUJOURS la décision de Jordan :
+    # une carte qui ne vise QUE « / » n'est jamais appliquée toute seule.
+    text = f"{action.get('title') or ''}\n{action.get('detail_md') or ''}"
+    paths = dedup.extract_paths(text)
+    if paths == {"/"}:
+        return False
     agent = (action.get("agent") or "").lower()
     if agent in _AUTO_SAFE_AGENTS:
         return True

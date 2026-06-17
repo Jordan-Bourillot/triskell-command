@@ -992,6 +992,13 @@ check("Search Console → PAS auto (besoin d'un humain)",
 check("conseil flou sans famille → PAS auto (jamais à l'aveugle)",
       not orch._is_auto_safe({"agent": "auditeur", "title": "Améliorer le contenu",
                               "detail_md": "Rendre la page plus riche et utile"}))
+check("la PAGE D'ACCUEIL (vitrine) reste toujours la décision de Jordan",
+      not orch._is_auto_safe({"agent": "auditeur",
+                              "title": "Réécrire le title de la home",
+                              "detail_md": "Page: https://pixel-pros.fr/"}))
+check("une page interne (pas l'accueil) reste auto-applicable",
+      orch._is_auto_safe({"agent": "auditeur", "title": "Réécrire le title",
+                          "detail_md": "Page: https://pixel-pros.fr/realisations"}))
 
 DRAFTS = [
     {"id": "t1", "site_id": "s1", "agent": "auditeur", "status": "draft",
