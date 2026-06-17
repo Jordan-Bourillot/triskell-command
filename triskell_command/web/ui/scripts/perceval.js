@@ -404,6 +404,7 @@ const Perceval = {
           view: this.view,
           event: event || '',
           last_said: this._recentSaid.slice(-6),
+          snapshot: this.snap || null,
         }),
       });
       if (!r.ok) return false;

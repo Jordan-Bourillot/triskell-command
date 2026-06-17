@@ -281,13 +281,16 @@ def create_app() -> FastAPI:
         if not isinstance(last_said, list):
             last_said = []
         last_said = [str(x) for x in last_said][-6:]
+        snapshot = payload.get("snapshot")
+        if not isinstance(snapshot, dict):
+            snapshot = None
         from ..integrations import claude_advisor
         from starlette.concurrency import run_in_threadpool
         try:
             res = await run_in_threadpool(
                 claude_advisor.perceval_take,
                 api_instance._app_state,
-                view=view, last_said=last_said, event=event,
+                view=view, last_said=last_said, event=event, snapshot=snapshot,
             )
         except Exception as exc:
             logger.warning("perceval_pulse: %s", exc)
