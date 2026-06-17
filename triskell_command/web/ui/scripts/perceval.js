@@ -50,6 +50,8 @@ const Perceval = {
   _recentSaid: [],              // dernières remarques de l'IA (anti-répétition)
   _lastPulseAt: 0,              // dernier appel au cerveau (IA)
   _pulseInFlight: false,        // un appel au cerveau est en cours
+  _bubbleFresh: false,          // la bulle vient d'apparaître (anim « il parle »)
+  _bubbleDismissed: false,      // l'utilisateur a fermé la bulle (croix)
   mood: 'observe',
   _speaking: false,
   _lastSpoken: '',
@@ -178,6 +180,7 @@ const Perceval = {
   onViewChange(viewId) {
     this.view = viewId;
     this._wake();
+    this._bubbleDismissed = false; // nouvel écran → la bulle peut revenir
     this._clearSpot(); // l'écran change : le doigt pointé n'a plus de cible
     // Il « regarde » ton nouvel écran un court instant.
     this._setMood('reflechit');
@@ -196,22 +199,24 @@ const Perceval = {
    *  Perceval.say('✓ Mission lancée')  (alias : Guide.say). */
   say(msg, ms = 6000, opts = {}) {
     this.eventMsg = msg;
+    this._bubbleDismissed = false; // nouvelle parole → la bulle revient
     // opts.choices = [{label, view}] : des boutons sous le message — utilisé
     // par la main tendue (« tu cherches quelque chose ? ») pour proposer
     // des destinations cliquables au lieu d'une question ouverte.
     this.eventChoices = Array.isArray(opts.choices) ? opts.choices : null;
     this._wake();
+    this._bubbleFresh = true;
     this._setMood('parle');
     this._renderBubble();
+    // La bulle RESTE affichée (une croix permet de la fermer) ; ce timer ne
+    // fait que calmer l'animation « il parle », sans effacer le message.
     if (this.eventTimer) clearTimeout(this.eventTimer);
     this.eventTimer = setTimeout(() => {
-      this.eventMsg = null;
-      this.eventChoices = null;
+      this._bubbleFresh = false;
       this._refreshMood();
-      this._renderBubble();
-    }, ms);
-    // À voix haute : les confirmations et alertes uniquement (jamais les
-    // statuts passifs), ou sur demande explicite (opts.speak).
+    }, Math.max(2500, ms));
+    // À voix haute : les confirmations et alertes (préfixe ✓/⚠), ou sur
+    // demande explicite (opts.speak).
     const spoken = /^[✓⚠]/.test(String(msg || ''));
     if (opts.speak || spoken) this._speak(msg);
   },
@@ -236,7 +241,7 @@ const Perceval = {
   },
   // Peut-il parler de sa propre initiative, là, maintenant ?
   _canSpeakSpontaneous() {
-    if (this.collapsed || this.eventMsg || this._chatOpen()) return false;
+    if (this.collapsed || this._bubbleFresh || this._chatOpen()) return false;
     const gap = this._spontaneousGap();
     if (!isFinite(gap)) return false;
     return (Date.now() - (this._lastSpontaneousAt || 0)) >= gap;
@@ -383,7 +388,7 @@ const Perceval = {
   // Renvoie true (a parlé), 'silent' (l'IA n'a rien à dire) ou false (indispo).
   async _pulse(event, opts = {}) {
     if (this._presence() === 'discret') return false;
-    if (this.collapsed || this.eventMsg || this._chatOpen() || this._pulseInFlight) return false;
+    if (this.collapsed || this._bubbleFresh || this._chatOpen() || this._pulseInFlight) return false;
     if (this._dbDown()) return false;
     const minGap = (opts.minGap != null) ? opts.minGap : this._pulseGap();
     if (!isFinite(minGap)) return false;
@@ -614,7 +619,7 @@ const Perceval = {
   // À la PREMIÈRE visite d'un écran d'action, il se présente : à quoi sert
   // l'écran, et l'invitation à lui parler. Une fois par écran, pour toujours.
   _maybeIntroduceView(viewId) {
-    if (!this.met || this.collapsed || this.eventMsg) return false;
+    if (!this.met || this.collapsed || this._bubbleFresh) return false;
     const vt = this.VIEW_TEXTS[viewId] || {};
     if (!vt.here || !vt.inview) return false; // réservé aux écrans d'action
     let seen = {};
@@ -960,7 +965,7 @@ const Perceval = {
     const s = this.snap;
     const w = (s && s.workers) || {};
     if (this._dbDown() || (w.error || 0) > 0) return 'alerte';
-    if (this._speaking || this.eventMsg) return 'parle';
+    if (this._speaking || this._bubbleFresh) return 'parle';
     const idleMs = Date.now() - this._lastActivity;
     const active = s && (s.missions || []).some(m => m.status === 'hunting' || m.status === 'handing');
     if (!active && idleMs > 5 * 60 * 1000) return 'sommeil';
@@ -1113,18 +1118,29 @@ const Perceval = {
     const body = document.getElementById('pv-body');
     if (body) body.title = `${this.name} — clique pour qu’on discute`;
 
+    // Bulle fermée à la main : on la garde masquée jusqu'à la prochaine
+    // parole (say) ou un changement d'écran.
+    if (this._bubbleDismissed && !this.eventMsg) {
+      bubble.classList.remove('pv-show');
+      bubble.innerHTML = '';
+      return;
+    }
+
     const vt = this.VIEW_TEXTS[this.view] || {};
     const rec = this._recommend();
     const lvl = this.level();
 
     // Contenu parlé : confirmation > base injoignable > conseil sur place
     let mid = '';
+    let closeBtn = '';
     if (this.eventMsg) {
       mid = `<div class="pv-event">${this._esc(this.eventMsg)}</div>`;
       if (Array.isArray(this.eventChoices) && this.eventChoices.length) {
         mid += `<div class="pv-actions">${this.eventChoices.map((c, i) =>
           `<button class="pv-chip" data-go-choice="${i}">${this._esc(c.label)} →</button>`).join('')}</div>`;
       }
+      // La bulle reste affichée : une croix permet de la fermer à la main.
+      closeBtn = `<button class="pv-close" type="button" aria-label="Fermer" title="Fermer">✕</button>`;
     } else if (this._dbDown()) {
       mid = `<div class="pv-status">Connexion à la base impossible — les chiffres reviennent dès qu’elle répond.</div>`;
     } else if (rec && rec.view === this.view && vt.inview) {
@@ -1153,7 +1169,16 @@ const Perceval = {
       return;
     }
     bubble.classList.add('pv-show');
-    bubble.innerHTML = `${mid}${chip}${tip}`;
+    bubble.innerHTML = `${closeBtn}${mid}${chip}${tip}`;
+    const close = bubble.querySelector('.pv-close');
+    if (close) close.onclick = () => {
+      this.eventMsg = null;
+      this.eventChoices = null;
+      this._bubbleFresh = false;
+      this._bubbleDismissed = true;   // masquée jusqu'à la prochaine parole
+      this._refreshMood();
+      this._renderBubble();
+    };
     const go = bubble.querySelector('.pv-chip[data-go]');
     if (go) go.onclick = () => {
       const v = go.dataset.go;
@@ -1411,6 +1436,16 @@ const Perceval = {
         animation: pvRise .25s ease-out;
       }
       #pv-bubble.pv-show { display: block; }
+      #pv-bubble { position: relative; }
+      #pv-bubble .pv-event { padding-right: 20px; }
+      .pv-close {
+        position: absolute; top: 5px; right: 6px;
+        width: 20px; height: 20px; border-radius: 50%;
+        border: 0; cursor: pointer; line-height: 1; padding: 0;
+        background: hsl(var(--border) / .5); color: hsl(var(--text-muted));
+        font-size: 11px; display: flex; align-items: center; justify-content: center;
+      }
+      .pv-close:hover { background: hsl(var(--border)); color: hsl(var(--text)); }
       .pv-event { color: hsl(var(--success)); font-weight: 600;
                   animation: pvFade .3s ease-out; }
       .pv-actions { margin-top: 7px; }
