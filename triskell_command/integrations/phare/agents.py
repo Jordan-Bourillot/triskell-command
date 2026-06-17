@@ -148,6 +148,9 @@ Standards qualité — RIGIDES :
 - health_score honnête (jamais > 95, jamais < 25 si le site existe)
 - critical_issues : 3 minimum, 7 maximum, ordonnés par impact € décroissant
 - quick_wins : exclusivement actionnables aujourd'hui sans dev majeur
+- quick_wins : NE PROPOSE PAS de correction de chaîne de redirection — c'est
+  détecté et corrigé automatiquement ailleurs (tu n'as que le compteur, pas
+  les adresses, donc ta carte serait inutilisable)
 - quick_wins[].simple : 1-2 phrases pour quelqu'un de NON technique —
   zéro jargon (pas de « canonical », « noindex », « title tag » : dire
   « le titre affiché dans Google », « cacher la page des résultats »…)

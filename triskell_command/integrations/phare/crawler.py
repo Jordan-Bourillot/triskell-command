@@ -44,6 +44,25 @@ def _normalize(url: str) -> str:
     return f"{p.scheme}://{p.netloc}{path}{('?' + p.query) if p.query else ''}"
 
 
+def _redirect_is_actionable(src: str, final: str) -> bool:
+    """Une redirection vaut-elle une correction côté code ?
+
+    On ignore les normalisations gérées par l'hébergeur (http→https, www,
+    barre de fin) — ce n'est PAS un défaut à corriger dans le site. On ne
+    garde que les vrais changements de chemin (ex: /ancienne → /nouvelle),
+    qui viennent souvent d'un lien interne pointant vers une vieille adresse."""
+    try:
+        a, b = urlparse(src), urlparse(final)
+    except ValueError:
+        return False
+
+    def _norm(u) -> tuple[str, str]:
+        return (u.netloc.replace("www.", "").lower(),
+                (u.path or "/").rstrip("/").lower())
+
+    return _norm(a) != _norm(b)
+
+
 def _same_host(url: str, host: str) -> bool:
     try:
         return urlparse(url).netloc.lower() == host.lower()
@@ -156,6 +175,7 @@ def crawl_site(domain: str,
     pages: list[dict] = []
     broken: list[dict] = []
     redirects_count = 0
+    redirect_chains: list[dict] = []
     started = time.time()
     started_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started))
 
@@ -174,6 +194,15 @@ def crawl_site(domain: str,
             continue
         if r.history:
             redirects_count += len(r.history)
+            src = r.history[0].url
+            final = r.url
+            if (_redirect_is_actionable(src, final)
+                    and not any(c["source"] == src for c in redirect_chains)):
+                redirect_chains.append({
+                    "source": src, "final": final,
+                    "status": r.history[0].status_code,
+                    "hops": len(r.history),
+                })
         if r.status_code >= 400:
             broken.append({"from": url, "to": url, "status": r.status_code})
             continue
@@ -218,6 +247,7 @@ def crawl_site(domain: str,
         "pages": pages,
         "broken_links": broken,
         "redirects": redirects_count,
+        "redirect_chains": redirect_chains[:20],
         "fetched": fetched,
         "skipped": skipped,
         "discovered_total": len(seen),

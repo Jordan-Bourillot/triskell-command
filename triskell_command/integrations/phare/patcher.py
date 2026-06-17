@@ -24,6 +24,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Iterable, Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -378,6 +379,31 @@ def _add_alt_attr(tag: str, alt: str) -> str:
                   flags=re.IGNORECASE)
 
 
+def _rewrite_links_in(content: str, source: str, final: str) -> str:
+    """Rend directs les liens internes qui pointent vers `source` (une adresse
+    qui en renvoie vers `final`). On ne touche QUE des valeurs exactes
+    d'attribut href=/src= (jamais un bout de texte), donc c'est sûr."""
+    su, fu = urlparse(source), urlparse(final)
+    same_host = (su.netloc.replace("www.", "").lower()
+                 == fu.netloc.replace("www.", "").lower())
+    # Cible : chemin relatif si même domaine, sinon l'URL finale complète.
+    target = (fu.path or "/") if same_host else final
+    src_path = su.path or "/"
+    needles = {source}
+    if len(src_path) > 1:                       # jamais "/" tout seul (trop large)
+        needles.add(src_path)
+        needles.add(src_path + "/")
+    out = content
+    for needle in needles:
+        if needle == target:
+            continue
+        for attr in ("href", "src"):
+            for q in ('"', "'"):
+                out = out.replace(f"{attr}={q}{needle}{q}",
+                                  f"{attr}={q}{target}{q}")
+    return out
+
+
 def resolve_sitemap_target(workdir: str) -> tuple[str, Optional[str]]:
     """Où vit (ou doit vivre) le sitemap.xml d'un site cloné ?
 
@@ -493,6 +519,37 @@ def localize_executor_patches(workdir: str, stack: str,
                 "old": tag, "new": _add_alt_attr(tag, new),
                 "field": "alt", "rationale": p.get("rationale") or "",
             })
+            continue
+
+        if field == "link_redirect":
+            # Lien interne qui passe par une étape inutile : on le rend direct.
+            source = (p.get("source") or "").strip()
+            final = (p.get("final") or "").strip()
+            if not source or not final:
+                needs_review.append({"field": "link_redirect", "old": "",
+                                     "new": final[:120], "candidates": [source],
+                                     "reason": "redirection sans adresse exploitable"})
+                continue
+            touched = False
+            for f in _walk(root, exts):
+                content = _read_text_safe(f)
+                if not content:
+                    continue
+                new_content = _rewrite_links_in(content, source, final)
+                if new_content != content:
+                    applicable.append({
+                        "file": str(f.relative_to(root)),
+                        "old": content, "new": new_content,
+                        "field": "link_redirect",
+                        "rationale": p.get("rationale") or "",
+                    })
+                    touched = True
+            if not touched:
+                needs_review.append({
+                    "field": "link_redirect", "old": "", "new": final[:120],
+                    "candidates": [source],
+                    "reason": ("aucun lien interne vers cette adresse "
+                               "(redirection gérée par l'hébergeur)")})
             continue
 
         if field == "head_insert":

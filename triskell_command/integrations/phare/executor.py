@@ -113,6 +113,20 @@ def _parse_image_seo_alts(detail_md: str) -> list[dict]:
     return patches
 
 
+_REDIRECT_SRC_RE = re.compile(r"Source\s*:\s*(\S+)", re.IGNORECASE)
+_REDIRECT_FINAL_RE = re.compile(r"(?:Destination finale|Finale)\s*:\s*(\S+)",
+                                re.IGNORECASE)
+
+
+def _parse_redirect_chain(detail_md: str) -> Optional[dict]:
+    """Lit « Source : … / Destination finale : … » d'une carte redirection."""
+    s = _REDIRECT_SRC_RE.search(detail_md or "")
+    f = _REDIRECT_FINAL_RE.search(detail_md or "")
+    if s and f:
+        return {"source": s.group(1).strip(), "final": f.group(1).strip()}
+    return None
+
+
 def _sitemap_equivalent(a: str, b: str) -> bool:
     """Deux sitemaps couvrent-ils les mêmes URLs ? (on ignore les <lastmod>,
     qui changent chaque jour — sinon on republierait pour rien)."""
@@ -407,6 +421,17 @@ def _apply_one(action_id: str, *, app_state=None) -> dict:
         out = {"mode": "patches", "patches": patches,
                "simple_md": ("J'ajoute le petit texte qui décrit tes images "
                              "(ce que Google lit à la place de l'image).")}
+    elif agent_name == "redirect_fixer":
+        # Lien interne en double étape : on le rend direct (déterministe).
+        chain = _parse_redirect_chain(action.get("detail_md") or "")
+        if not chain:
+            return _manual(action_id, "Je n'ai pas retrouvé l'adresse à "
+                           "corriger — relance un audit du site.")
+        out = {"mode": "patches",
+               "patches": [{"field": "link_redirect", "source": chain["source"],
+                            "final": chain["final"]}],
+               "simple_md": ("Je fais pointer le lien directement à la bonne "
+                             "adresse — fini l'étape inutile.")}
     else:
         try:
             ag = agents.Executeur()
@@ -441,6 +466,12 @@ def _apply_one(action_id: str, *, app_state=None) -> dict:
                 return _manual(action_id,
                                "Ces images n'ont pas besoin qu'on y touche "
                                f"({reasons or 'rien à corriger'}).")
+            if agent_name == "redirect_fixer":
+                # Aucun lien interne à corriger = redirection côté hébergeur :
+                # ce n'est pas un échec, il n'y a rien à changer dans le site.
+                return _manual(action_id,
+                               "C'est une redirection gérée par ton hébergeur "
+                               "— rien à changer dans le site.")
             return _fail(action_id,
                          "Le robot n'a pas retrouvé l'endroit exact à modifier "
                          f"dans le code ({reasons or 'aucun patch'}). "

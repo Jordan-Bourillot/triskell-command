@@ -21,6 +21,7 @@ import tempfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from . import (
     agents, crawler, dataforseo, git_pipeline, gsc, pagespeed, patcher, repo
@@ -95,6 +96,32 @@ def run_audit(site_id: str, *, app_state=None) -> dict:
             "simple_md": (qw.get("simple") or "").strip(),
             "status": "draft",
             "impact": 3, "effort": 2,
+        })
+
+    # Chaînes de redirection réelles repérées au crawl → cartes déterministes
+    # (vraies adresses, pas un conseil vague) que l'Exécuteur sait corriger en
+    # rendant le lien interne direct. Les normalisations gérées par l'hébergeur
+    # (http→https, www, barre de fin) sont déjà écartées par le crawler.
+    for chain in (crawl.get("redirect_chains") or [])[:5]:
+        src, final = chain.get("source") or "", chain.get("final") or ""
+        if not src or not final:
+            continue
+        label = urlparse(src).path or src
+        repo.insert_action({
+            "site_id": site_id,
+            "agent": "redirect_fixer",
+            "kind": "recommandation",
+            "title": f"Lien qui passe par une étape inutile : {label}",
+            "detail_md": (f"Source : {src}\nDestination finale : {final}\n\n"
+                          f"Un lien interne pointe vers une adresse qui en "
+                          f"renvoie vers une autre ({chain.get('hops', 1)} "
+                          f"étape(s)). On fait pointer le lien directement vers "
+                          f"la bonne adresse."),
+            "simple_md": ("Un lien de ton site passe par une page "
+                          "intermédiaire avant d'arriver à la bonne — on le "
+                          "fait pointer directement au bon endroit, c'est plus "
+                          "rapide et Google préfère."),
+            "status": "draft", "impact": 2, "effort": 1,
         })
 
     return {"ok": True, "audit_id": (audit or {}).get("id"),

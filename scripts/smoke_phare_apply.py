@@ -837,5 +837,75 @@ check("plan du site déjà à jour → marqué fait, aucune erreur sans fin",
       r.get("ok") and final.get("apply_state") == "done"
       and "à jour" in final.get("simple_md", ""))
 
+# ===========================================================================
+# Section ajoutée le 17/06/2026 : redirections en double étape corrigées
+# automatiquement (lien interne rendu direct), faux signaux d'hébergeur écartés.
+print("\n— redirections (lien rendu direct) (17/06) —")
+from triskell_command.integrations.phare import crawler as _crawler
+
+check("redirection http→https (même page) → PAS une corvée",
+      not _crawler._redirect_is_actionable("http://x.fr/page", "https://x.fr/page"))
+check("redirection www → non-www → PAS une corvée",
+      not _crawler._redirect_is_actionable("https://www.x.fr/p", "https://x.fr/p"))
+check("redirection barre de fin → PAS une corvée",
+      not _crawler._redirect_is_actionable("https://x.fr/p/", "https://x.fr/p"))
+check("vrai changement /ancienne → /nouvelle → à corriger",
+      _crawler._redirect_is_actionable("https://x.fr/ancienne", "https://x.fr/nouvelle"))
+
+ch = executor._parse_redirect_chain(
+    "Source : https://x.fr/ancienne\nDestination finale : https://x.fr/nouvelle\nbla")
+check("carte redirection lue (source + destination)",
+      ch and ch["source"] == "https://x.fr/ancienne"
+      and ch["final"] == "https://x.fr/nouvelle")
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    (root / "index.html").write_text(
+        '<html><body><a href="/ancienne">Voir</a> '
+        '<a href="https://x.fr/ancienne">aussi</a></body></html>',
+        encoding="utf-8")
+    (root / "autre.html").write_text(
+        '<html><body><a href="/contact">Contact</a></body></html>',
+        encoding="utf-8")
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "link_redirect", "source": "https://x.fr/ancienne",
+         "final": "https://x.fr/nouvelle"},
+    ], [])
+    fixed = next((p for p in loc["applicable"] if p["file"] == "index.html"), None)
+    check("lien interne rendu direct (chemin ET URL complète)",
+          fixed and 'href="/nouvelle"' in fixed["new"]
+          and "/ancienne" not in fixed["new"])
+    check("la page sans ce lien n'est pas touchée",
+          all(p["file"] != "autre.html" for p in loc["applicable"]))
+
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "link_redirect", "source": "https://x.fr/jamais-liee",
+         "final": "https://x.fr/final"},
+    ], [])
+    check("aucun lien vers l'adresse → revue « géré par l'hébergeur »",
+          not loc["applicable"]
+          and "hébergeur" in loc["needs_review"][0]["reason"])
+
+r = run_apply(None, action_extra={
+    "agent": "redirect_fixer",
+    "detail_md": "Source : https://pixel-pros.fr/ancienne\n"
+                 "Destination finale : https://pixel-pros.fr/nouvelle"})
+final = updates[-1]
+check("redirection → corrigée et publiée (sans l'IA)",
+      r.get("ok") and final.get("status") == "merged"
+      and final.get("apply_state") == "done")
+
+r = run_apply(None, action_extra={
+    "agent": "redirect_fixer",
+    "detail_md": "Source : https://pixel-pros.fr/x\n"
+                 "Destination finale : https://pixel-pros.fr/y"},
+    localized={"applicable": [], "needs_review": [
+        {"reason": "aucun lien interne vers cette adresse "
+                   "(redirection gérée par l'hébergeur)"}]})
+final = updates[-1]
+check("redirection côté hébergeur → manuel propre, jamais d'échec",
+      r.get("ok") and final.get("apply_state") == "manual"
+      and "hébergeur" in final.get("apply_error", ""))
+
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)
