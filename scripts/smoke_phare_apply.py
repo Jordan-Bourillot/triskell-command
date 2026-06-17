@@ -999,10 +999,16 @@ check("la PAGE D'ACCUEIL (vitrine) reste toujours la décision de Jordan",
 check("une page interne (pas l'accueil) reste auto-applicable",
       orch._is_auto_safe({"agent": "auditeur", "title": "Réécrire le title",
                           "detail_md": "Page: https://pixel-pros.fr/realisations"}))
+check("la home en MOTS (sans chemin explicite) est AUSSI protégée",
+      not orch._is_auto_safe({"agent": "auditeur",
+                              "title": "Réécrire le titre de la home et la méta"}))
+check("« accueil » cité mais une AUTRE page visée → reste applicable",
+      orch._is_auto_safe({"agent": "auditeur", "title": "Réécrire le titre de /tarifs",
+                          "detail_md": "Comme sur la page d'accueil. Page: /tarifs"}))
 
 DRAFTS = [
     {"id": "t1", "site_id": "s1", "agent": "auditeur", "status": "draft",
-     "apply_state": "", "title": "Réécrire le title de la home"},
+     "apply_state": "", "title": "Réécrire le title de /contact"},
     {"id": "m1", "site_id": "s1", "agent": "tisseur", "status": "draft",
      "apply_state": "", "title": "Maillage interne", "detail_md": "liens internes"},
     {"id": "t2", "site_id": "s1", "agent": "auditeur", "status": "draft",

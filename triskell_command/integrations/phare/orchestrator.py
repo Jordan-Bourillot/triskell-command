@@ -660,6 +660,13 @@ def auto_merge_verified(*, max_merges: int = 3,
         if not (action.get("github_pr_url") or ""):
             # Recommandation textuelle : décision humaine, pas d'auto-merge.
             continue
+        if _targets_home(action):
+            # L'accueil (la vitrine) ne se publie JAMAIS tout seul.
+            held.append({"action_id": action["id"],
+                         "title": action.get("title", ""),
+                         "site_id": action.get("site_id", ""),
+                         "decision": "accueil protégé"})
+            continue
         # Fenêtre de veto
         try:
             created = datetime.fromisoformat(
@@ -697,14 +704,28 @@ _AUTO_SAFE_FAMILIES = {"title", "meta", "canonical", "noindex", "h1",
                        "schema", "alt", "sitemap"}
 
 
-def _is_auto_safe(action: dict) -> bool:
-    """Le robot peut-il appliquer cette carte SANS demander à Jordan ?"""
+# La page d'accueil (la vitrine) reste TOUJOURS la décision de Jordan : ni
+# l'auto-application ni l'auto-publication n'y touchent. On la repère par le
+# chemin "/" seul, OU par les mots (accueil / home) quand AUCUNE autre page
+# n'est visée. (Vécu le 17/06 : un « Réécrire le titre de la home » sans
+# chemin explicite avait franchi le garde-fou qui ne regardait que "/".)
+_HOME_HINTS = ("accueil", "homepage", "home page", "la home")
+
+
+def _targets_home(action: dict) -> bool:
+    """La carte vise-t-elle la page d'accueil ?"""
     from . import dedup
-    # La page d'accueil (la vitrine) reste TOUJOURS la décision de Jordan :
-    # une carte qui ne vise QUE « / » n'est jamais appliquée toute seule.
     text = f"{action.get('title') or ''}\n{action.get('detail_md') or ''}"
     paths = dedup.extract_paths(text)
     if paths == {"/"}:
+        return True
+    low = text.lower()
+    return any(h in low for h in _HOME_HINTS) and not (paths - {"/"})
+
+
+def _is_auto_safe(action: dict) -> bool:
+    """Le robot peut-il appliquer cette carte SANS demander à Jordan ?"""
+    if _targets_home(action):
         return False
     agent = (action.get("agent") or "").lower()
     if agent in _AUTO_SAFE_AGENTS:
