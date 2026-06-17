@@ -19,6 +19,14 @@ def _esc(s: str) -> str:
     return _html.escape(str(s or ""))
 
 
+def _nowidow(s: str) -> str:
+    """Évite la « veuve » (un mot seul en fin de ligne) en reliant les deux
+    derniers mots par un espace insécable. Pour le HTML uniquement."""
+    s = (s or "").rstrip()
+    i = s.rfind(" ")
+    return s[:i] + "&nbsp;" + s[i + 1:] if i > 0 else s
+
+
 def render(name: str, demo_url: str, accent: str = "#6366F1",
            accent2: str = "#4F46E5", tu: bool = True, angle: str = "") -> str:
     """Retourne le corps HTML du mail pour un créateur."""
@@ -88,6 +96,11 @@ def render(name: str, demo_url: str, accent: str = "#6366F1",
     angle = (angle or "").strip()
     if angle:
         t["d3"] = "💰 &nbsp;" + _esc(angle)
+
+    for _k in ("h1b", "intro", "hero", "detail", "d1", "d2", "d3",
+               "quizcap", "offer"):
+        if t.get(_k):
+            t[_k] = _nowidow(t[_k])
 
     return f"""<!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
