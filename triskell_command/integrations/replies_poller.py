@@ -47,6 +47,12 @@ _POLLER_STOP = threading.Event()
 _POLLER_LOCK = threading.Lock()
 _LAST_RUN_AT: str = ""
 _LAST_RUN_RESULT: dict = {}
+# Poll manuel (bouton « Vérifier maintenant ») : lancé en arrière-plan pour ne
+# JAMAIS faire attendre l'appel HTTP (le tour des comptes prend ~45 s → la
+# connexion du navigateur couperait avant la fin). _POLL_GUARD sérialise les
+# cycles (auto + manuel) : jamais deux scans des mêmes boîtes en parallèle.
+_MANUAL_THREAD: Optional[threading.Thread] = None
+_POLL_GUARD = threading.Lock()
 # Fix 3 — compteur d'erreurs consecutives par compte pour declencher une
 # alerte si le polling echoue plusieurs cycles d'affilee
 _CONSECUTIVE_ERRORS: dict[str, int] = {}
@@ -116,6 +122,33 @@ def poll_now(app_state) -> dict:
     return _do_one_poll(app_state)
 
 
+def poll_now_async(app_state) -> dict:
+    """Lance un cycle de poll en arrière-plan et REND LA MAIN tout de suite.
+
+    Le bouton « Vérifier maintenant » fait le tour de tous les comptes IMAP
+    (~45 s). Attendre la fin côté HTTP garantissait une coupure (timeout
+    navigateur/proxy) → le bouton affichait une erreur alors que le scan se
+    terminait. On démarre donc le tour dans un thread ; l'appelant lit le
+    résultat ensuite via get_status() (last_run_at / last_run_result),
+    exactement comme pour le poll automatique.
+    """
+    global _MANUAL_THREAD
+    if _MANUAL_THREAD is not None and _MANUAL_THREAD.is_alive():
+        return {"ok": True, "started": False, "already_running": True,
+                "since": _LAST_RUN_AT}
+
+    def _run() -> None:
+        try:
+            _do_one_poll(app_state)
+        except Exception as exc:
+            logger.warning("poll manuel: %s", exc)
+
+    t = threading.Thread(target=_run, name="replies-poll-manual", daemon=True)
+    _MANUAL_THREAD = t
+    t.start()
+    return {"ok": True, "started": True, "since": _LAST_RUN_AT}
+
+
 # ---------------------------------------------------------------------------
 # Boucle interne
 # ---------------------------------------------------------------------------
@@ -162,6 +195,20 @@ def _poller_loop(app_state) -> None:
 
 
 def _do_one_poll(app_state) -> dict:
+    """Un cycle de poll, SÉRIALISÉ : si un scan (auto ou manuel) tourne déjà,
+    on rend la main sans rien faire — deux lecteurs en parallèle se
+    disputeraient le curseur last_uid de chaque compte."""
+    if not _POLL_GUARD.acquire(blocking=False):
+        return {"scanned": 0, "matched": 0, "classified": 0, "written": 0,
+                "errors": 0, "skipped": 0, "accounts_scanned": 0,
+                "per_account": {}, "skipped_reason": "poll_already_running"}
+    try:
+        return _do_one_poll_inner(app_state)
+    finally:
+        _POLL_GUARD.release()
+
+
+def _do_one_poll_inner(app_state) -> dict:
     """Un cycle complet : IMAP fetch → classify → write Supabase.
 
     Depuis la phase 2 multi-comptes : itère sur tous les comptes mail

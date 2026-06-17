@@ -509,14 +509,15 @@ const Replies = {
       Toast.error('Fonction indisponible — rafraîchis la page.');
       return;
     }
-    // Bouton désactivé pendant la vérification (anti double-clic), et la
-    // liste revient TOUJOURS à la fin — succès comme échec (avant, un échec
-    // laissait l'écran bloqué sur « Vérification… » pour toujours).
+    // Le tour des boîtes mail prend jusqu'à une minute côté serveur. On le
+    // LANCE et on rend la main tout de suite (avant : on attendait la fin →
+    // la connexion coupait et affichait une erreur alors que le scan se
+    // terminait). La liste reste visible et se met à jour toute seule.
     const btn = document.getElementById('r-poll');
     const originalHtml = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Vérification…'; }
-    const list = document.getElementById('r-list');
-    if (list) list.innerHTML = `<div class="text-center py-12 text-text-muted">Vérification de ta boîte mail…</div>`;
+
+    let baseline = '';
     try {
       const r = await App.api.replies_poll_now();
       if (r && r.error) {
@@ -526,15 +527,55 @@ const Replies = {
         };
         console.warn('replies_poll_now refus :', r.error);
         Toast.error('Vérification impossible : ' + (reasons[r.error] || r.error));
-      } else if (r) {
-        const n = r.written || 0;
-        if (n > 0) Toast.success(`${n} nouvelle(s) réponse(s) trouvée(s).`);
-        else Toast.info('Boîte vérifiée — rien de nouveau.');
+        if (btn) { btn.disabled = false; btn.innerHTML = originalHtml; }
+        await this.refresh();
+        return;
+      }
+      baseline = (r && r.since) || '';
+      if (r && r.already_running) {
+        Toast.info('Vérification déjà en cours — la liste se met à jour dans un instant.');
+      } else {
+        Toast.info('Je regarde dans tes boîtes mail — ça peut prendre jusqu’à une minute. La liste se met à jour toute seule.');
       }
     } catch (e) {
-      Toast.friendlyError(e, 'La vérification de la boîte mail a échoué.');
-    } finally {
+      Toast.friendlyError(e, 'La vérification de la boîte mail n’a pas pu démarrer.');
       if (btn) { btn.disabled = false; btn.innerHTML = originalHtml; }
+      await this.refresh();
+      return;
+    }
+
+    // Attente douce : on guette la santé mail jusqu'à ce qu'un nouveau passage
+    // soit enregistré (last_run_at change), puis on annonce le résultat.
+    await this._awaitPollResult(baseline, btn, originalHtml);
+  },
+
+  async _awaitPollResult(baseline, btn, originalHtml) {
+    const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+    const deadline = Date.now() + 90000; // 90 s : large pour le tour des 11 boîtes
+    let announced = false;
+    try {
+      while (Date.now() < deadline) {
+        // L'utilisateur a quitté l'écran Réponses → on arrête sans rien casser.
+        if (!document.getElementById('r-poll')) return;
+        await sleep(4000);
+        let h = null;
+        try { h = App.api.mail_health ? await App.api.mail_health() : null; }
+        catch (_) { h = null; }
+        if (h && h.last_run_at && h.last_run_at !== baseline) {
+          const n = (h.last_run_result || {}).written || 0;
+          if (n > 0) Toast.success(`${n} nouvelle(s) réponse(s) trouvée(s).`);
+          else Toast.info('Boîte vérifiée — rien de nouveau.');
+          announced = true;
+          break;
+        }
+      }
+      if (!announced) {
+        Toast.info('Vérification lancée — regarde la liste dans un instant.');
+      }
+    } finally {
+      if (btn && document.body.contains(btn)) {
+        btn.disabled = false; btn.innerHTML = originalHtml;
+      }
       await this.refresh();
     }
   },

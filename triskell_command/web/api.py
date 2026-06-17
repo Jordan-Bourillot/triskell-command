@@ -742,7 +742,9 @@ class Api:
     def replies_poll_now(self) -> dict:
         try:
             from ..integrations import replies_poller
-            return replies_poller.poll_now(self._app_state)
+            # Lancement en arrière-plan : on répond tout de suite (« c'est
+            # lancé »), le tour des boîtes (~45 s) ne bloque pas l'appel HTTP.
+            return replies_poller.poll_now_async(self._app_state)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
