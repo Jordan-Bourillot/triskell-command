@@ -901,17 +901,24 @@ const Obelisk = {
     // bouton « Réessayer » au lieu d'un faux « base vide ».
     this.state.statsError = !(res && res.ok);
     if (this.state.statsError && res) console.warn('[prospects] stats en erreur :', res.error);
-    const st = (res && res.ok && res.stats) ? res.stats : { total: 0, with_email: 0, qualified: 0, contacted: 0, won: 0 };
+    const st = (res && res.ok && res.stats) ? res.stats : { total: 0, to_contact: 0, contacted: 0, replied: 0, won: 0 };
     this.state.stats = st;
     if (!wrap) return;
     // Si zéro partout, on cache les stats — l'empty hero portera tout le poids.
     if (!st.total) { wrap.innerHTML = ''; return; }
+    // Le bandeau raconte le PARCOURS, dans l'ordre, avec des chiffres
+    // exacts en base (voir repo.stats()) : tout le monde → pas encore
+    // démarchés → déjà contactés → ceux qui ont répondu → devenus clients.
+    // « À contacter » regroupe new + qualified (fallback si vieux serveur).
+    const toContact = (st.to_contact != null)
+      ? st.to_contact
+      : ((st.new || 0) + (st.qualified || 0));
     wrap.innerHTML = `
       ${this._statInline('Total', st.total)}
-      ${this._statInline('Emails', st.with_email)}
-      ${this._statInline('Qualifiés', st.qualified)}
+      ${this._statInline('À contacter', toContact)}
       ${this._statInline('Contactés', st.contacted)}
-      ${this._statInline('Gagnés', st.won)}
+      ${this._statInline('Réponses', st.replied)}
+      ${this._statInline('Clients', st.won)}
     `;
   },
   _statInline(label, value) {

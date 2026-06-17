@@ -2223,8 +2223,38 @@ class Api:
         if client is None:
             return {"ok": False, "error": "Supabase non connecté"}
         try:
-            client.raw.table(table).update({"status": "rejected"}).eq(
+            sb = client.raw
+            # Pour un brouillon de prospection, on note le prospect lié
+            # AVANT de refuser le brouillon : il faut le LIBÉRER. Sinon il
+            # reste collé sur « qualified » alors que son mail ne partira
+            # jamais → le compteur « À contacter » se vide à tort et la
+            # fiche se bloque (cause des 149 faux « qualifiés »).
+            prospect_id = ""
+            prev_status = ""
+            if table == "prospect_drafts":
+                try:
+                    _r = (sb.table("prospect_drafts")
+                            .select("prospect_id, "
+                                    "prospects:prospect_id(id, status)")
+                            .eq("id", draft_id).limit(1).execute())
+                    _row = (_r.data or [{}])[0]
+                    prospect_id = _row.get("prospect_id") or ""
+                    prev_status = ((_row.get("prospects") or {}).get("status")
+                                   or "")
+                except Exception:
+                    prospect_id = ""
+            sb.table(table).update({"status": "rejected"}).eq(
                 "id", draft_id).execute()
+            # On ne redescend QUE depuis « qualified » : jamais un statut
+            # plus avancé (contacted / replied / won / lost / refused).
+            if prospect_id and prev_status == "qualified":
+                try:
+                    sb.table("prospects").update({"status": "new"}).eq(
+                        "id", prospect_id).execute()
+                except Exception as exc:
+                    logger.warning(
+                        "reject: libération prospect %s KO: %s",
+                        prospect_id, exc)
             return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}

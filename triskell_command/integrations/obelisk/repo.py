@@ -691,17 +691,24 @@ def stats() -> dict:
     if sb is None:
         return {"ok": False, "error": "Supabase non configuré"}
     try:
-        out: dict[str, int] = {"total": 0, "with_email": 0, "qualified": 0,
-                                "contacted": 0, "replied": 0, "won": 0}
+        out: dict[str, int] = {"total": 0, "with_email": 0, "new": 0,
+                                "qualified": 0, "contacted": 0, "replied": 0,
+                                "won": 0}
         # total
         r = sb.table("prospects").select("id", count="exact").limit(1).execute()
         out["total"] = getattr(r, "count", None) or 0
         # with_email (emails != '[]')
         r = sb.table("prospects").select("id", count="exact").neq("emails", "[]").limit(1).execute()
         out["with_email"] = getattr(r, "count", None) or 0
-        for s in ("qualified", "contacted", "replied", "won"):
+        for s in ("new", "qualified", "contacted", "replied", "won"):
             r = sb.table("prospects").select("id", count="exact").eq("status", s).limit(1).execute()
             out[s] = getattr(r, "count", None) or 0
+        # « À contacter » = prospects pas encore démarchés. On regroupe
+        # "new" ET "qualified" : un prospect "qualified" est en réalité un
+        # « pas encore contacté » (un brouillon lui a été préparé puis
+        # refusé/nettoyé sans jamais partir). Les deux appartiennent donc à
+        # la même case du parcours côté écran « Tous les prospects ».
+        out["to_contact"] = out["new"] + out["qualified"]
         return {"ok": True, "stats": out}
     except Exception as exc:
         logger.warning("obelisk.stats: %s", exc)
