@@ -1541,6 +1541,24 @@ class Api:
         if edited_body is None or _norm(edited_body) == _norm(stored_body):
             final = stored_body if edited_body is None else edited_body
             return final, stored_html, False
+        # Corps retouché : on remplace d'abord la phrase SUR PLACE dans le HTML
+        # stocké → l'aperçu du site et la mise en forme du modèle survivent
+        # (Jordan, 17/06/2026). Si on ne retrouve pas la phrase ET que le HTML
+        # contient un aperçu, on GARDE le HTML du modèle tel quel (on ne
+        # régénère pas → l'aperçu reste). Sans aperçu : on régénère proprement.
+        try:
+            from triskell_core.prospect.quality_reviewer import (
+                apply_retouche_to_html)
+            swapped, _ok = apply_retouche_to_html(
+                stored_body, edited_body, stored_html)
+            if _ok:
+                return edited_body, swapped, True
+        except Exception:
+            pass
+        import re as _re
+        if stored_html and _re.search(r'alt="Aper', stored_html, _re.I):
+            # On protège l'aperçu : HTML du modèle gardé tel quel.
+            return edited_body, stored_html, False
         try:
             from ..integrations.convoy_ai import (
                 _first_url_in, text_to_email_html,
