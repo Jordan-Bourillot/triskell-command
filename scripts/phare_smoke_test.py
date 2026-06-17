@@ -222,6 +222,47 @@ def test_auto_merge_guardrails() -> None:
     assert notified == ["a_ok"], "notification du merge auto manquante"
 
 
+def test_automerge_digest() -> None:
+    """« Publié tout seul » = récap quotidien : on empile sans envoyer, puis
+    UN seul mail groupé par jour, puis buffer vide."""
+    from triskell_command.integrations.phare import notifications as N
+
+    store: dict = {"items": []}
+    mails: list = []
+    saved = (N._read_digest, N._write_digest, N._send_mail, N._prefs)
+    N._read_digest = lambda: list(store["items"])
+    N._write_digest = lambda items: store.__setitem__(
+        "items", list(items)[-N.MAX_DIGEST_ITEMS:]) or True
+    N._send_mail = lambda to, subject, body: (
+        mails.append({"to": to, "subject": subject, "body": body})
+        or {"ok": True, "message_id": "t"})
+    N._prefs = lambda: {"push_enabled": True, "mail_enabled": True,
+                        "email": "contact@triskell-studio.fr", "user_id": "jordan"}
+    try:
+        # Empilage : 4 publications, 2 sites → AUCUN mail
+        for i in range(3):
+            N.notify_auto_merged(site={"name": "Pixel Pros"},
+                                 action={"title": f"Titre page {i} raccourci"})
+        N.notify_auto_merged(site={"name": "La Griffe"},
+                             action={"title": "Meta description ajoutée"})
+        assert len(store["items"]) == 4, "les 4 publications doivent être empilées"
+        assert mails == [], "AUCUN mail ne doit partir à l'empilage"
+
+        # Flush : exactement 1 mail, groupé par site, buffer vidé
+        res = N.flush_auto_merged_digest()
+        assert res["sent"] and res["count"] == 4, res
+        assert len(mails) == 1, "il doit y avoir EXACTEMENT 1 mail récap"
+        assert store["items"] == [], "le buffer doit être vide après envoi"
+        body = mails[0]["body"]
+        assert "Pixel Pros" in body and "La Griffe" in body, "groupement par site"
+
+        # Buffer vide : aucun mail inutile
+        res2 = N.flush_auto_merged_digest()
+        assert res2["sent"] is False and len(mails) == 1, "0 mail sur buffer vide"
+    finally:
+        (N._read_digest, N._write_digest, N._send_mail, N._prefs) = saved
+
+
 def test_algo_watch_rss_parser() -> None:
     """Le parser RSS doit ne pas planter sur du XML invalide."""
     from triskell_command.integrations.phare.algo_watch import _fetch_rss
@@ -472,6 +513,7 @@ def main() -> int:
     _run("Bulletin — fallback HTML sans reportlab", test_bulletin_html_fallback)
     _run("Scheduler — 9 missions pro dispatchées", test_scheduler_pro_missions_dispatched)
     _run("Auto-merge — garde-fous (opt-in, veto, plafond, hold)", test_auto_merge_guardrails)
+    _run("Auto-merge — récap quotidien (1 mail groupé, pas un par modif)", test_automerge_digest)
     _run("Algo watch — RSS parser tolérant", test_algo_watch_rss_parser)
     _run("Outreach — templates contiennent les placeholders", test_outreach_template_rendering)
     _run("Voice — texte propre détecté propre", test_voice_clean)

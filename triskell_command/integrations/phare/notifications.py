@@ -22,6 +22,7 @@ Tout échoue gracieusement : aucune notif ne casse jamais le tick scheduler.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Optional
 
 from . import repo
@@ -31,6 +32,13 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_EMAIL = "contact@triskell-studio.fr"
 DEFAULT_USER_ID = "jordan"
+
+# Récap quotidien des publications automatiques (« publié tout seul ») :
+# au lieu d'un mail par correction, on empile les publications du jour dans
+# cette clé shared_settings, et le scheduler envoie UN seul mail groupé par
+# jour (flush_auto_merged_digest). Plafond pour borner la taille du buffer.
+DIGEST_KEY = "phare_automerge_digest"
+MAX_DIGEST_ITEMS = 500
 
 
 def _prefs() -> dict:
@@ -208,40 +216,122 @@ def notify_bulletin(*, site: dict, bulletin: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Cas 2 — Modification en attente de validation
+# Cas 2 — Publication automatique (« publié tout seul ») → récap quotidien
+#
+# Avant : 1 push + 1 mail PAR correction publiée → la boîte de Jordan était
+# noyée, et chaque mail partait depuis/vers contact@triskell-studio.fr (donc
+# comptait dans les « mails envoyés » et grignotait le quota d'envoi de cette
+# boîte). Depuis le 18/06/2026 (choix de Jordan) : on empile les publications
+# de la journée et le scheduler envoie UN SEUL mail récapitulatif en fin de
+# journée (flush_auto_merged_digest). Plus de push individuelle.
 # ---------------------------------------------------------------------------
+def _read_digest() -> list[dict]:
+    """Publications auto en attente de récap (clé shared_settings dédiée)."""
+    sb = repo._sb()
+    if sb is None:
+        return []
+    try:
+        rows = (sb.table("shared_settings").select("value")
+                .eq("key", DIGEST_KEY).limit(1).execute().data)
+        if not rows:
+            return []
+        val = rows[0].get("value") or {}
+        items = val.get("items") if isinstance(val, dict) else None
+        return items if isinstance(items, list) else []
+    except Exception as exc:
+        logger.debug("phare digest read: %s", exc)
+        return []
+
+
+def _write_digest(items: list[dict]) -> bool:
+    sb = repo._sb()
+    if sb is None:
+        return False
+    try:
+        from ..shared_settings_db import upsert_setting
+        return upsert_setting(sb, DIGEST_KEY,
+                              {"items": items[-MAX_DIGEST_ITEMS:]})
+    except Exception as exc:
+        logger.debug("phare digest write: %s", exc)
+        return False
+
+
 def notify_auto_merged(*, site: dict, action: dict) -> dict:
-    """Appelée quand l'auto-merge a publié une modification VÉRIFIÉE tout seul.
-    Jordan est informé (transparence totale) mais n'a rien à faire."""
+    """Empile une publication auto dans le récap quotidien (AUCUN envoi ici).
+
+    Le mail groupé part une fois par jour via flush_auto_merged_digest(),
+    déclenché par le scheduler. Jordan reste informé (transparence) sans être
+    noyé sous un mail par correction."""
     site_name = site.get("name") or site.get("domain") or "ton site"
     action_title = action.get("title") or "modification SEO"
+    try:
+        items = _read_digest()
+        items.append({
+            "site": site_name,
+            "title": action_title[:200],
+            "at": datetime.now().isoformat(timespec="seconds"),
+        })
+        _write_digest(items)
+        return {"buffered": True, "pending": len(items)}
+    except Exception as exc:
+        logger.debug("notify_auto_merged buffer: %s", exc)
+        return {"buffered": False, "error": str(exc)}
 
-    title = f"✅ Publié tout seul — {site_name}"
-    body_short = (f"{action_title[:120]} — vérifs passées "
-                  "(vitesse, rendu, liens), mis en ligne.")
 
-    body_mail = (
-        f"Le Phare a publié une modification tout seul\n"
-        f"{'=' * 50}\n\n"
-        f"Site    : {site_name}\n"
-        f"Détail  : {action_title}\n\n"
-        "Toutes les vérifications sont passées (Lighthouse, rendu visuel,\n"
-        "aucun lien cassé). La surveillance post-publication reste active\n"
-        "14 jours : si le trafic décroche, tu seras alerté pour retour\n"
-        "arrière.\n\n"
-        "---\n"
-        "Historique complet :\n"
-        "https://command.triskell-studio.fr/#phare → Ce qui a été fait\n"
-    )
+def flush_auto_merged_digest() -> dict:
+    """Envoie UN mail récap de toutes les publications auto accumulées, puis
+    vide le buffer. Appelé 1×/jour par le scheduler. N'envoie RIEN (et ne
+    touche à rien) si le buffer est vide : pas de mail inutile."""
+    items = _read_digest()
+    if not items:
+        return {"ok": True, "sent": False, "reason": "empty"}
 
-    return _notify(
-        title=title,
-        body_short=body_short,
-        body_mail=body_mail,
-        url_path="https://command.triskell-studio.fr/#phare",
-        tag_group="phare-automerge",
-        priority="low",
-    )
+    n = len(items)
+    plural = "s" if n > 1 else ""
+    by_site: dict[str, list[str]] = {}
+    for it in items:
+        by_site.setdefault(it.get("site") or "ton site", []).append(
+            it.get("title") or "modification SEO")
+
+    title = f"✅ Le Phare — {n} correction{plural} publiée{plural} aujourd'hui"
+
+    lines = [
+        f"Le Phare a publié {n} correction{plural} tout seul aujourd'hui.",
+        "=" * 50,
+        "",
+        "Tu n'as rien à faire : toutes les vérifications sont passées "
+        "(vitesse, rendu, liens) et la surveillance reste active 14 jours.",
+        "",
+    ]
+    for site_name in sorted(by_site):
+        titles = by_site[site_name]
+        s = "s" if len(titles) > 1 else ""
+        lines.append(f"{site_name} — {len(titles)} correction{s} :")
+        for t in titles:
+            lines.append(f"    - {t}")
+        lines.append("")
+    lines += [
+        "---",
+        "Le détail est dans l'écran Le Phare, rubrique « Ce qui a été fait ».",
+        "https://command.triskell-studio.fr/#phare",
+    ]
+    body_mail = "\n".join(lines)
+
+    prefs = _prefs()
+    mail_wanted = bool(prefs["mail_enabled"] and prefs["email"])
+    mail_res = None
+    sent = False
+    if mail_wanted:
+        mail_res = _send_mail(to=prefs["email"], subject=title, body=body_mail)
+        sent = bool(mail_res and mail_res.get("ok"))
+
+    # On vide le buffer si le mail est parti, OU si le mail est désactivé
+    # (sinon le buffer gonflerait sans fin). En cas d'échec SMTP ponctuel, on
+    # garde le buffer pour retenter au prochain passage quotidien.
+    if sent or not mail_wanted:
+        _write_digest([])
+
+    return {"ok": True, "sent": sent, "count": n, "mail": mail_res}
 
 
 def notify_pending_action(*, site: dict, action: dict) -> dict:

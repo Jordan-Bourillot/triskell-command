@@ -420,6 +420,20 @@ def _tick(app_state) -> dict:
         actions_done.append({"mission": "client_reports_send", **r})
         _mark_ran("client_reports_send:")
 
+    # Récap quotidien des publications automatiques (« publié tout seul ») :
+    # UN seul mail en fin de journée au lieu d'un par correction. À partir de
+    # 19h (heure FR), global, 1 fois/jour. Buffer vide → aucun mail envoyé.
+    if hour >= 19 and not _global_ran_today("automerge_digest:"):
+        try:
+            from . import notifications
+            r = notifications.flush_auto_merged_digest()
+            if r.get("sent"):
+                actions_done.append({"mission": "automerge_digest",
+                                     "count": r.get("count", 0)})
+        except Exception as exc:
+            logger.warning("phare automerge_digest: %s", exc)
+        _mark_ran("automerge_digest:")
+
     # Battement de cœur : prouve que le tick a tourné même sans mission
     # lancée (sinon une panne GitHub Actions est invisible depuis le serveur).
     try:
@@ -615,4 +629,7 @@ def run_now(mission: str, site_id: Optional[str] = None,
     if mission == "client_reports_send":
         from . import client_report_sender
         return client_report_sender.send_pending_reports(app_state=app_state)
+    if mission == "automerge_digest":
+        from . import notifications
+        return notifications.flush_auto_merged_digest()
     return {"ok": False, "error": f"mission inconnue: {mission}"}
