@@ -952,6 +952,9 @@ class Api:
                           "emails, emails_meta, city, sources, platform_url)")
             _bonus_attempts = (
                 "body_html, review_score, review_verdict, review_comment, "
+                "review_score_before, review_score_after, review_modif_type, "
+                "review_modif_applied, sender_address, ",
+                "body_html, review_score, review_verdict, review_comment, "
                 "sender_address, ",
                 "body_html, review_score, review_verdict, review_comment, ",
                 "body_html, ",
@@ -1007,6 +1010,12 @@ class Api:
                     "review_score": r.get("review_score"),
                     "review_verdict": r.get("review_verdict") or "",
                     "review_comment": r.get("review_comment") or "",
+                    # Retouche unique de la 2e IA (migration 53) : avant/après
+                    # note + type de retouche, pour afficher « 8 → 9 · ✏️ ».
+                    "review_score_before": r.get("review_score_before"),
+                    "review_score_after": r.get("review_score_after"),
+                    "review_modif_type": r.get("review_modif_type") or "",
+                    "review_modif_applied": bool(r.get("review_modif_applied")),
                     "ts": (r.get("created_at") or "")[:19],
                     "provider": r.get("provider") or "",
                     "model": r.get("model") or "",
@@ -1175,6 +1184,10 @@ class Api:
                 "review_score":   draft.get("review_score"),
                 "review_verdict": draft.get("review_verdict", ""),
                 "review_comment": draft.get("review_comment", ""),
+                "review_score_before": draft.get("review_score_before"),
+                "review_score_after": draft.get("review_score_after"),
+                "review_modif_type": draft.get("review_modif_type", ""),
+                "review_modif_applied": bool(draft.get("review_modif_applied")),
             })
         return {"ok": True, "rows": rows}
 

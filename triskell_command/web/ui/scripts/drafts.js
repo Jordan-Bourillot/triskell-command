@@ -876,13 +876,31 @@ const Drafts = {
       cls = 'bg-warning/10 border-warning/40 text-warning';
       label = 'Moyen';
     }
+    // Retouche unique de la 2e IA (demande Jordan 17/06) : si elle a fait une
+    // petite modif GARDEE, on montre l'ancienne ET la nouvelle note + le type
+    // de retouche. Si elle a TESTE une modif mais qu'on l'a ecartee (elle
+    // n'ameliorait pas), on le signale discretement (le mail d'origine reste).
+    const before = (r.review_score_before == null) ? null
+      : Math.max(0, Math.min(10, parseInt(r.review_score_before, 10) || 0));
+    const after = (r.review_score_after == null) ? null
+      : Math.max(0, Math.min(10, parseInt(r.review_score_after, 10) || 0));
+    const applied = !!r.review_modif_applied;
+    const modifType = (r.review_modif_type || '').trim();
+    let scoreLabel = `${score}/10`;
+    let editPart = '';
+    if (applied && before != null && after != null) {
+      scoreLabel = `${before} → ${after}/10`;
+      editPart = ` <span class="font-semibold">· ✏️ retouché${modifType ? ' : ' + this._esc(modifType) : ''}</span>`;
+    } else if (!applied && after != null && modifType) {
+      editPart = ` <span class="text-text-secondary font-normal">· retouche testée, écartée (n’améliorait pas)</span>`;
+    }
     const commentPart = comment
       ? ` <span class="text-text-secondary font-normal">— ${this._esc(comment)}</span>`
       : '';
     return `
       <div class="mb-3 px-3 py-2 rounded-lg border text-xs sm:text-sm ${cls}"
            style="text-wrap: pretty">
-        <span class="font-semibold">2è IA · ${label} · ${score}/10</span>${commentPart}
+        <span class="font-semibold">2è IA · ${label} · ${scoreLabel}</span>${editPart}${commentPart}
       </div>`;
   },
 

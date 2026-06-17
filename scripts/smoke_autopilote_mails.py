@@ -293,6 +293,22 @@ check("relectrice : réponse cassée → brouillon (l'humain tranche)",
 check("relectrice : réponse valide → notée",
       _parse_review('{"score": 9, "verdict": "ok", "comment": "bon"}')
       ["score"] == 9)
+check("relectrice : type de retouche lu depuis le JSON",
+      _parse_review('{"score": 9, "verdict": "ok", "comment": "ok", '
+                    '"body_revised": "corps", "modif_type": "phrase reformulée"}')
+      ["modif_type"] == "phrase reformulée")
+check("relectrice : sans retouche → modif_type vide",
+      _parse_review('{"score": 9, "verdict": "ok", "comment": "ok"}')
+      .get("modif_type", "") == "")
+
+# --- Retouche unique de la 2e IA (Jordan 17/06/2026) ---
+# La micro-retouche n'est GARDÉE que si elle améliore (ou égale) la note ;
+# sinon on revient au mail d'origine. On teste la règle de décision.
+from triskell_core.prospect.pipeline import _retouche_keeps  # noqa: E402
+check("retouche : note qui monte (8→9) → on garde", _retouche_keeps(8, 9) is True)
+check("retouche : note égale (8→8) → on garde", _retouche_keeps(8, 8) is True)
+check("retouche : note qui baisse (8→7) → on annule", _retouche_keeps(8, 7) is False)
+check("retouche : pas de 2e note (None) → on annule", _retouche_keeps(8, None) is False)
 
 # --- Bascule automatique entre IA + panne « engine_down » (15/06/2026) ---
 # L'IA qui relit les mails ne doit plus tout bloquer en silence quand elle
