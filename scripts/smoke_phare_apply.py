@@ -1176,5 +1176,67 @@ check("explain : 1re ligne en jargon → phrase neutre, pas le charabia",
       not pl.has_jargon(pl.explain(
           {"detail_md": "Ajouter fetchpriority sur le <img> en haut de page."})))
 
+# ===========================================================================
+# Section ajoutée le 17/06/2026 : le robot FAIT la FAQ structurée et le
+# préchargement de l'image tout seul (lecture EN DIRECT de la page).
+print("\n— le robot fait la FAQ + le préchargement tout seul (17/06) —")
+from triskell_command.integrations.phare import page_extract as pe
+
+SAMPLE_FAQ = (
+    '<html><body><section id="faq"><div class="faq">'
+    '<details class="faq-item"><summary>Combien coûte un site ?</summary>'
+    '<div>À partir de 24,90 € par mois, tout compris.</div></details>'
+    '<details class="faq-item"><summary>En combien de temps ?</summary>'
+    '<p>Ton site est livré en 24 heures après ta commande.</p></details>'
+    '</div></section>'
+    '<img src="/img/hero-photographe.jpg" alt="x"><img src="/favicon.ico">'
+    '</body></html>')
+
+pairs = pe.extract_faq_pairs(SAMPLE_FAQ)
+check("lit les vraies questions-réponses de la page",
+      len(pairs) == 2 and pairs[0]["q"] == "Combien coûte un site ?"
+      and "24,90" in pairs[0]["a"])
+jsonld = pe.build_faqpage_jsonld(pairs)
+check("construit le bloc FAQ mot pour mot (jamais inventé)",
+      "FAQPage" in jsonld and "Combien coûte un site ?" in jsonld and "24,90" in jsonld)
+check("détecte une FAQ déjà en place",
+      pe.has_faq_schema('<script>{"@type":"FAQPage"}</script>'))
+check("trouve la grande image, ignore le favicon",
+      (pe.find_hero_image(SAMPLE_FAQ, "https://x.fr/") or "").endswith("hero-photographe.jpg"))
+check("balise de préchargement = chemin relatif au domaine",
+      'rel="preload"' in pe.preload_link("https://x.fr/img/hero.jpg")
+      and 'href="/img/hero.jpg"' in pe.preload_link("https://x.fr/img/hero.jpg"))
+
+check("page visée extraite du titre (/photographe)",
+      executor._card_page_path(
+          {"title": "Ajouter une FAQ structurée sur /photographe"}) == "/photographe")
+check("carte « de la home » → /",
+      executor._card_page_path(
+          {"title": "Précharger l'image principale de la home"}) == "/")
+
+SITE_X = {"domain": "x.fr"}
+with mock.patch.object(pe, "fetch_page", return_value=SAMPLE_FAQ):
+    out = executor._build_faq_out(
+        {"title": "Ajouter une FAQ structurée sur /photographe"}, SITE_X)
+    check("FAQ visible → le robot prépare le bloc (pas de refus)",
+          out["mode"] == "patches"
+          and out["patches"][0]["field"] == "head_insert"
+          and "FAQPage" in out["patches"][0]["new"])
+with mock.patch.object(pe, "fetch_page",
+                       return_value="<html><body>aucune faq ici</body></html>"):
+    out = executor._build_faq_out(
+        {"title": "Ajouter une FAQ structurée sur /x"}, SITE_X)
+    check("pas de vraie FAQ → manuel propre (jamais inventer, zéro jargon)",
+          out["mode"] == "manual" and not pl.has_jargon(out["manual_reason"]))
+with mock.patch.object(pe, "fetch_page", return_value=SAMPLE_FAQ):
+    out = executor._build_preload_out(
+        {"title": "Précharger l'image de la home"}, SITE_X)
+    check("grande image trouvée → préchargement préparé",
+          out["mode"] == "patches" and "preload" in out["patches"][0]["new"])
+
+check("FAQ + préchargement = invisible → pas bloqué par le diff visuel",
+      executor._is_metadata_only({"title": "Ajouter une FAQ structurée sur /x"})
+      and executor._is_metadata_only({"title": "Précharger l'image de la home"}))
+
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)

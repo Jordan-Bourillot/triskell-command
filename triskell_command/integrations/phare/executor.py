@@ -127,6 +127,68 @@ def _parse_redirect_chain(detail_md: str) -> Optional[dict]:
     return None
 
 
+def _card_page_path(action: dict) -> str:
+    """Chemin de la page visée par une carte (« /photographe », « / »…)."""
+    from . import dedup
+    text = f"{action.get('title') or ''}\n{action.get('detail_md') or ''}"
+    non_home = [p for p in dedup.extract_paths(text) if p and p != "/"]
+    return non_home[0] if non_home else "/"
+
+
+def _page_url(site: dict, path: str) -> str:
+    domain = (site.get("domain") or "").strip().strip("/")
+    return f"https://{domain}{path}"
+
+
+def _build_faq_out(action: dict, site: dict) -> dict:
+    """FAQ structurée : recopie les VRAIES questions-réponses de la page →
+    données structurées FAQPage. Jamais d'invention (sinon pénalité Google)."""
+    from . import page_extract
+    path = _card_page_path(action)
+    html = page_extract.fetch_page(_page_url(site, path))
+    if not html:
+        return {"mode": "manual", "manual_reason":
+                "Je n'ai pas réussi à ouvrir cette page pour lire ta FAQ."}
+    if page_extract.has_faq_schema(html):
+        return {"mode": "manual", "manual_reason":
+                "C'est déjà en place sur cette page — rien à ajouter."}
+    pairs = page_extract.extract_faq_pairs(html)
+    if len(pairs) < 2:
+        return {"mode": "manual", "manual_reason":
+                "Cette page n'a pas encore une vraie liste de questions-réponses "
+                "à recopier — il faudrait d'abord en écrire une ensemble."}
+    jsonld = page_extract.build_faqpage_jsonld(pairs)
+    return {"mode": "patches",
+            "patches": [{"field": "head_insert", "page_path": path, "new": jsonld}],
+            "simple_md": (f"J'indique à Google tes {len(pairs)} questions-réponses "
+                          "(recopiées exactement depuis ta page) pour qu'il puisse "
+                          "les afficher en grand dans ses résultats.")}
+
+
+def _build_preload_out(action: dict, site: dict) -> dict:
+    """Précharge la grande image principale de la page (chargement prioritaire)."""
+    from . import page_extract
+    path = _card_page_path(action)
+    url = _page_url(site, path)
+    html = page_extract.fetch_page(url)
+    if not html:
+        return {"mode": "manual", "manual_reason":
+                "Je n'ai pas réussi à ouvrir cette page."}
+    hero = page_extract.find_hero_image(html, url)
+    if not hero:
+        return {"mode": "manual", "manual_reason":
+                "Je n'ai pas trouvé de grande image principale à mettre en "
+                "priorité sur cette page."}
+    if page_extract.already_preloads(html, hero):
+        return {"mode": "manual", "manual_reason":
+                "C'est déjà fait sur cette page — rien à changer."}
+    return {"mode": "patches",
+            "patches": [{"field": "head_insert", "page_path": path,
+                         "new": page_extract.preload_link(hero)}],
+            "simple_md": ("Je dis au navigateur de charger en priorité ta grande "
+                          "image principale — la page s'affiche plus vite sur mobile.")}
+
+
 def _sitemap_equivalent(a: str, b: str) -> bool:
     """Deux sitemaps couvrent-ils les mêmes URLs ? (on ignore les <lastmod>,
     qui changent chaque jour — sinon on republierait pour rien)."""
@@ -451,6 +513,14 @@ def _apply_one(action_id: str, *, app_state=None) -> dict:
                             "final": chain["final"]}],
                "simple_md": ("Je fais pointer le lien directement à la bonne "
                              "adresse — fini l'étape inutile.")}
+    elif "faq" in (action.get("title") or "").lower():
+        # FAQ structurée : on recopie les VRAIES questions-réponses de la page
+        # (jamais inventer → sinon pénalité Google).
+        out = _build_faq_out(action, site)
+    elif any(k in (action.get("title") or "").lower()
+             for k in ("précharg", "precharg", "preload")):
+        # Précharger / prioriser la grande image principale de la page.
+        out = _build_preload_out(action, site)
     else:
         try:
             ag = agents.Executeur()
@@ -534,6 +604,11 @@ _INVISIBLE_FAMILIES = {"title", "meta", "canonical", "noindex", "schema",
 
 def _is_metadata_only(action: dict) -> bool:
     """La modif ne touche QUE des métadonnées invisibles (pas le visuel) ?"""
+    title_low = (action.get("title") or "").lower()
+    # FAQ structurée + préchargement = insertions dans le <head>, invisibles.
+    if any(k in title_low for k in ("faq", "précharg", "precharg", "preload",
+                                    "données structurées", "donnees structurees")):
+        return True
     fams = plain_language._families_of(action)
     return bool(fams) and fams.issubset(_INVISIBLE_FAMILIES)
 

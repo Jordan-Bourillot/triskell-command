@@ -129,8 +129,8 @@ _JARGON_RE = re.compile(
     re.IGNORECASE)
 
 CLEAN_MANUAL_FALLBACK = (
-    "Le robot a regardé : celle-ci, c'est mieux qu'on la fasse ensemble — il "
-    "préfère ne pas y toucher tout seul. Tu peux la mettre de côté pour l'instant.")
+    "celle-ci, c'est mieux qu'on la fasse ensemble — le robot préfère ne pas y "
+    "toucher tout seul. Tu peux la mettre de côté pour l'instant.")
 
 
 def has_jargon(text: str) -> bool:
