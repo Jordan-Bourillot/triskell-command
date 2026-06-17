@@ -1337,6 +1337,11 @@ class Api:
         if client is None:
             return {"ok": False, "error": "Base indisponible."}
         from collections import Counter
+        try:
+            from triskell_core.prospect.quality_reviewer import normalize_modif_type
+        except Exception:
+            def normalize_modif_type(s):
+                return (s or "").strip()
         sb = client.raw
         p = payload or {}
         threshold = max(2, int(p.get("threshold") or 3))
@@ -1352,7 +1357,7 @@ class Api:
         except Exception:
             rows = []
         for r in rows:
-            mt = (r.get("review_modif_type") or "").strip()
+            mt = normalize_modif_type(r.get("review_modif_type") or "")
             if not mt or not r.get("review_modif_applied"):
                 continue
             tk = (r.get("template_key") or "").strip() or "(sans modèle)"

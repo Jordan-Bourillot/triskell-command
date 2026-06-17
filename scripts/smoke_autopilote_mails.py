@@ -293,13 +293,23 @@ check("relectrice : réponse cassée → brouillon (l'humain tranche)",
 check("relectrice : réponse valide → notée",
       _parse_review('{"score": 9, "verdict": "ok", "comment": "bon"}')
       ["score"] == 9)
-check("relectrice : type de retouche lu depuis le JSON",
+check("relectrice : retouche rangée en catégorie fixe (transition → fluidité)",
       _parse_review('{"score": 9, "verdict": "ok", "comment": "ok", '
-                    '"body_revised": "corps", "modif_type": "phrase reformulée"}')
-      ["modif_type"] == "phrase reformulée")
+                    '"body_revised": "corps", "modif_type": "transition allégée"}')
+      ["modif_type"] == "fluidité")
 check("relectrice : sans retouche → modif_type vide",
       _parse_review('{"score": 9, "verdict": "ok", "comment": "ok"}')
       .get("modif_type", "") == "")
+# Catégories fixes : la 2e IA décrit chaque retouche différemment ; on les range
+# dans des cases fixes pour que les patterns ressortent (Jordan 17/06/2026).
+from triskell_core.prospect.quality_reviewer import normalize_modif_type  # noqa: E402
+check("catégorie : 'transition superflue retirée' → fluidité",
+      normalize_modif_type("transition superflue retirée") == "fluidité")
+check("catégorie : 'répétition évitée' → répétition",
+      normalize_modif_type("répétition évitée") == "répétition")
+check("catégorie : 'formulation précisée' → clarté",
+      normalize_modif_type("formulation précisée") == "clarté")
+check("catégorie : vide → reste vide", normalize_modif_type("") == "")
 
 # --- Bascule automatique entre IA + panne « engine_down » (15/06/2026) ---
 # L'IA qui relit les mails ne doit plus tout bloquer en silence quand elle
