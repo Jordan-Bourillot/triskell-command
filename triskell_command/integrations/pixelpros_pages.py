@@ -35,7 +35,7 @@ BASE_URL = "https://pixel-pros.fr"
 # (Les 8 « pisciniste → architecte-interieur » + les 15 « cuisiniste →
 #  food-truck » datent du 16/06/2026 : 40 pages métier au total.)
 KNOWN_SLUGS = (
-    "animalier", "beaute", "bien-etre", "carreleur", "coach",
+    "animalier", "beaute", "bien-etre", "carreleur", "coach", "coiffeur",
     "electricien", "fleuriste", "macon", "menuisier", "patisserie",
     "paysagiste", "peintre", "photographe", "plaquiste", "plombier",
     "restaurant", "tatoueur",
@@ -120,8 +120,8 @@ _PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("creper",     "restaurant"),    # crêperie / crêpier
     ("brasserie",  "restaurant"),
     ("bistro",     "restaurant"),    # bistro(t)
-    ("coiff",      "beaute"),
-    ("barbier",    "beaute"),
+    ("coiff",      "coiffeur"),     # coiffeur/coiffeuse → démo coiffeur dédiée (17/06/2026)
+    ("barbier",    "coiffeur"),
     ("beaut",      "beaute"),        # beauté / institut de beauté
     ("esthet",     "beaute"),        # esthéticienne / esthétique
     ("ongler",     "beaute"),        # onglerie
