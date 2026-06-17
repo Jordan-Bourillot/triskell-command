@@ -19,6 +19,7 @@ dans l'UI).
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from . import dedup
@@ -54,18 +55,44 @@ _FAMILY_TEXTS: dict[str, str] = {
                  "(et les visiteurs) à circuler vers les pages importantes."),
 }
 
-# Familles que le robot sait transformer en modification de code réelle
+# Familles que le robot sait transformer en modification de code réelle.
+# « alt » (texte des images) en fait partie depuis le 17/06/2026 — avant, le
+# bouton vert s'affichait dessus mais l'Exécuteur ne savait pas le faire.
 _CODE_FAMILIES = ("title", "meta", "canonical", "noindex", "h1",
-                  "schema", "alt", "sitemap", "maillage")
+                  "schema", "alt", "sitemap")
 # Familles traitées en relançant un outil interne (pas une modif de code)
 _TOOL_FAMILIES = ("pagespeed",)
-# Familles qui exigent un humain
-_MANUAL_FAMILIES = ("gsc",)
+# Familles qui exigent un humain (l'Exécuteur ne sait pas les faire seul) :
+#   - gsc      : compte Google Search Console requis
+#   - maillage : ajouter des liens DANS le corps d'une page — l'Exécuteur ne
+#                touche que <head>/title/meta/h1, jamais le contenu de la page
+_MANUAL_FAMILIES = ("gsc", "maillage")
+_MANUAL_TEXTS: dict[str, str] = {
+    "gsc": _FAMILY_TEXTS["gsc"],
+    "maillage": ("Ajouter des liens entre tes pages, ça se décide dans le "
+                 "contenu — à préparer avec Claude, pas en un clic."),
+}
+
+
+_CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
+_URL_IN_TEXT_RE = re.compile(r"https?://\S+")
+
+
+def _clean_text_for_fields(text: str) -> str:
+    """Retire blocs de code et URLs avant de repérer la famille de balise.
+
+    Sinon l'adresse interne du sitemap (« …sitemaps.org/schemas/… ») contient
+    le mot « schemas » et fait croire à tort à des « données structurées » :
+    la carte « plan du site » s'affichait avec le texte des données
+    structurées (constaté par Jordan le 17/06/2026)."""
+    text = _CODE_BLOCK_RE.sub(" ", text or "")
+    text = _URL_IN_TEXT_RE.sub(" ", text)
+    return text
 
 
 def _families_of(action: dict) -> set[str]:
     text = f"{action.get('title') or ''}\n{action.get('detail_md') or ''}"
-    return dedup.extract_fields(text)
+    return dedup.extract_fields(_clean_text_for_fields(text))
 
 
 def _agent_special(action: dict) -> Optional[tuple[str, str]]:
@@ -141,7 +168,9 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
     # « à toi de le faire » parce que son détail citait GSC pour la
     # vérification d'après). Le manuel ne gagne que s'il est SEUL en jeu.
     if manual_fams and not code_fams and not tool_fams:
-        return {"can": False, "mode": "manual", "why": _FAMILY_TEXTS["gsc"]}
+        fam = sorted(manual_fams)[0]
+        return {"can": False, "mode": "manual",
+                "why": _MANUAL_TEXTS.get(fam, _FAMILY_TEXTS["gsc"])}
     if tool_fams and not code_fams:
         return {"can": True, "mode": "tool",
                 "why": "Le robot relance la mesure tout seul."}

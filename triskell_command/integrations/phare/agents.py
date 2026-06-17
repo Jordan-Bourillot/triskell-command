@@ -719,6 +719,11 @@ Types de patch autorisés (page_path = le CHEMIN DE L'URL de la page :
 - {"field": "title",            "page_path": str, "old": str, "new": str}
 - {"field": "meta_description", "page_path": str, "old": str, "new": str}
 - {"field": "h1",               "page_path": str, "old": str, "new": str}
+- {"field": "alt",              "page_path": str, "image": str, "new": str}
+    → "image" = un bout du NOM DE FICHIER de l'image (ex: "hero-salon.jpg"),
+      "new" = le texte qui décrit l'image (50-100 caractères). Pour donner un
+      texte alternatif à une image qui n'en a pas. JAMAIS sur une icône de
+      navigateur (favicon, apple-touch-icon) → pour celles-là, mode="manual".
 - {"field": "head_insert",      "page_path": str, "new": str}
     → new = balise(s) à insérer juste avant </head> de CETTE page
       (canonical, noindex, JSON-LD…)

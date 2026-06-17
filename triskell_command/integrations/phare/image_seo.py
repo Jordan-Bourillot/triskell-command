@@ -45,7 +45,7 @@ def audit_page(url: str, html: Optional[str] = None) -> list[dict]:
     images = []
     for img in soup.find_all("img"):
         src = img.get("src") or ""
-        if not src:
+        if not src or src.strip().lower().startswith("data:"):
             continue
         full_src = urljoin(url, src)
         alt = img.get("alt", "")
@@ -53,8 +53,11 @@ def audit_page(url: str, html: Optional[str] = None) -> list[dict]:
         srcset = img.get("srcset", "")
         fmt = _guess_format(full_src)
         size_kb = _head_size(full_src)
+        decorative = _is_decorative_img(full_src, img)
         issues = []
-        if not alt or alt.strip() == "":
+        # Une icône de navigateur (favicon, apple-touch-icon) n'a pas besoin
+        # de texte alternatif → on ne crée pas de corvée impossible.
+        if not decorative and (not alt or alt.strip() == ""):
             issues.append("alt_missing")
         elif len(alt) > 125:
             issues.append("alt_too_long")
@@ -77,6 +80,30 @@ def audit_page(url: str, html: Optional[str] = None) -> list[dict]:
             "issues": issues,
         })
     return images
+
+
+_DECORATIVE_IMG_HINTS = (
+    "favicon", "apple-touch-icon", "apple-icon", "android-chrome", "mstile",
+    "safari-pinned-tab", "sprite", "spacer", "blank.", "1x1", "pixel.gif",
+    "transparent.",
+)
+
+
+def _is_decorative_img(src: str, img) -> bool:
+    """Icône de navigateur ou pixel minuscule : pas de texte alternatif utile."""
+    name = (src or "").lower()
+    if any(h in name for h in _DECORATIVE_IMG_HINTS):
+        return True
+    try:
+        def _dim(v: object) -> int:
+            digits = re.sub(r"\D", "", str(v or ""))
+            return int(digits) if digits else 0
+        w, h = _dim(img.get("width")), _dim(img.get("height"))
+        if 0 < w <= 48 and 0 < h <= 48:
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _guess_format(url: str) -> str:

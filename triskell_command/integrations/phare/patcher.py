@@ -342,6 +342,69 @@ def _files_matching_page(root: Path, exts: tuple[str, ...],
     return by_name
 
 
+# ---------------------------------------------------------------------
+# Texte alternatif des images (<img alt="…">) + plan du site (sitemap.xml)
+# ---------------------------------------------------------------------
+_DECORATIVE_IMG_HINTS = (
+    "favicon", "apple-touch-icon", "apple-icon", "android-chrome", "mstile",
+    "safari-pinned-tab", "site.webmanifest", "sprite", "spacer", "blank.",
+    "1x1", "pixel.gif", "transparent.",
+)
+
+
+def _is_decorative_image(name: str) -> bool:
+    """Icône / chrome de navigateur : pas de texte alternatif utile."""
+    n = (name or "").lower()
+    return any(h in n for h in _DECORATIVE_IMG_HINTS)
+
+
+def _img_src(tag: str) -> str:
+    m = re.search(r"\bsrc\s*=\s*([\"'])(.*?)\1", tag, re.IGNORECASE | re.DOTALL)
+    return m.group(2) if m else ""
+
+
+def _img_has_alt(tag: str) -> bool:
+    m = re.search(r"\balt\s*=\s*([\"'])(.*?)\1", tag, re.IGNORECASE | re.DOTALL)
+    return bool(m and m.group(2).strip())
+
+
+def _add_alt_attr(tag: str, alt: str) -> str:
+    """Pose (ou remplit) l'attribut alt d'une balise <img>."""
+    alt = (alt or "").replace('"', "&quot;").strip()
+    if re.search(r"\balt\s*=\s*([\"']).*?\1", tag, re.IGNORECASE | re.DOTALL):
+        return re.sub(r"\balt\s*=\s*([\"']).*?\1", f'alt="{alt}"', tag,
+                      count=1, flags=re.IGNORECASE | re.DOTALL)
+    return re.sub(r"<img\b", f'<img alt="{alt}"', tag, count=1,
+                  flags=re.IGNORECASE)
+
+
+def resolve_sitemap_target(workdir: str) -> tuple[str, Optional[str]]:
+    """Où vit (ou doit vivre) le sitemap.xml d'un site cloné ?
+
+    Renvoie (chemin_relatif, contenu_existant | None). On NE saute PAS le
+    dossier public/ : c'est justement là que vivent les sitemaps statiques.
+    """
+    root = Path(workdir)
+    skip = {"node_modules", ".git", "dist", "build", ".next", ".astro", ".cache"}
+    found: list[Path] = []
+    try:
+        for p in root.rglob("sitemap*.xml"):
+            if any(part in skip for part in p.parts):
+                continue
+            found.append(p)
+    except OSError:
+        pass
+    if found:
+        found.sort(key=lambda p: len(p.relative_to(root).parts))
+        tgt = found[0]
+        return (str(tgt.relative_to(root)).replace("\\", "/"),
+                _read_text_safe(tgt))
+    for sub in ("public", "static"):
+        if (root / sub).is_dir():
+            return (f"{sub}/sitemap.xml", None)
+    return ("sitemap.xml", None)
+
+
 def localize_executor_patches(workdir: str, stack: str,
                               exec_patches: list[dict],
                               pages: Optional[list[dict]] = None) -> dict:
@@ -386,6 +449,50 @@ def localize_executor_patches(workdir: str, stack: str,
             applicable.append({"file": rel, "old": "", "new": new,
                                "field": field, "create": True,
                                "rationale": p.get("rationale") or ""})
+            continue
+
+        if field == "alt":
+            # Texte alternatif d'une image : on retrouve la balise <img> par
+            # un bout de son nom de fichier, sur la (les) page(s) visée(s), et
+            # on pose l'alt s'il manque. Les icônes de navigateur (favicon,
+            # apple-touch-icon…) n'ont pas besoin d'alt → revue, jamais forcé.
+            img_hint = (p.get("image") or p.get("src_hint") or "").strip()
+            if not img_hint:
+                needs_review.append({"field": "alt", "old": "", "new": new[:120],
+                                     "candidates": [],
+                                     "reason": "patch image sans nom de fichier"})
+                continue
+            if _is_decorative_image(img_hint):
+                needs_review.append({
+                    "field": "alt", "old": "", "new": new[:120],
+                    "candidates": [img_hint],
+                    "reason": "image décorative (icône) — pas besoin de texte"})
+                continue
+            found: Optional[tuple[Path, str]] = None
+            for f in _files_matching_page(root, exts, page_path, page_title):
+                content = _read_text_safe(f)
+                for m in re.finditer(r"<img\b[^>]*>", content,
+                                     re.IGNORECASE | re.DOTALL):
+                    tag = m.group(0)
+                    if img_hint.lower() in _img_src(tag).lower():
+                        if _img_has_alt(tag):
+                            continue   # déjà décrite : on n'écrase pas
+                        found = (f, tag)
+                        break
+                if found:
+                    break
+            if not found:
+                needs_review.append({
+                    "field": "alt", "old": "", "new": new[:120],
+                    "candidates": [img_hint],
+                    "reason": "image introuvable sur la page (ou déjà décrite)"})
+                continue
+            tgt_file, tag = found
+            applicable.append({
+                "file": str(tgt_file.relative_to(root)),
+                "old": tag, "new": _add_alt_attr(tag, new),
+                "field": "alt", "rationale": p.get("rationale") or "",
+            })
             continue
 
         if field == "head_insert":

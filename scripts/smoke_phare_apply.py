@@ -670,5 +670,172 @@ def _section_plan_b():
 
 _section_plan_b()
 
+# ===========================================================================
+# Section ajoutée le 17/06/2026 : texte des images (alt), plan du site
+# régénéré, et badge « le robot peut le faire » honnête.
+print("\n— images (alt), plan du site, badge honnête (17/06) —")
+
+# 1) La carte « plan du site » ne doit plus parler de données structurées :
+#    le mot « schemas » est dans l'URL du namespace sitemap (faux positif).
+sitemap_card = {
+    "agent": "sitemap_builder",
+    "title": "Sitemap.xml généré (43 URLs)",
+    "detail_md": ("Sitemap.xml prêt à publier dans `/public/sitemap.xml` "
+                  "(2000 caractères, 43 URLs).\n\n```xml\n"
+                  '<?xml version="1.0"?>\n<urlset xmlns="http://www.'
+                  'sitemaps.org/schemas/sitemap/0.9"><url><loc>https://x.fr/'
+                  "</loc></url></urlset>\n```"),
+}
+exp = pl.explain(sitemap_card)
+check("carte plan du site → parle du plan du site, pas de données structurées",
+      "plan du site" in exp and "structur" not in exp.lower())
+
+# 2) maillage interne = à faire à la main (l'Exécuteur ne touche pas le corps)
+v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
+                           "agent": "tisseur",
+                           "title": "Renforcer le maillage interne vers /demo",
+                           "detail_md": "Ajouter des liens internes."}, site_ok)
+check("maillage interne → à toi de le faire (pas un clic robot)",
+      not v["can"] and v["mode"] == "manual" and "contenu" in v["why"])
+
+# alt reste, lui, automatisable (le robot sait désormais le faire)
+v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
+                           "agent": "image_seo",
+                           "title": "Ajouter le texte alternatif des images"},
+                          site_ok)
+check("texte des images → le robot peut le faire (code)",
+      v["can"] and v["mode"] == "code")
+
+# 3) patcher : poser un alt sur une image qui n'en a pas
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    (root / "index.html").write_text(
+        "<html><head><title>Accueil</title></head><body>"
+        '<img src="/img/hero-salon.jpg">'
+        '<img src="/apple-touch-icon.png">'
+        '<img src="/img/equipe.jpg" alt="Déjà décrite">'
+        "</body></html>", encoding="utf-8")
+    pgs = [{"path": "/", "title": "Accueil"}]
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "alt", "page_path": "/", "image": "hero-salon.jpg",
+         "new": "Salon de coiffure lumineux avec fauteuils design"},
+    ], pgs)
+    check("alt posé sur l'image qui n'en avait pas",
+          len(loc["applicable"]) == 1
+          and 'alt="Salon de coiffure' in loc["applicable"][0]["new"]
+          and "hero-salon.jpg" in loc["applicable"][0]["new"])
+
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "alt", "page_path": "/", "image": "apple-touch-icon.png",
+         "new": "Icône"},
+    ], pgs)
+    check("icône (apple-touch-icon) → écartée, jamais d'alt forcé",
+          not loc["applicable"]
+          and "décorative" in loc["needs_review"][0]["reason"])
+
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "alt", "page_path": "/", "image": "equipe.jpg",
+         "new": "Autre texte"},
+    ], pgs)
+    check("image qui a DÉJÀ un alt → laissée tranquille",
+          not loc["applicable"] and bool(loc["needs_review"]))
+
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "alt", "page_path": "/", "image": "fantome.jpg", "new": "x"},
+    ], pgs)
+    check("image absente de la page → revue, jamais d'invention",
+          not loc["applicable"]
+          and "introuvable" in loc["needs_review"][0]["reason"])
+
+# 4) executor : lecture déterministe des alts d'une carte Image SEO
+det = ("**2 images** présentent au moins un problème.\n"
+       "**2 alts** ont été générés automatiquement :\n\n"
+       "- Page `/` — `hero-salon.jpg`\n  → `alt=\"Salon lumineux\"`\n"
+       "- Page `/equipe` — `team.jpg`\n  → `alt=\"L'équipe au complet\"`")
+parsed = executor._parse_image_seo_alts(det)
+check("carte Image SEO → 2 patches alt lus (page + fichier + texte)",
+      len(parsed) == 2 and parsed[0]["image"] == "hero-salon.jpg"
+      and parsed[0]["page_path"] == "/"
+      and parsed[0]["new"] == "Salon lumineux"
+      and parsed[1]["field"] == "alt")
+
+r = run_apply(None, action_extra={"agent": "image_seo",
+                                  "detail_md": "**3 images** à corriger."})
+final = updates[-1]
+check("Image SEO sans alt exploitable → manuel propre, jamais d'échec",
+      r.get("ok") and final.get("apply_state") == "manual"
+      and "rien à faire" in final.get("apply_error", "").lower())
+
+r = run_apply(None, action_extra={
+    "agent": "image_seo",
+    "detail_md": "- Page `/` — `hero.jpg`\n  → `alt=\"Un salon\"`"})
+final = updates[-1]
+check("Image SEO avec alt → publié comme une vraie modif (sans l'IA)",
+      r.get("ok") and final.get("status") == "merged"
+      and final.get("apply_state") == "done")
+
+# 5) plan du site : équivalence (on ignore les dates) + cible
+check("deux sitemaps mêmes URLs (lastmod différents) → équivalents",
+      executor._sitemap_equivalent(
+          "<urlset><url><loc>https://x.fr/</loc><lastmod>2026-06-01</lastmod></url></urlset>",
+          "<urlset><url><loc>https://x.fr/</loc><lastmod>2026-06-17</lastmod></url></urlset>"))
+check("sitemaps URLs différentes → pas équivalents",
+      not executor._sitemap_equivalent(
+          "<urlset><url><loc>https://x.fr/a</loc></url></urlset>",
+          "<urlset><url><loc>https://x.fr/b</loc></url></urlset>"))
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    (root / "public").mkdir()
+    rel, existing = patcher.resolve_sitemap_target(str(root))
+    check("pas de sitemap + dossier public → créé dans public/sitemap.xml",
+          rel == "public/sitemap.xml" and existing is None)
+    (root / "public" / "sitemap.xml").write_text("<urlset></urlset>",
+                                                  encoding="utf-8")
+    rel, existing = patcher.resolve_sitemap_target(str(root))
+    check("sitemap existant retrouvé dans public/ avec son contenu",
+          rel == "public/sitemap.xml" and existing == "<urlset></urlset>")
+
+
+def run_sitemap_apply(*, resolve_ret):
+    """_apply_one sur une carte plan du site, tout accès externe doublé."""
+    updates.clear()
+    fake_pr = {"ok": True, "branch": "phare/auto-sm", "pr_number": 5,
+               "pr_url": "https://github.com/x/y/pull/5"}
+    action = {**ACTION, "agent": "sitemap_builder",
+              "title": "Sitemap.xml généré (3 URLs)"}
+    with mock.patch.object(executor, "_get_action", return_value=action), \
+         mock.patch.object(executor.repo, "get_site", return_value=dict(SITE)), \
+         mock.patch.object(executor.repo, "update_action", side_effect=fake_update), \
+         mock.patch.object(executor.repo, "list_pages",
+                           return_value=[{"path": "/", "url": "https://pixel-pros.fr/"}]), \
+         mock.patch.object(executor.shutil, "which", return_value="C:/git.exe"), \
+         mock.patch.object(git_pipeline, "_github_token", return_value="tok"), \
+         mock.patch.object(git_pipeline, "clone_repo", return_value=True), \
+         mock.patch.object(git_pipeline, "apply_and_open_pr", return_value=fake_pr), \
+         mock.patch.object(git_pipeline, "merge_pr", return_value=True), \
+         mock.patch.object(git_pipeline, "verify_pr",
+                           return_value={"ok": True, "checks": {}, "decision": "merge"}), \
+         mock.patch.object(patcher, "resolve_sitemap_target", return_value=resolve_ret):
+        return executor._apply_one("act1")
+
+
+r = run_sitemap_apply(resolve_ret=("public/sitemap.xml", None))
+final = updates[-1]
+check("plan du site absent → créé et publié",
+      r.get("ok") and final.get("status") == "merged"
+      and final.get("apply_state") == "done")
+
+same_xml = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            "  <url>\n    <loc>https://pixel-pros.fr/</loc>\n"
+            "    <lastmod>2020-01-01</lastmod>\n    <changefreq>weekly</changefreq>\n"
+            "  </url>\n</urlset>")
+r = run_sitemap_apply(resolve_ret=("public/sitemap.xml", same_xml))
+final = updates[-1]
+check("plan du site déjà à jour → marqué fait, aucune erreur sans fin",
+      r.get("ok") and final.get("apply_state") == "done"
+      and "à jour" in final.get("simple_md", ""))
+
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)

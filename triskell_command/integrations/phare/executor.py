@@ -32,6 +32,7 @@ Garde-fous :
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import tempfile
 import threading
@@ -87,6 +88,96 @@ def _update(action_id: str, patch: dict) -> bool:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Cas déterministes (pas de devinette IA) : images + plan du site
+# ---------------------------------------------------------------------------
+_IMG_ALT_RE = re.compile(
+    r"Page\s*`([^`]+)`[^\n`]*`([^`]+)`\s*\r?\n\s*(?:→|->)\s*`?alt\s*=\s*"
+    r"\"([^\"]*)\"",
+    re.IGNORECASE)
+
+
+def _parse_image_seo_alts(detail_md: str) -> list[dict]:
+    """Lit la liste « Page `/x` — `img.jpg` → alt="…" » d'une carte Image SEO
+    et la transforme en patches alt prêts pour le patcher. Déterministe :
+    l'alt a déjà été écrit par l'AltGenerator au moment de l'audit."""
+    patches: list[dict] = []
+    for m in _IMG_ALT_RE.finditer(detail_md or ""):
+        page_path, image, alt = (m.group(1).strip(), m.group(2).strip(),
+                                 m.group(3).strip())
+        if image and alt:
+            patches.append({"field": "alt", "page_path": page_path,
+                            "image": image, "new": alt})
+    return patches
+
+
+def _sitemap_equivalent(a: str, b: str) -> bool:
+    """Deux sitemaps couvrent-ils les mêmes URLs ? (on ignore les <lastmod>,
+    qui changent chaque jour — sinon on republierait pour rien)."""
+    def _locs(s: str) -> set:
+        return set(re.findall(r"<loc>\s*(.*?)\s*</loc>", s or "",
+                              re.IGNORECASE | re.DOTALL))
+    return _locs(a) == _locs(b)
+
+
+def _apply_sitemap(action_id: str, action: dict, site: dict, *,
+                   app_state=None) -> dict:
+    """« OK, fais-le » sur une carte « plan du site » : on régénère le
+    sitemap.xml à partir des pages connues (la source de vérité) et on le
+    crée ou le met à jour. Si le fichier existe déjà et couvre les mêmes
+    pages → rien à faire (fini la boucle « Réessayer » qui échouait toujours)."""
+    from . import sitemap as sitemap_mod
+    pages = repo.list_pages(site["id"], limit=5000)
+    if not pages:
+        return _manual(action_id,
+                       "Le robot n'a pas encore la liste de tes pages — "
+                       "relance d'abord un audit du site.")
+    xml = sitemap_mod.generate_sitemap_xml(site, pages)
+
+    workdir_root = tempfile.mkdtemp(prefix="phare_sitemap_")
+    try:
+        workdir = str(Path(workdir_root) / site["repo_github"].split("/")[-1])
+        if not git_pipeline.clone_repo(
+                site["repo_github"], workdir,
+                branch=site.get("repo_branch_main") or "main"):
+            return _fail(action_id, "Impossible de récupérer le code du site.")
+
+        rel, existing = patcher.resolve_sitemap_target(workdir)
+        if existing is not None and _sitemap_equivalent(existing, xml):
+            _update(action_id, {
+                "status": "merged", "merged_at": _now_iso(),
+                "auto_merged": False, "apply_state": "done", "apply_error": "",
+                "simple_md": "Ton plan de site est déjà à jour — rien à changer.",
+            })
+            return {"ok": True, "action_id": action_id, "done": True,
+                    "noop": True}
+
+        if existing is None:
+            patch = {"file": rel, "old": "", "new": xml, "create": True}
+        else:
+            patch = {"file": rel, "old": existing, "new": xml}
+
+        pr = git_pipeline.apply_and_open_pr(
+            site=site, patches=[patch],
+            pr_title=action.get("title") or "Plan du site (sitemap.xml)",
+            pr_body=("Mise à jour du plan du site avec toutes les pages "
+                     "connues.\n\n---\nDemandé par Jordan via « OK, fais-le » "
+                     "(Le Phare)."),
+            workdir_root=workdir_root)
+        if not pr.get("ok"):
+            return _fail(action_id, "La préparation de la modification a "
+                         f"échoué : {pr.get('error') or '?'}")
+        return _verify_and_merge(
+            action_id, action, site,
+            pr_number=pr["pr_number"], branch=pr.get("branch") or "",
+            pr_url=pr.get("pr_url") or "",
+            simple_md=("J'ai mis à jour le plan de ton site — la liste de "
+                       "toutes tes pages pour Google."),
+            files=[rel])
+    finally:
+        shutil.rmtree(workdir_root, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -298,13 +389,32 @@ def _apply_one(action_id: str, *, app_state=None) -> dict:
                      "git n'est pas installé ici — le tick GitHub Actions "
                      "prendra le relais au prochain passage.")
 
+    agent_name = (action.get("agent") or "").lower()
+    # Plan du site : régénération déterministe (jamais via l'IA, qui ne
+    # connaît pas toutes les URLs et bloquait quand le fichier existait déjà).
+    if agent_name == "sitemap_builder":
+        return _apply_sitemap(action_id, action, site, app_state=app_state)
+
     pages = repo.list_pages(site["id"], limit=200)
-    try:
-        ag = agents.Executeur()
-        out = ag.run(site=site, action=action, pages=pages,
-                     app_state=app_state)
-    except Exception as exc:
-        return _fail(action_id, f"L'IA exécutrice n'a pas répondu : {str(exc)[:200]}")
+    if agent_name == "image_seo":
+        # Les textes des images ont déjà été écrits à l'audit : on les pose
+        # directement, sans repasser par l'IA.
+        patches = _parse_image_seo_alts(action.get("detail_md") or "")
+        if not patches:
+            return _manual(action_id,
+                           "Aucune image à décrire ici — rien à faire "
+                           "automatiquement.")
+        out = {"mode": "patches", "patches": patches,
+               "simple_md": ("J'ajoute le petit texte qui décrit tes images "
+                             "(ce que Google lit à la place de l'image).")}
+    else:
+        try:
+            ag = agents.Executeur()
+            out = ag.run(site=site, action=action, pages=pages,
+                         app_state=app_state)
+        except Exception as exc:
+            return _fail(action_id,
+                         f"L'IA exécutrice n'a pas répondu : {str(exc)[:200]}")
 
     if (out.get("mode") or "") == "manual" or not (out.get("patches") or []):
         why = (out.get("manual_reason") or out.get("simple_md")
@@ -325,6 +435,12 @@ def _apply_one(action_id: str, *, app_state=None) -> dict:
             out.get("patches") or [], pages)
         if not loc["applicable"]:
             reasons = "; ".join(r.get("reason") or "?" for r in loc["needs_review"][:3])
+            if agent_name == "image_seo":
+                # Images décoratives / introuvables : ce n'est pas un échec,
+                # juste rien à faire — message clair, pas de « Réessayer ».
+                return _manual(action_id,
+                               "Ces images n'ont pas besoin qu'on y touche "
+                               f"({reasons or 'rien à corriger'}).")
             return _fail(action_id,
                          "Le robot n'a pas retrouvé l'endroit exact à modifier "
                          f"dans le code ({reasons or 'aucun patch'}). "
