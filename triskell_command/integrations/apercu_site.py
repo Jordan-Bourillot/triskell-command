@@ -144,10 +144,9 @@ _DEMO_MAP: dict[str, str] = {
     "esthet": "demo-beaute", "beaut": "demo-beaute", "ongle": "demo-beaute",
     "manucur": "demo-beaute", "maquill": "demo-beaute",
     "institut": "demo-beaute", "cils": "demo-beaute",
-    # Coiffure : pas de démo dédié → univers beauté/salon (le plus proche).
-    # ~130 fiches concernées (coiffeur / coiffeuse / barbier) — premier
-    # métier prospecté sans démo (constaté le 15/06/2026).
-    "coiff": "demo-beaute", "barbier": "demo-beaute", "barber": "demo-beaute",
+    # Coiffure : démo DÉDIÉE depuis le 17/06/2026 (avant : fallback « beauté »,
+    # ~130 fiches coiffeur/barbier renvoyées par erreur vers l'institut).
+    "coiff": "demo-coiffeur", "barbier": "demo-coiffeur", "barber": "demo-coiffeur",
     # ostéo / kiné = paramédical, AVANT massage (masseur-kiné → ostéo)
     "osteopath": "demo-osteopathe", "osteo": "demo-osteopathe",
     "kinesi": "demo-osteopathe", "kine": "demo-osteopathe",
@@ -265,7 +264,7 @@ _DEMO_CITY: dict[str, str] = {
     "demo-patisserie": "Lyon", "demo-electricien": "Lyon",
     "demo-menuisier": "Lyon", "demo-paysagiste": "Lyon",
     "demo-photographe": "Lyon", "demo-tatoueur": "Lyon",
-    "demo-beaute": "Lyon", "demo-bien-etre": "Lyon",
+    "demo-beaute": "Lyon", "demo-bien-etre": "Lyon", "demo-coiffeur": "Lyon",
     "demo-animalier": "Lyon", "demo-coach": "Lyon",
     "demo-restaurant": "Lorient", "demo-plaquiste": "Vannes",
     "demo-macon": "Quimper", "demo-peintre": "Angers",
@@ -321,6 +320,7 @@ _DEMO_LABEL: dict[str, str] = {
     "demo-menuisier": "Menuisier", "demo-paysagiste": "Paysagiste",
     "demo-photographe": "Photographe", "demo-tatoueur": "Tatoueur",
     "demo-beaute": "Institut de beauté", "demo-bien-etre": "Bien-être",
+    "demo-coiffeur": "Salon de coiffure",
     "demo-animalier": "Toilettage", "demo-coach": "Coach sportif",
     "demo-restaurant": "Restaurant", "demo-plaquiste": "Plaquiste",
     "demo-macon": "Maçonnerie", "demo-peintre": "Peintre",
