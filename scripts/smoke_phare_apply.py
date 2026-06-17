@@ -1152,5 +1152,29 @@ with mock.patch.object(orch.repo, "_sb", return_value=FakeSB(ma_db)), \
     check("« Publier sur le site » + vitesse en chute → bloqué (pas publié)",
           not r.get("ok") and not merged_n2)
 
+# ===========================================================================
+# Section ajoutée le 17/06/2026 : plus JAMAIS de jargon technique montré à
+# Jordan (filtre central + refus du robot nettoyé).
+print("\n— plus jamais de jargon montré à Jordan (17/06) —")
+
+check("détecte le jargon (FAQPage / schema.org / H1)",
+      pl.has_jargon("Le balisage FAQPage en schema.org exige de reprendre le H1"))
+check("détecte fetchpriority / balise <img>",
+      pl.has_jargon('Ajouter fetchpriority="high" sur une balise <img>'))
+check("français normal → aucun jargon détecté",
+      not pl.has_jargon("Pour bien faire, j'ai besoin de recopier tes vraies "
+                        "questions-réponses déjà écrites sur ta page."))
+
+r = run_apply({"mode": "manual",
+               "manual_reason": "Le balisage FAQPage en schema.org exige le H1."})
+final = updates[-1]
+check("refus en jargon → message propre sur la carte (zéro charabia)",
+      final.get("apply_state") == "manual"
+      and not pl.has_jargon(final.get("apply_error", "")))
+
+check("explain : 1re ligne en jargon → phrase neutre, pas le charabia",
+      not pl.has_jargon(pl.explain(
+          {"detail_md": "Ajouter fetchpriority sur le <img> en haut de page."})))
+
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)

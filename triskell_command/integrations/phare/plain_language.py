@@ -116,6 +116,28 @@ def _agent_special(action: dict) -> Optional[tuple[str, str]]:
     return None
 
 
+# Filet anti-jargon : Jordan ne doit JAMAIS voir de mot technique (règle
+# « parler normal »). Quand un texte écrit par une IA en contient malgré tout,
+# on le remplace par un message neutre plutôt que de lui infliger le charabia.
+_JARGON_RE = re.compile(
+    r"(faqpage|json-?ld|schema\.?org|données structurées|donnees structurees|"
+    r"fetchpriority|canonical|noindex|méta-?description|meta-?description|"
+    r"\bmeta\b|\bbalise|\battribut|<\s*/?\s*(head|img|title|meta|link|script|h[1-6])|"
+    r"\bjsonld\b|\bcrawl|\bsrcset|\bloading=|\balt=|microdonnées|microdonnees|"
+    r"breadcrumb|localbusiness|\borganization\b|sitemap\.xml|head_insert|"
+    r"\bhtml\b|\bcss\b|\brepo\b|\bh1\b|\bh2\b)",
+    re.IGNORECASE)
+
+CLEAN_MANUAL_FALLBACK = (
+    "Le robot a regardé : celle-ci, c'est mieux qu'on la fasse ensemble — il "
+    "préfère ne pas y toucher tout seul. Tu peux la mettre de côté pour l'instant.")
+
+
+def has_jargon(text: str) -> bool:
+    """Le texte contient-il un mot technique interdit pour Jordan ?"""
+    return bool(_JARGON_RE.search(text or ""))
+
+
 def explain(action: dict) -> str:
     """Phrase « ce que ça change », sans jargon. Jamais vide."""
     simple = (action.get("simple_md") or "").strip()
@@ -130,11 +152,13 @@ def explain(action: dict) -> str:
                 "sitemap", "pagespeed", "alt", "maillage", "gsc"):
         if fam in fams:
             return _FAMILY_TEXTS[fam]
-    # Fallback : début du détail technique, mieux que rien
+    # Fallback : début du détail — mais JAMAIS une 1re ligne pleine de jargon
+    # (texte d'un agent technique). Mieux vaut une phrase neutre qu'un charabia.
     detail = (action.get("detail_md") or "").strip()
     if detail:
         first = detail.split("\n")[0].strip()
-        return first[:220] + ("…" if len(first) > 220 else "")
+        if first and not has_jargon(first):
+            return first[:220] + ("…" if len(first) > 220 else "")
     return "Proposition des robots — ouvre le détail pour en savoir plus."
 
 

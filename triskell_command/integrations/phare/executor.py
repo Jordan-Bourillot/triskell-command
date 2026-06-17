@@ -463,6 +463,10 @@ def _apply_one(action_id: str, *, app_state=None) -> dict:
     if (out.get("mode") or "") == "manual" or not (out.get("patches") or []):
         why = (out.get("manual_reason") or out.get("simple_md")
                or "Le robot a regardé : c'est à faire à la main.")
+        # Filet anti-jargon : si l'IA a laissé filer un mot technique, on
+        # n'inflige pas son charabia à Jordan — message neutre et clair.
+        if plain_language.has_jargon(why):
+            why = plain_language.CLEAN_MANUAL_FALLBACK
         return _manual(action_id, why)
 
     simple_md = (out.get("simple_md") or "").strip()

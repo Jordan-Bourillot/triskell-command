@@ -740,7 +740,18 @@ Format JSON strict (rien d'autre) :
   "patches": [ ... ],                  // si mode=patches, 1 à 8 patches
   "simple_md": str,                    // 1-2 phrases SANS jargon : ce que tu fais,
                                        // compréhensible par quelqu'un de non technique
-  "manual_reason": str                 // si mode=manual : pourquoi, en français simple
+  "manual_reason": str                 // si mode=manual : pourquoi. AFFICHÉ TEL QUEL
+                                       // à Jordan, qui n'y connaît RIEN en technique.
+                                       // ZÉRO jargon : jamais « JSON-LD », « FAQPage »,
+                                       // « schema.org », « balise », « attribut »,
+                                       // « canonical », « title », « meta », « H1 »,
+                                       // « crawl », « <head> », « <img> »,
+                                       // « fetchpriority ». Explique en mots de tous les
+                                       // jours, comme à un ami. INTERDIT : « le balisage
+                                       // FAQPage en schema.org exige… ». BON : « pour
+                                       // bien faire j'ai besoin de recopier une vraie
+                                       // liste de questions-réponses déjà écrite sur ta
+                                       // page, et je ne l'ai pas sous les yeux ».
 }"""
 
     def run(self, *, site: dict, action: dict, pages: list,

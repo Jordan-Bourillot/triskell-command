@@ -269,16 +269,15 @@ def run_onpage_optim(site_id: str, page_path: str = "/",
 
     detail_lines = [out.get("summary_md") or ""]
     if file_patches:
-        detail_lines.append(f"\n**{len(file_patches)} patches fichier** "
-                             "appliqués (cf. PR liée).")
+        n = len(file_patches)
+        detail_lines.append(f"\nJ'ai préparé {n} amélioration"
+                            f"{'s' if n > 1 else ''} sur cette page.")
     if needs_review:
-        detail_lines.append(f"\n**{len(needs_review)} patches en review** "
-                             "(localisation ambiguë) :")
-        for r in needs_review[:6]:
-            detail_lines.append(
-                f"- `{r['field']}` — {r['reason']} — "
-                f"candidates: {r.get('candidates') or ['aucun']}"
-            )
+        # Détail technique (endroits ambigus) : gardé pour le JOURNAL, jamais
+        # écrit sur la carte — on n'inflige pas de charabia de débogage à Jordan.
+        logger.info("run_onpage_optim %s : %d à revoir (%s)", page_path,
+                    len(needs_review),
+                    ", ".join(str(r.get("field")) for r in needs_review[:6]))
 
     action = repo.insert_action({
         "site_id": site_id,
