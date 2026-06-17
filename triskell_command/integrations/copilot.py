@@ -581,6 +581,39 @@ def _hours_since(iso: str) -> float:
         return 1e9
 
 
+_FR_JOURS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi",
+             "dimanche")
+_FR_MOIS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+            "août", "septembre", "octobre", "novembre", "décembre")
+
+
+def _today_marker() -> str:
+    """Repère temporel donné à l'IA à CHAQUE tour : sans lui, elle ne sait pas
+    quel jour on est et invente les écarts (« le 12 juin (hier) » alors qu'on
+    est le 17). Frais à chaque tour — jamais mis dans le cache du contexte."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("Europe/Paris"))
+        suffixe = " (heure de Paris)"
+    except Exception:
+        # Serveur sans table de fuseaux : l'heure peut être en UTC, mais le
+        # JOUR reste juste à 2 h près — largement assez pour situer une date.
+        now = datetime.now()
+        suffixe = ""
+    date_fr = (f"{_FR_JOURS[now.weekday()]} {now.day} "
+               f"{_FR_MOIS[now.month - 1]} {now.year}")
+    return (
+        f"REPÈRE DU JOUR — nous sommes le {date_fr}, il est environ "
+        f"{now.strftime('%Hh%M')}{suffixe}. Les dates du JSON sont au format "
+        "année-mois-jour. Pour situer une date (« hier », « il y a 3 jours », "
+        "« la semaine dernière »), calcule TOUJOURS l'écart par rapport à CE "
+        "jour — ne devine jamais de mémoire. En cas de doute, donne la date "
+        "réelle (« le 12 juin ») plutôt qu'un raccourci faux. Un « dernier "
+        "passage » ou un « dernier envoi » vieux de plusieurs jours n'est PAS "
+        "récent : dis-le franchement."
+    )
+
+
 def briefing_due(user_id: str) -> bool:
     """Un point du jour est-il dû ? (jamais fait, ou il date de plus de
     BRIEFING_GAP_HOURS heures)."""
@@ -666,6 +699,7 @@ TON ET FORMAT (ÉCRIT)
 - JAMAIS de jargon technique : pas de noms de fichiers, d'endpoints, de termes anglais techniques. Tu parles comme à quelqu'un de non-technique.
 - Si tu ne comprends pas la demande, pose UNE question de clarification, courte.
 - N'invente JAMAIS un chiffre ou un fait : tout vient du JSON ou du fil de la conversation.
+- LES DATES : un « REPÈRE DU JOUR » t'est donné plus bas. Tout écart de date (« hier », « il y a X jours », « ce matin ») se calcule par rapport à LUI, jamais de mémoire. Une date vieille de plusieurs jours n'est jamais « hier ». Dans le doute, donne la date réelle (« le 12 juin ») plutôt qu'un raccourci faux.
 - Quand tu viens d'AGIR (action exécutée), ne promets rien que le système ne fait pas : décris ce qui va réellement se passer.
 
 ═══════════════════════════════════════════════════════════════
@@ -777,6 +811,7 @@ def build_prompt(app_state, user_id: str, thread: list[dict],
     if summary:
         blocks.append("RÉSUMÉ DES ÉCHANGES PLUS ANCIENS (le fil ci-dessous "
                       "ne montre que la fin) :\n" + summary)
+    blocks.append(_today_marker())
     blocks.append(_context_block(app_state))
     if view:
         blocks.append(f"Écran actuellement ouvert devant {name} : {view}")
@@ -1171,6 +1206,7 @@ def stream_briefing(app_state, user_id: str, view: str = "") -> Iterator[dict]:
     blocks.append(_context_block(app_state))
     if view:
         blocks.append(f"Écran actuellement ouvert devant {name} : {view}")
+    blocks.append(_today_marker())
     blocks.append(f"Repère temporel : {since}.")
     blocks.append(BRIEFING_INSTRUCTION.replace("{PRENOM}", name))
     prompt = "\n\n---\n\n".join(blocks)
