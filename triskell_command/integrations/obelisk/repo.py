@@ -96,6 +96,13 @@ def _sb():
 # Liste des créateurs (lecture)
 # ---------------------------------------------------------------------------
 ALLOWED_STATUSES = ("new", "qualified", "contacted", "replied", "refused", "won", "lost")
+# Statuts qu'on peut FILTRER en lecture mais qu'on ne pose jamais à la main
+# (le système les met seul) : « bounced » = adresse morte (mail revenu en
+# erreur), « unsubscribed » = désinscrit. On les autorise dans le filtre de
+# liste pour pouvoir voir/gérer ces fiches (compteurs « Adresses mortes » et
+# « Désinscrits » de la page Santé rendus cliquables). On ne les ajoute PAS
+# à ALLOWED_STATUSES pour qu'ils restent refusés en écriture manuelle.
+FILTERABLE_STATUSES = ALLOWED_STATUSES + ("bounced", "unsubscribed")
 
 # Colonnes lues pour la liste. Les 3 dernières (contact_channel,
 # next_follow_up_at, demo_url) viennent de la migration 51 : si la base
@@ -231,7 +238,7 @@ def list_creators(*,
                 if end:
                     qy = qy.lte("created_at",
                                 _shift_iso(end, seconds=300))
-        if status and status in ALLOWED_STATUSES:
+        if status and status in FILTERABLE_STATUSES:
             qy = qy.eq("status", status)
         if min_score and min_score > 0:
             qy = qy.gte("score", int(min_score))

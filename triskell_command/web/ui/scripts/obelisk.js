@@ -195,6 +195,9 @@ const Obelisk = {
   STATUS_LABELS: {
     new: 'Nouveau', qualified: 'Qualifié', contacted: 'Contacté',
     replied: 'A répondu', refused: 'Refusé', won: 'Gagné', lost: 'Perdu',
+    // Posés par le système (jamais à la main) : utiles pour FILTRER et
+    // AFFICHER la fiche, exclus du sélecteur de changement de statut.
+    bounced: 'Adresse morte', unsubscribed: 'Désinscrit',
   },
   // États des recherches (le serveur parle anglais, pas l'écran)
   JOB_STATUS_LABELS: {
@@ -208,6 +211,8 @@ const Obelisk = {
     refused: 'text-danger bg-danger/10',
     won: 'text-success bg-success/15',
     lost: 'text-text-muted bg-text-muted/10',
+    bounced: 'text-danger bg-danger/10',
+    unsubscribed: 'text-text-muted bg-text-muted/10',
   },
 
   async _api(method, payload, opts) {
@@ -325,7 +330,7 @@ const Obelisk = {
   // "Tous les prospects" sous PROSPECTION. Réutilise toute la machinerie
   // de l'onglet Créateurs, mais sans les onglets Obelisk (Nouvelle
   // recherche / Réglages restent dans la vue Obelisk).
-  async renderCreatorsView(container) {
+  async renderCreatorsView(container, params) {
     this._root = container;
     this._standalone = true;
     this.state.tab = 'creators';
@@ -364,6 +369,15 @@ const Obelisk = {
     document.getElementById('ob-import-file').onclick = () => this._openImportFile();
     // Restaure les filtres de la liste si on revient sur la vue
     this._applyListFilters();
+    // Ouverture ciblée depuis un autre écran (ex. carte « Adresses mortes »
+    // de la page Santé → on arrive directement filtré sur ce statut). Le
+    // filtre demandé PRIME sur les filtres restaurés, et on remet le type
+    // sur « Tous » pour ne masquer aucune fiche.
+    if (params && params.status) {
+      this.state.filters.status = params.status;
+      this._setListAudience('');
+      Toast.info('Filtré sur : ' + (this.STATUS_LABELS[params.status] || params.status) + '.');
+    }
     await this._loadStats();
     this._loadPending();
     await this._renderCreators();
@@ -1718,6 +1732,23 @@ const Obelisk = {
     };
   },
 
+  // Options du sélecteur de CHANGEMENT de statut d'une fiche. On ne propose
+  // QUE les statuts manuels ; « Adresse morte » et « Désinscrit » sont posés
+  // par le système, jamais à la main. Si la fiche est déjà dans un de ces
+  // états, on l'affiche en tête (sélectionné, non-cliquable) pour ne pas
+  // faire croire qu'elle est « Nouveau » — tout en laissant la réactiver
+  // vers un statut manuel (ex. l'adresse remarche).
+  _statusChangeOptions(current) {
+    const AUTO = ['bounced', 'unsubscribed'];
+    const head = AUTO.includes(current)
+      ? `<option value="${current}" selected disabled>${this._esc(this.STATUS_LABELS[current] || current)}</option>`
+      : '';
+    return head + Object.entries(this.STATUS_LABELS)
+      .filter(([k]) => !AUTO.includes(k))
+      .map(([k, l]) => `<option value="${k}" ${current === k ? 'selected' : ''}>${this._esc(l)}</option>`)
+      .join('');
+  },
+
   _rowHtml(p) {
     const platform = this._inferPlatform(p);
     const emails = Array.isArray(p.emails) ? p.emails : [];
@@ -1741,7 +1772,7 @@ const Obelisk = {
         <td style="color: hsl(var(--text-muted));">${this._esc(p.city || '—')}</td>
         <td>
           <select class="ob-status-select" data-ob-status="${this._esc(p.id)}" aria-label="Statut de ce prospect">
-            ${Object.entries(this.STATUS_LABELS).map(([k, l]) => `<option value="${k}" ${status === k ? 'selected' : ''}>${this._esc(l)}</option>`).join('')}
+            ${this._statusChangeOptions(status)}
           </select>
         </td>
       </tr>
@@ -2130,7 +2161,7 @@ const Obelisk = {
       <div class="border-t border-border pt-4 mt-5">
         <div class="text-[11px] uppercase tracking-widest font-bold text-text-muted mb-2">Statut</div>
         <select id="ob-d-status" class="ob-status-select w-full" aria-label="Statut de ce prospect">
-          ${Object.entries(this.STATUS_LABELS).map(([k, l]) => `<option value="${k}" ${(p.status || 'new') === k ? 'selected' : ''}>${this._esc(l)}</option>`).join('')}
+          ${this._statusChangeOptions(p.status || 'new')}
         </select>
 
         <div class="text-[11px] uppercase tracking-widest font-bold text-text-muted mb-1 mt-4">Notes</div>

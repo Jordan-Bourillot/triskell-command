@@ -463,8 +463,10 @@ const Health = {
                       review > 0 ? "App.show('drafts')" : '')}
           ${blockCard('Doublons évités (récents)', dup, dup > 0 ? '' : '')}
           ${blockCard('Adresses mortes', bounced,
-                      bounced > 0 ? 'warning' : '')}
-          ${blockCard('Désinscrits (STOP)', unsub, '')}
+                      bounced > 0 ? 'warning' : '',
+                      bounced > 0 ? "App.show('prospects_crm', {status:'bounced'})" : '')}
+          ${blockCard('Désinscrits (STOP)', unsub, '',
+                      unsub > 0 ? "App.show('prospects_crm', {status:'unsubscribed'})" : '')}
         </div>
         ${alerts ? `
           <div class="card p-4 mt-4 border-l-4 border-l-danger">
