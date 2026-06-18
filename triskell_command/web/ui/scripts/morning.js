@@ -1544,8 +1544,8 @@ const Morning = {
           value: nInbox,
           delta: 'repérés par l’IA — à vérifier',
           tone: 'warning',
-          onClick: `App.show('mails', { tab: 'inbound' })`,
-          hint: 'Mails de gens pas encore dans ta liste que l’IA juge importants (question, devis, partenariat…). Clic pour ouvrir ta boîte de réception.',
+          onClick: `App.show('mails', { tab: 'inbound', focus: 'attention' })`,
+          hint: 'Mails de gens pas encore dans ta liste que l’IA juge importants (question, devis, partenariat…). Clic pour tomber direct sur le(s) mail(s) concerné(s).',
         }) : ''}
         ${this._kpi({
           label: 'Brouillons à valider',

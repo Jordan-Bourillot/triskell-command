@@ -2297,7 +2297,7 @@ const Obelisk = {
       : 'ex : entrepreneur, coaching, growth, formation';
     c.innerHTML = `
       <div class="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5">
-        <div class="bg-card border border-border rounded-xl p-6">
+        <div class="bg-surface-elevated border border-border rounded-xl p-6">
           <div class="ob-audience-switch">
             ${['creator', 'pro'].map(a => {
               const meta = this.AUDIENCE_LABELS[a];
@@ -2409,7 +2409,7 @@ const Obelisk = {
           <div id="ob-s-progress" class="mt-5"></div>
         </div>
 
-        <div class="bg-card border border-border rounded-xl p-5">
+        <div class="bg-surface-elevated border border-border rounded-xl p-5">
           <h4 class="text-sm font-bold mb-3">Recherches récentes</h4>
           <div id="ob-s-jobs" class="text-[12px] text-text-muted">Chargement…</div>
         </div>
@@ -2643,7 +2643,7 @@ const Obelisk = {
     const cfg = (r && r.ok && r.config) || {};
     this.state.config = cfg;
     c.innerHTML = `
-      <div class="bg-card border border-border rounded-xl p-6 max-w-3xl">
+      <div class="bg-surface-elevated border border-border rounded-xl p-6 max-w-3xl">
         <h3 class="text-lg font-bold mb-1">Réglages Obélisk</h3>
         <p class="text-sm text-text-muted mb-6">Clés d’accès par plateforme, préférences IA, et catalogue d’offres utilisé dans les mails générés.</p>
 

@@ -338,8 +338,8 @@ const MailTemplates = {
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4">
-          <aside id="mt-list" class="bg-card border border-border rounded-xl p-2 overflow-y-auto" style="max-height: calc(100vh - 240px);"></aside>
-          <main  id="mt-editor" class="bg-card border border-border rounded-xl p-5 min-h-[500px]"></main>
+          <aside id="mt-list" class="bg-surface-elevated border border-border rounded-xl p-2 overflow-y-auto" style="max-height: calc(100vh - 240px);"></aside>
+          <main  id="mt-editor" class="bg-surface-elevated border border-border rounded-xl p-5 min-h-[500px]"></main>
         </div>
       </section>
     `;

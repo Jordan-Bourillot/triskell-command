@@ -38,6 +38,13 @@ const Mails = {
     // (newsletters, notifs, rapports DMARC...). Caché par défaut, persisté
     // en localStorage. N'affecte que l'onglet 'inbound'.
     showAuto: null,
+    // Deep-link depuis la carte « Mails d'inconnus à regarder » (Cockpit) :
+    // ne montre QUE les mails épinglés par l'IA (🔎 à regarder). Persiste
+    // tant qu'on reste dessus ; nettoyé au changement d'onglet.
+    attentionOnly: false,
+    // Une seule fois après le deep-link : si un seul mail est repéré, on
+    // l'ouvre tout seul (on tombe direct dessus). Consommé après ouverture.
+    attentionAutoOpen: false,
   },
 
   READ_STORAGE_KEY: 'triskell.mails.readIds',
@@ -175,6 +182,13 @@ const Mails = {
     if (params && params.tab && ['inbound', 'reply', 'sent', 'scheduled'].includes(params.tab)) {
       this.state.tab = params.tab;
     }
+    // Arrivée depuis la carte « Mails d'inconnus à regarder » : on force la
+    // Boîte de réception filtrée sur les seuls mails épinglés par l'IA, et on
+    // arme l'ouverture auto s'il n'y en a qu'un.
+    const wantAttention = !!(params && (params.focus === 'attention' || params.attention));
+    this.state.attentionOnly = wantAttention;
+    this.state.attentionAutoOpen = wantAttention;
+    if (wantAttention) this.state.tab = 'inbound';
     // Le champ de recherche repart vide à chaque affichage de la vue :
     // on aligne l'état (sinon un ancien filtre s'appliquerait en silence).
     this.state.searchQuery = '';
@@ -367,6 +381,9 @@ const Mails = {
   _switchTab(tab) {
     this.state.tab = tab;
     this.state.selectedIds = new Set();
+    // Changer d'onglet quitte le filtre « à regarder » du deep-link.
+    this.state.attentionOnly = false;
+    this.state.attentionAutoOpen = false;
     // La recherche est propre à un onglet : on la réinitialise en changeant.
     this.state.searchQuery = '';
     const searchInput = document.getElementById('m-search');
@@ -472,6 +489,21 @@ const Mails = {
       if (toggleBtn) toggleBtn.style.display = 'none';
     }
 
+    // Filtre « à regarder » (deep-link Cockpit) : ne garde que les mails que
+    // l'IA a épinglés. On le pose APRÈS le filtre notifs auto, et on cache le
+    // bouton "notifs auto" qui n'a aucun sens dans cette vue ciblée.
+    // On colle au compteur du Cockpit : mails épinglés (🔎) ET pas encore
+    // lus — exactement ce qui est compté côté serveur (extra.triage.attention
+    // + pas de read_at).
+    const attentionOnly = this.state.tab === 'inbound' && this.state.attentionOnly;
+    if (attentionOnly) {
+      this.state.mails = this.state.mails.filter(m => {
+        const t = (m.extra || {}).triage;
+        return t && t.attention && !this._isRead(m.id, m);
+      });
+      if (toggleBtn) toggleBtn.style.display = 'none';
+    }
+
     // Le serveur a-t-il probablement plus de mails que ce qui est chargé ?
     // (la pagination par décalage va chercher la suite — garde-fou à 1000)
     const limit = this.state.listLimit || 100;
@@ -479,23 +511,40 @@ const Mails = {
     this.state.hasMore = maybeMore && allMails.length < 1000;
     const recentNote = maybeMore ? ` — les ${allMails.length} plus récents` : '';
 
-    countEl.textContent = (hiddenAutoCount > 0
-      ? `${this.state.mails.length} mail(s) — ${hiddenAutoCount} notif(s) auto cachée(s)`
-      : `${this.state.mails.length} mail(s)`) + recentNote;
+    if (attentionOnly) {
+      const n = this.state.mails.length;
+      countEl.textContent = `${n} mail${n > 1 ? 's' : ''} à regarder`;
+    } else {
+      countEl.textContent = (hiddenAutoCount > 0
+        ? `${this.state.mails.length} mail(s) — ${hiddenAutoCount} notif(s) auto cachée(s)`
+        : `${this.state.mails.length} mail(s)`) + recentNote;
+    }
 
     // Bandeau d'information sur la Boîte de réception : elle ne contient
     // que les réponses liées à la prospection, pas toute la boîte mail.
-    const limitedBanner = this.state.tab === 'inbound'
-      ? `<div class="mb-3 px-4 py-2.5 rounded-xl border border-border bg-bg text-[11px] text-text-muted" style="text-wrap: pretty">
-           ℹ Cette boîte montre les mails entrants liés à ta prospection — pas toute ta boîte mail.
-           Les réponses de prospects déjà triées par l'IA (intéressé, refus…) sont dans
-           <button type="button" class="text-accent underline hover:no-underline" onclick="App.show('replies')">Réponses</button>.
-         </div>` + this._triageBar()
-      : '';
+    let limitedBanner = '';
+    if (this.state.tab === 'inbound') {
+      if (attentionOnly) {
+        // Vue ciblée : un bandeau clair + un retour vers la boîte complète.
+        limitedBanner = `<div class="mb-3 px-4 py-2.5 rounded-xl text-[12px] text-text flex items-center gap-2 flex-wrap"
+             style="border:1px solid hsl(var(--gold)/0.4); background:hsl(var(--gold)/0.08); text-wrap: pretty">
+             <span>🔎 <strong>Mails repérés par l'IA</strong> — à vérifier (gens pas encore dans ta liste).</span>
+             <button type="button" class="text-accent underline hover:no-underline ml-auto" onclick="Mails._clearAttentionFilter()">Voir tous les mails entrants</button>
+           </div>`;
+      } else {
+        limitedBanner = `<div class="mb-3 px-4 py-2.5 rounded-xl border border-border bg-bg text-[11px] text-text-muted" style="text-wrap: pretty">
+             ℹ Cette boîte montre les mails entrants liés à ta prospection — pas toute ta boîte mail.
+             Les réponses de prospects déjà triées par l'IA (intéressé, refus…) sont dans
+             <button type="button" class="text-accent underline hover:no-underline" onclick="App.show('replies')">Réponses</button>.
+           </div>` + this._triageBar();
+      }
+    }
 
     if (!this.state.mails.length) {
       let hint;
-      if (hiddenAutoCount > 0) {
+      if (attentionOnly) {
+        hint = `<p class="text-text-muted">Aucun mail « à regarder » pour le moment — tu es à jour. <button type="button" class="text-accent underline hover:no-underline" onclick="Mails._clearAttentionFilter()">Voir tous les mails entrants</button></p>`;
+      } else if (hiddenAutoCount > 0) {
         hint = `<p class="text-text-muted">Aucun mail visible — ${hiddenAutoCount} notif(s) auto cachée(s). Clique sur "Afficher les notifs auto" pour les voir.</p>`;
       } else if (this.state.accountFilter) {
         hint = `<p class="text-text-muted">Aucun mail pour ce compte. Les mails les plus anciens n'ont pas l'information du compte : remets le filtre sur « — Tous — » pour tout voir.</p>`;
@@ -521,6 +570,22 @@ const Mails = {
       return;
     }
     this._renderListAndBulk(root, limitedBanner, this.state.mails);
+
+    // Deep-link « à regarder » avec un seul mail repéré → on l'ouvre tout
+    // seul, une seule fois (Jordan tombe direct dessus). Plusieurs mails →
+    // on laisse la liste filtrée, il choisit.
+    if (attentionOnly && this.state.attentionAutoOpen && this.state.mails.length === 1) {
+      this.state.attentionAutoOpen = false;
+      const only = this.state.mails[0];
+      setTimeout(() => this._openDetail(only), 150);
+    }
+  },
+
+  /** Quitte le filtre « à regarder » et réaffiche toute la Boîte de réception. */
+  _clearAttentionFilter() {
+    this.state.attentionOnly = false;
+    this.state.attentionAutoOpen = false;
+    this._load();
   },
 
   // ----------------------------------------------------------------------
@@ -968,7 +1033,7 @@ const Mails = {
         <label class="flex items-center gap-1.5">
           <span class="text-text-muted">à partir de :</span>
           <select onchange="Mails._setTriage('min_priority', this.value)"
-                  class="px-2 py-1 rounded-lg bg-card border border-border text-text">
+                  class="px-2 py-1 rounded-lg bg-surface-elevated border border-border text-text">
             ${opt('low', 'tout')}
             ${opt('normal', 'important')}
             ${opt('high', 'urgent seulement')}
