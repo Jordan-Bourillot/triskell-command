@@ -3,7 +3,7 @@
    Filtres par famille + statut + démo + message. Données via App.api.creators_*.
    Couleurs : jetons de thème uniquement (lisible en clair / mid / sombre). */
 const Creators = {
-  state: { rows: [], due: [], editing: null, q: '', fam: '' },
+  state: { rows: [], due: [], editing: null, q: '', fam: '', plat: '' },
 
   _api(method, payload) { return App.api['creators_' + method](payload || {}); },
 
@@ -25,6 +25,23 @@ const Creators = {
     if (n.includes('🟠')) return 'digital';
     if (n.includes('⚫')) return 'marque';
     return '';
+  },
+
+  PLAT: {
+    youtube:   { e: '▶️', label: 'YouTube',   color: '#ef4444' },
+    tiktok:    { e: '🎵', label: 'TikTok',    color: '#0ea5b7' },
+    instagram: { e: '📸', label: 'Instagram', color: '#d6249f' },
+  },
+
+  // Plateforme réelle du créateur. Le champ "platform" a parfois servi à noter
+  // le canal de contact (ex "Email") sur les anciens → on recoupe lien + notes.
+  platKey(c) {
+    const h = (c.handle || '').toLowerCase(), p = (c.platform || '').toLowerCase(),
+          n = (c.notes || '').toLowerCase(), m = (c.message || '').toLowerCase();
+    if (p === 'tiktok' || h.includes('tiktok.com') || n.includes('cible tiktok')) return 'tiktok';
+    if (h.includes('youtube.com') || n.includes('youtube') || n.includes('chaîne') || n.includes('chaine') || m.includes('youtubeur')) return 'youtube';
+    if (p === 'instagram' || h.includes('instagram')) return 'instagram';
+    return 'youtube';
   },
 
   fmtDate(v) {
@@ -88,19 +105,28 @@ const Creators = {
     const host = document.getElementById('cr-filters');
     if (!host) return;
     const rows = this.state.rows;
-    const count = k => k === '' ? rows.length : rows.filter(c => this.famKey(c) === k).length;
-    const chip = (k, label) => {
-      const active = this.state.fam === k;
-      const f = this.FAMILIES[k];
-      const col = f ? f.color : 'hsl(var(--accent-strong))';
-      const e = f ? f.e + ' ' : '';
-      return `<button data-fam="${k}" style="border:1px solid ${active ? col : 'hsl(var(--border-strong))'};background:${active ? col : 'hsl(var(--surface))'};color:${active ? '#fff' : 'hsl(var(--text-secondary))'};border-radius:999px;padding:6px 13px;font-size:13px;font-weight:600;cursor:pointer">${e}${label} (${count(k)})</button>`;
-    };
-    host.innerHTML = chip('', 'Tous') + chip('vierge', 'Vierges') + chip('physique', 'Physiques') + chip('digital', 'Services') + (count('marque') ? chip('marque', 'Marques') : '');
+    const mkChip = (attr, k, label, active, color, emoji, n) =>
+      `<button data-${attr}="${k}" style="border:1px solid ${active ? color : 'hsl(var(--border-strong))'};background:${active ? color : 'hsl(var(--surface))'};color:${active ? '#fff' : 'hsl(var(--text-secondary))'};border-radius:999px;padding:6px 13px;font-size:13px;font-weight:600;cursor:pointer">${emoji ? emoji + ' ' : ''}${label} (${n})</button>`;
+    const pc = k => k === '' ? rows.length : rows.filter(c => this.platKey(c) === k).length;
+    const platChip = (k, label) => { const pf = this.PLAT[k]; return mkChip('plat', k, label, this.state.plat === k, pf ? pf.color : 'hsl(var(--accent-strong))', pf ? pf.e : '', pc(k)); };
+    const fc = k => k === '' ? rows.length : rows.filter(c => this.famKey(c) === k).length;
+    const famChip = (k, label) => { const f = this.FAMILIES[k]; return mkChip('fam', k, label, this.state.fam === k, f ? f.color : 'hsl(var(--accent-strong))', f ? f.e : '', fc(k)); };
+    const rowS = 'display:flex;gap:8px;flex-wrap:wrap;align-items:center';
+    const lblS = 'font-size:11px;letter-spacing:.3px;text-transform:uppercase;color:hsl(var(--text-muted));font-weight:700;margin-right:2px;min-width:74px';
+    host.style.flexDirection = 'column';
+    host.style.alignItems = 'stretch';
+    host.innerHTML =
+      `<div style="${rowS};margin-bottom:9px"><span style="${lblS}">Plateforme</span>`
+        + platChip('', 'Toutes') + platChip('youtube', 'YouTube') + platChip('tiktok', 'TikTok') + platChip('instagram', 'Instagram')
+      + `</div>`
+      + `<div style="${rowS}"><span style="${lblS}">Famille</span>`
+        + famChip('', 'Tous') + famChip('vierge', 'Vierges') + famChip('physique', 'Physiques') + famChip('digital', 'Services') + (fc('marque') ? famChip('marque', 'Marques') : '')
+      + `</div>`;
+    host.querySelectorAll('[data-plat]').forEach(b => b.addEventListener('click', () => {
+      this.state.plat = b.getAttribute('data-plat'); this.renderFilters(); this.renderGrid();
+    }));
     host.querySelectorAll('[data-fam]').forEach(b => b.addEventListener('click', () => {
-      this.state.fam = b.getAttribute('data-fam');
-      this.renderFilters();
-      this.renderGrid();
+      this.state.fam = b.getAttribute('data-fam'); this.renderFilters(); this.renderGrid();
     }));
   },
 
@@ -138,6 +164,7 @@ const Creators = {
       return;
     }
     let rows = this.state.rows;
+    if (this.state.plat) rows = rows.filter(c => this.platKey(c) === this.state.plat);
     if (this.state.fam) rows = rows.filter(c => this.famKey(c) === this.state.fam);
     if (this.state.q) rows = rows.filter(c =>
       (c.name || '').toLowerCase().includes(this.state.q) || (c.notes || '').toLowerCase().includes(this.state.q));
@@ -171,6 +198,8 @@ const Creators = {
     const bar = contacted ? '#16a34a' : '#d97706';
     const fk = this.famKey(c);
     const fam = this.FAMILIES[fk];
+    const pf = this.PLAT[this.platKey(c)];
+    const platBadge = pf ? `<span style="background:${pf.color}1a;color:${pf.color};font-size:11px;font-weight:700;padding:2px 9px;border-radius:6px;white-space:nowrap">${pf.e} ${pf.label}</span>` : '';
     const famBadge = fam
       ? `<span style="background:${fam.color}1a;color:${fam.color};font-size:11px;font-weight:700;padding:2px 9px;border-radius:6px;white-space:nowrap">${fam.e} ${fam.label}</span>`
       : `<span style="background:hsl(var(--surface));color:hsl(var(--text-muted));font-size:11px;font-weight:600;padding:2px 9px;border-radius:6px">à classer</span>`;
@@ -196,7 +225,7 @@ const Creators = {
         <div style="height:4px;background:${bar}"></div>
         <div style="padding:14px 16px 15px;display:flex;flex-direction:column;gap:7px;flex:1">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            ${famBadge}
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${platBadge}${famBadge}</div>
             <button data-del="${c.id}" title="Supprimer" style="border:0;background:none;cursor:pointer;font-size:15px;color:hsl(var(--text-muted))">🗑</button>
           </div>
           <div style="font-size:16.5px;font-weight:700;color:hsl(var(--text));line-height:1.25">${this.esc(c.name)}</div>
