@@ -499,7 +499,10 @@ const Phare = {
             <button class="btn btn-secondary btn-sm" data-apply-retry="${this._esc(a.id || '')}">Réessayer</button>
           </span>
         </div>`;
-    } else if (applyState === 'manual') {
+    } else if (robotDeclined && !canRobot) {
+      // Note « à la main » UNIQUEMENT quand le robot ne reprend pas la carte.
+      // Si ses capacités ont grandi (canRobot=true), l'ancien verdict est
+      // obsolète : ne pas l'afficher sous un bouton vert « OK, fais-le ».
       stateNote = `<div class="phare-empty-inline" style="margin-top:8px;border-left:3px solid #f5a623">
           🛠️ Le robot a regardé : ${this._esc(a.apply_error || 'c’est à faire à la main.')}
         </div>`;

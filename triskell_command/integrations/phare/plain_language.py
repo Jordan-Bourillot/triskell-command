@@ -237,6 +237,16 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
         return {"can": False, "mode": "manual",
                 "why": ("Celle-ci, c'est un travail à faire ensemble — le robot "
                         "ne peut pas s'en charger tout seul.")}
+    # Le robot a DÉJÀ regardé cette carte et tranché « à la main »
+    # (apply_state 'manual', sa raison est affichée juste en dessous). Les
+    # vraies capacités (FAQ, préchargement, familles de balises) sont testées
+    # PLUS HAUT et priment — si on arrive ICI, aucune capacité sûre ne couvre
+    # la carte. On n'invente donc pas un bouton vert optimiste qui
+    # contredirait le verdict déjà rendu (bug vu par Jordan le 18/06 : pastille
+    # verte « le robot peut le faire » posée AU-DESSUS de « le robot préfère ne
+    # pas y toucher tout seul »).
+    if (action.get("apply_state") or "").lower() == "manual":
+        return {"can": False, "mode": "manual", "why": CLEAN_MANUAL_FALLBACK}
     # Sinon : on laisse l'IA exécutrice regarder si le site est relié.
     if (site.get("repo_github") or "").strip():
         return {"can": True, "mode": "code",

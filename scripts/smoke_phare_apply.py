@@ -1271,5 +1271,21 @@ fp = pl.classify_for_apply(
 check("carte « fetchpriority » → à voir ensemble (pas de faux bouton « relance la mesure »)",
       fp["can"] is False and fp["mode"] == "manual")
 
+# Bug 18/06 : une carte que le robot a DÉJÀ jugée « à la main » (apply_state
+# 'manual') ne doit plus se voir recoller une pastille verte optimiste — sinon
+# « le robot peut le faire » s'affiche AU-DESSUS de « il préfère ne pas y toucher ».
+_declined = {"status": "draft", "kind": "recommandation", "apply_state": "manual",
+             "title": "Dupliquer /carreleur en /electricien avec adaptation minimale"}
+check("déjà jugée « à la main » → plus de faux bouton vert optimiste",
+      pl.classify_for_apply(_declined, site_ok)["can"] is False)
+# La MÊME carte jamais tentée garde sa chance (fallback optimiste assumé).
+check("même carte jamais tentée → le robot regarde (optimiste)",
+      pl.classify_for_apply({**_declined, "apply_state": ""}, site_ok)["can"] is True)
+# Une vraie capacité (titre) PRIME sur un refus passé (capacités grandies).
+check("capacité sûre (titre) → reprend la main malgré un refus passé",
+      pl.classify_for_apply(
+          {"status": "draft", "apply_state": "manual",
+           "title": "Réécrire le title de la home"}, site_ok)["can"] is True)
+
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)
