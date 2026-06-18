@@ -174,6 +174,13 @@ def create_app() -> FastAPI:
         # semaines — ne doit JAMAIS se reproduire.)
         _start_watchdog_thread(api_instance)
 
+        # Réchauffeur Pixel Pros : le serveur (hébergé en Europe) visite la
+        # home toutes les 3 min pour que l'edge européen ne s'endorme jamais.
+        # Sinon, faute de trafic, le 1er visiteur (et le test Google, toujours
+        # à froid) attend ~1,6 s → note de vitesse mobile dans le rouge.
+        # Demande Jordan le 18/06/2026 (le ping vient d'Europe = bonne « porte »).
+        _start_keepwarm_thread()
+
         # Le guetteur du copilote : dépose les évènements (réponse de
         # prospect, chasse finie, rappels) dans le fil + push si chaud.
         try:
@@ -1226,6 +1233,41 @@ def _start_supabase_refresh_thread(interval_sec: int = 1800) -> None:
     t = threading.Thread(target=loop, name="supabase-refresh", daemon=True)
     t.start()
     logger.info("Thread auto-refresh Supabase démarré (toutes les %d s).", interval_sec)
+
+
+def _start_keepwarm_thread(interval_sec: int = 180) -> None:
+    """Garde le site Pixel Pros « chaud » depuis l'Europe.
+
+    Sans trafic, le routage des sous-domaines clients (edge function Netlify)
+    et le cache CDN s'endorment : la 1re visite suivante met ~1,6 s à répondre
+    (LCP mobile dans le rouge côté Google, qui teste toujours à froid). Un ping
+    toutes les 3 min depuis ce serveur — situé en Europe, comme les vrais
+    visiteurs — réchauffe la bonne « porte » et supprime ce délai. Daemon,
+    échecs silencieux : ne casse jamais le serveur. Demande Jordan 18/06/2026.
+    """
+    pages = (
+        "https://pixel-pros.fr/",
+        "https://pixel-pros.fr/configurer",
+    )
+
+    def loop():
+        import requests
+        time.sleep(25)  # laisse le boot se terminer avant le 1er ping
+        while True:
+            for url in pages:
+                try:
+                    requests.get(
+                        url, timeout=15,
+                        headers={"User-Agent": "TriskellKeepWarm/1.0"},
+                    )
+                except Exception as exc:
+                    logger.debug("keepwarm %s : %s", url, exc)
+            time.sleep(interval_sec)
+
+    t = threading.Thread(target=loop, name="pixelpros-keepwarm", daemon=True)
+    t.start()
+    logger.info("Réchauffeur Pixel Pros démarré (ping toutes les %d s).",
+                interval_sec)
 
 
 def _start_server_heartbeat_thread() -> None:
