@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import namedtuple
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -39,6 +40,12 @@ STAGE_MODES_DEFAULTS = {
 }
 DEFAULT_HOUR_PARIS = 3                    # déclenchement à 3h du matin
 WINDOW_MINUTES = 60                       # fenêtre [3h, 4h]
+# Filet de securite (rattrapage) : si le creneau nocturne a ete manque
+# (serveur redemarre/occupe a l'heure cible, Supabase ko...), on rattrape
+# UNE fois jusqu'a cette heure (Paris), au lieu d'attendre la nuit suivante.
+# Borne haute pour ne jamais envoyer en pleine apres-midi / soiree (mauvais
+# pour la delivrabilite). Ne s'applique qu'aux creneaux nocturnes/matinaux.
+CATCHUP_UNTIL_HOUR = 11
 CYCLE_INTERVAL_SECONDS = 5 * 60           # check toutes les 5 min
 INITIAL_DELAY_SECONDS = 120
 # Au-dela de ce delai, un run reste a status="started" est considere comme
@@ -417,6 +424,45 @@ def _loop(app_state) -> None:
             return
 
 
+_WindowDecision = namedtuple("_WindowDecision",
+                             ["skip_reason", "catchup", "target_hour"])
+
+
+def _window_decision(now_hour: int, target_hour: int,
+                     already_today: bool) -> "_WindowDecision":
+    """Decide si le run nocturne peut partir maintenant (fonction pure, testee
+    par scripts/smoke_autopilot_catchup.py).
+
+    Renvoie un _WindowDecision :
+      - skip_reason : None si on peut lancer, sinon la raison du skip
+        ('outside_window:...' ou 'already_ran_today') ;
+      - catchup : True si c'est un rattrapage (creneau de la nuit manque,
+        on repart en matinee au lieu d'attendre la nuit suivante) ;
+      - target_hour : l'heure cible clampee dans [0..23].
+
+    Regles :
+      - Fenetre normale : l'heure pile configuree (ex 3h => 3h00..3h59).
+      - Rattrapage : pas deja tourne aujourd'hui, creneau cible nocturne/
+        matinal (avant CATCHUP_UNTIL_HOUR), et on est apres l'heure cible
+        mais au plus tard a CATCHUP_UNTIL_HOUR. Borne haute = jamais d'envoi
+        en pleine apres-midi / soiree (mauvais pour la delivrabilite).
+    """
+    target_hour = max(0, min(23, int(target_hour)))
+    in_window = now_hour == target_hour
+    in_catchup = (
+        not already_today
+        and target_hour < CATCHUP_UNTIL_HOUR
+        and target_hour < now_hour <= CATCHUP_UNTIL_HOUR
+    )
+    if not (in_window or in_catchup):
+        return _WindowDecision(
+            f"outside_window:hour={now_hour} (target={target_hour}h)",
+            False, target_hour)
+    if already_today:
+        return _WindowDecision("already_ran_today", False, target_hour)
+    return _WindowDecision(None, in_catchup, target_hour)
+
+
 def _do_one_tick(app_state) -> None:
     """Un seul cycle : décide si on doit lancer le pipeline."""
     # Charge la config de l'autopilote
@@ -490,21 +536,24 @@ def _do_one_tick(app_state) -> None:
     )
 
     if not interrupted:
-        # Run normal : on doit etre dans la fenetre horaire configuree
+        # Run normal (heure pile configuree) OU rattrapage matinal si le
+        # creneau de la nuit a ete manque (serveur redemarre/occupe a 3h,
+        # Supabase ko...). La decision est isolee dans _window_decision()
+        # pour rester testable (scripts/smoke_autopilot_catchup.py).
         target_hour = int(getattr(cfg, "nightly_hour", DEFAULT_HOUR_PARIS)
                           or DEFAULT_HOUR_PARIS)
-        target_hour = max(0, min(23, target_hour))
-        if now.hour != target_hour:
+        already_today = state.get("last_run_date") == today_iso
+        decision = _window_decision(now.hour, target_hour, already_today)
+        if decision.skip_reason is not None:
             _LAST_RUN_RESULT.clear()
-            _LAST_RUN_RESULT["skipped_reason"] = (
-                f"outside_window:hour={now.hour} (target={target_hour}h)"
+            _LAST_RUN_RESULT["skipped_reason"] = decision.skip_reason
+            return
+        if decision.catchup:
+            logger.info(
+                "[autopilot_nightly] RATTRAPAGE : creneau de %dh manque cette "
+                "nuit, rattrapage a %dh (Paris) au lieu d'attendre demain.",
+                decision.target_hour, now.hour,
             )
-            return
-        # Pas deja run aujourd'hui ?
-        if state.get("last_run_date") == today_iso:
-            _LAST_RUN_RESULT.clear()
-            _LAST_RUN_RESULT["skipped_reason"] = "already_ran_today"
-            return
 
     # Anti-double-run : si un pipeline tourne deja (bouton "Lancer
     # maintenant" actif), on skip ce tick. Le pipeline reprendra au tick
