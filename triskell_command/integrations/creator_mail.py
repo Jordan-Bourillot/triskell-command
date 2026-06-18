@@ -27,10 +27,25 @@ def _nowidow(s: str) -> str:
     return s[:i] + "&nbsp;" + s[i + 1:] if i > 0 else s
 
 
+def _initials(name: str) -> str:
+    """Initiales du créateur pour la pastille du mail (l'avatar image n'est pas
+    déployé sur tous les sites → on évite le rond vide)."""
+    import re
+    n = re.sub(r"\(.*?\)", " ", name or "")
+    stop = {"de", "des", "du", "la", "le", "les", "et", "d", "l", "un", "une"}
+    parts = [p for p in re.split(r"[\s\-]+", n) if p and p.lower() not in stop]
+    if not parts:
+        return "★"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[1][0]).upper()
+
+
 def render(name: str, demo_url: str, accent: str = "#6366F1",
            accent2: str = "#4F46E5", tu: bool = True, angle: str = "") -> str:
     """Retourne le corps HTML du mail pour un créateur."""
     base = (demo_url or "").rstrip("/")
+    initials = _initials(name)
     name = _esc(name)
     acc = accent or "#6366F1"
     acc2 = accent2 or "#4F46E5"
@@ -111,7 +126,7 @@ def render(name: str, demo_url: str, accent: str = "#6366F1",
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 10px 34px rgba(15,23,42,.10);">
     <tr><td style="padding:34px 38px 6px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td style="padding-right:13px;"><img src="{img_avatar}" width="52" height="52" alt="" style="border-radius:50%;display:block;border:2px solid {acc};"></td>
+        <td style="padding-right:13px;"><div style="width:52px;height:52px;border-radius:50%;background:{acc};color:#ffffff;font-size:20px;font-weight:800;line-height:52px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">{initials}</div></td>
         <td style="font-size:14px;color:#6b7280;line-height:1.3;">Préparé pour vous par<br><b style="color:#111827;font-size:15px;">Triskell Studio</b></td>
       </tr></table>
       <h1 style="margin:22px 0 10px;font-size:25px;line-height:1.25;color:#0f172a;">{t['hello']}<br>{t['h1b']}</h1>
