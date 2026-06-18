@@ -3277,6 +3277,14 @@ class Api:
                 for a in done:
                     if a.get("simple_md"):
                         a["simple_what"] = a["simple_md"]
+                    # Filet rétroactif : un travail PUBLIÉ (merged) ne doit pas
+                    # traîner une vieille étiquette « échec » qu'une approbation
+                    # n'avait pas nettoyée (vu le 18/06 : 5 modifs Lagriffe en
+                    # ligne depuis le 12/06 mais affichées « échec — diff
+                    # visuel »). La publication gagne.
+                    if (a.get("status") or "").lower() == "merged":
+                        a["apply_state"] = "done"
+                        a["apply_error"] = ""
                     if plain_language.has_jargon(a.get("apply_error") or ""):
                         a["apply_error"] = plain_language.CLEAN_MANUAL_FALLBACK
                 # Écran épuré (17/06) : on sort de la pile « à toi de jouer »

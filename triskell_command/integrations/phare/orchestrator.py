@@ -607,6 +607,10 @@ def merge_action(action_id: str, *, force: bool = False,
         repo.update_action(action_id, {
             "status": "merged", "auto_merged": auto,
             "merged_at": datetime.now().isoformat(),
+            # Publié → on efface toute vieille étiquette d'échec d'une tentative
+            # auto antérieure (sinon la carte reste affichée « échec » alors
+            # qu'elle est en ligne — vu le 18/06 sur Lagriffe).
+            "apply_state": "done", "apply_error": "",
         })
         return {"ok": True, "kind": "note_only"}
     site = repo.get_site(action["site_id"])
@@ -632,7 +636,10 @@ def merge_action(action_id: str, *, force: bool = False,
                                 commit_title=action.get("title", ""))
     if ok:
         repo.update_action(action_id, {"status": "merged", "auto_merged": auto,
-                                        "merged_at": datetime.now().isoformat()})
+                                        "merged_at": datetime.now().isoformat(),
+                                        # Publié → effacer toute vieille étiquette
+                                        # d'échec (cf. note ci-dessus).
+                                        "apply_state": "done", "apply_error": ""})
     return {"ok": ok}
 
 
