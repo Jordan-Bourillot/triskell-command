@@ -141,6 +141,28 @@ def has_jargon(text: str) -> bool:
     return bool(_JARGON_RE.search(text or ""))
 
 
+# Le robot a déjà BUTÉ sur un blocage CONCRET qu'aucune capacité ne lèvera :
+# page absente de son scan, titre actuel inconnu, page introuvable… Re-proposer
+# un bouton vert « OK, fais-le » sur ces cartes, c'est mentir — ça échouerait
+# exactement pareil (vécu le 18/06 : « Enrichir les titles de /demo-wedding-
+# planner & /demo-coach » re-proposé alors que ces pages ne sont pas dans le
+# scan → clic → échec en boucle).
+_HARD_BLOCKER_RE = re.compile(
+    r"(ne figure|n['’ ]?existe|introuvable|dernier scan|"
+    r"pas dans (le |les |son )?(scan|données|donnees|crawl)|"
+    r"je ne connais pas|ne connais pas|je ne peux pas modifier|"
+    r"relanc\w* (le scan|un scan|l['’ ]?analyse)|page absente|"
+    r"pas trouvé|pas trouvee|pas trouvée|sous les yeux)",
+    re.IGNORECASE)
+
+
+def _is_hard_blocker(text: str) -> bool:
+    """Le robot a buté sur un blocage CONCRET (donnée manquante) qu'aucune
+    capacité ne lèvera. Sur ces cartes : pas de bouton vert, on respecte le
+    verdict du robot et on affiche sa raison."""
+    return bool(_HARD_BLOCKER_RE.search(text or ""))
+
+
 def explain(action: dict) -> str:
     """Phrase « ce que ça change », sans jargon. Jamais vide."""
     simple = (action.get("simple_md") or "").strip()
@@ -185,6 +207,18 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
     special = _agent_special(action)
     if special:
         return {"can": False, "mode": special[1], "why": special[0]}
+
+    # Le robot a DÉJÀ tenté cette carte et a buté sur un blocage CONCRET (page
+    # absente de son scan, titre actuel inconnu…) qu'aucune capacité ne lève.
+    # On le détecte AVANT les familles de balises : sinon une carte « titre »
+    # garderait son bouton vert alors que le robot vient de dire qu'il ne peut
+    # pas (clic → échec en boucle). On respecte son verdict et on montre sa
+    # raison (vu par Jordan le 18/06 sur « Enrichir les titles de /demo-* »).
+    _err = action.get("apply_error") or ""
+    if ((action.get("apply_state") or "").lower() in ("manual", "failed")
+            and _is_hard_blocker(_err)):
+        return {"can": False, "mode": "manual",
+                "why": _err.strip() if not has_jargon(_err) else CLEAN_MANUAL_FALLBACK}
 
     # Capacités apprises au robot le 17/06 (il lit la page en direct) : FAQ
     # structurée + préchargement de l'image principale → faisables tout seul.

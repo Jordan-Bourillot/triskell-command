@@ -1308,6 +1308,21 @@ _geo = pl.classify_for_apply(
      "title": "GEO check : 0/0 mentions (0%)"}, site_ok)
 check("carte GEO check (surveillance) → à lire, pas de faux bouton vert",
       _geo["can"] is False and _geo["mode"] == "info")
+# Bug 18/06 (capture Jordan) : une carte « titre » que le robot a TENTÉE mais où
+# il a buté sur un blocage concret (pages absentes de son scan) ne doit PLUS
+# re-proposer un bouton vert — il échouerait pareil.
+_blocked = pl.classify_for_apply(
+    {"status": "draft", "apply_state": "failed",
+     "title": "Enrichir les titles des pages /demo-wedding-planner et /demo-coach",
+     "apply_error": "Ces pages ne figurent pas dans les données du dernier scan ; "
+                    "je ne connais pas leur titre actuel."}, site_ok)
+check("carte titre BLOQUÉE (page absente du scan) → plus de faux bouton vert",
+      _blocked["can"] is False and _blocked["mode"] == "manual")
+# Mais une carte titre simplement déclinée SANS blocage concret garde sa chance.
+check("carte titre déclinée sans blocage concret → garde sa 2e chance",
+      pl.classify_for_apply(
+          {"status": "draft", "apply_state": "manual",
+           "title": "Réécrire le title de la home"}, site_ok)["can"] is True)
 
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)
