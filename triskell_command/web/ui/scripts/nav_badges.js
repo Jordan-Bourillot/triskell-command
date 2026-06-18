@@ -90,7 +90,8 @@
     },
 
     async checkAll() {
-      if (!window.App || !App.api || !App.api.guide_snapshot) return;
+      if (typeof App === 'undefined' || !App.api
+          || typeof App.api.guide_snapshot !== 'function') return;
       let snap = null;
       try { snap = await App.api.guide_snapshot(); }
       catch (e) { return; }
@@ -100,7 +101,7 @@
         this._last[rule.view] = cur;
         // Déjà sur cette vue → considéré vu (le badge ne se remplit pas pendant
         // qu'il la regarde).
-        if (window.App && App.currentView === rule.view) this._setSeen(rule.view, cur);
+        if (typeof App !== 'undefined' && App.currentView === rule.view) this._setSeen(rule.view, cur);
         this._renderOne(rule, cur, false);
       }
     },
@@ -130,7 +131,8 @@
       const tick = () => this.checkAll();
       const wait = setInterval(() => {
         tries += 1;
-        if (window.App && App.api && App.api.guide_snapshot) {
+        if (typeof App !== 'undefined' && App.api
+            && typeof App.api.guide_snapshot === 'function') {
           clearInterval(wait);
           tick();
           setInterval(tick, this.POLL_MS);

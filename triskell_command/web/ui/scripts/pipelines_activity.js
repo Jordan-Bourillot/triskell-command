@@ -66,7 +66,8 @@ window.PipelinesActivity = {
   refresh() { return this.checkAll(); },
 
   async checkAll() {
-    if (!window.App || !App.api || !App.api.pipelines_activity) return;
+    if (typeof App === 'undefined' || !App.api
+        || typeof App.api.pipelines_activity !== 'function') return;
     let data = null;
     try { data = await App.api.pipelines_activity({ limit: this.LIMIT }); }
     catch (e) { console.warn('pipelines_activity:', e); return; }
@@ -90,7 +91,7 @@ window.PipelinesActivity = {
       // Si l'utilisateur a CETTE vue sous les yeux, tout est considéré vu :
       // on rafraîchit la "dernière visite" à chaque poll (avant, le badge
       // se remplissait pendant qu'il regardait l'écran concerné).
-      if (window.App && App.currentView === prefix) this._setSeen(prefix);
+      if (typeof App !== 'undefined' && App.currentView === prefix) this._setSeen(prefix);
       const seen = this._getSeen(prefix);
       const unseen = seen ? recent.filter(r => (r.at || '') > seen) : recent.slice();
       this._state[prefix] = {
@@ -210,7 +211,7 @@ window.PipelinesActivity = {
     slot.querySelectorAll('.cockpit-pa-open').forEach(btn => {
       btn.onclick = () => {
         const pfx = btn.dataset.prefix;
-        if (window.App && App.show) App.show(pfx);
+        if (typeof App !== 'undefined' && App.show) App.show(pfx);
       };
     });
   },
@@ -283,7 +284,7 @@ window.PipelinesActivity = {
     let tries = 0;
     const wait = setInterval(() => {
       tries += 1;
-      if (window.App && App.api) {
+      if (typeof App !== 'undefined' && App.api) {
         clearInterval(wait);
         tick();
         this._pollTimer = setInterval(tick, this.POLL_MS);
