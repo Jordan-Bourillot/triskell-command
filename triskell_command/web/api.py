@@ -1890,6 +1890,7 @@ class Api:
             acc = accent or na or "#6366F1"
             acc2 = accent2 or na2 or acc
             ang = (angle or "").strip() or creator_mail.angle_from_notes(notes)
+            kind = creator_mail.kind_for(cr.get("platform") or "", notes)
             return creator_mail.render(
                 name=cr.get("name") or "",
                 demo_url=cr.get("demo_url") or "",
@@ -1897,6 +1898,7 @@ class Api:
                 accent2=acc2,
                 tu=tu,
                 angle=ang,
+                kind=kind,
             )
         except Exception:
             return ""
@@ -1926,12 +1928,13 @@ class Api:
             from ..integrations import creator_mail
             notes = cr.get("notes") or ""
             tu = "vouvoiement" not in notes.lower()
+            kind = creator_mail.kind_for(cr.get("platform") or "", notes)
             if d.get("review_modif_applied") and (d.get("angle_revised") or "").strip():
                 ang = d.get("angle_revised").strip()
             else:
                 ang = creator_mail.angle_from_notes(notes)
             body = creator_mail.render_text(cr.get("name") or "", demo, tu,
-                                            angle=ang)
+                                            angle=ang, kind=kind)
             body_html = self._creator_mail_html(
                 cr, d.get("accent") or "", d.get("accent2") or "", angle=ang)
             out.append({
@@ -1998,9 +2001,11 @@ class Api:
             final_body = (body or "").strip()
         else:
             _tu = "vouvoiement" not in (cr.get("notes") or "").lower()
+            _kind = creator_mail.kind_for(cr.get("platform") or "",
+                                          cr.get("notes") or "")
             final_body = creator_mail.render_text(
                 cr.get("name") or "", (cr.get("demo_url") or "").strip(),
-                _tu, angle=_ang)
+                _tu, angle=_ang, kind=_kind)
         final_body = (final_body or "").strip()
 
         _safe = PS.mail_is_safe_to_send(subject, final_body)
@@ -2257,12 +2262,13 @@ class Api:
                 continue
             notes = cr.get("notes") or ""
             tu = "vouvoiement" not in notes.lower()
+            kind = creator_mail.kind_for(cr.get("platform") or "", notes)
             if d.get("review_modif_applied") and (d.get("angle_revised") or "").strip():
                 ang = d.get("angle_revised").strip()
             else:
                 ang = creator_mail.angle_from_notes(notes)
             body = creator_mail.render_text(cr.get("name") or "", demo, tu,
-                                            angle=ang)
+                                            angle=ang, kind=kind)
             body_html = self._creator_mail_html(
                 cr, d.get("accent") or "", d.get("accent2") or "", angle=ang)
             ok = self._log_creator_email_sent(
@@ -6830,7 +6836,11 @@ class Api:
                     continue  # en masse : on saute les déjà contactés
                 vouvoie = "tutoiement" not in (r.get("notes") or "").lower()
                 poss = "votre" if vouvoie else "ta"
-                subject = f"Un assistant à {poss} marque, pour {poss} communauté"
+                _kit = ((r.get("platform") or "").lower() == "tiktok"
+                        or "cible tiktok" in (r.get("notes") or "").lower())
+                subject = (f"Une boutique à {poss} marque, pour {poss} communauté"
+                           if _kit else
+                           f"Un assistant à {poss} marque, pour {poss} communauté")
                 p = payload or {}
                 d = CD.queue(sb, r.get("id") or "", subject,
                              accent=p.get("accent", ""),

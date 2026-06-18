@@ -41,9 +41,95 @@ def _initials(name: str) -> str:
     return (parts[0][0] + parts[1][0]).upper()
 
 
+def kind_for(platform: str = "", notes: str = "") -> str:
+    """« kit » pour les créateurs TikTok (offre boutique + cours + cadeau, pas
+    d'assistant ni de quiz), « assistant » sinon (offre YouTube historique)."""
+    p = (platform or "").lower()
+    n = (notes or "").lower()
+    if (p == "tiktok" or "cible tiktok" in n
+            or "kit de monétisation" in n or "kit de monetisation" in n):
+        return "kit"
+    return "assistant"
+
+
+def _render_kit(name: str, initials: str, acc: str, acc2: str,
+                url_accueil: str, tu: bool) -> str:
+    """Mail « boutique » pour un créateur TikTok : pas d'assistant ni de quiz,
+    pas d'images (elles n'existent pas sur ces sites), juste l'offre réelle."""
+    if tu:
+        hello = "Salut " + name + " 👋"
+        h1b = "j'ai préparé une boutique à ta marque."
+        intro = ("J'ai regardé ton compte, et je t'ai préparé de quoi "
+                 "<b>transformer ton audience en revenus</b>, sans que tu aies "
+                 "rien à gérer. Le plus simple, c'est d'aller y jeter un œil.")
+        b1 = ("🏪 &nbsp;<b>Une petite boutique à ta marque</b>, le lien à "
+              "mettre dans ta bio")
+        b2 = ("💸 &nbsp;<b>Un produit prêt à vendre</b>, un cours et un guide "
+              "tirés de ton contenu")
+        b3 = ("🎁 &nbsp;<b>Un cadeau gratuit</b> qui transforme tes vues en "
+              "e-mails à toi")
+        cta = "Découvrir ta boutique →"
+        offer = ("Tout est déjà prêt, à ta marque, fait à partir de ton "
+                 "contenu. Toi tu crées, je m'occupe du reste. Si l'idée te "
+                 "plaît, je t'explique tout avec plaisir.")
+    else:
+        hello = "Bonjour " + name + " 👋"
+        h1b = "j'ai préparé une boutique à votre marque."
+        intro = ("J'ai regardé votre compte, et je vous ai préparé de quoi "
+                 "<b>transformer votre audience en revenus</b>, sans que vous "
+                 "ayez rien à gérer. Le plus simple, c'est d'aller y jeter un "
+                 "œil.")
+        b1 = ("🏪 &nbsp;<b>Une petite boutique à votre marque</b>, le lien à "
+              "mettre dans votre bio")
+        b2 = ("💸 &nbsp;<b>Un produit prêt à vendre</b>, un cours et un guide "
+              "tirés de votre contenu")
+        b3 = ("🎁 &nbsp;<b>Un cadeau gratuit</b> qui transforme vos vues en "
+              "e-mails à vous")
+        cta = "Découvrir votre boutique →"
+        offer = ("Tout est déjà prêt, à votre marque, fait à partir de votre "
+                 "contenu. Vous créez, je m'occupe du reste. Si l'idée vous "
+                 "plaît, je vous explique tout avec plaisir.")
+    h1b = _nowidow(h1b); intro = _nowidow(intro)
+    b1 = _nowidow(b1); b2 = _nowidow(b2); b3 = _nowidow(b3); offer = _nowidow(offer)
+    return f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef1f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#eef1f5;">
+<tr><td align="center" style="padding:30px 12px;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 10px 34px rgba(15,23,42,.10);">
+    <tr><td style="padding:34px 38px 6px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td style="padding-right:13px;"><div style="width:52px;height:52px;border-radius:50%;background:{acc};color:#ffffff;font-size:20px;font-weight:800;line-height:52px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">{initials}</div></td>
+        <td style="font-size:14px;color:#6b7280;line-height:1.3;">Préparé pour vous par<br><b style="color:#111827;font-size:15px;">Triskell Studio</b></td>
+      </tr></table>
+      <h1 style="margin:22px 0 10px;font-size:25px;line-height:1.25;color:#0f172a;">{hello}<br>{h1b}</h1>
+      <p style="margin:0;font-size:16px;line-height:1.6;color:#374151;">{intro}</p>
+    </td></tr>
+    <tr><td style="padding:16px 38px 0;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr><td style="padding:9px 0;font-size:15px;color:#374151;line-height:1.5;">{b1}</td></tr>
+        <tr><td style="padding:9px 0;font-size:15px;color:#374151;line-height:1.5;">{b2}</td></tr>
+        <tr><td style="padding:9px 0;font-size:15px;color:#374151;line-height:1.5;">{b3}</td></tr>
+      </table>
+    </td></tr>
+    <tr><td align="center" style="padding:26px 38px 6px;">
+      <a href="{url_accueil}" style="display:inline-block;background:linear-gradient(135deg,{acc},{acc2});color:#fff;padding:15px 30px;border-radius:10px;text-decoration:none;font-weight:800;font-size:16px;">{cta}</a>
+    </td></tr>
+    <tr><td style="padding:20px 38px 34px;">
+      <p style="margin:0;font-size:14.5px;line-height:1.6;color:#6b7280;">{offer}</p>
+      <p style="margin:16px 0 0;font-size:14.5px;color:#374151;">Au plaisir,<br><b>Triskell Studio</b></p>
+    </td></tr>
+  </table>
+</td></tr>
+</table>
+</body></html>"""
+
+
 def render(name: str, demo_url: str, accent: str = "#6366F1",
-           accent2: str = "#4F46E5", tu: bool = True, angle: str = "") -> str:
-    """Retourne le corps HTML du mail pour un créateur."""
+           accent2: str = "#4F46E5", tu: bool = True, angle: str = "",
+           kind: str = "assistant") -> str:
+    """Retourne le corps HTML du mail pour un créateur. `kind`='kit' pour les
+    créateurs TikTok (boutique + cours + cadeau), 'assistant' sinon."""
     base = (demo_url or "").rstrip("/")
     initials = _initials(name)
     name = _esc(name)
@@ -54,6 +140,9 @@ def render(name: str, demo_url: str, accent: str = "#6366F1",
     img_avatar = base + "/brand_avatar.jpg"
     img_assistant = base + "/_mail_assistant.png"
     img_quiz = base + "/_mail_quiz.png"
+
+    if kind == "kit":
+        return _render_kit(name, initials, acc, acc2, url_accueil, tu)
 
     if tu:
         t = {
@@ -162,14 +251,53 @@ def render(name: str, demo_url: str, accent: str = "#6366F1",
 
 
 def render_text(name: str, demo_url: str, tu: bool = True,
-                angle: str = "") -> str:
+                angle: str = "", kind: str = "assistant") -> str:
     """Version TEXTE BRUT du mail (secours `text/plain`), cohérente avec le
     rendu HTML et sans tic d'IA (pas de « : » d'annonce, pas de tiret
     cadratin, pas de « sans pression »). `angle` remplace la 3e ligne pour
-    les créateurs qui vendent déjà (pitch complémentaire)."""
+    les créateurs qui vendent déjà (pitch complémentaire). `kind`='kit' pour
+    les créateurs TikTok (offre boutique)."""
     base = (demo_url or "").rstrip("/")
     url = base + "/accueil.html"
     angle = (angle or "").strip()
+    if kind == "kit":
+        if tu:
+            return (
+                f"Salut {name},\n\n"
+                "J'ai regardé ton compte et je t'ai préparé une petite "
+                "boutique à ta marque, pour transformer ton audience en "
+                "revenus sans que tu aies rien à gérer.\n\n"
+                "Voici ce qu'il y a dedans.\n"
+                "- Une petite boutique à ta marque, le lien à mettre dans ta "
+                "bio\n"
+                "- Un produit prêt à vendre, un cours et un guide tirés de ton "
+                "contenu\n"
+                "- Un cadeau gratuit qui transforme tes vues en e-mails à "
+                "toi\n\n"
+                "Tu peux tout découvrir ici.\n"
+                f"{url}\n\n"
+                "Tout est déjà prêt, à ta marque. Toi tu crées, je m'occupe du "
+                "reste. Si l'idée te plaît, je t'explique tout avec plaisir.\n\n"
+                "Au plaisir,\nTriskell Studio"
+            )
+        return (
+            f"Bonjour {name},\n\n"
+            "J'ai regardé votre compte et je vous ai préparé une petite "
+            "boutique à votre marque, pour transformer votre audience en "
+            "revenus sans que vous ayez rien à gérer.\n\n"
+            "Voici ce qu'il y a dedans.\n"
+            "- Une petite boutique à votre marque, le lien à mettre dans votre "
+            "bio\n"
+            "- Un produit prêt à vendre, un cours et un guide tirés de votre "
+            "contenu\n"
+            "- Un cadeau gratuit qui transforme vos vues en e-mails à vous\n\n"
+            "Vous pouvez tout découvrir ici.\n"
+            f"{url}\n\n"
+            "Tout est déjà prêt, à votre marque. Vous créez, je m'occupe du "
+            "reste. Si l'idée vous plaît, je vous explique tout avec "
+            "plaisir.\n\n"
+            "Au plaisir,\nTriskell Studio"
+        )
     if tu:
         d3 = angle or ("Un revenu récurrent presque passif, où ta communauté "
                        "s'abonne et te reverse une part, pendant que je "
