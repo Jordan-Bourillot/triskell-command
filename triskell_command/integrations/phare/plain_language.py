@@ -105,6 +105,9 @@ def _agent_special(action: dict) -> Optional[tuple[str, str]]:
     if agent == "analyste" or title.startswith("bulletin"):
         return ("Le point sur les chiffres du site. À lire — rien à publier.",
                 "info")
+    if agent == "geo_surveillant" or title.startswith("geo check"):
+        return ("Le point sur ta visibilité dans les IA (ChatGPT, Perplexity…). "
+                "C'est une mesure à lire — rien à publier sur le site.", "info")
     if agent == "veilleur" or "cluster" in title:
         return ("Des idées de nouvelles pages à créer autour d'un thème "
                 "porteur. C'est un chantier de contenu : à lancer avec "

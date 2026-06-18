@@ -491,7 +491,14 @@ const Phare = {
 
     // Bandeaux d'état du robot (échec / à faire à la main)
     let stateNote = '';
-    if (applyState === 'failed') {
+    if (applyState === 'failed' && canRobot) {
+      // Le robot peut TOUJOURS le faire (le bouton vert « OK, fais-le » relance) :
+      // on n'affiche PAS l'ancien message d'échec « à la main », qui
+      // contredirait le bouton vert. On signale juste, sobrement, l'essai raté.
+      stateNote = `<div class="phare-empty-inline" style="margin-top:8px;border-left:3px solid #f5a623">
+          ⚠️ Le dernier essai n'a pas abouti — clique « OK, fais-le » pour relancer.
+        </div>`;
+    } else if (applyState === 'failed') {
       stateNote = `<div class="phare-empty-inline" style="margin-top:8px;border-left:3px solid #e5484d;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
           <span>⚠️ ${this._esc(a.apply_error || 'Le robot n’a pas réussi.')}</span>
           <span style="display:flex;gap:8px">

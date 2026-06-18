@@ -1286,6 +1286,13 @@ check("capacité sûre (titre) → reprend la main malgré un refus passé",
       pl.classify_for_apply(
           {"status": "draft", "apply_state": "manual",
            "title": "Réécrire le title de la home"}, site_ok)["can"] is True)
+# Bug 18/06 (capture Jordan) : la surveillance GEO (« GEO check : 0/0 mentions »)
+# est un RAPPORT à lire, pas une action → jamais de bouton vert « OK, fais-le ».
+_geo = pl.classify_for_apply(
+    {"status": "draft", "kind": "recommandation", "agent": "geo_surveillant",
+     "title": "GEO check : 0/0 mentions (0%)"}, site_ok)
+check("carte GEO check (surveillance) → à lire, pas de faux bouton vert",
+      _geo["can"] is False and _geo["mode"] == "info")
 
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)
