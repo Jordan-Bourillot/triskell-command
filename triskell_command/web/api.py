@@ -11105,6 +11105,14 @@ class Api:
         except Exception:
             out["geo_pending_fixes"] = None
 
+        # Dernier passage de l'auto-pilote GEO (pour la pastille « du nouveau »
+        # sur l'onglet GEO du menu). En mémoire, jamais bloquant.
+        try:
+            out["geo_last_run_at"] = (
+                self._geo_autopilot_settings().get("last_run_at") or "")
+        except Exception:
+            out["geo_last_run_at"] = ""
+
         cache["data"] = out
         cache["at"] = _time.time()
         return self._with_copilot_unseen(out)
