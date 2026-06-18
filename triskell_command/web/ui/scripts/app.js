@@ -162,6 +162,46 @@ const App = {
     const desktopOnlyMethods = new Set([
       'open_url', 'compose_mail', 'open_teddy_mail', 'launch_app',
     ]);
+    // --- Connectivité : ne signaler une coupure que si elle DURE vraiment ---
+    // Avant, le moindre hoquet réseau (un fetch raté qui repassait à l'appel
+    // suivant) affichait aussitôt une pop-up rouge alarmante, qui montait à
+    // « ×42 » alors que le serveur n'avait jamais bougé. Désormais : silence
+    // total tant que ça se rétablit tout seul ; UNE alerte calme seulement si
+    // le serveur reste injoignable un bon moment, et elle s'efface d'elle-même
+    // dès que la connexion revient.
+    const conn = { fails: 0, firstFailTs: 0, alertEl: null };
+    const CONN_SILENCE_MS = 25000; // injoignable en continu depuis 25 s…
+    const CONN_FAILS_MIN = 2;      // …et au moins 2 appels ratés d'affilée
+    const markReachable = () => {
+      // Le serveur a répondu QUELQUE CHOSE (même un 401/500 = il est joignable).
+      if (conn.fails === 0 && !conn.alertEl) return;
+      const wasAlerted = !!conn.alertEl;
+      conn.fails = 0;
+      conn.firstFailTs = 0;
+      if (conn.alertEl) {
+        try { conn.alertEl.remove(); } catch (e) {}
+        conn.alertEl = null;
+      }
+      if (wasAlerted && typeof HealthCheck !== 'undefined') {
+        HealthCheck.toast('', 'Connexion rétablie.', 'success');
+      }
+    };
+    const markUnreachable = (method, netErr) => {
+      if (typeof HealthCheck !== 'undefined') {
+        HealthCheck.record({ kind: 'api_network', method, msg: String(netErr) });
+      }
+      const now = Date.now();
+      conn.fails += 1;
+      if (!conn.firstFailTs) conn.firstFailTs = now;
+      const longEnough = (now - conn.firstFailTs) >= CONN_SILENCE_MS;
+      if (conn.fails >= CONN_FAILS_MIN && longEnough && !conn.alertEl
+          && typeof HealthCheck !== 'undefined') {
+        conn.alertEl = HealthCheck.toast('Connexion perdue',
+          'Le serveur Triskell ne répond plus depuis un moment. Vérifie ta '
+          + 'connexion internet. Dès qu’elle revient, tout se remet à jour '
+          + 'tout seul, sans rien recharger.', 'error', { duration: 3600000 });
+      }
+    };
     return new Proxy({}, {
       get: (_target, method) => {
         // Évite les pièges : si le code fait `if (App.api.foo)` ou JSON.stringify(App.api),
@@ -189,19 +229,16 @@ const App = {
               credentials: 'same-origin',
             });
           } catch (netErr) {
-            // Erreur réseau brute (offline, CORS, DNS, etc.)
-            // Le détail technique part en console + rapport de bug ; à
-            // l'écran : français normal + quoi faire (audit débutant).
+            // Erreur réseau brute (offline, CORS, DNS, coupure passagère…).
+            // Le détail technique part en console + rapport de bug ; à l'écran,
+            // on ne dit RIEN tant que ça peut se rétablir tout seul (voir
+            // markUnreachable : alerte seulement si la coupure dure vraiment).
             console.warn(`[api] /api/${method} injoignable :`, netErr);
-            if (typeof HealthCheck !== 'undefined') {
-              HealthCheck.record({ kind: 'api_network', method, msg: String(netErr) });
-              HealthCheck.toast('Connexion impossible',
-                'Le serveur Triskell n’a pas répondu. Vérifie ta connexion '
-                + 'internet, puis réessaie. Si ça continue, clique sur '
-                + '« Signaler un bug » en bas du menu.', 'error');
-            }
+            markUnreachable(method, netErr);
             throw netErr;
           }
+          // Le serveur a répondu (statut quelconque) → connexion bien vivante.
+          markReachable();
           const elapsed = Math.round(performance.now() - t0);
           // Session expirée ou pas connecté → rediriger vers le login
           if (r.status === 401) {

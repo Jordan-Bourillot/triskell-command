@@ -138,19 +138,20 @@ const HealthCheck = {
   // ----- Toasts : délégués au système commun (toast.js) -----
   // Signature historique conservée : toast(titre, corps, type).
   // La déduplication (même message répété) est gérée par Toast lui-même.
-  toast(title, body, kind = 'info') {
-    if (this.isQuiet()) return;
+  toast(title, body, kind = 'info', opts = {}) {
+    if (this.isQuiet()) return null;
     const type = ['success', 'error', 'warn', 'info'].includes(kind) ? kind : 'info';
     if (window.Toast && typeof window.Toast.show === 'function') {
-      window.Toast.show(String(body == null ? '' : body), {
-        type,
-        title: title ? String(title) : '',
-      });
-    } else {
-      // toast.js pas encore chargé (ne devrait pas arriver : il est
-      // inclus avant ce fichier) — au pire, trace en console.
-      console.warn('[HealthCheck.toast]', title, body);
+      const showOpts = { type, title: title ? String(title) : '' };
+      if (Number.isFinite(opts.duration)) showOpts.duration = opts.duration;
+      // Renvoie l'élément du toast → l'appelant peut le refermer lui-même
+      // (ex. app.js efface l'alerte « Connexion perdue » dès le retour réseau).
+      return window.Toast.show(String(body == null ? '' : body), showOpts);
     }
+    // toast.js pas encore chargé (ne devrait pas arriver : il est
+    // inclus avant ce fichier) — au pire, trace en console.
+    console.warn('[HealthCheck.toast]', title, body);
+    return null;
   },
 
   /** Diagnostic console : tape `HealthCheck.dump()` pour voir tout le buffer. */
