@@ -56,8 +56,9 @@ def render(name: str, demo_url: str, accent: str = "#6366F1",
                    "communauté et la ramène vers toi"),
             "d2": ("🔍 &nbsp;<b>Une analyse de ta chaîne</b> et <b>10 idées de "
                    "vidéos</b>, offertes, rien que pour toi"),
-            "d3": ("💰 &nbsp;<b>De quoi monétiser ton audience</b>, avec un "
-                   "abonnement pour ta communauté dont tu touches une part"),
+            "d3": ("💰 &nbsp;<b>Un revenu récurrent presque passif</b>, où ta "
+                   "communauté s'abonne et te reverse une part, pendant que je "
+                   "m'occupe de tout le reste"),
             "quizcap": ("Un aperçu du quiz, à ta marque, avec tes vraies "
                         "vidéos et tes couleurs."),
             "cta": "Découvrir tout ton espace →",
@@ -81,9 +82,9 @@ def render(name: str, demo_url: str, accent: str = "#6366F1",
                    "votre communauté et la ramène vers vous"),
             "d2": ("🔍 &nbsp;<b>Une analyse de votre chaîne</b> et <b>10 idées "
                    "de vidéos</b>, offertes, rien que pour vous"),
-            "d3": ("💰 &nbsp;<b>De quoi monétiser votre audience</b>, avec un "
-                   "abonnement pour votre communauté dont vous touchez une "
-                   "part"),
+            "d3": ("💰 &nbsp;<b>Un revenu récurrent presque passif</b>, où "
+                   "votre communauté s'abonne et vous reverse une part, "
+                   "pendant que je m'occupe de tout le reste"),
             "quizcap": ("Un aperçu du quiz, à votre marque, avec vos vraies "
                         "vidéos et vos couleurs."),
             "cta": "Découvrir tout votre espace →",
@@ -155,8 +156,9 @@ def render_text(name: str, demo_url: str, tu: bool = True,
     url = base + "/accueil.html"
     angle = (angle or "").strip()
     if tu:
-        d3 = angle or ("De quoi monétiser ton audience, avec un abonnement "
-                       "pour ta communauté dont tu touches une part")
+        d3 = angle or ("Un revenu récurrent presque passif, où ta communauté "
+                       "s'abonne et te reverse une part, pendant que je "
+                       "m'occupe de tout le reste")
         return (
             f"Salut {name},\n\n"
             "J'ai regardé ta chaîne et j'ai préparé tout un espace à ta "
@@ -176,8 +178,9 @@ def render_text(name: str, demo_url: str, tu: bool = True,
             "plaît, je t'explique tout avec plaisir.\n\n"
             "Au plaisir,\nTriskell Studio"
         )
-    d3 = angle or ("De quoi monétiser votre audience, avec un abonnement "
-                   "pour votre communauté dont vous touchez une part")
+    d3 = angle or ("Un revenu récurrent presque passif, où votre communauté "
+                   "s'abonne et vous reverse une part, pendant que je "
+                   "m'occupe de tout le reste")
     return (
         f"Bonjour {name},\n\n"
         "J'ai regardé votre chaîne et j'ai préparé tout un espace à votre "
@@ -221,7 +224,9 @@ def default_pitch(tu: bool = True) -> str:
     Sert de base à la 2e IA pour noter / peaufiner le pitch des créateurs qui
     n'ont pas d'angle propre."""
     if tu:
-        return ("De quoi monétiser ton audience, avec un abonnement pour ta "
-                "communauté dont tu touches une part")
-    return ("De quoi monétiser votre audience, avec un abonnement pour votre "
-            "communauté dont vous touchez une part")
+        return ("Un revenu récurrent presque passif, où ta communauté "
+                "s'abonne et te reverse une part, pendant que je m'occupe de "
+                "tout le reste")
+    return ("Un revenu récurrent presque passif, où votre communauté "
+            "s'abonne et vous reverse une part, pendant que je m'occupe de "
+            "tout le reste")

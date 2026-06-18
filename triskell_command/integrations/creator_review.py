@@ -29,10 +29,16 @@ MONÉTISATION (le « pitch »), recopiée plus bas.
 zéro bullshit), cohérence avec CE créateur. Le tutoiement ou le vouvoiement \
 est VOULU par l'auteur : ne pénalise jamais ça.
 
-2) Regarde SEULEMENT le pitch. Si tu peux le rendre plus percutant, plus clair \
-ou plus juste POUR CE CRÉATEUR, propose une version améliorée : une seule \
-phrase, longueur proche, même esprit. Interdits : deux-points d'annonce, tiret \
-cadratin, « sans pression », impératif. Sinon, laisse vide.
+2) Regarde SEULEMENT le pitch (la ligne sur la monétisation). Un bon pitch \
+reste CONCRET sur le gain. Il décrit un revenu récurrent et presque passif, via \
+un abonnement que prend sa communauté, dont une part lui revient pendant que \
+Triskell s'occupe de tout. Évite les formules vagues ou passives comme « tu \
+touches une part » seule, qui affaiblissent l'attrait. N'invente JAMAIS de \
+chiffre, de pourcentage ni de montant. Si tu peux rendre le pitch plus \
+percutant, plus clair ou plus juste POUR CE CRÉATEUR en l'ancrant dans son \
+univers, propose une version améliorée : une seule phrase, longueur proche, \
+même esprit. Interdits : deux-points d'annonce, tiret cadratin, « sans \
+pression », impératif. Sinon, laisse vide.
 
 Réponds UNIQUEMENT en JSON, sans markdown, sans rien avant ni après :
 {{
