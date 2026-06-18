@@ -217,7 +217,7 @@ def _do_one_poll_inner(app_state) -> dict:
     """
     global _LAST_RUN_AT, _LAST_RUN_RESULT
     counters = {"scanned": 0, "matched": 0, "classified": 0,
-                "written": 0, "errors": 0, "skipped": 0,
+                "written": 0, "errors": 0, "skipped": 0, "notified": 0,
                 "accounts_scanned": 0, "per_account": {}}
 
     client = _get_supabase_client()
@@ -249,12 +249,20 @@ def _do_one_poll_inner(app_state) -> dict:
     # seulement si un compte a effectivement du courrier à traiter (sinon on
     # relisait toute la base pour rien à chaque cycle, à vide).
     ai_settings = _resolve_ai_settings(app_state, client)
+    # Réglages de tri/alerte des mails entrants (analyse des inconnus +
+    # notifications téléphone). Lus une seule fois par cycle. Ne bloque
+    # jamais la lecture des mails — repli sur les valeurs par défaut.
+    from . import inbox_triage
+    try:
+        triage_cfg = inbox_triage.load_config(client)
+    except Exception:
+        triage_cfg = dict(inbox_triage.DEFAULT_CONFIG)
 
     for acc in accounts:
         aid = acc.get("id", "primary")
         try:
             sub = _poll_one_account(
-                client, app_state, acc, ai_settings,
+                client, app_state, acc, ai_settings, triage_cfg,
             )
         except Exception as exc:
             logger.warning("poll account %s failed: %s", aid, exc)
@@ -281,7 +289,8 @@ def _do_one_poll_inner(app_state) -> dict:
             _LAST_ERROR_PER_ACCOUNT.pop(aid, None)
         counters["per_account"][aid] = sub
         counters["accounts_scanned"] += 1
-        for k in ("scanned", "matched", "classified", "written", "errors", "skipped"):
+        for k in ("scanned", "matched", "classified", "written", "errors",
+                  "skipped", "notified"):
             counters[k] = counters.get(k, 0) + sub.get(k, 0)
 
     _LAST_RUN_RESULT = counters
@@ -290,10 +299,15 @@ def _do_one_poll_inner(app_state) -> dict:
 
 
 def _log_inbox_mail(client, account_id: str, *, from_addr: str, subject: str,
-                     body: str, in_reply_to: str, body_html: str = "") -> None:
+                     body: str, in_reply_to: str, body_html: str = "",
+                     extra_fields: Optional[dict] = None) -> str:
     """Loggue dans email_history un mail entrant qui n'est pas une réponse
     prospect (kind='inbox_received'). Anti-doublon : si un mail avec même
     sujet + même from + même in_reply_to existe déjà sur ce compte, on saute.
+
+    Renvoie l'id de la ligne créée, ou '' si doublon écarté / échec d'insert.
+    extra_fields (optionnel) est fusionné dans extra — sert à y déposer le
+    résultat du tri IA ('triage') du mail d'inconnu.
     """
     sb = client.raw
     try:
@@ -305,7 +319,7 @@ def _log_inbox_mail(client, account_id: str, *, from_addr: str, subject: str,
                  .eq("extra->>from", from_addr)
                  .limit(1).execute())
         if check.data:
-            return
+            return ""
     except Exception:
         pass  # si le check fail, on continue, l'insert peut échouer mais best-effort
     extra = {
@@ -315,6 +329,8 @@ def _log_inbox_mail(client, account_id: str, *, from_addr: str, subject: str,
         "body_excerpt": (body or "")[:1500],
         "body_html": (body_html or "")[:80_000],
     }
+    if extra_fields:
+        extra.update(extra_fields)
     row = {
         "kind": "inbox_received",
         "ts": datetime.now().isoformat(timespec="seconds"),
@@ -324,9 +340,70 @@ def _log_inbox_mail(client, account_id: str, *, from_addr: str, subject: str,
         "created_by": client.user_id,
     }
     try:
-        sb.table("email_history").insert(with_workspace(client, row)).execute()
+        ins = sb.table("email_history").insert(
+            with_workspace(client, row)).execute()
+        return ((ins.data or [{}])[0].get("id") or "")
     except Exception as exc:
         logger.warning("log inbox mail insert KO: %s", exc)
+        return ""
+
+
+def _notify_inbox_attention(client, history_row_id: str, triage_cfg: dict, *,
+                             title: str, body: str, priority: str,
+                             view: str, tag_group: str) -> bool:
+    """Envoie l'alerte téléphone pour un mail qui mérite l'attention, puis
+    marque la fiche (extra.notified_at) pour ne JAMAIS alerter deux fois.
+
+    Relit l'extra à jour avant d'écrire (pour ne pas écraser le brouillon de
+    réponse déposé entre-temps). Renvoie True si une alerte a été délivrée.
+    Ne lève jamais.
+    """
+    if not history_row_id:
+        return False
+    from . import inbox_triage
+    sb = client.raw
+    try:
+        res = (sb.table("email_history").select("extra")
+               .eq("id", history_row_id).limit(1).execute())
+        extra = (res.data or [{}])[0].get("extra") or {}
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except Exception:
+                extra = {}
+    except Exception:
+        extra = {}
+    if extra.get("notified_at"):
+        return False   # déjà alerté pour ce mail
+
+    sent = 0
+    try:
+        from ..web.push import send_push
+        target = (triage_cfg.get("notify_user_id") or "").strip()
+        user_id = target if (target and target.lower() != "all") else None
+        result = send_push(
+            title, body,
+            user_id=user_id,
+            tag_group=tag_group,
+            url=f"/?view={view}",
+            priority=inbox_triage.push_priority(priority),
+            extra_data={"history_id": history_row_id, "view": view},
+        ) or {}
+        sent = int(result.get("sent") or 0)
+    except Exception as exc:
+        logger.debug("send_push KO: %s", exc)
+
+    # On marque la fiche quel que soit le résultat d'envoi : si le téléphone
+    # n'était pas joignable, on ne ré-alerte pas en boucle au cycle suivant.
+    try:
+        extra["notified_at"] = datetime.now().isoformat(timespec="seconds")
+        extra["notify_sent"] = sent
+        sb.table("email_history").update({"extra": extra}).eq(
+            "id", history_row_id).execute()
+    except Exception as exc:
+        logger.debug("mark notified KO: %s", exc)
+
+    return sent > 0
 
 
 def _list_imap_accounts_to_scan(app_state, client) -> list[dict]:
@@ -373,15 +450,19 @@ def _list_imap_accounts_to_scan(app_state, client) -> list[dict]:
     return out
 
 
-def _poll_one_account(client, app_state, account: dict, ai_settings: dict) -> dict:
+def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
+                       triage_cfg: dict | None = None) -> dict:
     """Scanne UNE boîte IMAP. Renvoie les compteurs locaux.
 
     Ne lève pas — toute erreur est capturée et renvoyée dans counters['error'].
     Le account_id est tracé dans email_history.extra.account_id pour le filtre
     par compte côté UI.
     """
+    from . import inbox_triage
+    if triage_cfg is None:
+        triage_cfg = dict(inbox_triage.DEFAULT_CONFIG)
     counters = {"scanned": 0, "matched": 0, "classified": 0,
-                "written": 0, "errors": 0, "skipped": 0}
+                "written": 0, "errors": 0, "skipped": 0, "notified": 0}
     last_uid_key = account["last_uid_key"]
     account_id = account.get("id", "primary")
     last_uid = int(client.get_shared_setting(last_uid_key, 0) or 0)
@@ -499,18 +580,40 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict) -> di
                     if prospect_id is None and from_addr:
                         prospect_id = from_to_prospect.get(from_addr.lower())
                     if prospect_id is None:
-                        # Phase 3 : logger quand même comme entrant général
-                        # (pour la vue Mails "Tous entrants"). On filtre juste
-                        # le bruit minimum (vide, pas d'expéditeur).
+                        # Mail d'un INCONNU (pas encore dans la base prospects).
+                        # Avant : simplement rangé, sans analyse → on pouvait
+                        # passer à côté d'un mail important. Maintenant : l'IA
+                        # juge s'il mérite l'attention de Jordan, on garde son
+                        # verdict sur la fiche, et on alerte le téléphone si oui.
                         if from_addr and (subject or body):
                             try:
-                                _log_inbox_mail(client, account_id,
-                                                 from_addr=from_addr,
-                                                 subject=subject, body=body,
-                                                 in_reply_to=in_reply_to,
-                                                 body_html=body_html)
+                                if triage_cfg.get("analyze_strangers_with_ai", True):
+                                    triage = inbox_triage.triage_stranger_mail(
+                                        ai_settings, from_addr=from_addr,
+                                        subject=subject, body=body)
+                                else:
+                                    triage = inbox_triage._fallback_triage(
+                                        subject, body)
+                                row_id = _log_inbox_mail(
+                                    client, account_id, from_addr=from_addr,
+                                    subject=subject, body=body,
+                                    in_reply_to=in_reply_to,
+                                    body_html=body_html,
+                                    extra_fields={"triage": triage})
+                                if row_id and inbox_triage.should_notify(
+                                        triage_cfg, is_stranger=True,
+                                        attention=triage.get("attention"),
+                                        priority=triage.get("priority")):
+                                    title, pbody = inbox_triage.build_stranger_push(
+                                        from_addr=from_addr, triage=triage)
+                                    if _notify_inbox_attention(
+                                            client, row_id, triage_cfg,
+                                            title=title, body=pbody,
+                                            priority=triage.get("priority"),
+                                            view="mails", tag_group="contact"):
+                                        counters["notified"] += 1
                             except Exception as exc:
-                                logger.debug("log_inbox_mail KO: %s", exc)
+                                logger.debug("triage inconnu KO: %s", exc)
                         counters["skipped"] += 1
                         continue
                     counters["matched"] += 1
@@ -525,8 +628,26 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict) -> di
                     )
                     counters["classified"] += 1
 
+                    # Attention déterministe (zéro coût IA) : un « intéressé »
+                    # mérite une alerte, un « non merci » / désinscription est
+                    # géré tout seul → pas d'alerte.
+                    attention = inbox_triage.attention_for_reply(
+                        (classification or {}).get("category", ""),
+                        (classification or {}).get("confidence", 0.0))
+
+                    # Fiche prospect (nom + mails) lue UNE seule fois : sert au
+                    # brouillon de réponse ET à l'alerte (évite 2 lectures).
+                    try:
+                        pres = (client.raw.table("prospects")
+                                .select("name,legal_name,emails")
+                                .eq("id", prospect_id).limit(1).execute())
+                        prospect = (pres.data or [{}])[0]
+                    except Exception:
+                        prospect = {}
+
                     extra = {
                         "classification": classification,
+                        "attention": attention,
                         "body_excerpt": (body or "")[:1500],
                         "body_html": (body_html or "")[:80_000],
                         "from": from_addr,
@@ -557,10 +678,6 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict) -> di
                     if history_row_id:
                         try:
                             from . import reply_responder
-                            pres = (client.raw.table("prospects")
-                                    .select("name,legal_name,emails")
-                                    .eq("id", prospect_id).limit(1).execute())
-                            prospect = (pres.data or [{}])[0]
                             reply_responder.ensure_suggested_reply(
                                 client, history_row_id,
                                 classification=classification,
@@ -602,6 +719,29 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict) -> di
                             }).eq("id", prospect_id).execute()
                     except Exception as exc:
                         logger.debug("update status KO: %s", exc)
+
+                    # --- Alerte téléphone si la réponse mérite l'attention ---
+                    # (intéressé surtout). Les refus / désinscriptions sont
+                    # traités tout seuls → pas d'alerte (attention=False).
+                    try:
+                        if history_row_id and inbox_triage.should_notify(
+                                triage_cfg, is_stranger=False,
+                                attention=attention.get("attention"),
+                                priority=attention.get("priority")):
+                            disp = (prospect.get("name")
+                                    or prospect.get("legal_name") or "")
+                            title, pbody = inbox_triage.build_reply_push(
+                                display_name=disp,
+                                category=(classification or {}).get("category", ""),
+                                subject=subject)
+                            if _notify_inbox_attention(
+                                    client, history_row_id, triage_cfg,
+                                    title=title, body=pbody,
+                                    priority=attention.get("priority"),
+                                    view="replies", tag_group="replies"):
+                                counters["notified"] += 1
+                    except Exception as exc:
+                        logger.debug("notify reply KO: %s", exc)
 
                 except Exception as exc:
                     logger.warning("UID %s [%s]: %s", uid_int, account_id, exc)

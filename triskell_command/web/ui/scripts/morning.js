@@ -1509,6 +1509,7 @@ const Morning = {
     const q = d.queue || {};
     const nInt = q.replies_unhandled_interested || 0;
     const nDrafts = (q.drafts_prospect_pending || 0) + (q.drafts_convoy_pending || 0);
+    const nInbox = q.inbox_attention || 0;
 
     return `
       <div class="cockpit-grid">
@@ -1538,6 +1539,14 @@ const Morning = {
           onClick: `if(window.Replies){Replies.filter='interested';} App.show('replies')`,
           hint: 'Prospects qui ont répondu « intéressé » et attendent TA réponse — à traiter en priorité, dans les 2 h c’est l’idéal.',
         })}
+        ${nInbox > 0 ? this._kpi({
+          label: 'Mails d’inconnus à regarder',
+          value: nInbox,
+          delta: 'repérés par l’IA — à vérifier',
+          tone: 'warning',
+          onClick: `App.show('mails', { tab: 'inbound' })`,
+          hint: 'Mails de gens pas encore dans ta liste que l’IA juge importants (question, devis, partenariat…). Clic pour ouvrir ta boîte de réception.',
+        }) : ''}
         ${this._kpi({
           label: 'Brouillons à valider',
           value: nDrafts,

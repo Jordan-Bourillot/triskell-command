@@ -265,6 +265,7 @@ const Mails = {
     });
 
     await this._loadAccounts();
+    await this._loadTriageCfg();
     await this._load();
   },
 
@@ -489,7 +490,7 @@ const Mails = {
            ℹ Cette boîte montre les mails entrants liés à ta prospection — pas toute ta boîte mail.
            Les réponses de prospects déjà triées par l'IA (intéressé, refus…) sont dans
            <button type="button" class="text-accent underline hover:no-underline" onclick="App.show('replies')">Réponses</button>.
-         </div>`
+         </div>` + this._triageBar()
       : '';
 
     if (!this.state.mails.length) {
@@ -881,6 +882,7 @@ const Mails = {
         <span class="mail-row-from-sub" title="${this._escape(sentFromEmail)}${origin === 'app' ? ' — envoyé automatiquement par l’app' : origin === 'user' ? ' — envoyé par toi depuis le composeur' : ''}">depuis ${this._escape(sentFromEmail)}${originChip}</span>`
       : this._escape(senderName || '—');
     const fromCellClass = sentFromEmail ? 'mail-row-from is-stacked' : 'mail-row-from';
+    const attnChip = this._attnChip(m, { isInbox, isReply });
     return `
       <div class="mail-row ${stateClass}" data-mail-open="${this._escape(m.id)}"
            role="button" tabindex="0" aria-label="Ouvrir le mail : ${this._escape(subject)}">
@@ -890,12 +892,104 @@ const Mails = {
         <span class="mail-row-dot" style="background: hsl(var(--${dotColor}))" title="${dotTitle}"></span>
         <div class="${fromCellClass}" title="${this._escape(senderRaw)}">${fromCellInner}</div>
         <div class="mail-row-main">
+          ${attnChip}
           <span class="mail-row-subject">${this._escape(subject)}</span>
           ${snippet ? `<span class="mail-row-snippet"> — ${this._escape(snippet.slice(0, 160))}</span>` : ''}
         </div>
         <span class="mail-row-date">${ts}</span>
       </div>
     `;
+  },
+
+  /** Pastille « à regarder » fabriquée à partir du tri IA.
+   * - Mail d'inconnu jugé important (extra.triage.attention) → pastille
+   *   dorée avec la catégorie + le résumé IA en infobulle.
+   * - Réponse de prospect intéressé (extra.attention.priority='high') →
+   *   pastille « 🔥 Intéressé ».
+   * Rien si le mail ne mérite pas d'attention particulière. */
+  _attnChip(m, { isInbox, isReply }) {
+    const extra = m.extra || {};
+    const pill = (icon, label, colorVar, tip) =>
+      `<span class="mail-row-attn" title="${this._escape(tip || '')}" style="`
+      + `display:inline-block;font-size:11px;font-weight:600;line-height:1.4;`
+      + `padding:0 8px;margin-right:6px;border-radius:999px;vertical-align:middle;`
+      + `background:hsl(var(--${colorVar})/0.16);color:hsl(var(--${colorVar}));`
+      + `border:1px solid hsl(var(--${colorVar})/0.35);">`
+      + `${icon} ${this._escape(label)}</span>`;
+    if (isInbox) {
+      const t = extra.triage;
+      if (t && t.attention) {
+        let cat = (t.category || 'À regarder').toString();
+        cat = cat.charAt(0).toUpperCase() + cat.slice(1);
+        return pill('🔎', cat, 'gold', t.summary || 'Mail à regarder');
+      }
+      return '';
+    }
+    if (isReply) {
+      const a = extra.attention;
+      if (a && a.attention && a.priority === 'high') {
+        return pill('🔥', 'Intéressé', 'success', 'Prospect intéressé — à traiter');
+      }
+    }
+    return '';
+  },
+
+  // ----------------------------------------------------------------------
+  // Réglage des alertes (qui me prévient sur le téléphone, et pour quoi)
+  // ----------------------------------------------------------------------
+  async _loadTriageCfg() {
+    try {
+      const r = await App.api.inbox_triage_get_config();
+      if (r && r.ok && r.config) {
+        this._triageCfg = r.config;
+        this._triageCfgLoaded = true;
+      }
+    } catch (e) { /* jamais bloquant */ }
+  },
+
+  /** Barre de réglage des alertes, en tête de la Boîte de réception. */
+  _triageBar() {
+    if (!this._triageCfgLoaded) return '';   // pas encore chargée
+    const c = this._triageCfg || {};
+    const chk = (on) => on ? 'checked' : '';
+    const opt = (val, label) =>
+      `<option value="${val}" ${c.min_priority === val ? 'selected' : ''}>${label}</option>`;
+    return `
+      <div class="mb-3 px-4 py-2.5 rounded-xl border border-border bg-bg text-[11px] flex items-center gap-x-4 gap-y-1.5 flex-wrap">
+        <span class="text-text-muted font-semibold">🔔 M'alerter sur le téléphone :</span>
+        <label class="flex items-center gap-1.5 cursor-pointer">
+          <input type="checkbox" ${chk(c.notify_strangers)} onchange="Mails._setTriage('notify_strangers', this.checked)">
+          <span>mails d'inconnus importants</span>
+        </label>
+        <label class="flex items-center gap-1.5 cursor-pointer">
+          <input type="checkbox" ${chk(c.notify_prospect_replies)} onchange="Mails._setTriage('notify_prospect_replies', this.checked)">
+          <span>réponses de prospects intéressants</span>
+        </label>
+        <label class="flex items-center gap-1.5">
+          <span class="text-text-muted">à partir de :</span>
+          <select onchange="Mails._setTriage('min_priority', this.value)"
+                  class="px-2 py-1 rounded-lg bg-card border border-border text-text">
+            ${opt('low', 'tout')}
+            ${opt('normal', 'important')}
+            ${opt('high', 'urgent seulement')}
+          </select>
+        </label>
+      </div>`;
+  },
+
+  /** Enregistre un réglage d'alerte (envoie la config COMPLÈTE pour ne
+   *  jamais remettre les autres champs à zéro). Garde le système allumé. */
+  async _setTriage(field, value) {
+    if (!this._triageCfg) this._triageCfg = {};
+    this._triageCfg[field] = value;
+    this._triageCfg.enabled = true;
+    try {
+      const r = await App.api.inbox_triage_save_config({ config: this._triageCfg });
+      if (r && r.ok && r.config) this._triageCfg = r.config;
+      if (window.Toast) Toast.success('Réglage des alertes enregistré.');
+    } catch (e) {
+      if (window.Toast) Toast.error('Réglage non enregistré.');
+    }
   },
 
   // ----------------------------------------------------------------------
@@ -928,6 +1022,7 @@ const Mails = {
       ? extra.attachments_meta.filter(a => a && !a.inline)
       : [];
     const classification = extra.classification || null;
+    const triage = extra.triage || null;   // tri IA des mails d'inconnus
     const inReplyTo = extra.in_reply_to || '';
     const replySubject = subject.toLowerCase().startsWith('re:') ? subject : 'Re: ' + subject;
 
@@ -985,6 +1080,7 @@ const Mails = {
                     : `→ reçu sur <span class="font-medium text-text">${this._escape(accountLabel)}</span>${accountEmail ? ` <span class="opacity-70">(${this._escape(accountEmail)})</span>` : ''}`}
                 </div>
                 ${classification ? `<div class="text-[11px] mt-2"><span class="text-text-muted">Lecture IA :</span> <span class="font-medium" style="color: hsl(var(--${kindColor}));">${this._escape(this._classificationLabel(classification))}</span></div>` : ''}
+                ${triage ? `<div class="text-[11px] mt-2"><span class="text-text-muted">Lecture IA :</span> <span class="font-medium" style="color: hsl(var(--${triage.attention ? 'gold' : 'text-muted'}));">${triage.attention ? '🔎 À regarder' : 'Sans importance'}${triage.category ? ` · ${this._escape(triage.category)}` : ''}</span>${triage.summary ? ` <span class="text-text-muted">— ${this._escape(triage.summary)}</span>` : ''}</div>` : ''}
               </div>
             </div>
           </div>

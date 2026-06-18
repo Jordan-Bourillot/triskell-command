@@ -163,6 +163,35 @@ def _count_unhandled_replies(client, *, only_interested: bool = False) -> int:
         return 0
 
 
+def _count_inbox_attention(client) -> int:
+    """Mails d'INCONNUS (hors prospects) que l'IA a jugés « à regarder » et
+    qui ne sont pas encore lus. Sert le compteur « X mails d'inconnus à
+    regarder » de la Matinale — filet en plus de l'alerte téléphone.
+
+    Filtre côté Python car triage + read_at vivent dans extra (JSONB)."""
+    try:
+        sb = client.raw
+        res = (sb.table("email_history").select("extra")
+               .eq("kind", "inbox_received")
+               .order("ts", desc=True).limit(500).execute())
+        n = 0
+        for r in res.data or []:
+            extra = r.get("extra") or {}
+            if isinstance(extra, str):
+                try:
+                    extra = json.loads(extra)
+                except Exception:
+                    extra = {}
+            if extra.get("read_at"):
+                continue   # déjà ouvert/lu → plus « à regarder »
+            tri = extra.get("triage") or {}
+            if tri.get("attention"):
+                n += 1
+        return n
+    except Exception:
+        return 0
+
+
 def _count_failed_convoy_drafts(client, day_start: str, day_end: str) -> int:
     try:
         sb = client.raw
@@ -245,6 +274,7 @@ def compute_digest() -> dict[str, Any]:
             "drafts_convoy_skipped_duplicate": 0,
             "replies_unhandled_interested": 0,
             "replies_unhandled_total": 0,
+            "inbox_attention": 0,
         },
         "alerts": {"convoy_failed_yesterday": 0,
                     "convoy_failed_today": 0},
@@ -294,6 +324,7 @@ def compute_digest() -> dict[str, Any]:
     out["queue"]["replies_unhandled_interested"] = _count_unhandled_replies(
         client, only_interested=True)
     out["queue"]["replies_unhandled_total"] = _count_unhandled_replies(client)
+    out["queue"]["inbox_attention"] = _count_inbox_attention(client)
 
     # Drafts bloques (variables non remplies, anti-doublon) — important pour
     # que Jordan voit qu'il y a des mails a regarder manuellement

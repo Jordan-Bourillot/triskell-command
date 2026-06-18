@@ -7578,6 +7578,44 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
+    # Tri + alertes des mails entrants (analyse de TOUS les mails reçus,
+    # y compris les inconnus, + notification quand un mail mérite l'attention)
+    # ------------------------------------------------------------------
+    def inbox_triage_get_config(self) -> dict:
+        try:
+            from ..integrations import inbox_triage
+            client = self._supabase()
+            if not client:
+                return {"ok": True, "config": dict(inbox_triage.DEFAULT_CONFIG)}
+            return {"ok": True, "config": inbox_triage.load_config(client)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def inbox_triage_save_config(self, payload: dict) -> dict:
+        try:
+            from ..integrations import inbox_triage
+            client = self._supabase()
+            if not client:
+                return {"ok": False, "error": "Base partagée non connectée"}
+            cfg = (payload or {}).get("config") or {}
+            # On part de la config ACTUELLE (pas des défauts) et on n'écrase
+            # que les champs fournis → un envoi partiel ne remet jamais les
+            # autres réglages à zéro.
+            base = inbox_triage.load_config(client)
+            for k in ("enabled", "notify_strangers", "notify_prospect_replies",
+                      "analyze_strangers_with_ai"):
+                if k in cfg:
+                    base[k] = bool(cfg[k])
+            if cfg.get("min_priority") in ("low", "normal", "high"):
+                base["min_priority"] = cfg["min_priority"]
+            if "notify_user_id" in cfg:
+                base["notify_user_id"] = str(cfg.get("notify_user_id") or "")
+            inbox_triage.save_config(client, base)
+            return {"ok": True, "config": base}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
     # Relance multi-canal (LinkedIn DM préparé par IA)
     # ------------------------------------------------------------------
     def multichannel_get_actions(self) -> dict:
