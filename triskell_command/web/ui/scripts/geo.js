@@ -121,6 +121,7 @@ const GEO = {
         <div class="geo-pills mt-3">${providersInfo}</div>
       </div>
       ${this._renderAutopilotCard(ap, sites)}
+      <div id="geo-last-run"></div>
       <div class="geo-sites-grid mt-6">
         ${sites.length === 0
           ? `<div class="geo-empty"><div class="geo-empty-icon">🌐</div><h3>Aucun site pour l'instant</h3><p>Clique sur « Ajouter un site » pour démarrer.</p></div>`
@@ -157,8 +158,58 @@ const GEO = {
       };
     });
     this._wireAutopilot(ap);
+    this._renderLastRun();
     const cfg = container.querySelector('[data-go-config]');
     if (cfg) cfg.onclick = (e) => { e.preventDefault(); App.show('config', { tab: 'ai' }); };
+  },
+
+  // Encart « ce que le robot a publié » : les pages écrites + mises en ligne
+  // automatiquement par l'auto-pilote, avec les liens. Chargé à part pour ne
+  // pas ralentir l'accueil. (Demande Jordan : voir d'un coup d'œil ce qui a
+  // été fait, au lieu d'aller fouiller dans les Outils avancés.)
+  async _renderLastRun() {
+    const slot = document.getElementById('geo-last-run');
+    if (!slot) return;
+    let items = [];
+    try {
+      const r = await App.api.geo_generated_list({});
+      if (r && r.ok) items = r.items || [];
+    } catch (e) { return; }
+    const href = (it) => {
+      const p = (it.publications || [])[0];
+      return (typeof p === 'string') ? p : (p && p.url) || '';
+    };
+    const domain = (u) => {
+      try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return ''; }
+    };
+    const pub = items.filter(it => href(it))
+                     .sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
+    if (!pub.length) { slot.innerHTML = ''; return; }
+    const lastDate = (pub[0].ts || '').slice(0, 10);
+    const rows = pub.slice(0, 8).map(it => {
+      const u = href(it);
+      const site = (it.auto_source && it.auto_source.site_name) || domain(u);
+      return `<li style="display:flex;gap:10px;align-items:baseline;padding:6px 0;`
+           + `border-top:1px dashed hsl(var(--border));font-size:13.5px;">`
+           + `<span style="font-weight:700;color:hsl(var(--text-muted));min-width:120px;">`
+           + `${this._esc(site)}</span>`
+           + `<a href="${this._esc(u)}" target="_blank" rel="noopener" `
+           + `style="color:hsl(var(--accent));text-decoration:none;">`
+           + `${this._esc(it.topic || '(sans titre)')} ↗</a></li>`;
+    }).join('');
+    const more = pub.length > 8
+      ? `<p class="geo-card-sub mt-2">+ ${pub.length - 8} autre(s) — voir « Outils avancés ».</p>`
+      : '';
+    slot.innerHTML = `
+      <div class="geo-card mt-6">
+        <div class="geo-row-between">
+          <h2 class="geo-card-title">🤖 Ce que le robot a publié</h2>
+          <span class="geo-card-sub">${pub.length} page${pub.length > 1 ? 's' : ''} en ligne · dernier passage le ${this._esc(lastDate)}</span>
+        </div>
+        <ul style="list-style:none;margin:10px 0 0;padding:0;">${rows}</ul>
+        ${more}
+        <p class="geo-card-sub mt-2">Pages écrites et mises en ligne toutes seules. Être cité par les IA prend des semaines — normal que ce soit lent au début.</p>
+      </div>`;
   },
 
   // ════════════════════════════════════════════════════════════════════
