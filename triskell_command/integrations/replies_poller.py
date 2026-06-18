@@ -218,7 +218,7 @@ def _do_one_poll_inner(app_state) -> dict:
     global _LAST_RUN_AT, _LAST_RUN_RESULT
     counters = {"scanned": 0, "matched": 0, "classified": 0,
                 "written": 0, "errors": 0, "skipped": 0, "notified": 0,
-                "accounts_scanned": 0, "per_account": {}}
+                "warmup": 0, "accounts_scanned": 0, "per_account": {}}
 
     client = _get_supabase_client()
     if client is None:
@@ -290,7 +290,7 @@ def _do_one_poll_inner(app_state) -> dict:
         counters["per_account"][aid] = sub
         counters["accounts_scanned"] += 1
         for k in ("scanned", "matched", "classified", "written", "errors",
-                  "skipped", "notified"):
+                  "skipped", "notified", "warmup"):
             counters[k] = counters.get(k, 0) + sub.get(k, 0)
 
     _LAST_RUN_RESULT = counters
@@ -462,7 +462,8 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
     if triage_cfg is None:
         triage_cfg = dict(inbox_triage.DEFAULT_CONFIG)
     counters = {"scanned": 0, "matched": 0, "classified": 0,
-                "written": 0, "errors": 0, "skipped": 0, "notified": 0}
+                "written": 0, "errors": 0, "skipped": 0, "notified": 0,
+                "warmup": 0}
     last_uid_key = account["last_uid_key"]
     account_id = account.get("id", "primary")
     last_uid = int(client.get_shared_setting(last_uid_key, 0) or 0)
@@ -511,6 +512,17 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                     references = headers.get("References", "") or ""
                     from_addr = _from_address(headers.get("From", ""))
                     subject = (headers.get("Subject") or "").strip()
+
+                    # --- Mails de CHAUFFE (warm-up) ---
+                    # Ce sont NOS propres mails, envoyés entre nos boîtes pour
+                    # bâtir la réputation d'envoi. Ils portent l'en-tête caché
+                    # X-TS-Warmup. On les ignore TOTALEMENT : ni prospect, ni
+                    # tri IA, ni alerte téléphone, ni log — sinon ils sont vus
+                    # comme des « mails d'inconnus à regarder » (faux positif).
+                    # warmup_tick.py les lit et les nettoie de son côté.
+                    if headers.get("X-TS-Warmup"):
+                        counters["warmup"] += 1
+                        continue
 
                     # --- Fix 2 : detection precoce des bounces (DSN) ---
                     # Un avis de non-delivrance arrive depuis mailer-daemon,
@@ -869,7 +881,8 @@ def _parse_fetch_response(msg_data) -> tuple[dict, str, str]:
         # prospect_status.looks_like_automated() pour ecarter newsletters,
         # notifs de plateformes, accuses de reception, etc.
         for k in ("List-Unsubscribe", "List-Id", "Auto-Submitted",
-                  "Precedence", "X-Auto-Response-Suppress", "Feedback-ID"):
+                  "Precedence", "X-Auto-Response-Suppress", "Feedback-ID",
+                  "X-TS-Warmup"):
             v = msg.get(k)
             if v:
                 headers[k] = v

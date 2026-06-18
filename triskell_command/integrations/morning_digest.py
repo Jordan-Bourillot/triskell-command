@@ -163,13 +163,30 @@ def _count_unhandled_replies(client, *, only_interested: bool = False) -> int:
         return 0
 
 
+def _own_sending_addresses(client) -> set[str]:
+    """Adresses de NOS propres boîtes d'envoi (principale + secondaires).
+    Sert à ne jamais compter un mail venu de chez nous (mail de chauffe,
+    message interne) comme un « mail d'inconnu à regarder »."""
+    try:
+        from . import shared_secrets
+        accounts = shared_secrets.get_all_mail_accounts(client=client) or []
+        return {(a.get("from_email") or "").strip().lower()
+                for a in accounts if a.get("from_email")}
+    except Exception:
+        return set()
+
+
 def _count_inbox_attention(client) -> int:
     """Mails d'INCONNUS (hors prospects) que l'IA a jugés « à regarder » et
     qui ne sont pas encore lus. Sert le compteur « X mails d'inconnus à
     regarder » de la Matinale — filet en plus de l'alerte téléphone.
 
-    Filtre côté Python car triage + read_at vivent dans extra (JSONB)."""
+    Filtre côté Python car triage + read_at vivent dans extra (JSONB).
+    Double sécurité : on écarte tout mail venu d'une de NOS propres boîtes
+    (chauffe / interne) — le robot de lecture les ignore déjà à la source,
+    ceci rattrape ceux qui auraient été enregistrés avant le correctif."""
     try:
+        own = _own_sending_addresses(client)
         sb = client.raw
         res = (sb.table("email_history").select("extra")
                .eq("kind", "inbox_received")
@@ -184,6 +201,9 @@ def _count_inbox_attention(client) -> int:
                     extra = {}
             if extra.get("read_at"):
                 continue   # déjà ouvert/lu → plus « à regarder »
+            frm = str(extra.get("from") or "").strip().lower()
+            if frm and own and any(o in frm for o in own):
+                continue   # mail de chez nous (chauffe / interne)
             tri = extra.get("triage") or {}
             if tri.get("attention"):
                 n += 1
