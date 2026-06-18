@@ -3151,6 +3151,19 @@ class Api:
                 actions = repo.list_actions(site_id=sid, limit=100) or []
                 pending = [a for a in actions
                            if (a.get("status") or "") in ("draft", "preview", "pending_review")]
+                # La pastille « en attente » ne compte QUE les vraies décisions
+                # (le robot peut agir, ou une modif est prête à publier) — jamais
+                # les « idées » (contenu, backlinks) ni les notes « à lire »
+                # (plans, GEO, bulletins). Sinon l'accueil afficherait « 7 »
+                # alors que l'écran du site ne montre plus aucun devoir (demande
+                # Jordan 18/06 : outil autonome, plus de pile qui réclame).
+                try:
+                    from ..integrations.phare import plain_language as _pl
+                    pending = [a for a in pending
+                               if (_pl.classify_for_apply(a, s) or {}).get("mode")
+                               not in ("manual", "info")]
+                except Exception:
+                    pass
                 metrics30 = repo.metrics_window(sid, days=30) or []
                 clicks30 = sum((m.get("organic_clicks") or 0) for m in metrics30)
                 metrics_prev = []
@@ -3270,7 +3283,7 @@ class Api:
             # chaque carte reçoit `simple_what` (phrase sans jargon) et
             # `apply` ({can, mode, why}) calculés côté serveur — l'UI ne
             # devine rien.
-            advice = []
+            ideas = []
             try:
                 from ..integrations.phare import plain_language
                 for a in to_review:
@@ -3293,13 +3306,20 @@ class Api:
                         a["apply_error"] = ""
                     if plain_language.has_jargon(a.get("apply_error") or ""):
                         a["apply_error"] = plain_language.CLEAN_MANUAL_FALLBACK
-                # Écran épuré (17/06) : on sort de la pile « à toi de jouer »
-                # les conseils que le robot ne peut PAS faire (à lire / à faire
-                # toi-même) → volet « Conseils ». Ne restent dans la pile que
-                # les vraies décisions (le robot peut agir, ou une modif est
-                # déjà prête à publier).
-                advice = [a for a in to_review
-                          if (a.get("apply") or {}).get("mode") in ("manual", "info")]
+                # Écran autonome (18/06, demande Jordan : « l'outil doit être
+                # autonome et arrêter de me demander de bosser à la place des
+                # robots »). On ne montre PLUS de pile de devoirs :
+                #   • mode "info" (à lire, rien à publier : plans du mois,
+                #     mesures GEO…) → RETIRÉ de la vue. C'est du bruit que
+                #     Jordan ne lit pas ; le GEO a déjà son propre outil.
+                #   • mode "manual" (vrai travail de contenu/contact : idées de
+                #     pages, backlinks…) → déplacé dans un volet « Idées »
+                #     silencieux et optionnel (replié, sans compteur, sans
+                #     « à toi de le faire »), pas une tâche qui réclame.
+                # Ne restent dans « à toi de jouer » que les vraies décisions
+                # (le robot peut agir, ou une modif est déjà prête à publier).
+                ideas = [a for a in to_review
+                         if (a.get("apply") or {}).get("mode") == "manual"]
                 to_review = [a for a in to_review
                              if (a.get("apply") or {}).get("mode") not in ("manual", "info")]
             except Exception as exc:
@@ -3327,7 +3347,7 @@ class Api:
                     "delta_pct": delta_pct,
                 },
                 "to_review": to_review[:20],
-                "advice": advice[:20],
+                "ideas": ideas[:8],
                 "recently_done": done[:10],
                 "rejected_recent": rejected[:5],
                 "bulletin": bulletin,

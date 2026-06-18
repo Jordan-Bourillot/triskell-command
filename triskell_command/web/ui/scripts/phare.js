@@ -258,14 +258,14 @@ const Phare = {
     const s = data.site || {};
     const kpis = data.kpis || {};
     const toReview = data.to_review || [];
-    const advice = data.advice || [];
+    const ideas = data.ideas || [];
     const done = data.recently_done || [];
     const bull = data.bulletin || null;
     this._selectedSiteName = s.name || s.domain || '';
 
-    // Indexer les propositions (pile + conseils) pour la modale d'aperçu
+    // Indexer les propositions (pile + idées) pour la modale d'aperçu
     this._currentActions = {};
-    [...toReview, ...advice].forEach(a => { if (a && a.id) this._currentActions[a.id] = a; });
+    [...toReview, ...ideas].forEach(a => { if (a && a.id) this._currentActions[a.id] = a; });
 
     document.getElementById('ph-site-body').innerHTML = `
       <header class="phare-site-hero">
@@ -317,16 +317,18 @@ const Phare = {
         </div>
       </div>
 
-      <!-- CONSEILS (à lire / à faire toi-même) — hors de la pile, repliable -->
-      ${advice.length === 0 ? '' : `
+      <!-- IDÉES (optionnel) — volet silencieux, AUCUNE pile de devoirs.
+           Le robot fait ce qu'il sait faire ; ici, juste des pistes de contenu
+           si Jordan veut, repliées et sans compteur (demande du 18/06 :
+           l'outil doit être autonome, plus de « à toi de le faire »). -->
+      ${ideas.length === 0 ? '' : `
       <div class="phare-section">
-        <details>
-          <summary style="cursor:pointer;">
-            <strong style="font-size:1.05rem;">💡 Conseils (${advice.length})</strong>
-            <span class="phare-section-sub" style="display:block;margin-top:4px;">À lire ou à faire toi-même — le robot ne peut pas s’en charger. Rien d’urgent, déplie si tu veux.</span>
+        <details class="phare-ideas">
+          <summary style="cursor:pointer;list-style:none;opacity:.6;font-size:.95rem;">
+            💡 Idées pour aller plus loin <span style="opacity:.7;font-weight:normal;">— optionnel, rien à faire</span>
           </summary>
-          <div id="ph-advice-list" style="margin-top:12px;">
-            ${advice.map(a => this._actionCard(a, 'todo')).join('')}
+          <div id="ph-ideas-list" style="margin-top:10px;">
+            ${ideas.map(a => this._ideaCard(a)).join('')}
           </div>
         </details>
       </div>`}
@@ -573,6 +575,54 @@ const Phare = {
     `;
   },
 
+  // Carte « idée » — volet optionnel et silencieux. Ce sont les propositions
+  // que le robot ne peut PAS exécuter lui-même (contenu, backlinks, vérifs
+  // Google…). Demande de Jordan (18/06) : surtout PAS une tâche qui réclame —
+  // pas de pastille « à toi de le faire », pas de bouton « j'ai fait ». Juste
+  // une piste qu'on lit si on veut, et qu'on écarte d'un clic sans question.
+  _ideaCard(a) {
+    const agentLabel = this._agentShortName(a.agent || '');
+    const simpleWhat = (a.simple_what || '').trim();
+    const detailFull = a.detail_md || a.summary || '';
+    const body = simpleWhat
+      ? `<div class="phare-action-summary" style="font-size:13px;line-height:1.5;opacity:.92">${this._esc(simpleWhat)}</div>
+         ${detailFull ? `<details class="phare-action-tech" style="margin-top:6px">
+           <summary style="cursor:pointer;font-size:12px;opacity:.6">Détail</summary>
+           <div class="phare-action-summary" style="margin-top:6px">${this._esc(detailFull.slice(0, 600))}${detailFull.length > 600 ? '…' : ''}</div>
+         </details>` : ''}`
+      : (detailFull ? `<div class="phare-action-summary" style="opacity:.92">${this._esc(detailFull.slice(0, 200))}${detailFull.length > 200 ? '…' : ''}</div>` : '');
+    return `
+      <article class="phare-action phare-action--idea" data-aid="${this._esc(a.id || '')}" style="opacity:.95">
+        <div class="phare-action-head">
+          <div class="phare-action-icon phare-action-icon--todo">${this._actionEmoji(a.agent)}</div>
+          <div class="phare-action-body">
+            <div class="phare-action-title">${this._esc(a.title || a.kind || '—')}</div>
+            <div class="phare-action-meta">Idée de ${this._esc(agentLabel)}</div>
+          </div>
+        </div>
+        ${body}
+        <footer class="phare-action-foot">
+          <button class="btn btn-secondary btn-sm" data-idea-dismiss="${this._esc(a.id || '')}">Pas pour moi</button>
+        </footer>
+      </article>`;
+  },
+
+  // Écarter une idée : sans question (contrairement à la poubelle des vraies
+  // propositions). Un clic = rangé ; le robot ne la repropose pas de sitôt
+  // (dédup côté serveur).
+  async _dismissIdea(id, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Rangé'; }
+    try {
+      const res = await App.api.phare_reject_action({ id, reason: 'Idée écartée' });
+      if (res && res.ok) { this._removeActionCard(id); return true; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Pas pour moi'; }
+      return false;
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Pas pour moi'; }
+      return false;
+    }
+  },
+
   // Retourne true si l'approbation déclenche une publication automatique
   // (modif technique préparée par un robot — PR GitHub à merger), false
   // si c'est juste une recommandation textuelle à appliquer à la main.
@@ -591,6 +641,9 @@ const Phare = {
     });
     root.querySelectorAll('[data-reject]').forEach(b => {
       b.onclick = () => this._rejectAction(b.dataset.reject, b);
+    });
+    root.querySelectorAll('[data-idea-dismiss]').forEach(b => {
+      b.onclick = () => this._dismissIdea(b.dataset.ideaDismiss, b);
     });
     root.querySelectorAll('[data-preview]').forEach(b => {
       b.onclick = () => {

@@ -233,40 +233,15 @@ def run_geo_check(site_id: str, *, max_queries: int = 5,
             if detected["mentioned"]:
                 mentioned_count += 1
 
-    # Aucune IA n'a répondu (clés ChatGPT/Perplexity absentes, ou rien renvoyé) :
-    # on n'a RIEN mesuré. Surtout pas une carte « 0/0 — 0% à améliorer » à
-    # impact 4 qui ferait croire à un mauvais score alors qu'aucune question n'a
-    # été posée (fausse alerte vue sur tous les sites le 18/06). On pose une note
-    # honnête, à lire, sans urgence — déduplifiée d'un passage à l'autre.
+    # 18/06/2026 (demande Jordan) : le GEO a SON propre outil dédié. On ne crée
+    # donc plus AUCUNE carte « conseil » GEO dans Le Phare (l'outil SEO) — ça
+    # faisait doublon et encombrait la pile « à toi de le faire » que Jordan ne
+    # veut plus voir. La MESURE continue (elle a déjà été écrite dans
+    # phare_geo_mentions plus haut, et alimente l'écran GEO) : seule la carte-
+    # tâche disparaît. Avant : une carte « 0/0 — 0% » à impact 4 sur tous les
+    # sites + une carte « GEO check » à chaque passage = pur bruit.
     if not checked:
-        repo.insert_action({
-            "site_id": site_id,
-            "agent": "geo_surveillant",
-            "kind": "recommandation",
-            "title": "GEO : pas encore mesuré (rien à corriger)",
-            "detail_md": ("Aucune question n'a pu être posée aux IA — ChatGPT, "
-                          "Perplexity et les autres ne sont pas branchés (ou n'ont "
-                          "rien renvoyé). Il n'y a donc rien à améliorer pour "
-                          "l'instant : la mesure reprendra dès que la veille IA "
-                          "sera active."),
-            "status": "draft",
-            "impact": 1, "effort": 1,
-        })
         return {"ok": True, "checked": 0, "mentioned": 0, "coverage_pct": 0.0}
-
     coverage_pct = round(mentioned_count / checked * 100, 1)
-    repo.insert_action({
-        "site_id": site_id,
-        "agent": "geo_surveillant",
-        "kind": "recommandation",
-        "title": f"GEO check : {mentioned_count}/{checked} mentions ({coverage_pct}%)",
-        "detail_md": (f"Sur {checked} requêtes interrogées sur "
-                      f"{', '.join(surfaces)}, ton site est cité "
-                      f"{mentioned_count} fois. "
-                      f"{'Bon démarrage' if coverage_pct > 30 else 'À améliorer'} "
-                      f"(seuil sain : 50% sur ton domaine)."),
-        "status": "draft",
-        "impact": 4, "effort": 4,
-    })
     return {"ok": True, "checked": checked, "mentioned": mentioned_count,
             "coverage_pct": coverage_pct}
