@@ -233,7 +233,28 @@ def run_geo_check(site_id: str, *, max_queries: int = 5,
             if detected["mentioned"]:
                 mentioned_count += 1
 
-    coverage_pct = round((mentioned_count / checked * 100) if checked else 0, 1)
+    # Aucune IA n'a répondu (clés ChatGPT/Perplexity absentes, ou rien renvoyé) :
+    # on n'a RIEN mesuré. Surtout pas une carte « 0/0 — 0% à améliorer » à
+    # impact 4 qui ferait croire à un mauvais score alors qu'aucune question n'a
+    # été posée (fausse alerte vue sur tous les sites le 18/06). On pose une note
+    # honnête, à lire, sans urgence — déduplifiée d'un passage à l'autre.
+    if not checked:
+        repo.insert_action({
+            "site_id": site_id,
+            "agent": "geo_surveillant",
+            "kind": "recommandation",
+            "title": "GEO : pas encore mesuré (rien à corriger)",
+            "detail_md": ("Aucune question n'a pu être posée aux IA — ChatGPT, "
+                          "Perplexity et les autres ne sont pas branchés (ou n'ont "
+                          "rien renvoyé). Il n'y a donc rien à améliorer pour "
+                          "l'instant : la mesure reprendra dès que la veille IA "
+                          "sera active."),
+            "status": "draft",
+            "impact": 1, "effort": 1,
+        })
+        return {"ok": True, "checked": 0, "mentioned": 0, "coverage_pct": 0.0}
+
+    coverage_pct = round(mentioned_count / checked * 100, 1)
     repo.insert_action({
         "site_id": site_id,
         "agent": "geo_surveillant",

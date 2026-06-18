@@ -1274,8 +1274,9 @@ check("carte « fetchpriority » → à voir ensemble (pas de faux bouton « rel
 # Bug 18/06 : une carte que le robot a DÉJÀ jugée « à la main » (apply_state
 # 'manual') ne doit plus se voir recoller une pastille verte optimiste — sinon
 # « le robot peut le faire » s'affiche AU-DESSUS de « il préfère ne pas y toucher ».
+# Titre SANS famille ni signal de contenu → il atteint vraiment le fallback optimiste.
 _declined = {"status": "draft", "kind": "recommandation", "apply_state": "manual",
-             "title": "Dupliquer /carreleur en /electricien avec adaptation minimale"}
+             "title": "Installer la mesure d'INP via un snippet web-vitals"}
 check("déjà jugée « à la main » → plus de faux bouton vert optimiste",
       pl.classify_for_apply(_declined, site_ok)["can"] is False)
 # La MÊME carte jamais tentée garde sa chance (fallback optimiste assumé).
@@ -1286,6 +1287,20 @@ check("capacité sûre (titre) → reprend la main malgré un refus passé",
       pl.classify_for_apply(
           {"status": "draft", "apply_state": "manual",
            "title": "Réécrire le title de la home"}, site_ok)["can"] is True)
+# Bug 18/06 (capture Jordan) : créer/dupliquer une page ou écrire son contenu =
+# hors de portée de l'Exécuteur. Le faux bouton vert venait d'un détail citant
+# « Title cible : … » ou « + H1 » qui allumait à tort la famille title/h1.
+_dup = pl.classify_for_apply(
+    {"status": "draft", "kind": "recommandation",
+     "title": "Dupliquer /carreleur en /electricien avec adaptation minimale",
+     "detail_md": "Title cible : « Site internet pour électricien — Pixel Pros »."}, site_ok)
+check("dupliquer une page (détail cite « Title cible ») → à la main, pas de bouton vert",
+      _dup["can"] is False and _dup["mode"] == "manual")
+_homecontent = pl.classify_for_apply(
+    {"status": "draft", "kind": "recommandation",
+     "title": "Publier un contenu minimal sur la home (300 mots + H1 ciblé)"}, site_ok)
+check("publier le contenu d'une page (cite « H1 ») → à la main, pas de bouton vert",
+      _homecontent["can"] is False and _homecontent["mode"] == "manual")
 # Bug 18/06 (capture Jordan) : la surveillance GEO (« GEO check : 0/0 mentions »)
 # est un RAPPORT à lire, pas une action → jamais de bouton vert « OK, fais-le ».
 _geo = pl.classify_for_apply(

@@ -207,6 +207,26 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
                 "why": ("Changer la priorité de chargement des images, le robot "
                         "ne sait pas encore le faire tout seul — à voir ensemble.")}
 
+    # Créer/dupliquer une PAGE entière ou écrire le CONTENU d'une page : hors de
+    # portée de l'Exécuteur (il ne retouche que des balises — title, méta, h1… —
+    # sur des pages qui existent DÉJÀ ; il n'invente jamais de contenu). On le
+    # détecte AVANT les familles : sinon un détail qui cite « Title cible : … »
+    # ou « + H1 ciblé » allume à tort la famille title/h1 et décroche un faux
+    # bouton vert (vu le 18/06 : « Dupliquer /carreleur en /electricien »,
+    # « Publier un contenu minimal sur la home », « Rédiger et déployer le
+    # contenu de … »). Volontairement des expressions MULTI-MOTS, pour ne jamais
+    # frapper un légitime « réécrire le title/la méta ».
+    _PAGE_CONTENT_SIGNS = (
+        "dupliquer", "créer une page", "creer une page", "créer un brouillon",
+        "creer un brouillon", "publier un contenu", "publier du contenu",
+        "rédiger une page", "rediger une page", "rédiger et déployer le contenu",
+        "rediger et deployer le contenu", "rédiger le contenu", "rediger le contenu")
+    if any(k in title_low for k in _PAGE_CONTENT_SIGNS):
+        return {"can": False, "mode": "manual",
+                "why": ("Écrire ou dupliquer une page entière, c'est du contenu à "
+                        "préparer ensemble — le robot ne retouche que des pages "
+                        "qui existent déjà, il n'invente jamais de texte.")}
+
     fams = _families_of(action)
     code_fams = fams & set(_CODE_FAMILIES)
     tool_fams = fams & set(_TOOL_FAMILIES)
