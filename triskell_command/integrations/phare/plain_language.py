@@ -254,28 +254,27 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
                         "à brancher dans « Réglages du site ».")}
 
     title_low = (action.get("title") or "").lower()
-    # FAQ : le robot sait RECOPIER en données structurées une FAQ DÉJÀ écrite sur
-    # la page — il n'en INVENTE jamais (sinon pénalité Google). Une carte qui
-    # propose d'ÉCRIRE / d'étoffer une FAQ (« étoffer… avec une mini-FAQ »,
-    # « rédiger 3 questions ») est donc du CONTENU à préparer ensemble, pas un
-    # clic (vécu le 19/06 : « Étoffer /demande-site avec une mini-FAQ » montrait
-    # le bouton vert puis « il faudrait d'abord en écrire une ensemble »).
-    if "faq" in title_low and any(
-            k in title_low for k in ("étoffer", "etoffer", "mini-faq", "mini faq",
-                                     "rédiger", "rediger", "écrire", "ecrire",
-                                     "créer", "creer")):
+    # FAQ & PRÉCHARGEMENT : pour ces deux-là (et SEULEMENT ces deux-là), le robot
+    # doit OUVRIR ta page EN DIRECT — lire ta FAQ déjà écrite, repérer ta grande
+    # image. Cette ouverture peut RATER (page injoignable, aucune FAQ écrite,
+    # image en fond CSS) et le badge ne peut PAS le deviner d'avance → on ne
+    # PROMET donc PAS un bouton vert qui se dégonfle au clic (« Je n'ai pas réussi
+    # à ouvrir cette page », « il faudrait d'abord en écrire une ensemble », vus
+    # par Jordan les 18-19/06). On les range honnêtement en « à voir ensemble »
+    # (volet Idées). ⚠️ Ne PAS les re-verdir : tout ce que le robot fait à coup
+    # SÛR (titre, méta, h1, canonical, noindex, données structurées, alt, plan du
+    # site, images, redirection) travaille sur une COPIE du code, sans ouverture
+    # en direct — ça seul reste vert.
+    if "faq" in title_low:
         return {"can": False, "mode": "manual",
-                "why": ("Écrire une FAQ — les questions et leurs réponses —, "
-                        "c'est du contenu à préparer ensemble. Le robot ne sait "
-                        "que recopier une FAQ déjà présente sur ta page.")}
-
-    # Capacités apprises au robot le 17/06 (il lit la page en direct) : FAQ
-    # structurée (recopie) + préchargement de l'image principale → faisables seul.
-    if ("faq" in title_low
-            or any(k in title_low for k in ("précharg", "precharg", "preload"))):
-        if (site.get("repo_github") or "").strip():
-            return {"can": True, "mode": "code",
-                    "why": "Le robot lit ta page et s'en charge."}
+                "why": ("Une FAQ, le robot ne peut que recopier celle qui est "
+                        "déjà écrite sur ta page — il doit l'ouvrir pour ça et "
+                        "ça peut rater. On la prépare mieux ensemble.")}
+    if any(k in title_low for k in ("précharg", "precharg", "preload")):
+        return {"can": False, "mode": "manual",
+                "why": ("Pour accélérer ta grande image, le robot doit ouvrir ta "
+                        "page en direct pour la repérer, et ça peut rater — on "
+                        "la regarde ensemble quand tu veux.")}
 
     # Changer la PRIORITÉ ou le mode de chargement d'une image (fetchpriority,
     # lazy-load) : le robot ne sait pas encore toucher aux attributs d'une

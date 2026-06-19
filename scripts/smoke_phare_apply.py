@@ -1257,13 +1257,16 @@ check("FAQ + préchargement = invisible → pas bloqué par le diff visuel",
       executor._is_metadata_only({"title": "Ajouter une FAQ structurée sur /x"})
       and executor._is_metadata_only({"title": "Précharger l'image de la home"}))
 
-# Le classement reconnaît les nouvelles capacités → bouton « OK, fais-le »
-check("carte FAQ → le robot peut le faire (bouton vert)",
-      pl.classify_for_apply(
-          {"status": "draft", "title": "Ajouter une FAQ structurée sur /x"}, site_ok)["can"])
-check("carte préchargement → le robot peut le faire",
-      pl.classify_for_apply(
-          {"status": "draft", "title": "Précharger l'image principale de la home"}, site_ok)["can"])
+# 19/06 : FAQ & préchargement exigent d'OUVRIR la page en direct (ça peut rater)
+# → plus de bouton vert qui se dégonfle au clic. À voir ensemble (volet Idées).
+_faq = pl.classify_for_apply(
+    {"status": "draft", "title": "Ajouter une FAQ structurée sur /x"}, site_ok)
+check("carte FAQ (ouverture en direct) → à voir ensemble, pas de vert",
+      _faq["can"] is False and _faq["mode"] == "manual")
+_pre = pl.classify_for_apply(
+    {"status": "draft", "title": "Précharger l'image principale de la home"}, site_ok)
+check("carte préchargement (ouverture en direct) → à voir ensemble, pas de vert",
+      _pre["can"] is False and _pre["mode"] == "manual")
 check("écrire du contenu → reste à toi (pas de faux bouton vert)",
       not pl.classify_for_apply(
           {"status": "draft", "title": "Rédiger une page de service"}, site_ok)["can"])
@@ -1359,16 +1362,18 @@ _faq_creation = pl.classify_for_apply(
      "detail_md": "Ajouter trois questions-réponses en bas de page."}, site_ok)
 check("« Étoffer … mini-FAQ » (à écrire) → contenu ensemble, pas de vert",
       _faq_creation["can"] is False and _faq_creation["mode"] == "manual")
-# Garde-fou : une FAQ DÉJÀ écrite, juste à baliser, reste faisable par le robot
-check("FAQ déjà écrite à baliser → le robot peut encore le faire",
+# FAQ & préchargement : ouverture en direct → à voir ensemble (jamais de vert)
+check("FAQ (ouverture en direct, peut rater) → à voir ensemble, pas de vert",
       pl.classify_for_apply(
           {"status": "draft", "title": "Ajouter une FAQ structurée sur /photographe"},
-          site_ok)["can"] is True)
-# Garde-fou : un préchargement d'image (invisible) sur l'accueil reste permis
-check("préchargement (invisible) sur l'accueil → toujours permis",
-      pl.classify_for_apply(
-          {"status": "draft", "title": "Précharger l'image principale de la home"},
-          site_ok)["can"] is True)
+          site_ok)["can"] is False)
+# Garde-fou : un ajout INVISIBLE sur l'accueil qui NE demande PAS d'ouverture en
+# direct (canonical, posé sur la copie du code) reste vert — Edit « accueil » ne
+# bloque que le contenu visible (titre/H1/méta), pas les balises invisibles.
+_canon_home = pl.classify_for_apply(
+    {"status": "draft", "title": "Ajouter un canonical sur la home"}, site_ok)
+check("canonical (invisible, sur copie du code) sur l'accueil → reste vert",
+      _canon_home["can"] is True and _canon_home["mode"] == "code")
 # Garde-fou : un titre sur une page INTERNE reste un vrai bouton vert
 _interne = pl.classify_for_apply(
     {"status": "draft", "title": "Réécrire le title de /photographe"}, site_ok)
