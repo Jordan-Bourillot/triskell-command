@@ -223,19 +223,20 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
                 "why": (_err.strip() if (_err.strip() and not has_jargon(_err))
                         else CLEAN_MANUAL_FALLBACK)}
 
-    # La page d'ACCUEIL (la vitrine) : le robot n'en RÉÉCRIT jamais le contenu
-    # visible tout seul (le titre, le grand titre, le descriptif) — règle de fond
-    # depuis qu'il avait viré le nom du site d'une home. Donc PAS de bouton vert
-    # sur ces cartes : c'est une décision à prendre ensemble. (Les ajouts
-    # INVISIBLES — plan du site, données structurées… — restent permis.)
+    # La page d'ACCUEIL (la vitrine) : le robot n'y touche JAMAIS tout seul —
+    # AUCUNE carte, AUCUNE famille. Règle de fond depuis qu'il avait viré le nom
+    # du site d'une home. C'est EXACTEMENT la règle de l'auto-publication
+    # (`orchestrator._is_auto_safe` exclut toute carte d'accueil) : on l'aligne
+    # ici pour que le bouton « OK, fais-le » dise la même chose (sinon un faux
+    # vert « schema sur la page d'accueil » subsiste — audit du 19/06). L'accueil,
+    # c'est une décision à prendre ENSEMBLE, jamais une tâche-robot.
     try:
         from . import orchestrator
-        if orchestrator._targets_home(action) and (
-                _families_of(action) & {"title", "h1", "meta"}):
+        if orchestrator._targets_home(action):
             return {"can": False, "mode": "manual",
-                    "why": ("La page d'accueil, c'est ta vitrine — le robot n'en "
-                            "change pas le texte tout seul. Si tu veux la "
-                            "retoucher, on le fait ensemble.")}
+                    "why": ("La page d'accueil, c'est ta vitrine : le robot n'y "
+                            "touche jamais tout seul. Si tu veux la retoucher, on "
+                            "le fait ensemble.")}
     except Exception:
         pass
 

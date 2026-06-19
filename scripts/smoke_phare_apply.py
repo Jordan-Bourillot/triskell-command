@@ -1367,13 +1367,20 @@ check("FAQ (ouverture en direct, peut rater) → à voir ensemble, pas de vert",
       pl.classify_for_apply(
           {"status": "draft", "title": "Ajouter une FAQ structurée sur /photographe"},
           site_ok)["can"] is False)
-# Garde-fou : un ajout INVISIBLE sur l'accueil qui NE demande PAS d'ouverture en
-# direct (canonical, posé sur la copie du code) reste vert — Edit « accueil » ne
-# bloque que le contenu visible (titre/H1/méta), pas les balises invisibles.
-_canon_home = pl.classify_for_apply(
-    {"status": "draft", "title": "Ajouter un canonical sur la home"}, site_ok)
-check("canonical (invisible, sur copie du code) sur l'accueil → reste vert",
-      _canon_home["can"] is True and _canon_home["mode"] == "code")
+# 19/06 (audit base réelle) : l'accueil = la vitrine, le robot n'y touche JAMAIS
+# tout seul — AUCUNE famille, même invisible (schema/canonical). Aligné sur la
+# règle de l'auto-publication. Un « schema LocalBusiness sur la page d'accueil »
+# restait vert et c'était le dernier faux vert de la base.
+_schema_home = pl.classify_for_apply(
+    {"status": "draft", "title": "Ajouter le schema LocalBusiness sur la page d'accueil"},
+    site_ok)
+check("schema/canonical sur l'ACCUEIL → à faire ensemble (jamais le robot seul)",
+      _schema_home["can"] is False and _schema_home["mode"] == "manual")
+# … mais la MÊME balise invisible sur une page INTERNE reste, elle, faisable
+_canon_interne = pl.classify_for_apply(
+    {"status": "draft", "title": "Ajouter un canonical sur /configurer"}, site_ok)
+check("canonical sur une page interne → le robot peut le faire",
+      _canon_interne["can"] is True and _canon_interne["mode"] == "code")
 # Garde-fou : un titre sur une page INTERNE reste un vrai bouton vert
 _interne = pl.classify_for_apply(
     {"status": "draft", "title": "Réécrire le title de /photographe"}, site_ok)
