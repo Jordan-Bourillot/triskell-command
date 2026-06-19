@@ -11050,8 +11050,17 @@ class Api:
             out["prospects_new"] = _count("prospects", status="new")
             d1 = _count("prospect_drafts", status="pending")
             d2 = _count("convoy_drafts", status="pending")
-            if d1 is not None or d2 is not None:
-                out["drafts_pending"] = (d1 or 0) + (d2 or 0)
+            # Brouillons CRÉATEURS : stockés dans shared_settings (pas une
+            # table) → comptés via le module, sinon le Cockpit affichait 0
+            # alors que l'écran Brouillons en montrait (ex. 12 mails club).
+            d3 = None
+            try:
+                from ..integrations import creator_drafts as _CD
+                d3 = len(_CD.list_all(sb, status="pending"))
+            except Exception as exc:
+                logger.debug("guide_snapshot: creator_drafts KO: %s", exc)
+            if d1 is not None or d2 is not None or d3 is not None:
+                out["drafts_pending"] = (d1 or 0) + (d2 or 0) + (d3 or 0)
             # Réponses non traitées : le flag est dans extra (JSON) → on
             # compte côté Python sur les 200 dernières (même logique que
             # la vue Réponses).
