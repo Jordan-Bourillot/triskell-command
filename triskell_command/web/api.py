@@ -8041,6 +8041,7 @@ class Api:
             ("claude_proactive",      "Veille proactive Claude"),
             ("copilot_watch",         "Guetteur du copilote"),
             ("mission_runner",        "Chef de gare des prospections"),
+            ("creator_followup",      "Relances créateurs (carnet)"),
             ("autopilot_runner",      "Prospection nocturne (3h Paris)"),
             ("pixelpros.auto_builder", "Construction auto des sites payés"),
             ("pixelpros.content_chaser", "Relances des sites payés à compléter"),
@@ -8157,6 +8158,7 @@ class Api:
             "claude_proactive":       ("claude_proactive",       "start_worker", True),
             "copilot_watch":          ("copilot_watch",          "start_worker", False),
             "mission_runner":         ("mission_runner",         "start_worker", True),
+            "creator_followup":       ("creator_followup",       "start_worker", True),
             "autopilot_runner":       ("autopilot_runner",       "start_worker", True),
             "pixelpros.auto_builder": ("pixelpros.auto_builder", "start_worker", True),
             "pixelpros.content_chaser": ("pixelpros.content_chaser", "start_worker", True),
@@ -9621,6 +9623,7 @@ class Api:
             ("scheduled_mail_runner",  "start_worker", "scheduled_mails"),
             ("backup_runner",          "start_worker", "backup_runner"),
             ("mission_runner",         "start_worker", "mission_runner"),
+            ("creator_followup",       "start_worker", "creator_followup"),
             ("autopilot_runner",       "start_worker", "autopilot_nightly"),
             ("pixelpros.auto_builder", "start_worker", "pixelpros_auto_builder"),
             ("pixelpros.content_chaser", "start_worker", "pixelpros_content_chaser"),
@@ -11178,6 +11181,7 @@ class Api:
                              "post_sale_runner", "lead_to_client",
                              "multichannel_followup", "dormant_recycler",
                              "stripe_poller", "mission_runner",
+                             "creator_followup",
                              "autopilot_runner", "site_vision_worker"):
                 try:
                     mod = __import__(
