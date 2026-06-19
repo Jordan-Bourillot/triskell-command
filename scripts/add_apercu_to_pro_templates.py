@@ -41,7 +41,10 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from supabase import create_client  # noqa: E402
 
-KEYS = ("prosp_pp_pro_commerce", "prosp_pp_pro_artisan")
+# Commerce + Artisan depuis le 14/06. Cabinet (variante « intention », en fait
+# générique testée en A/B/C sur toute entreprise) ajouté le 19/06 : c'était le
+# SEUL modèle « pro » sans aperçu → ~1 mail sur 7 partait sans image (Jordan).
+KEYS = ("prosp_pp_pro_commerce", "prosp_pp_pro_artisan", "prosp_pp_pro_cabinet")
 
 # Ancre : le paragraphe des 2 boutons (présent à l'identique dans les 2 modèles).
 BTN_MARKER = '<p style="margin:24px 0 8px 0;"><a href="{{page_metier}}"'

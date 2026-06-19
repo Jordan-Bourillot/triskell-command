@@ -369,8 +369,19 @@ _DEMO_LABEL: dict[str, str] = {
 }
 
 
+# Métiers « à double casquette » : leur libellé officiel contient le mot d'un
+# AUTRE métier capté plus haut dans la table. Ex. « menuiserie métallique et
+# serrurerie » contient « menuis » → renvoyait un site de MENUISIER par erreur
+# (Jordan, brouillons du 19/06/2026). On teste ces fragments très spécifiques
+# EN PREMIER pour qu'ils l'emportent sur le mot générique.
+_DEMO_PRIORITY: tuple[str, ...] = ("serrur", "metall", "ferronn")
+
+
 def _demo_slug_for(metier: str) -> str | None:
     key = _strip_accents((metier or "").lower())
+    for frag in _DEMO_PRIORITY:
+        if frag in key:
+            return _DEMO_MAP[frag]
     for frag, slug in _DEMO_MAP.items():
         if frag in key:
             return slug
@@ -829,7 +840,7 @@ def _public_url(path: str) -> str:
 
 # Version du design : à incrémenter si on change l'aspect de l'aperçu, pour
 # invalider les images déjà mises en cache (la clé en dépend).
-_DESIGN_VERSION = "2"
+_DESIGN_VERSION = "3"
 
 
 def _object_exists(url: str) -> bool:
@@ -886,5 +897,98 @@ def preview_img_html(nom: str, metier: str = "", ville: str = "") -> str:
             'border:1px solid #e5e7eb;display:block;margin:0 0 16px;">')
 
 
+# ===========================================================================
+#  Aperçu d'un site de CRÉATEUR (assistant / club / boutique)
+#  — capture en direct de la 1re vue de SON vrai site, telle quelle.
+#  Sert dans le mail créateur : une image fidèle, jamais cassée (avant, le
+#  mail pointait vers /_mail_assistant.png absent des sites de club → 404).
+# ===========================================================================
+
+# Habillage de démo à masquer dans la capture d'un site de créateur : le
+# bandeau « Maquette… » et les boutons de bascule des sites de club, plus les
+# annotations façon démo. Inoffensif sur les sites qui n'ont pas ces classes.
+_CREATOR_HIDE_CSS = (
+    ".maquette,.toggle,.demo-bar,.annot,.annot-after-hero,"
+    ".cust-hero-scroll{display:none!important;}")
+
+
+def _render_site_top_png(target_url: str) -> bytes | None:
+    """Capture le haut (en-tête + hero) de n'importe quel site, tel quel."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        logger.info("apercu_site : Playwright absent — capture créateur sautée.")
+        return None
+    png = None
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            try:
+                page = browser.new_page(
+                    viewport={"width": 1200, "height": 800}, device_scale_factor=2)
+
+                def _route(route):
+                    u = route.request.url
+                    if any(s in u for s in _BLOCK_FRAGMENTS):
+                        route.abort()
+                    else:
+                        route.continue_()
+                page.route("**/*", _route)
+
+                page.goto(target_url, wait_until="domcontentloaded", timeout=35000)
+                try:
+                    page.add_style_tag(content=_CREATOR_HIDE_CSS)
+                except Exception:
+                    pass
+                try:
+                    page.evaluate(_WAIT_HERO_BG_JS)  # no-op si pas de .cust-hero-bg
+                except Exception:
+                    pass
+                try:
+                    page.evaluate("async () => { await document.fonts.ready; }")
+                except Exception:
+                    pass
+                page.wait_for_timeout(1200)
+                png = page.screenshot(
+                    clip={"x": 0, "y": 0, "width": 1200, "height": 760})
+            finally:
+                browser.close()
+    except Exception as exc:
+        logger.warning("apercu_site : capture créateur %s échouée : %s",
+                       target_url, exc)
+        return None
+    return png
+
+
+def creator_site_preview_url(target_url: str) -> str:
+    """Aperçu (image hébergée) de la 1re vue du vrai site d'un créateur.
+    Réutilise l'image si déjà générée (même URL). "" si indisponible —
+    jamais bloquant (le mail part alors sans image plutôt qu'avec une cassée)."""
+    target_url = (target_url or "").strip()
+    if not target_url:
+        return ""
+    key = hashlib.sha1(
+        f"creator|{target_url}|v{_DESIGN_VERSION}".encode("utf-8")).hexdigest()[:20]
+    path = f"apercus/creator_{key}.png"
+    url = _public_url(path)
+    if url and _object_exists(url):
+        return url  # déjà généré → on réutilise
+    png = _in_thread(_render_site_top_png, target_url)
+    if not png:
+        return ""
+    c = _sb_client()
+    if c is None:
+        return ""
+    try:
+        c.raw.storage.from_(_BUCKET).upload(
+            path=path, file=png,
+            file_options={"content-type": "image/png", "upsert": "true"})
+    except Exception as exc:
+        logger.warning("apercu_site : upload aperçu créateur échoué : %s", exc)
+        return ""
+    return url or _public_url(path)
+
+
 __all__ = ["build_preview_html", "render_preview_png",
-           "preview_image_url", "preview_img_html"]
+           "preview_image_url", "preview_img_html",
+           "creator_site_preview_url"]

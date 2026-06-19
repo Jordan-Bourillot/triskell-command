@@ -1878,27 +1878,30 @@ class Api:
 
     @staticmethod
     def _creator_mail_html(cr: dict, accent: str = "", accent2: str = "",
-                           angle: str = "") -> str:
+                           angle: str = "", preview_url: str = "") -> str:
         """Mail HTML riche d'un créateur (accroche globale, aperçus, détail,
         bouton). Tutoiement par défaut, vouvoiement si la fiche le précise.
-        `angle` (s'il est fourni) prime sur celui rangé dans la fiche."""
+        `angle` (s'il est fourni) prime sur celui rangé dans la fiche.
+        `preview_url` (clubs) = vraie capture du site du créateur."""
         try:
             from ..integrations import creator_mail
             notes = (cr.get("notes") or "")
+            demo = (cr.get("demo_url") or "").strip()
             tu = "vouvoiement" not in notes.lower()
             na, na2 = creator_mail.accent_from_notes(notes)
             acc = accent or na or "#6366F1"
             acc2 = accent2 or na2 or acc
             ang = (angle or "").strip() or creator_mail.angle_from_notes(notes)
-            kind = creator_mail.kind_for(cr.get("platform") or "", notes)
+            kind = creator_mail.kind_for(cr.get("platform") or "", notes, demo)
             return creator_mail.render(
                 name=cr.get("name") or "",
-                demo_url=cr.get("demo_url") or "",
+                demo_url=demo,
                 accent=acc,
                 accent2=acc2,
                 tu=tu,
                 angle=ang,
                 kind=kind,
+                preview_url=(preview_url or "").strip(),
             )
         except Exception:
             return ""
@@ -1928,7 +1931,7 @@ class Api:
             from ..integrations import creator_mail
             notes = cr.get("notes") or ""
             tu = "vouvoiement" not in notes.lower()
-            kind = creator_mail.kind_for(cr.get("platform") or "", notes)
+            kind = creator_mail.kind_for(cr.get("platform") or "", notes, demo)
             if d.get("review_modif_applied") and (d.get("angle_revised") or "").strip():
                 ang = d.get("angle_revised").strip()
             else:
@@ -1936,7 +1939,8 @@ class Api:
             body = creator_mail.render_text(cr.get("name") or "", demo, tu,
                                             angle=ang, kind=kind)
             body_html = self._creator_mail_html(
-                cr, d.get("accent") or "", d.get("accent2") or "", angle=ang)
+                cr, d.get("accent") or "", d.get("accent2") or "", angle=ang,
+                preview_url=d.get("preview_url") or "")
             out.append({
                 "source": "creator",
                 "id": d.get("id") or "",
@@ -2002,7 +2006,8 @@ class Api:
         else:
             _tu = "vouvoiement" not in (cr.get("notes") or "").lower()
             _kind = creator_mail.kind_for(cr.get("platform") or "",
-                                          cr.get("notes") or "")
+                                          cr.get("notes") or "",
+                                          (cr.get("demo_url") or "").strip())
             final_body = creator_mail.render_text(
                 cr.get("name") or "", (cr.get("demo_url") or "").strip(),
                 _tu, angle=_ang, kind=_kind)
@@ -2039,8 +2044,25 @@ class Api:
             return {"ok": False,
                     "error": "config SMTP introuvable — rien envoyé"}
 
+        # Aperçu (clubs) : vraie capture du site du créateur. Pris du brouillon ;
+        # sinon généré ici (best-effort) pour que le mail parte avec son image.
+        _prev = (d.get("preview_url") or "").strip()
+        if not _prev:
+            _khtml = creator_mail.kind_for(
+                cr.get("platform") or "", cr.get("notes") or "",
+                (cr.get("demo_url") or "").strip())
+            if _khtml == "club":
+                try:
+                    from ..integrations import apercu_site
+                    _prev = apercu_site.creator_site_preview_url(
+                        (cr.get("demo_url") or "").strip())
+                    if _prev:
+                        CD.set_review(sb, draft_id, {"preview_url": _prev})
+                except Exception as exc:
+                    logger.debug("approve creator: preview gen KO: %s", exc)
         body_html = self._creator_mail_html(
-            cr, d.get("accent") or "", d.get("accent2") or "", angle=_ang)
+            cr, d.get("accent") or "", d.get("accent2") or "", angle=_ang,
+            preview_url=_prev)
         try:
             msg_id = send_email(smtp_cfg, to=to, subject=subject,
                                 body=final_body, body_html=body_html)
@@ -2262,7 +2284,7 @@ class Api:
                 continue
             notes = cr.get("notes") or ""
             tu = "vouvoiement" not in notes.lower()
-            kind = creator_mail.kind_for(cr.get("platform") or "", notes)
+            kind = creator_mail.kind_for(cr.get("platform") or "", notes, demo)
             if d.get("review_modif_applied") and (d.get("angle_revised") or "").strip():
                 ang = d.get("angle_revised").strip()
             else:
@@ -2270,7 +2292,8 @@ class Api:
             body = creator_mail.render_text(cr.get("name") or "", demo, tu,
                                             angle=ang, kind=kind)
             body_html = self._creator_mail_html(
-                cr, d.get("accent") or "", d.get("accent2") or "", angle=ang)
+                cr, d.get("accent") or "", d.get("accent2") or "", angle=ang,
+                preview_url=d.get("preview_url") or "")
             ok = self._log_creator_email_sent(
                 client, d.get("id"), cr, to, d.get("subject") or "",
                 body, body_html, "", "", ts=d.get("sent_at"))
@@ -6854,17 +6877,34 @@ class Api:
                     continue
                 if not cid and r.get("contacted_at"):
                     continue  # en masse : on saute les déjà contactés
+                from ..integrations import creator_mail
                 vouvoie = "tutoiement" not in (r.get("notes") or "").lower()
                 poss = "votre" if vouvoie else "ta"
-                _kit = ((r.get("platform") or "").lower() == "tiktok"
-                        or "cible tiktok" in (r.get("notes") or "").lower())
-                subject = (f"Une boutique à {poss} marque, pour {poss} communauté"
-                           if _kit else
-                           f"Un assistant à {poss} marque, pour {poss} communauté")
+                demo = (r.get("demo_url") or "").strip()
+                kind = creator_mail.kind_for(
+                    r.get("platform") or "", r.get("notes") or "", demo)
+                if kind == "kit":
+                    subject = f"Une boutique à {poss} marque, pour {poss} communauté"
+                elif kind == "club":
+                    subject = f"Un club à {poss} marque, pour {poss} communauté"
+                else:
+                    subject = f"Un assistant à {poss} marque, pour {poss} communauté"
+                # Aperçu (clubs) : vraie capture de leur site, pré-calculée ici
+                # pour que l'écran Brouillons reste rapide (pas de capture au
+                # chargement). Best-effort : un échec laisse juste le mail sans
+                # image, jamais bloquant.
+                prev = ""
+                if kind == "club" and demo:
+                    try:
+                        from ..integrations import apercu_site
+                        prev = apercu_site.creator_site_preview_url(demo)
+                    except Exception as exc:
+                        logger.debug("queue creator: preview gen KO: %s", exc)
                 p = payload or {}
                 d = CD.queue(sb, r.get("id") or "", subject,
                              accent=p.get("accent", ""),
-                             accent2=p.get("accent2", ""))
+                             accent2=p.get("accent2", ""),
+                             preview_url=prev)
                 if d:
                     queued.append({"name": r.get("name") or "?", "to": email})
             return {"ok": True, "count": len(queued),

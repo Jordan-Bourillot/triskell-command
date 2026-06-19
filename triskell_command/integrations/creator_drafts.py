@@ -62,7 +62,7 @@ def get(sb, draft_id: str) -> dict | None:
 
 
 def queue(sb, creator_id: str, subject: str, sender_address: str = "",
-          accent: str = "", accent2: str = "") -> dict | None:
+          accent: str = "", accent2: str = "", preview_url: str = "") -> dict | None:
     """Met (ou remplace) un brouillon `pending` pour ce créateur."""
     if sb is None or not creator_id:
         return None
@@ -78,6 +78,8 @@ def queue(sb, creator_id: str, subject: str, sender_address: str = "",
         "sender_address": (sender_address or "").strip(),
         "accent": (accent or "").strip(),
         "accent2": (accent2 or "").strip(),
+        # Aperçu (clubs) : URL de la capture du site du créateur (image hébergée).
+        "preview_url": (preview_url or "").strip(),
         "status": "pending",
         "created_at": _now(),
         # Relecture 2e IA (renseignée par creator_drafts_rereview).

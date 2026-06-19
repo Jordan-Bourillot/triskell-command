@@ -41,18 +41,46 @@ def _initials(name: str) -> str:
     return (parts[0][0] + parts[1][0]).upper()
 
 
-def kind_for(platform: str = "", notes: str = "") -> str:
-    """« kit » pour les créateurs TikTok (offre boutique + cours + cadeau, pas
-    d'assistant ni de quiz), « assistant » sinon (offre YouTube historique)."""
+# Badge Triskell (logo hébergé) affiché dans le rond de l'en-tête. Asset public
+# stable, dans le bucket Supabase déjà utilisé pour les aperçus. Choix de Jordan
+# (19/06/2026) : un logo Triskell constant plutôt que les initiales du créateur
+# (le rond, c'est l'expéditeur — « préparé par Triskell Studio »).
+TRISKELL_BADGE_URL = (
+    "https://rmaafrrseafghptlsgdz.supabase.co/storage/v1/object/public/"
+    "pp-client-photos/brand/triskell_badge.png")
+
+
+def _badge_html() -> str:
+    """Rond d'en-tête : le logo Triskell hébergé, sur un fond sombre de repli
+    (si l'image ne charge pas, on a un rond sombre à la marque, jamais un rond
+    cassé ni des initiales qui ne sont pas celles du créateur)."""
+    return (
+        '<div style="width:52px;height:52px;border-radius:50%;'
+        'background:#0B0B14;overflow:hidden;line-height:0;">'
+        f'<img src="{TRISKELL_BADGE_URL}" width="52" height="52" '
+        'alt="Triskell Studio" style="display:block;width:52px;height:52px;'
+        'border:0;outline:none;"></div>')
+
+
+def kind_for(platform: str = "", notes: str = "", demo_url: str = "") -> str:
+    """« kit » pour les créateurs TikTok (boutique + cours + cadeau), « club »
+    pour les créateurs Instagram à qui on propose un club mensuel à leur marque
+    (offre récente), « assistant » sinon (offre YouTube historique)."""
     p = (platform or "").lower()
     n = (notes or "").lower()
+    d = (demo_url or "").lower()
     if (p == "tiktok" or "cible tiktok" in n
             or "kit de monétisation" in n or "kit de monetisation" in n):
         return "kit"
+    # Club : repéré par les notes (« (club) », « Piste A/B ») ou par l'adresse
+    # du site (les démos de club vivent sur des sous-domaines « club-… »).
+    host = d.split("//", 1)[-1]
+    if "club" in n or host.startswith("club-") or "/club-" in d:
+        return "club"
     return "assistant"
 
 
-def _render_kit(name: str, initials: str, acc: str, acc2: str,
+def _render_kit(name: str, badge: str, acc: str, acc2: str,
                 url_accueil: str, tu: bool) -> str:
     """Mail « boutique » pour un créateur TikTok : pas d'assistant ni de quiz,
     pas d'images (elles n'existent pas sur ces sites), juste l'offre réelle."""
@@ -99,7 +127,7 @@ def _render_kit(name: str, initials: str, acc: str, acc2: str,
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 10px 34px rgba(15,23,42,.10);">
     <tr><td style="padding:34px 38px 6px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td style="padding-right:13px;"><div style="width:52px;height:52px;border-radius:50%;background:{acc};color:#ffffff;font-size:20px;font-weight:800;line-height:52px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">{initials}</div></td>
+        <td style="padding-right:13px;">{badge}</td>
         <td style="font-size:14px;color:#6b7280;line-height:1.3;">Préparé pour vous par<br><b style="color:#111827;font-size:15px;">Triskell Studio</b></td>
       </tr></table>
       <h1 style="margin:22px 0 10px;font-size:25px;line-height:1.25;color:#0f172a;">{hello}<br>{h1b}</h1>
@@ -125,24 +153,123 @@ def _render_kit(name: str, initials: str, acc: str, acc2: str,
 </body></html>"""
 
 
+def _render_club(name: str, badge: str, acc: str, acc2: str,
+                 url_club: str, preview_url: str, tu: bool) -> str:
+    """Mail « club » pour un créateur Instagram : un club mensuel à sa marque
+    (rendez-vous mensuel + direct + communauté + abonnement). L'aperçu est une
+    vraie capture de SON site de club (preview_url), jamais une image absente."""
+    if tu:
+        hello = "Salut " + name + " 👋"
+        h1b = "j'ai préparé ton club, à ta marque."
+        intro = ("J'ai regardé ton compte, et j'ai préparé un moyen de "
+                 "<b>transformer ton audience en revenus réguliers</b>, sans "
+                 "que tu aies rien à gérer. Le plus simple, c'est de te montrer "
+                 "ça directement.")
+        cap = "Ton club, à ta marque, déjà en ligne."
+        detail = "Voilà ce qu'il y a dedans."
+        d1 = ("🗓️ &nbsp;<b>Un rendez-vous chaque mois</b>, un cours filmé "
+              "étape par étape")
+        d2 = ("🔴 &nbsp;<b>Un direct avec toi</b>, où ta communauté pose ses "
+              "questions")
+        d3 = ("👥 &nbsp;<b>Une communauté</b> qui partage ses projets et "
+              "avance avec toi")
+        d4 = ("💰 &nbsp;<b>Un abonnement</b>, où ta communauté te reverse "
+              "chaque mois, pendant que je m'occupe de tout le reste")
+        cta = "Découvrir ton club →"
+        offer = ("Tout est déjà prêt, à ta marque, fait à partir de ton "
+                 "contenu. Toi tu crées, je m'occupe du reste. Si l'idée te "
+                 "plaît, je t'explique tout avec plaisir.")
+    else:
+        hello = "Bonjour " + name + " 👋"
+        h1b = "j'ai préparé votre club, à votre marque."
+        intro = ("J'ai regardé votre compte, et j'ai préparé un moyen de "
+                 "<b>transformer votre audience en revenus réguliers</b>, sans "
+                 "que vous ayez rien à gérer. Le plus simple, c'est de vous "
+                 "montrer ça directement.")
+        cap = "Votre club, à votre marque, déjà en ligne."
+        detail = "Voilà ce qu'il y a dedans."
+        d1 = ("🗓️ &nbsp;<b>Un rendez-vous chaque mois</b>, un cours filmé "
+              "étape par étape")
+        d2 = ("🔴 &nbsp;<b>Un direct avec vous</b>, où votre communauté pose "
+              "ses questions")
+        d3 = ("👥 &nbsp;<b>Une communauté</b> qui partage ses projets et "
+              "avance avec vous")
+        d4 = ("💰 &nbsp;<b>Un abonnement</b>, où votre communauté vous reverse "
+              "chaque mois, pendant que je m'occupe de tout le reste")
+        cta = "Découvrir votre club →"
+        offer = ("Tout est déjà prêt, à votre marque, fait à partir de votre "
+                 "contenu. Vous créez, je m'occupe du reste. Si l'idée vous "
+                 "plaît, je vous explique tout avec plaisir.")
+    h1b = _nowidow(h1b); intro = _nowidow(intro); detail = _nowidow(detail)
+    d1 = _nowidow(d1); d2 = _nowidow(d2); d3 = _nowidow(d3); d4 = _nowidow(d4)
+    offer = _nowidow(offer)
+    img_row = ""
+    if preview_url:
+        img_row = (
+            '<tr><td style="padding:24px 38px 0;">'
+            f'<a href="{url_club}" style="text-decoration:none;">'
+            f'<img src="{preview_url}" width="524" alt="" style="width:100%;'
+            'display:block;border-radius:12px;border:1px solid #e5e7eb;"></a>'
+            '<p style="margin:12px 0 0;font-size:13px;color:#6b7280;'
+            f'text-align:center;">{cap}</p></td></tr>')
+    return f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef1f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#eef1f5;">
+<tr><td align="center" style="padding:30px 12px;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 10px 34px rgba(15,23,42,.10);">
+    <tr><td style="padding:34px 38px 6px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td style="padding-right:13px;">{badge}</td>
+        <td style="font-size:14px;color:#6b7280;line-height:1.3;">Préparé pour vous par<br><b style="color:#111827;font-size:15px;">Triskell Studio</b></td>
+      </tr></table>
+      <h1 style="margin:22px 0 10px;font-size:25px;line-height:1.25;color:#0f172a;">{hello}<br>{h1b}</h1>
+      <p style="margin:0;font-size:16px;line-height:1.6;color:#374151;">{intro}</p>
+    </td></tr>
+    {img_row}
+    <tr><td style="padding:22px 38px 0;">
+      <p style="margin:0 0 12px;font-size:15.5px;color:#0f172a;font-weight:700;">{detail}</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr><td style="padding:9px 0;font-size:15px;color:#374151;line-height:1.5;">{d1}</td></tr>
+        <tr><td style="padding:9px 0;font-size:15px;color:#374151;line-height:1.5;">{d2}</td></tr>
+        <tr><td style="padding:9px 0;font-size:15px;color:#374151;line-height:1.5;">{d3}</td></tr>
+        <tr><td style="padding:9px 0;font-size:15px;color:#374151;line-height:1.5;">{d4}</td></tr>
+      </table>
+    </td></tr>
+    <tr><td align="center" style="padding:28px 38px 6px;">
+      <a href="{url_club}" style="display:inline-block;background:linear-gradient(135deg,{acc},{acc2});color:#fff;padding:15px 30px;border-radius:10px;text-decoration:none;font-weight:800;font-size:16px;">{cta}</a>
+    </td></tr>
+    <tr><td style="padding:18px 38px 34px;">
+      <p style="margin:0;font-size:14.5px;line-height:1.6;color:#6b7280;">{offer}</p>
+      <p style="margin:16px 0 0;font-size:14.5px;color:#374151;">Au plaisir,<br><b>Triskell Studio</b></p>
+    </td></tr>
+  </table>
+</td></tr>
+</table>
+</body></html>"""
+
+
 def render(name: str, demo_url: str, accent: str = "#6366F1",
            accent2: str = "#4F46E5", tu: bool = True, angle: str = "",
-           kind: str = "assistant") -> str:
-    """Retourne le corps HTML du mail pour un créateur. `kind`='kit' pour les
-    créateurs TikTok (boutique + cours + cadeau), 'assistant' sinon."""
+           kind: str = "assistant", preview_url: str = "") -> str:
+    """Retourne le corps HTML du mail pour un créateur. `kind`='kit' (TikTok :
+    boutique + cours + cadeau), 'club' (Instagram : club mensuel à la marque),
+    'assistant' sinon (YouTube : assistant IA + quiz). `preview_url` (clubs) =
+    image hébergée de la 1re vue du VRAI site du créateur (aperçu fidèle)."""
     base = (demo_url or "").rstrip("/")
-    initials = _initials(name)
+    badge = _badge_html()
     name = _esc(name)
     acc = accent or "#6366F1"
     acc2 = accent2 or "#4F46E5"
     url_accueil = base + "/accueil.html"
     url_quiz = base + "/quiz.html"
-    img_avatar = base + "/brand_avatar.jpg"
     img_assistant = base + "/_mail_assistant.png"
     img_quiz = base + "/_mail_quiz.png"
 
     if kind == "kit":
-        return _render_kit(name, initials, acc, acc2, url_accueil, tu)
+        return _render_kit(name, badge, acc, acc2, url_accueil, tu)
+    if kind == "club":
+        return _render_club(name, badge, acc, acc2, base, preview_url, tu)
 
     if tu:
         t = {
@@ -215,7 +342,7 @@ def render(name: str, demo_url: str, accent: str = "#6366F1",
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 10px 34px rgba(15,23,42,.10);">
     <tr><td style="padding:34px 38px 6px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td style="padding-right:13px;"><div style="width:52px;height:52px;border-radius:50%;background:{acc};color:#ffffff;font-size:20px;font-weight:800;line-height:52px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">{initials}</div></td>
+        <td style="padding-right:13px;">{badge}</td>
         <td style="font-size:14px;color:#6b7280;line-height:1.3;">Préparé pour vous par<br><b style="color:#111827;font-size:15px;">Triskell Studio</b></td>
       </tr></table>
       <h1 style="margin:22px 0 10px;font-size:25px;line-height:1.25;color:#0f172a;">{t['hello']}<br>{t['h1b']}</h1>
@@ -296,6 +423,42 @@ def render_text(name: str, demo_url: str, tu: bool = True,
             "Tout est déjà prêt, à votre marque. Vous créez, je m'occupe du "
             "reste. Si l'idée vous plaît, je vous explique tout avec "
             "plaisir.\n\n"
+            "Au plaisir,\nTriskell Studio"
+        )
+    if kind == "club":
+        if tu:
+            return (
+                f"Salut {name},\n\n"
+                "J'ai regardé ton compte et je t'ai préparé un club mensuel à "
+                "ta marque, pour transformer ton audience en revenus réguliers "
+                "sans que tu aies rien à gérer.\n\n"
+                "Voici ce qu'il y a dedans.\n"
+                "- Un rendez-vous chaque mois, un cours filmé étape par étape\n"
+                "- Un direct avec toi, où ta communauté pose ses questions\n"
+                "- Une communauté qui partage ses projets et avance avec toi\n"
+                "- Un abonnement, où ta communauté te reverse chaque mois, "
+                "pendant que je m'occupe de tout le reste\n\n"
+                "Tu peux tout découvrir ici.\n"
+                f"{base}\n\n"
+                "Tout est déjà prêt, à ta marque. Toi tu crées, je m'occupe du "
+                "reste. Si l'idée te plaît, je t'explique tout avec plaisir.\n\n"
+                "Au plaisir,\nTriskell Studio"
+            )
+        return (
+            f"Bonjour {name},\n\n"
+            "J'ai regardé votre compte et je vous ai préparé un club mensuel à "
+            "votre marque, pour transformer votre audience en revenus réguliers "
+            "sans que vous ayez rien à gérer.\n\n"
+            "Voici ce qu'il y a dedans.\n"
+            "- Un rendez-vous chaque mois, un cours filmé étape par étape\n"
+            "- Un direct avec vous, où votre communauté pose ses questions\n"
+            "- Une communauté qui partage ses projets et avance avec vous\n"
+            "- Un abonnement, où votre communauté vous reverse chaque mois, "
+            "pendant que je m'occupe de tout le reste\n\n"
+            "Vous pouvez tout découvrir ici.\n"
+            f"{base}\n\n"
+            "Tout est déjà prêt, à votre marque. Vous créez, je m'occupe du "
+            "reste. Si l'idée vous plaît, je vous explique tout avec plaisir.\n\n"
             "Au plaisir,\nTriskell Studio"
         )
     if tu:
