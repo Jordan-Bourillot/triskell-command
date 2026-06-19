@@ -1992,6 +1992,14 @@ class Api:
         if not cr_res.get("ok"):
             return {"ok": False, "error": "créateur introuvable"}
         cr = cr_res["row"]
+        # DERNIER REMPART : ne JAMAIS envoyer à un créateur déjà contacté
+        # (contacted_at posé au 1er envoi). Même si un brouillon en double
+        # existe, il ne peut pas partir une 2e fois. Garde-fou 19/06 (Jordan).
+        if str(cr.get("contacted_at") or "").strip():
+            return {"ok": False, "blocked": "already_contacted",
+                    "error": (f"{cr.get('name') or 'Ce créateur'} a déjà été "
+                              f"contacté le {str(cr.get('contacted_at'))[:10]} — "
+                              f"envoi refusé pour éviter un doublon.")}
         to = self._creator_email(cr)
         if not to:
             return {"ok": False, "error": "pas d'email sur ce créateur"}
@@ -6876,8 +6884,13 @@ class Api:
                 if not email or not msg:
                     skipped.append(r.get("name") or "?")
                     continue
-                if not cid and r.get("contacted_at"):
-                    continue  # en masse : on saute les déjà contactés
+                # JAMAIS re-préparer un créateur DÉJÀ contacté — même ciblé par
+                # id (avant : seul le mode "en masse" vérifiait, donc une
+                # re-préparation par id recréait un brouillon pour quelqu'un
+                # déjà envoyé → risque de 2e envoi). Garde-fou 19/06 (Jordan).
+                if r.get("contacted_at"):
+                    skipped.append((r.get("name") or "?") + " (déjà contacté)")
+                    continue
                 from ..integrations import creator_mail
                 vouvoie = "tutoiement" not in (r.get("notes") or "").lower()
                 poss = "votre" if vouvoie else "ta"
@@ -6971,7 +6984,9 @@ class Api:
                     continue
                 if not (r.get("message") or "").strip():
                     continue
-                if not cid and r.get("contacted_at"):
+                # Jamais de brouillon pour un créateur déjà contacté (même par
+                # id) — garde-fou 19/06 (Jordan), cohérent avec creators_queue_draft.
+                if r.get("contacted_at"):
                     continue
                 targets.append(r)
             if not targets:
