@@ -1437,7 +1437,8 @@ const Morning = {
     const nTotal = q.replies_unhandled_total || 0;
     const nDraftsP = q.drafts_prospect_pending || 0;
     const nDraftsC = q.drafts_convoy_pending || 0;
-    const nDrafts = nDraftsP + nDraftsC;
+    const nDraftsCr = q.drafts_creator_pending || 0;
+    const nDrafts = nDraftsP + nDraftsC + nDraftsCr;
     const nReview = q.drafts_convoy_needs_review || 0;
 
     let kicker, title, body, cta, target, state;
@@ -1508,7 +1509,8 @@ const Morning = {
     const repY  = d.replies.yesterday_total;
     const q = d.queue || {};
     const nInt = q.replies_unhandled_interested || 0;
-    const nDrafts = (q.drafts_prospect_pending || 0) + (q.drafts_convoy_pending || 0);
+    const nDrafts = (q.drafts_prospect_pending || 0) + (q.drafts_convoy_pending || 0)
+                    + (q.drafts_creator_pending || 0);
     const nInbox = q.inbox_attention || 0;
 
     return `

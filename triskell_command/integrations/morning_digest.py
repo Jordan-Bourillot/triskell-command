@@ -131,6 +131,18 @@ def _count_pending_convoy_drafts(client) -> int:
     return _count_pending_drafts_with_content(client, "convoy_drafts")
 
 
+def _count_pending_creator_drafts(client) -> int:
+    # Brouillons CRÉATEURS (carnet) : stockés dans shared_settings, pas une
+    # table → comptés via le module. Cohérent avec la vue Brouillons, qui les
+    # affiche (source 'creator'). Sans ça le Cockpit affichait 0 alors que
+    # l'écran montrait les mails créateurs en attente.
+    try:
+        from . import creator_drafts as _CD
+        return len(_CD.list_all(client.raw, status="pending"))
+    except Exception:
+        return 0
+
+
 def _count_unhandled_replies(client, *, only_interested: bool = False) -> int:
     """Réponses entrantes pas encore traitées (handled=False).
 
@@ -290,6 +302,7 @@ def compute_digest() -> dict[str, Any]:
         "queue": {
             "drafts_prospect_pending": 0,
             "drafts_convoy_pending": 0,
+            "drafts_creator_pending": 0,
             "drafts_convoy_needs_review": 0,
             "drafts_convoy_skipped_duplicate": 0,
             "replies_unhandled_interested": 0,
@@ -341,6 +354,7 @@ def compute_digest() -> dict[str, Any]:
 
     out["queue"]["drafts_prospect_pending"] = _count_pending_prospect_drafts(client)
     out["queue"]["drafts_convoy_pending"] = _count_pending_convoy_drafts(client)
+    out["queue"]["drafts_creator_pending"] = _count_pending_creator_drafts(client)
     out["queue"]["replies_unhandled_interested"] = _count_unhandled_replies(
         client, only_interested=True)
     out["queue"]["replies_unhandled_total"] = _count_unhandled_replies(client)
