@@ -840,7 +840,7 @@ def _public_url(path: str) -> str:
 
 # Version du design : à incrémenter si on change l'aspect de l'aperçu, pour
 # invalider les images déjà mises en cache (la clé en dépend).
-_DESIGN_VERSION = "3"
+_DESIGN_VERSION = "4"
 
 
 def _object_exists(url: str) -> bool:
@@ -911,9 +911,27 @@ _CREATOR_HIDE_CSS = (
     ".maquette,.toggle,.demo-bar,.annot,.annot-after-hero,"
     ".cust-hero-scroll{display:none!important;}")
 
+# Où finit le « hero » (la grande accroche du haut) ? On coupe pile au-dessus
+# du 1er bloc de contenu, pour ne JAMAIS couper une section en deux (sinon
+# l'aperçu a un bout de titre/carte qui dépasse en bas = « mal cadré »).
+# Club : <section class="block">. Boutique/kit : .grouplbl (« Pour ton
+# audience… »). Repli : 1er <section> / <footer>. Renvoie 0 si rien trouvé.
+_HERO_CUT_JS = r"""() => {
+  const markers = ['.block', '.grouplbl', 'section', 'footer', '.svc-title'];
+  let best = 0;
+  for (const sel of markers) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    const top = Math.round(el.getBoundingClientRect().top + window.scrollY);
+    if (top > 260) { best = top; break; }
+  }
+  return best;
+}"""
+
 
 def _render_site_top_png(target_url: str) -> bytes | None:
-    """Capture le haut (en-tête + hero) de n'importe quel site, tel quel."""
+    """Capture le HERO (en-tête + grande accroche) d'un site, coupé proprement
+    à la fin du hero — pas de section coupée en deux."""
     try:
         from playwright.sync_api import sync_playwright
     except Exception:
@@ -925,7 +943,7 @@ def _render_site_top_png(target_url: str) -> bytes | None:
             browser = p.chromium.launch()
             try:
                 page = browser.new_page(
-                    viewport={"width": 1200, "height": 800}, device_scale_factor=2)
+                    viewport={"width": 1200, "height": 1400}, device_scale_factor=2)
 
                 def _route(route):
                     u = route.request.url
@@ -949,8 +967,16 @@ def _render_site_top_png(target_url: str) -> bytes | None:
                 except Exception:
                     pass
                 page.wait_for_timeout(1200)
+                # Hauteur = fin du hero (mesurée), bornée. Repli 720 si non trouvé.
+                h = 720
+                try:
+                    cut = int(page.evaluate(_HERO_CUT_JS) or 0)
+                    if 360 <= cut <= 1280:
+                        h = cut
+                except Exception:
+                    pass
                 png = page.screenshot(
-                    clip={"x": 0, "y": 0, "width": 1200, "height": 760})
+                    clip={"x": 0, "y": 0, "width": 1200, "height": h})
             finally:
                 browser.close()
     except Exception as exc:
