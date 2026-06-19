@@ -255,13 +255,19 @@ check("jamais vide", bool(pl.explain({})))
 site_ok = {"repo_github": "Jordan-Bourillot/pixel-studio"}
 site_ko = {"repo_github": ""}
 v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
-                           "title": "Réécrire le title de la home"}, site_ok)
-check("title + site relié → robot peut le faire (code)",
+                           "title": "Réécrire le title de /photographe"}, site_ok)
+check("title (page interne) + site relié → robot peut le faire (code)",
       v["can"] and v["mode"] == "code")
 v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
-                           "title": "Réécrire le title de la home"}, site_ko)
+                           "title": "Réécrire le title de /photographe"}, site_ko)
 check("title + site NON relié → manuel avec explication",
       not v["can"] and "relié" in v["why"])
+# La page d'accueil (vitrine) : le robot n'en réécrit jamais le texte tout seul
+# → jamais de bouton vert, même titre + site relié (19/06).
+v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
+                           "title": "Réécrire le title de la home"}, site_ok)
+check("title de la PAGE D'ACCUEIL → à faire ensemble (jamais le robot seul)",
+      not v["can"] and v["mode"] == "manual" and "accueil" in v["why"].lower())
 v = pl.classify_for_apply({"status": "draft", "kind": "recommandation",
                            "title": "Vérifier la couverture d'index dans Search Console",
                            "detail_md": "Ouvrir Search Console et vérifier."},
@@ -472,8 +478,8 @@ from triskell_command.integrations.phare import executor, git_pipeline, agents
 
 ACTION = {"id": "act1", "site_id": "s1", "agent": "auditeur",
           "kind": "recommandation", "status": "draft", "apply_state": "queued",
-          "title": "Réécrire le title de la home avec le mot-clé principal",
-          "detail_md": "Remplacer X par Y.\n\nPage: https://pixel-pros.fr/"}
+          "title": "Réécrire le title de /realisations avec le mot-clé principal",
+          "detail_md": "Remplacer X par Y.\n\nPage: https://pixel-pros.fr/realisations"}
 SITE = {"id": "s1", "name": "Pixel Pros", "domain": "pixel-pros.fr",
         "repo_github": "Jordan-Bourillot/pixel-studio",
         "repo_branch_main": "main", "stack": "html", "netlify_site_id": ""}
@@ -1279,14 +1285,18 @@ _declined = {"status": "draft", "kind": "recommandation", "apply_state": "manual
              "title": "Installer la mesure d'INP via un snippet web-vitals"}
 check("déjà jugée « à la main » → plus de faux bouton vert optimiste",
       pl.classify_for_apply(_declined, site_ok)["can"] is False)
-# La MÊME carte jamais tentée garde sa chance (fallback optimiste assumé).
-check("même carte jamais tentée → le robot regarde (optimiste)",
-      pl.classify_for_apply({**_declined, "apply_state": ""}, site_ok)["can"] is True)
-# Une vraie capacité (titre) PRIME sur un refus passé (capacités grandies).
-check("capacité sûre (titre) → reprend la main malgré un refus passé",
+# 19/06 : la MÊME carte jamais tentée n'a aucune famille SÛRE → on ne ment plus
+# avec un bouton vert « optimiste » qui se dégonfle au clic. Honnêtement : à voir
+# ensemble (volet Idées).
+check("carte inconnue (aucune famille sûre) → à voir ensemble, pas de promesse",
+      pl.classify_for_apply({**_declined, "apply_state": ""}, site_ok)["can"] is False)
+# 19/06 : un refus passé (apply_state='manual') est RESPECTÉ — plus jamais de
+# bouton vert qui re-promet ce que le robot vient de refuser. C'est LA fin de la
+# boucle « 10 fois ». Vrai même sur une famille « sûre » comme le titre.
+check("refus passé (même sur un titre interne) → reste à la main, pas de re-promesse",
       pl.classify_for_apply(
           {"status": "draft", "apply_state": "manual",
-           "title": "Réécrire le title de la home"}, site_ok)["can"] is True)
+           "title": "Réécrire le title de /photographe"}, site_ok)["can"] is False)
 # Bug 18/06 (capture Jordan) : créer/dupliquer une page ou écrire son contenu =
 # hors de portée de l'Exécuteur. Le faux bouton vert venait d'un détail citant
 # « Title cible : … » ou « + H1 » qui allumait à tort la famille title/h1.
@@ -1318,11 +1328,52 @@ _blocked = pl.classify_for_apply(
                     "je ne connais pas leur titre actuel."}, site_ok)
 check("carte titre BLOQUÉE (page absente du scan) → plus de faux bouton vert",
       _blocked["can"] is False and _blocked["mode"] == "manual")
-# Mais une carte titre simplement déclinée SANS blocage concret garde sa chance.
-check("carte titre déclinée sans blocage concret → garde sa 2e chance",
+# 19/06 : une carte déclinée (apply_state='manual') reste à la main — un refus
+# est un refus, plus de « 2e chance » trompeuse (fin de la boucle « 10 fois »).
+check("carte déclinée (apply_state manual) → reste à la main",
       pl.classify_for_apply(
           {"status": "draft", "apply_state": "manual",
-           "title": "Réécrire le title de la home"}, site_ok)["can"] is True)
+           "title": "Réécrire le title de la home"}, site_ok)["can"] is False)
+
+# ===========================================================================
+# Section ajoutée le 19/06/2026 : le bouton vert « LE ROBOT PEUT LE FAIRE » ne
+# ment plus. Plainte Jordan (« ça fait 10 fois ») : il cliquait « OK fais-le »
+# et le robot finissait par « fais-le toi-même ». Trois sources tuées :
+#   1) un refus passé re-proposait un bouton vert (boucle) — testé plus haut ;
+#   2) la page d'accueil (titre/H1/méta) montrait un vert mais le robot n'y
+#      touche jamais seul ;
+#   3) une FAQ à ÉCRIRE (contenu) était promise comme un clic.
+print("\n— 19/06 : le bouton vert ne ment plus (captures Jordan) —")
+# Capture Jordan : « Optim on-page / » = le titre de la page d'accueil
+_optim_home = pl.classify_for_apply(
+    {"status": "draft", "kind": "recommandation", "agent": "optimiseur",
+     "title": "Optim on-page /",
+     "detail_md": "Changer le titre de la page tel qu'il s'affiche dans Google."},
+    site_ok)
+check("« Optim on-page / » (titre de l'accueil) → à faire ensemble, pas de vert",
+      _optim_home["can"] is False and _optim_home["mode"] == "manual")
+# Capture Jordan : « Étoffer … avec une mini-FAQ (3 questions) » = à écrire
+_faq_creation = pl.classify_for_apply(
+    {"status": "draft", "kind": "recommandation", "agent": "auditeur",
+     "title": "Étoffer la page /demande-site avec une mini-FAQ (3 questions)",
+     "detail_md": "Ajouter trois questions-réponses en bas de page."}, site_ok)
+check("« Étoffer … mini-FAQ » (à écrire) → contenu ensemble, pas de vert",
+      _faq_creation["can"] is False and _faq_creation["mode"] == "manual")
+# Garde-fou : une FAQ DÉJÀ écrite, juste à baliser, reste faisable par le robot
+check("FAQ déjà écrite à baliser → le robot peut encore le faire",
+      pl.classify_for_apply(
+          {"status": "draft", "title": "Ajouter une FAQ structurée sur /photographe"},
+          site_ok)["can"] is True)
+# Garde-fou : un préchargement d'image (invisible) sur l'accueil reste permis
+check("préchargement (invisible) sur l'accueil → toujours permis",
+      pl.classify_for_apply(
+          {"status": "draft", "title": "Précharger l'image principale de la home"},
+          site_ok)["can"] is True)
+# Garde-fou : un titre sur une page INTERNE reste un vrai bouton vert
+_interne = pl.classify_for_apply(
+    {"status": "draft", "title": "Réécrire le title de /photographe"}, site_ok)
+check("titre d'une page interne → vrai bouton vert conservé",
+      _interne["can"] is True and _interne["mode"] == "code")
 
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)

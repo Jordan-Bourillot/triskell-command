@@ -208,21 +208,69 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
     if special:
         return {"can": False, "mode": special[1], "why": special[0]}
 
-    # Le robot a DÉJÀ tenté cette carte et a buté sur un blocage CONCRET (page
-    # absente de son scan, titre actuel inconnu…) qu'aucune capacité ne lève.
-    # On le détecte AVANT les familles de balises : sinon une carte « titre »
-    # garderait son bouton vert alors que le robot vient de dire qu'il ne peut
-    # pas (clic → échec en boucle). On respecte son verdict et on montre sa
-    # raison (vu par Jordan le 18/06 sur « Enrichir les titles de /demo-* »).
+    # Le robot a DÉJÀ tranché « à la main » sur cette carte (apply_state='manual')
+    # → on RESPECTE son verdict : plus JAMAIS de bouton vert qui re-promet ce
+    # qu'il vient de refuser. C'était LA cause de la boucle « clic vert → fais-le
+    # toi-même → clic vert → … » (Jordan, 19/06 : « ça fait 10 fois qu'on
+    # recommence »). AVANT, on ne gelait QUE les refus « durs » (page absente…)
+    # et on laissait une 2e chance « optimiste » aux autres → d'où la boucle sur
+    # les refus « doux » (accueil, FAQ à écrire…). Un échec TECHNIQUE ('failed')
+    # garde, lui, son bouton Réessayer : ce n'est pas un refus, juste un raté.
     _err = action.get("apply_error") or ""
-    if ((action.get("apply_state") or "").lower() in ("manual", "failed")
-            and _is_hard_blocker(_err)):
+    _state = (action.get("apply_state") or "").lower()
+    if _state == "manual" or (_state == "failed" and _is_hard_blocker(_err)):
         return {"can": False, "mode": "manual",
-                "why": _err.strip() if not has_jargon(_err) else CLEAN_MANUAL_FALLBACK}
+                "why": (_err.strip() if (_err.strip() and not has_jargon(_err))
+                        else CLEAN_MANUAL_FALLBACK)}
+
+    # La page d'ACCUEIL (la vitrine) : le robot n'en RÉÉCRIT jamais le contenu
+    # visible tout seul (le titre, le grand titre, le descriptif) — règle de fond
+    # depuis qu'il avait viré le nom du site d'une home. Donc PAS de bouton vert
+    # sur ces cartes : c'est une décision à prendre ensemble. (Les ajouts
+    # INVISIBLES — plan du site, données structurées… — restent permis.)
+    try:
+        from . import orchestrator
+        if orchestrator._targets_home(action) and (
+                _families_of(action) & {"title", "h1", "meta"}):
+            return {"can": False, "mode": "manual",
+                    "why": ("La page d'accueil, c'est ta vitrine — le robot n'en "
+                            "change pas le texte tout seul. Si tu veux la "
+                            "retoucher, on le fait ensemble.")}
+    except Exception:
+        pass
+
+    # Agents DÉTERMINISTES : l'Exécuteur a un traitement dédié SANS IA (plan du
+    # site régénéré, texte des images recopié, lien rendu direct). Le robot SAIT
+    # les faire → bouton vert, même si le titre ne cite aucune balise (« Lien
+    # direct » n'a aucune « famille »). Sans ça, ces cartes tombaient dans le
+    # repli « à voir ensemble » quand on a coupé l'optimisme (régression 19/06).
+    agent_low = (action.get("agent") or "").lower()
+    if agent_low in ("sitemap_builder", "image_seo", "redirect_fixer"):
+        if (site.get("repo_github") or "").strip():
+            return {"can": True, "mode": "code",
+                    "why": "Le robot prépare la modification, la vérifie et la publie."}
+        return {"can": False, "mode": "manual",
+                "why": ("Le site n'est pas encore relié à son code — "
+                        "à brancher dans « Réglages du site ».")}
+
+    title_low = (action.get("title") or "").lower()
+    # FAQ : le robot sait RECOPIER en données structurées une FAQ DÉJÀ écrite sur
+    # la page — il n'en INVENTE jamais (sinon pénalité Google). Une carte qui
+    # propose d'ÉCRIRE / d'étoffer une FAQ (« étoffer… avec une mini-FAQ »,
+    # « rédiger 3 questions ») est donc du CONTENU à préparer ensemble, pas un
+    # clic (vécu le 19/06 : « Étoffer /demande-site avec une mini-FAQ » montrait
+    # le bouton vert puis « il faudrait d'abord en écrire une ensemble »).
+    if "faq" in title_low and any(
+            k in title_low for k in ("étoffer", "etoffer", "mini-faq", "mini faq",
+                                     "rédiger", "rediger", "écrire", "ecrire",
+                                     "créer", "creer")):
+        return {"can": False, "mode": "manual",
+                "why": ("Écrire une FAQ — les questions et leurs réponses —, "
+                        "c'est du contenu à préparer ensemble. Le robot ne sait "
+                        "que recopier une FAQ déjà présente sur ta page.")}
 
     # Capacités apprises au robot le 17/06 (il lit la page en direct) : FAQ
-    # structurée + préchargement de l'image principale → faisables tout seul.
-    title_low = (action.get("title") or "").lower()
+    # structurée (recopie) + préchargement de l'image principale → faisables seul.
     if ("faq" in title_low
             or any(k in title_low for k in ("précharg", "precharg", "preload"))):
         if (site.get("repo_github") or "").strip():
@@ -294,21 +342,18 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
         return {"can": False, "mode": "manual",
                 "why": ("Celle-ci, c'est un travail à faire ensemble — le robot "
                         "ne peut pas s'en charger tout seul.")}
-    # Le robot a DÉJÀ regardé cette carte et tranché « à la main »
-    # (apply_state 'manual', sa raison est affichée juste en dessous). Les
-    # vraies capacités (FAQ, préchargement, familles de balises) sont testées
-    # PLUS HAUT et priment — si on arrive ICI, aucune capacité sûre ne couvre
-    # la carte. On n'invente donc pas un bouton vert optimiste qui
-    # contredirait le verdict déjà rendu (bug vu par Jordan le 18/06 : pastille
-    # verte « le robot peut le faire » posée AU-DESSUS de « le robot préfère ne
-    # pas y toucher tout seul »).
-    if (action.get("apply_state") or "").lower() == "manual":
-        return {"can": False, "mode": "manual", "why": CLEAN_MANUAL_FALLBACK}
-    # Sinon : on laisse l'IA exécutrice regarder si le site est relié.
-    if (site.get("repo_github") or "").strip():
-        return {"can": True, "mode": "code",
-                "why": ("Le robot va regarder si cette proposition peut se "
-                        "transformer en modification du site.")}
+    # Si on arrive ICI : aucune capacité SÛRE ne couvre la carte (pas de famille
+    # de balise reconnue, pas un cas spécial). On ne PROMET PLUS un bouton vert
+    # « optimiste » qui se dégonflait au clic — la cause des « 10 fois qu'on
+    # recommence » (Jordan, 19/06 : un « je peux » DOIT savoir faire). Le robot
+    # ne se déclare capable QUE de ce qu'il sait vraiment faire (testé plus haut).
+    # Le reste → honnêtement « à voir ensemble » (volet Idées, silencieux), jamais
+    # une fausse promesse. (Un refus passé, apply_state='manual', est déjà géré
+    # tout en haut : il n'est jamais re-proposé.)
+    if not (site.get("repo_github") or "").strip():
+        return {"can": False, "mode": "manual",
+                "why": ("Le site n'est pas encore relié à son code — "
+                        "à brancher dans « Réglages du site ».")}
     return {"can": False, "mode": "manual",
-            "why": ("Le site n'est pas encore relié à son code — "
-                    "à brancher dans « Réglages du site ».")}
+            "why": ("Celle-ci, le robot n'est pas sûr de savoir la faire tout "
+                    "seul — on la regarde ensemble quand tu veux.")}

@@ -735,6 +735,13 @@ def _targets_home(action: dict) -> bool:
     paths = dedup.extract_paths(text)
     if paths == {"/"}:
         return True
+    # Titre dont le chemin visé est l'accueil NU (« Optim on-page / », « Audit de
+    # / ») : le « / » seul n'est pas vu comme un chemin par extract_paths. On le
+    # repère ici — sinon une optim d'accueil échappe à la protection ET décroche
+    # un faux bouton vert (vu le 19/06 sur « Optim on-page / », capture Jordan).
+    title_s = (action.get("title") or "").strip()
+    if title_s == "/" or title_s.endswith(" /") or title_s.endswith("\t/"):
+        return True
     low = text.lower()
     return any(h in low for h in _HOME_HINTS) and not (paths - {"/"})
 
