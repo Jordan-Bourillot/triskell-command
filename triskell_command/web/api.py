@@ -2048,14 +2048,15 @@ class Api:
         # sinon généré ici (best-effort) pour que le mail parte avec son image.
         _prev = (d.get("preview_url") or "").strip()
         if not _prev:
+            _demo = (cr.get("demo_url") or "").strip()
             _khtml = creator_mail.kind_for(
-                cr.get("platform") or "", cr.get("notes") or "",
-                (cr.get("demo_url") or "").strip())
-            if _khtml == "club":
+                cr.get("platform") or "", cr.get("notes") or "", _demo)
+            if _khtml in ("club", "kit") and _demo:
                 try:
                     from ..integrations import apercu_site
-                    _prev = apercu_site.creator_site_preview_url(
-                        (cr.get("demo_url") or "").strip())
+                    _target = (_demo.rstrip("/") + "/accueil.html"
+                               if _khtml == "kit" else _demo)
+                    _prev = apercu_site.creator_site_preview_url(_target)
                     if _prev:
                         CD.set_review(sb, draft_id, {"preview_url": _prev})
                 except Exception as exc:
@@ -6894,10 +6895,14 @@ class Api:
                 # chargement). Best-effort : un échec laisse juste le mail sans
                 # image, jamais bloquant.
                 prev = ""
-                if kind == "club" and demo:
+                if kind in ("club", "kit") and demo:
                     try:
                         from ..integrations import apercu_site
-                        prev = apercu_site.creator_site_preview_url(demo)
+                        # club = racine du site ; kit (boutique TikTok) = la
+                        # page boutique /accueil.html (cible du bouton du mail).
+                        target = (demo.rstrip("/") + "/accueil.html"
+                                  if kind == "kit" else demo)
+                        prev = apercu_site.creator_site_preview_url(target)
                     except Exception as exc:
                         logger.debug("queue creator: preview gen KO: %s", exc)
                 p = payload or {}

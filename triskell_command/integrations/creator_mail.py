@@ -81,12 +81,13 @@ def kind_for(platform: str = "", notes: str = "", demo_url: str = "") -> str:
 
 
 def _render_kit(name: str, badge: str, acc: str, acc2: str,
-                url_accueil: str, tu: bool) -> str:
-    """Mail « boutique » pour un créateur TikTok : pas d'assistant ni de quiz,
-    pas d'images (elles n'existent pas sur ces sites), juste l'offre réelle."""
+                url_accueil: str, tu: bool, preview_url: str = "") -> str:
+    """Mail « boutique » pour un créateur TikTok (boutique + cours + cadeau).
+    `preview_url` = vraie capture de SA boutique en ligne (aperçu fidèle)."""
     if tu:
         hello = "Salut " + name + " 👋"
         h1b = "j'ai préparé une boutique à ta marque."
+        cap = "Ta boutique, à ta marque, déjà en ligne."
         intro = ("J'ai regardé ton compte, et je t'ai préparé de quoi "
                  "<b>transformer ton audience en revenus</b>, sans que tu aies "
                  "rien à gérer. Le plus simple, c'est d'aller y jeter un œil.")
@@ -103,6 +104,7 @@ def _render_kit(name: str, badge: str, acc: str, acc2: str,
     else:
         hello = "Bonjour " + name + " 👋"
         h1b = "j'ai préparé une boutique à votre marque."
+        cap = "Votre boutique, à votre marque, déjà en ligne."
         intro = ("J'ai regardé votre compte, et je vous ai préparé de quoi "
                  "<b>transformer votre audience en revenus</b>, sans que vous "
                  "ayez rien à gérer. Le plus simple, c'est d'aller y jeter un "
@@ -119,6 +121,15 @@ def _render_kit(name: str, badge: str, acc: str, acc2: str,
                  "plaît, je vous explique tout avec plaisir.")
     h1b = _nowidow(h1b); intro = _nowidow(intro)
     b1 = _nowidow(b1); b2 = _nowidow(b2); b3 = _nowidow(b3); offer = _nowidow(offer)
+    img_row = ""
+    if preview_url:
+        img_row = (
+            '<tr><td style="padding:22px 38px 0;">'
+            f'<a href="{url_accueil}" style="text-decoration:none;">'
+            f'<img src="{preview_url}" width="524" alt="" style="width:100%;'
+            'display:block;border-radius:12px;border:1px solid #e5e7eb;"></a>'
+            '<p style="margin:12px 0 0;font-size:13px;color:#6b7280;'
+            f'text-align:center;">{cap}</p></td></tr>')
     return f"""<!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#eef1f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
@@ -133,6 +144,7 @@ def _render_kit(name: str, badge: str, acc: str, acc2: str,
       <h1 style="margin:22px 0 10px;font-size:25px;line-height:1.25;color:#0f172a;">{hello}<br>{h1b}</h1>
       <p style="margin:0;font-size:16px;line-height:1.6;color:#374151;">{intro}</p>
     </td></tr>
+    {img_row}
     <tr><td style="padding:16px 38px 0;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
         <tr><td style="padding:9px 0;font-size:15px;color:#374151;line-height:1.5;">{b1}</td></tr>
@@ -267,7 +279,7 @@ def render(name: str, demo_url: str, accent: str = "#6366F1",
     img_quiz = base + "/_mail_quiz.png"
 
     if kind == "kit":
-        return _render_kit(name, badge, acc, acc2, url_accueil, tu)
+        return _render_kit(name, badge, acc, acc2, url_accueil, tu, preview_url)
     if kind == "club":
         return _render_club(name, badge, acc, acc2, base, preview_url, tu)
 
