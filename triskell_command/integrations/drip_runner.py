@@ -44,12 +44,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     # Vouvoiement obligatoire (règle absolue de Jordan) — les anciens
     # textes par défaut tutoyaient.
+    # Relances PERSONNALISÉES (nom de l'entreprise via {name}). Vouvoiement.
+    # Sans tiret cadratin ni « : » d'annonce (cf. feedback Jordan).
     "templates": {
         "follow_up_7d": (
             "Bonjour,\n\n"
-            "Je me permets de revenir vers vous suite à mon message de la "
-            "semaine dernière — je sais que vous recevez beaucoup de "
-            "sollicitations.\n\n"
+            "Je me permets de revenir vers vous au sujet du site internet "
+            "pour {name}. Je vous avais écrit la semaine dernière et je sais "
+            "que vous recevez beaucoup de sollicitations.\n\n"
             "Si ce n'est pas le bon moment, dites-le-moi simplement et je "
             "reviendrai vers vous plus tard. Sinon, je reste à votre "
             "disposition.\n\n"
@@ -57,9 +59,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         ),
         "follow_up_30d": (
             "Bonjour,\n\n"
-            "Dernière relance, promis. Si le sujet peut vous intéresser un "
-            "jour, je serai ravi d'en parler — sinon, je ne vous "
-            "recontacterai plus.\n\n"
+            "Dernière relance au sujet du site pour {name}, promis. Si le "
+            "sujet peut vous intéresser un jour, je serai ravi d'en parler. "
+            "Sinon, je ne vous recontacterai plus.\n\n"
             "Bonne continuation à vous,\n\n"
             "{signature}"
         ),
@@ -70,6 +72,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 CYCLE_INTERVAL_SECONDS = 60 * 60     # 1 h
 INITIAL_DELAY_SECONDS = 90
+
+# Préparation des relances UNE FOIS PAR JOUR, le matin (et plus à l'heure
+# pile de chaque envoi d'origine) : toutes les relances DUES ce jour-là
+# arrivent ensemble dans « à valider », marquées « à envoyer aujourd'hui ».
+# Le dédoublonnage (brouillon de relance déjà en attente / déjà envoyé) rend
+# un éventuel re-passage après redémarrage parfaitement sûr (idempotent).
+BATCH_HOUR = 8            # heure locale à partir de laquelle on prépare le jour
+_LAST_BATCH_DATE: str = ""  # "AAAA-MM-JJ" du dernier lot préparé (mémoire process)
 
 _WORKER_THREAD: Optional[threading.Thread] = None
 _WORKER_STOP = threading.Event()
@@ -139,7 +149,9 @@ def _initial_sender(sent_row: dict) -> tuple:
 
 
 def run_now(app_state) -> dict:
-    return _do_one_cycle(app_state)
+    # Déclenchement manuel ("Lancer maintenant") : on force, peu importe
+    # l'heure ou le lot du jour (le dédoublonnage évite les doublons).
+    return _do_one_cycle(app_state, force=True)
 
 
 # ---------------------------------------------------------------------------
@@ -183,8 +195,8 @@ def _loop(app_state) -> None:
             time.sleep(5)
 
 
-def _do_one_cycle(app_state) -> dict:
-    global _LAST_RUN_AT, _LAST_RUN_RESULT
+def _do_one_cycle(app_state, force: bool = False) -> dict:
+    global _LAST_RUN_AT, _LAST_RUN_RESULT, _LAST_BATCH_DATE
     counters = {"scanned": 0, "drafts_created": 0,
                 "auto_sent": 0, "skipped": 0, "errors": 0}
 
@@ -211,21 +223,37 @@ def _do_one_cycle(app_state) -> dict:
 
     sb = client.raw
     now = datetime.now()
+    today = now.date().isoformat()
+    # Une seule préparation par jour, à partir de BATCH_HOUR (sauf "Lancer
+    # maintenant" qui force). Les relances du jour arrivent ainsi groupées
+    # le matin, et plus à l'heure éparpillée de chaque envoi d'origine.
+    if not force:
+        if now.hour < BATCH_HOUR:
+            counters["skipped_reason"] = f"avant {BATCH_HOUR}h (lot du matin)"
+            _set_run(counters)
+            return counters
+        if _LAST_BATCH_DATE == today:
+            counters["skipped_reason"] = "lot du jour déjà préparé"
+            _set_run(counters)
+            return counters
+
     for stage in STAGES:
         stage_cfg = (config.get("stages") or {}).get(stage) or {}
         days = int(stage_cfg.get("days") or 0)
         if days <= 0:
             continue
-        target = now - timedelta(days=days)
-        # Fenêtre de ±1h pour absorber les décalages de cycles
-        window_start = (target - timedelta(hours=1)).isoformat(timespec="seconds")
-        window_end = (target + timedelta(hours=1)).isoformat(timespec="seconds")
+        # Tout ce qui a été envoyé le JOUR situé il y a `days` jours → sa
+        # relance est préparée aujourd'hui (fenêtre = la journée entière).
+        td = (now - timedelta(days=days)).date()
+        day0 = datetime(td.year, td.month, td.day)
+        window_start = day0.isoformat(timespec="seconds")
+        window_end = (day0 + timedelta(days=1)).isoformat(timespec="seconds")
 
         try:
             res = (sb.table("email_history").select("*")
                    .eq("kind", "email_sent")
                    .gte("ts", window_start).lt("ts", window_end)
-                   .limit(500).execute())
+                   .limit(1000).execute())
             sent_rows = res.data or []
         except Exception as exc:
             logger.warning("fetch sent for %s: %s", stage, exc)
@@ -251,6 +279,7 @@ def _do_one_cycle(app_state) -> dict:
                                 stage, row.get("id"), exc)
                 counters["errors"] += 1
 
+    _LAST_BATCH_DATE = today  # lot du jour préparé → pas de re-passage aujourd'hui
     _set_run(counters)
     return counters
 
@@ -271,6 +300,19 @@ def _should_skip(client, sent_row: dict, stage: str) -> bool:
         return True
     sb = client.raw
     sent_ts = sent_row.get("ts") or ""
+
+    # ANTI-DOUBLON : un brouillon de relance de CE stage est-il DÉJÀ en attente
+    # pour ce prospect ? (les anciennes fenêtres ±1h pouvaient en créer 2 ; un
+    # re-passage du lot ne doit jamais redoubler non plus.) Bug attrapé par
+    # Jordan le 19/06 : 8 relances = 4 prospects × 2.
+    try:
+        ex = (sb.table("prospect_drafts").select("id")
+              .eq("prospect_id", prospect_id).eq("kind", stage)
+              .eq("status", "pending").limit(1).execute())
+        if ex.data:
+            return True
+    except Exception:
+        pass
 
     # Status final ? (PS.NO_CONTACT_STATUSES + 'replied' = pas de relance auto)
     try:
@@ -375,7 +417,7 @@ def _create_drip_draft(client, app_state, sent_row: dict,
         return out
 
     name = (prospect.get("name") or prospect.get("legal_name")
-            or "vous").strip()
+            or "votre entreprise").strip()
     emails = prospect.get("emails") or []
     if not emails:
         out["error"] = "no_email"

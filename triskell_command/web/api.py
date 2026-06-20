@@ -931,6 +931,27 @@ class Api:
                 return None
         return c if getattr(c, "is_authenticated", False) else None
 
+    @staticmethod
+    def _relance_info(kind: str, created_at: str):
+        """Pour une relance (follow_up_7d/30d) : date du 1er contact + date
+        d'envoi prévue, calculées depuis la création du brouillon (préparé le
+        jour d'envoi). Renvoie None pour un mail normal. Affiché dans l'écran
+        « à valider » pour vérifier le timing (demande Jordan, 19/06)."""
+        offsets = {"follow_up_7d": 7, "follow_up_30d": 30}
+        days = offsets.get(kind)
+        if not days or not created_at:
+            return None
+        try:
+            from datetime import datetime, timedelta
+            prep = datetime.fromisoformat(str(created_at)[:19])
+            return {
+                "first_contact": (prep - timedelta(days=days)).date().isoformat(),
+                "due_date": prep.date().isoformat(),
+                "stage_days": days,
+            }
+        except Exception:
+            return None
+
     def get_drafts(self) -> dict:
         client = self._supabase_client_or_none()
         if client is None:
@@ -1022,6 +1043,10 @@ class Api:
                     "provider": r.get("provider") or "",
                     "model": r.get("model") or "",
                     "kind": r.get("kind") or "",
+                    # Relances : date du 1er contact + date d'envoi prévue,
+                    # pour vérifier que le timing est bon (demande Jordan).
+                    "relance": self._relance_info(
+                        r.get("kind") or "", r.get("created_at") or ""),
                     # Origine globale du prospect + catégorie
                     "prospect_sources":
                         self._source_names_from_sources(p.get("sources")),

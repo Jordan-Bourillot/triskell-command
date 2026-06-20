@@ -591,6 +591,7 @@ const Drafts = {
               </div>
             ` : ''}
             ${emailOriginLine}
+            ${this._relanceLine(r.relance)}
           </div>
         </header>
         ${reviewBanner}
@@ -966,6 +967,19 @@ const Drafts = {
       return `<span class="text-xs px-2 py-0.5 rounded-full bg-info/15 text-info-text border border-info/30">Pro / Entreprise</span>`;
     }
     return '';
+  },
+
+  // Ligne « 📅 1er contact le X · à envoyer aujourd'hui » pour les relances
+  // (demande Jordan : voir d'un coup d'œil que le timing est bon).
+  _relanceLine(rel) {
+    if (!rel || !rel.first_contact) return '';
+    const today = new Date().toISOString().slice(0, 10);
+    const fmt = (d) => { const p = String(d).split('-'); return `${p[2]}/${p[1]}/${p[0]}`; };
+    let when, cls;
+    if (rel.due_date === today) { when = 'à envoyer aujourd’hui'; cls = 'text-accent font-semibold'; }
+    else if (rel.due_date < today) { when = `à envoyer (en retard depuis le ${fmt(rel.due_date)})`; cls = 'text-warning font-semibold'; }
+    else { when = `à envoyer le ${fmt(rel.due_date)}`; cls = 'text-text-muted'; }
+    return `<div class="text-xs mt-1.5 ${cls}">📅 1er contact le ${fmt(rel.first_contact)} · ${when}</div>`;
   },
 
   // Traduit le type de brouillon (code technique) en français lisible.
