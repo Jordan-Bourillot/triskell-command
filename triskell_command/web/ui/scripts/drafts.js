@@ -867,6 +867,17 @@ const Drafts = {
           <span class="text-text-secondary font-normal"> — ${this._esc(why)}</span>
         </div>`;
     }
+    // Relances : modèle FIXE approuvé (pas écrit par l'IA) → inutile de le
+    // faire relire à chaque fois (coût IA pour rien). On indique juste qu'il
+    // s'appuie sur un modèle validé, personnalisé au nom de l'entreprise.
+    if (r.review_score == null && String(r.kind || '').startsWith('follow_up')) {
+      return `
+        <div class="mb-3 px-3 py-2 rounded-lg border text-xs sm:text-sm bg-success/10 border-success/30 text-success"
+             style="text-wrap: pretty">
+          <span class="font-semibold">✓ Modèle de relance validé</span>
+          <span class="text-text-secondary font-normal"> — texte approuvé, personnalisé au nom de l'entreprise</span>
+        </div>`;
+    }
     if (r.review_score == null) return '';
     const score = Math.max(0, Math.min(10, parseInt(r.review_score, 10) || 0));
     const comment = (r.review_comment || '').trim();

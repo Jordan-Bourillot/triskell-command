@@ -2123,6 +2123,23 @@ class Api:
         CD.set_status(client.raw, draft_id, "rejected")
         return {"ok": True}
 
+    def _rereview_creator_draft_async(self, draft_id: str) -> None:
+        """Lance la 2e IA (relectrice) sur UN brouillon créateur, en arrière-plan
+        (la mise en brouillon reste instantanée ; la note s'affiche quelques
+        secondes plus tard, comme pour la prospection)."""
+        draft_id = (draft_id or "").strip()
+        if not draft_id:
+            return
+        import threading
+
+        def _run():
+            try:
+                self.creator_drafts_rereview({"draft_id": draft_id})
+            except Exception as exc:
+                logger.debug("2e IA créateur (async) KO: %s", exc)
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def creator_drafts_rereview(self, payload: dict | None = None) -> dict:
         """2e IA pour les brouillons créateurs : note le pitch de monétisation
         de chaque mail (l'angle, la 3e ligne) et le peaufine si elle fait mieux
@@ -6950,6 +6967,11 @@ class Api:
                              preview_url=prev)
                 if d:
                     queued.append({"name": r.get("name") or "?", "to": email})
+                    # 2e IA (relectrice) en arrière-plan : le brouillon créateur
+                    # passe le même filtre que les mails de prospection (note +
+                    # retouche du pitch). Async → la mise en brouillon reste
+                    # rapide, la note apparaît quelques secondes après. (Jordan, 19/06)
+                    self._rereview_creator_draft_async(d.get("id"))
             return {"ok": True, "count": len(queued),
                     "queued": queued, "skipped": skipped}
         except Exception as exc:
