@@ -88,6 +88,9 @@ _LIGHT_COLS = "id,name,website,emails,tags,notes,industry"
 # à savoir qu'il n'y a rien de neuf à juger.
 _LAST_TOTAL: int | None = None
 _BACKLOG_CLEARED: bool = False
+_HAD_WORK: bool = False        # a-t-on déjà eu des sites à juger (sinon pas
+                              # de fausse alerte "fini" sur une base déjà vue)
+_DONE_NOTIFIED: bool = False   # alerte "analyse terminée" envoyée une fois
 
 
 def _judgeable(row: dict) -> bool:
@@ -163,6 +166,34 @@ def _tag_and_save_row(c, row: dict, extra_tags, note) -> None:
         logger.warning("oeil: tag %s échoué : %s", row.get("name", "?"), exc)
 
 
+def _notify_done_once(c) -> None:
+    """Quand l'œil a TOUT passé (plus aucun site à juger), prévient Jordan
+    sur son téléphone — une seule fois. Ne notifie jamais si on n'a jamais
+    eu de travail (évite une fausse alerte au démarrage sur base déjà vue)."""
+    global _DONE_NOTIFIED
+    if _DONE_NOTIFIED or not _HAD_WORK:
+        return
+    _DONE_NOTIFIED = True
+    n = None
+    try:
+        r = (c.raw.table("prospects")
+             .select("id", count="exact", head=True)
+             .filter("tags", "cs", '["redo_visuel"]').execute())
+        n = int(r.count or 0)
+    except Exception:
+        pass
+    body = "L'œil a fini de regarder tous les sites de la base."
+    if n is not None:
+        body += f" {n} sites « à refaire » repérés."
+    try:
+        from ..web.push import send_push
+        send_push("👁️ Analyse des sites terminée", body,
+                  user_id="jordan", priority="normal",
+                  tag="oeil_done", tag_group="system", url="/")
+    except Exception as exc:
+        logger.warning("oeil: notif fin échouée : %s", exc)
+
+
 def tick() -> dict:
     """Un passage : juge un petit paquet de prospects pas encore vus.
 
@@ -171,7 +202,7 @@ def tick() -> dict:
     les lignes) au lieu de retélécharger toute la base. Sinon on lit léger
     (6 colonnes) et on écrit en ciblé, fiche par fiche.
     """
-    global _LAST_TOTAL, _BACKLOG_CLEARED
+    global _LAST_TOTAL, _BACKLOG_CLEARED, _HAD_WORK
     from .site_quality import REDO_TAG
     from . import site_vision
 
@@ -203,7 +234,9 @@ def tick() -> dict:
         _LAST_TOTAL = total
     if not targets:
         _BACKLOG_CLEARED = True
+        _notify_done_once(c)
         return {"done": True, "remaining": 0}
+    _HAD_WORK = True
     _BACKLOG_CLEARED = False
 
     keys = {}
@@ -255,6 +288,7 @@ def tick() -> dict:
     out["remaining"] = max(0, remaining - out["judged"])
     if out["remaining"] <= 0:
         _BACKLOG_CLEARED = True
+        _notify_done_once(c)
     return out
 
 
