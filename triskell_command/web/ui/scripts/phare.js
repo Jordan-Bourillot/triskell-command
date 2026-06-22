@@ -1263,6 +1263,7 @@ const Phare = {
           </div>
         </header>
         <div id="ph-automerge-panel"></div>
+        <div id="ph-deeprank-panel"></div>
         <button class="phare-prog-entry" data-act="programmatic">
           <span class="phare-prog-entry-ico">🏭</span>
           <span class="phare-prog-entry-body">
@@ -1280,6 +1281,7 @@ const Phare = {
       this._go(this._coulissesFrom === 'site' && this.selectedSite ? 'site' : 'home');
     container.querySelector('[data-act="programmatic"]').onclick = () => this._go('programmatic');
     this._renderAutomergePanel();
+    this._renderDeepRankPanel();
     let agents = this._defaultAgents();
     if (App.api) {
       try {
@@ -1341,6 +1343,66 @@ const Phare = {
   // ════════════════════════════════════════════════════════════════════
   //  PANNEAU PUBLICATION AUTO — interrupteur auto-merge (vue Coulisses)
   // ════════════════════════════════════════════════════════════════════
+  async _renderDeepRankPanel() {
+    const host = document.getElementById('ph-deeprank-panel');
+    if (!host || !App.api || typeof App.api.phare_deep_rank_get !== 'function') return;
+    const st = { enabled: false };
+    try {
+      const res = await App.api.phare_deep_rank_get();
+      if (!res || !res.ok) return;          // base injoignable → pas de panneau
+      st.enabled = !!res.enabled;
+    } catch (e) { return; }
+
+    const paint = (busy) => {
+      const on = st.enabled;
+      host.innerHTML = `
+        <div class="phare-automerge ${on ? 'is-on' : ''}">
+          <div class="phare-automerge-text">
+            <div class="phare-automerge-title">
+              ${on ? '🟢' : '⚪'} Suivi de position avancé (payant)
+            </div>
+            <p class="phare-automerge-desc">
+              ${on
+                ? 'Le robot mesure ta vraie place sur Google même pour les mots où tu n’es pas encore visible (là où Google reste muet). Une seule mesure par site à chaque passage — quelques centimes. Tu vois enfin où tu pars de loin.'
+                : 'Aujourd’hui ta position vient de Google (gratuit), mais seulement pour les mots où ton site apparaît déjà. Active pour mesurer aussi ta place sur les mots où tu n’es pas encore visible — coût léger : quelques euros par mois pour tous tes sites réunis.'}
+            </p>
+          </div>
+          <button class="btn ${on ? 'btn-secondary' : 'btn-primary'}" data-act="toggle" ${busy ? 'disabled' : ''}>
+            ${busy ? '…' : (on ? 'Couper' : 'Activer')}
+          </button>
+        </div>`;
+      host.querySelector('[data-act="toggle"]').onclick = async () => {
+        const next = !st.enabled;
+        if (next) {
+          const sure = await Dialog.confirm(
+            'Le robot va mesurer ta vraie place sur Google pour tous tes sites, ' +
+            'y compris sur les mots où tu n’es pas encore visible.\n\n' +
+            'C’est payant mais léger : une seule mesure par site à chaque ' +
+            'passage, soit quelques euros par mois en tout. Tu peux couper ' +
+            'quand tu veux.',
+            { title: 'Activer le suivi de position avancé ?', okLabel: 'Activer',
+              cancelLabel: 'Annuler' });
+          if (!sure) return;
+        }
+        paint(true);
+        try {
+          const r = await App.api.phare_deep_rank_set({ enabled: next });
+          if (r && r.ok) {
+            st.enabled = !!r.enabled;
+            paint(false);
+            Toast.success(st.enabled
+              ? 'Suivi avancé activé — tes positions complètes au prochain passage'
+              : 'Suivi de position avancé coupé');
+          } else {
+            paint(false);
+            Toast.friendlyError(r && r.error, 'Le réglage n’a pas pu être enregistré. Réessaie dans un instant.');
+          }
+        } catch (e) { paint(false); Toast.friendlyError(e); }
+      };
+    };
+    paint(false);
+  },
+
   async _renderAutomergePanel() {
     const host = document.getElementById('ph-automerge-panel');
     if (!host || !App.api || typeof App.api.phare_automerge_get !== 'function') return;

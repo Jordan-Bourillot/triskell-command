@@ -3929,6 +3929,33 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def phare_deep_rank_get(self) -> dict:
+        """Lit l'état du suivi de position avancé (payant)."""
+        try:
+            from ..integrations.phare import repo as phare_repo
+            cfg = phare_repo.get_config() or {}
+            return {"ok": True,
+                    "enabled": bool(cfg.get("deep_rank_tracking", False))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def phare_deep_rank_set(self, payload: dict) -> dict:
+        """Active/coupe le suivi de position avancé (phare_config.deep_rank_tracking).
+        Mesure la vraie position des sites sur Google même là où Search Console
+        est muet (1 appel payant par site et par passage). N'écrit QUE cette clé."""
+        enabled = bool((payload or {}).get("enabled"))
+        try:
+            from ..integrations.phare import repo as phare_repo
+            phare_repo.update_config({"deep_rank_tracking": enabled})
+            cfg = phare_repo.get_config() or {}
+            real = bool(cfg.get("deep_rank_tracking", False))
+            if real != enabled:
+                return {"ok": False, "error":
+                        "Le réglage n'a pas pu être enregistré (base injoignable ?)."}
+            return {"ok": True, "enabled": real}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ══════════════════════════════════════════════════════════════════
     #  PAGES EN SÉRIE (SEO programmatique) — moteur phare/programmatic.py
     #  Un modèle + une liste de valeurs → des dizaines de pages utiles,

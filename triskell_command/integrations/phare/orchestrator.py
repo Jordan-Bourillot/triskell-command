@@ -174,6 +174,19 @@ def run_keywords(site_id: str, *, app_state=None) -> dict:
     except Exception as exc:
         logger.debug("run_keywords positions GSC: %s", exc)
 
+    # Suivi de position AVANCÉ (payant, opt-in : phare_config.deep_rank_tracking,
+    # défaut coupé). UN seul appel renvoie les vraies positions du site sur
+    # Google — même pour les mots où Google Search Console est muet (site pas
+    # encore visible sur ces requêtes). Sert UNIQUEMENT à combler les trous de
+    # GSC ; GSC reste prioritaire (plus frais, gratuit). 1 appel par site → coût
+    # négligeable, pas de plafond nécessaire.
+    deep_pos: dict[str, int] = {}
+    try:
+        if repo.get_config().get("deep_rank_tracking") and dataforseo.is_configured():
+            deep_pos = dataforseo.ranked_keywords(domain)
+    except Exception as exc:
+        logger.debug("run_keywords suivi position avancé: %s", exc)
+
     # Meilleure position jamais atteinte : on lit l'existant pour garder la
     # trace (colonne best_position prévue mais jamais remplie jusqu'ici).
     prev_best: dict[str, int] = {}
@@ -193,6 +206,8 @@ def run_keywords(site_id: str, *, app_state=None) -> dict:
         v = volumes.get(kwl, {})
         pos = gsc_pos.get(kwl)
         cur_pos = int(round(pos)) if isinstance(pos, (int, float)) else None
+        if cur_pos is None and kwl in deep_pos:   # GSC muet → position mesurée
+            cur_pos = deep_pos[kwl]
         best = prev_best.get(kwl)
         if cur_pos is not None:
             best = cur_pos if best is None else min(best, cur_pos)

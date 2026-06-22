@@ -496,9 +496,12 @@ def test_sql_files_present() -> None:
 
 def test_keywords_data_filling() -> None:
     """La veille mots-clés remplit la VRAIE difficulté (DataForSEO, repli sur
-    l'estimation — jamais un 0 trompeur), la position réelle (GSC arrondie,
-    None si Google ne nous voit pas) et garde la meilleure place atteinte
-    (best_position = min avec l'historique)."""
+    l'estimation — jamais un 0 trompeur), la position réelle, et garde la
+    meilleure place atteinte (best_position = min avec l'historique).
+
+    Position : Google Search Console d'abord (gratuit, prioritaire) ; le suivi
+    de position AVANCÉ (payant, opt-in deep_rank_tracking) comble UNIQUEMENT les
+    mots où GSC est muet — il ne remplace jamais une vraie position GSC."""
     from triskell_command.integrations.phare import orchestrator as orch
     from triskell_command.integrations.phare import repo as ph_repo
     from triskell_command.integrations.phare import gsc, dataforseo, agents
@@ -517,10 +520,11 @@ def test_keywords_data_filling() -> None:
             ], "long_tail": []}
 
     saved = (ph_repo.get_site, ph_repo.list_keywords, ph_repo.upsert_keywords,
-             ph_repo.expire_open_actions, ph_repo.insert_action,
+             ph_repo.expire_open_actions, ph_repo.insert_action, ph_repo.get_config,
              gsc.fetch_top_queries, gsc.fetch_top_pages,
              dataforseo.serp_top10, dataforseo.search_volume,
-             dataforseo.keyword_difficulty, agents.VeilleurMotsCles)
+             dataforseo.keyword_difficulty, dataforseo.is_configured,
+             dataforseo.ranked_keywords, agents.VeilleurMotsCles)
     try:
         ph_repo.get_site = lambda sid: {"id": sid, "domain": "exemple.fr", "name": "Ex"}
         ph_repo.list_keywords = lambda sid, limit=200: [
@@ -529,6 +533,7 @@ def test_keywords_data_filling() -> None:
             captured.__setitem__("rows", rows) or len(rows))
         ph_repo.expire_open_actions = lambda *a, **k: None
         ph_repo.insert_action = lambda *a, **k: None
+        ph_repo.get_config = lambda: {"deep_rank_tracking": True}   # suivi avancé ON
         gsc.fetch_top_queries = lambda *a, **k: [
             {"query": "plombier rennes", "position": 3.4},
             {"query": "depannage plomberie rennes", "position": 14.8}]
@@ -538,14 +543,20 @@ def test_keywords_data_filling() -> None:
             {"keyword": "plombier rennes", "volume": 880}]
         dataforseo.keyword_difficulty = lambda kws: {
             "plombier rennes": 42, "depannage plomberie rennes": 7}
+        dataforseo.is_configured = lambda: True
+        # Le suivi avancé renvoie une place pour le mot que GSC ne voit pas,
+        # ET une place pour un mot que GSC voit déjà (doit être ignorée).
+        dataforseo.ranked_keywords = lambda domain: {
+            "plombier pas cher": 23, "plombier rennes": 9}
         agents.VeilleurMotsCles = _FakeVeilleur
         orch.run_keywords("site1")
     finally:
         (ph_repo.get_site, ph_repo.list_keywords, ph_repo.upsert_keywords,
-         ph_repo.expire_open_actions, ph_repo.insert_action,
+         ph_repo.expire_open_actions, ph_repo.insert_action, ph_repo.get_config,
          gsc.fetch_top_queries, gsc.fetch_top_pages,
          dataforseo.serp_top10, dataforseo.search_volume,
-         dataforseo.keyword_difficulty, agents.VeilleurMotsCles) = saved
+         dataforseo.keyword_difficulty, dataforseo.is_configured,
+         dataforseo.ranked_keywords, agents.VeilleurMotsCles) = saved
 
     rows = {r["keyword"]: r for r in captured.get("rows", [])}
     assert set(rows) == {"plombier rennes", "depannage plomberie rennes",
@@ -557,14 +568,15 @@ def test_keywords_data_filling() -> None:
     assert rows["plombier rennes"]["difficulty"] == 42
     assert rows["depannage plomberie rennes"]["difficulty"] == 7
     assert rows["plombier pas cher"]["difficulty"] == 80    # absent DFS → estimé
-    # Position : GSC arrondie ; inconnue de Google → None
+    # Position : GSC arrondie et PRIORITAIRE (3, pas le 9 du suivi avancé) ;
+    # le suivi avancé comble UNIQUEMENT le mot que GSC ne voit pas (→ 23).
     assert rows["plombier rennes"]["current_position"] == 3
     assert rows["depannage plomberie rennes"]["current_position"] == 15
-    assert rows["plombier pas cher"]["current_position"] is None
+    assert rows["plombier pas cher"]["current_position"] == 23
     # Meilleure place : min(historique, actuelle) ; 1er relevé sinon
     assert rows["plombier rennes"]["best_position"] == 2
     assert rows["depannage plomberie rennes"]["best_position"] == 15
-    assert rows["plombier pas cher"]["best_position"] is None
+    assert rows["plombier pas cher"]["best_position"] == 23
 
 
 # ---------------------------------------------------------------------------

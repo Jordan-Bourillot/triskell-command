@@ -215,3 +215,39 @@ def referring_domains(domain: str, limit: int = 100) -> list[dict]:
                     "first_seen": item.get("first_seen", ""),
                 })
     return out
+
+
+def ranked_keywords(domain: str, limit: int = 700) -> dict[str, int]:
+    """Positions RÉELLES du domaine sur Google, en UN seul appel.
+
+    Renvoie tous les mots-clés sur lesquels le site est classé dans le top 100,
+    avec leur place : {mot_clé_minuscule: position}. Bien moins cher qu'une
+    requête par mot (1 appel couvre tout le site). Sert à combler les mots où
+    Google Search Console est muet (site pas encore visible sur ces requêtes).
+
+    Vide si non configuré, site classé nulle part, ou API muette.
+    """
+    if not domain:
+        return {}
+    body = [{
+        "target": domain,
+        "location_code": DFS_LOCATION_FR,
+        "language_code": DFS_LANGUAGE_FR,
+        "limit": min(limit, 1000),
+    }]
+    data = _post("dataforseo_labs/google/ranked_keywords/live", body)
+    if not data:
+        return {}
+    out: dict[str, int] = {}
+    for task in data.get("tasks", []) or []:
+        for res in task.get("result", []) or []:
+            for item in res.get("items", []) or []:
+                kw = ((item.get("keyword_data") or {}).get("keyword") or "").lower()
+                serp = (item.get("ranked_serp_element") or {}).get("serp_item") or {}
+                rank = serp.get("rank_group")
+                if kw and isinstance(rank, int) and rank > 0:
+                    # un mot peut revenir (plusieurs pages classées) → garde la
+                    # meilleure place.
+                    if kw not in out or rank < out[kw]:
+                        out[kw] = rank
+    return out
