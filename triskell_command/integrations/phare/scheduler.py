@@ -535,17 +535,25 @@ def _pick_next_for_mission(mission: str, sites: list[dict]) -> Optional[dict]:
 
 
 def _pick_page_to_optimize(site_id: str) -> str:
-    """Choisit la page la moins optimisée d'un site, ou '/' par défaut."""
-    pages = repo.list_pages(site_id, limit=200)
+    """Choisit la page la moins optimisée d'un site — JAMAIS l'accueil.
+
+    Le robot ne publie jamais l'accueil tout seul (vitrine = décision de
+    Jordan) : une optim d'accueil ouvre donc une PR qui ne se fusionne jamais,
+    s'accumule et consomme une prévisualisation Netlify pour rien (constat
+    22/06 : 18 PR « Optim on-page / » fantômes sur pixel-studio/studio-wow).
+    Renvoie "" s'il n'y a aucune page hors accueil à optimiser → on saute.
+    """
+    pages = [p for p in repo.list_pages(site_id, limit=200)
+             if (p.get("path") or "/") not in ("/", "")]
     if not pages:
-        return "/"
+        return ""
     # Page avec le plus petit optim_score (None = pas encore évaluée → priorité)
     pages_sorted = sorted(
         pages,
         key=lambda p: (p.get("optim_score") if p.get("optim_score") is not None
                        else -1, p.get("path") or "")
     )
-    return pages_sorted[0].get("path") or "/"
+    return pages_sorted[0].get("path") or ""
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +582,8 @@ def run_now(mission: str, site_id: Optional[str] = None,
         if not site_id:
             return {"ok": False, "error": "site_id requis"}
         page_path = _pick_page_to_optimize(site_id)
+        if not page_path:           # que l'accueil → on ne crée pas de PR fantôme
+            return {"ok": True, "skipped": "aucune page hors accueil à optimiser"}
         return orchestrator.run_onpage_optim(
             site_id, page_path=page_path, auto_open_pr=True,
             app_state=app_state,
