@@ -885,6 +885,14 @@ def auto_apply_safe(*, max_apply: int = 8, app_state=None) -> dict:
         granular.add("schema")
     if alts_on:
         granular.add("alt")
+    # Mode ciblé (firehose global coupé) : on reste TRÈS économe en
+    # reconstructions de site — chaque correction publiée = un déploiement chez
+    # l'hébergeur, et son crédit est limité. On en applique donc peu par
+    # passage. Les étiquettes/alts sont de toute façon auto-limitées (une page
+    # déjà équipée n'est plus jamais retouchée), donc ce plafond bas n'enlève
+    # rien à la qualité : il étale juste le rattrapage initial.
+    if not global_on:
+        max_apply = min(max_apply, 3)
     from . import plain_language
     drafts = repo.list_actions(status="draft", limit=200)
     enqueued: list[dict] = []
