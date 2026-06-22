@@ -261,6 +261,7 @@ const Phare = {
     const ideas = data.ideas || [];
     const done = data.recently_done || [];
     const bull = data.bulletin || null;
+    const keywords = data.keywords || [];
     this._selectedSiteName = s.name || s.domain || '';
 
     // Indexer les propositions (pile + idées) pour la modale d'aperçu
@@ -316,6 +317,9 @@ const Phare = {
             : toReview.map(a => this._actionCard(a, 'todo')).join('')}
         </div>
       </div>
+
+      <!-- TES MOTS-CLÉS — ce que les gens tapent + où on est sur Google -->
+      ${this._keywordsPanel(keywords)}
 
       <!-- IDÉES (optionnel) — volet silencieux, AUCUNE pile de devoirs.
            Le robot fait ce qu'il sait faire ; ici, juste des pistes de contenu
@@ -1129,6 +1133,75 @@ const Phare = {
         <div class="phare-kpi-sub">${this._esc(sub)}</div>
       </div>
     `;
+  },
+
+  // ── Panneau « Tes mots-clés sur Google » ──────────────────────────────
+  // Affiche, en clair : le mot, combien de gens le tapent par mois, à quel
+  // point c'est dur d'y arriver, et où le site se trouve sur Google.
+  _keywordsPanel(keywords) {
+    const kws = Array.isArray(keywords) ? keywords.slice() : [];
+    // Les mots où on est positionné en premier (meilleure place d'abord),
+    // puis ceux pas encore positionnés, les plus recherchés en tête.
+    kws.sort((a, b) => {
+      const pa = a && typeof a.current_position === 'number' ? a.current_position : null;
+      const pb = b && typeof b.current_position === 'number' ? b.current_position : null;
+      if (pa !== null && pb !== null) return pa - pb;
+      if (pa !== null) return -1;
+      if (pb !== null) return 1;
+      return (b.volume || 0) - (a.volume || 0);
+    });
+    const shown = kws.slice(0, 20);
+    const body = kws.length === 0
+      ? `<div class="phare-empty-inline">Le Veilleur n'a pas encore choisi de mots-clés pour ce site. Ils apparaîtront ici après son prochain passage.</div>`
+      : `<div class="phare-kw-table">
+           <div class="phare-kw-head">
+             <span>Mot-clé</span><span>Recherches/mois</span>
+             <span>Difficulté</span><span>Ta place sur Google</span>
+           </div>
+           ${shown.map(k => this._kwRow(k)).join('')}
+         </div>${kws.length > shown.length
+            ? `<div class="phare-kw-more">+ ${kws.length - shown.length} autres mots-clés suivis</div>`
+            : ''}`;
+    return `
+      <div class="phare-section">
+        <details class="phare-kw-details" open>
+          <summary class="phare-kw-summary">
+            <span class="phare-kw-summary-title">🎯 Tes mots-clés sur Google</span>
+            <span class="phare-section-sub">Ce que les gens tapent pour te trouver — et où tu apparais.</span>
+          </summary>
+          ${body}
+        </details>
+      </div>`;
+  },
+
+  _kwRow(k) {
+    k = k || {};
+    const vol = (k.volume && k.volume > 0) ? this._fmt(k.volume) : '—';
+    // Difficulté : 0 ou absent = on ne sait pas (on n'invente pas « facile »).
+    const d = k.difficulty;
+    let diffHtml = `<span class="phare-kw-pill phare-kw-pill--mute">—</span>`;
+    if (typeof d === 'number' && d > 0) {
+      if (d < 30) diffHtml = `<span class="phare-kw-pill phare-kw-pill--easy">Facile</span>`;
+      else if (d < 60) diffHtml = `<span class="phare-kw-pill phare-kw-pill--mid">Moyen</span>`;
+      else diffHtml = `<span class="phare-kw-pill phare-kw-pill--hard">Difficile</span>`;
+    }
+    // Position réelle (Google Search Console).
+    const p = k.current_position;
+    let posHtml = `<span class="phare-kw-pos phare-kw-pos--none">Pas encore</span>`;
+    if (typeof p === 'number' && p > 0) {
+      let cls = 'far', tag = `#${p}`;
+      if (p <= 3) { cls = 'top'; tag = `🥇 #${p}`; }
+      else if (p <= 10) { cls = 'good'; tag = `#${p} · page 1`; }
+      else if (p <= 20) { cls = 'near'; tag = `#${p} · à portée`; }
+      posHtml = `<span class="phare-kw-pos phare-kw-pos--${cls}">${tag}</span>`;
+    }
+    return `
+      <div class="phare-kw-row">
+        <span class="phare-kw-word">${this._esc(k.keyword || '—')}</span>
+        <span class="phare-kw-vol">${vol}</span>
+        <span>${diffHtml}</span>
+        <span>${posHtml}</span>
+      </div>`;
   },
 
   _backHeader() {

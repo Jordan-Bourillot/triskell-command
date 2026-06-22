@@ -3425,6 +3425,9 @@ class Api:
                 "recently_done": done[:10],
                 "rejected_recent": rejected[:5],
                 "bulletin": bulletin,
+                # Mots-clés suivis (volume, difficulté, position réelle) : triés
+                # par volume desc côté base. L'écran les affiche en clair.
+                "keywords": repo.list_keywords(sid, limit=40) or [],
             }
         except Exception as exc:
             logger.warning("phare_site_dashboard: %s", exc)

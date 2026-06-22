@@ -153,19 +153,57 @@ def run_keywords(site_id: str, *, app_state=None) -> dict:
 
     primary = plan.get("primary_keywords") or []
     long_tail = plan.get("long_tail") or []
-    # Enrichit avec volumes DataForSEO si dispo
     kws_to_check = [k.get("keyword") for k in primary + long_tail if k.get("keyword")]
+
+    # Volumes ET difficulté RÉELS via DataForSEO (un appel groupé chacun) ; si
+    # l'API est muette pour un mot, on retombe sur l'estimation de l'agent —
+    # jamais sur un 0 trompeur.
     volumes = {v["keyword"].lower(): v for v in dataforseo.search_volume(kws_to_check)}
+    difficulty = dataforseo.keyword_difficulty(kws_to_check)
+
+    # Position RÉELLE depuis Google Search Console : la position moyenne que
+    # Google nous donne déjà pour chaque requête où le site apparaît. Gratuit,
+    # fiable. Un mot ciblé que Google ne connaît pas encore → position None
+    # (« pas encore positionné »), ce qui est une info en soi.
+    gsc_pos: dict[str, float] = {}
+    try:
+        for q in gsc.fetch_top_queries(domain, days=28, limit=250):
+            qk = (q.get("query") or "").lower().strip()
+            if qk and isinstance(q.get("position"), (int, float)):
+                gsc_pos[qk] = q["position"]
+    except Exception as exc:
+        logger.debug("run_keywords positions GSC: %s", exc)
+
+    # Meilleure position jamais atteinte : on lit l'existant pour garder la
+    # trace (colonne best_position prévue mais jamais remplie jusqu'ici).
+    prev_best: dict[str, int] = {}
+    try:
+        for row in repo.list_keywords(site_id, limit=500):
+            kwl = (row.get("keyword") or "").lower()
+            bp = row.get("best_position")
+            if kwl and isinstance(bp, int):
+                prev_best[kwl] = bp
+    except Exception as exc:
+        logger.debug("run_keywords best_position: %s", exc)
+
     persisted = []
     for k in primary + long_tail:
         kw = k.get("keyword", "")
-        v = volumes.get(kw.lower(), {})
+        kwl = kw.lower()
+        v = volumes.get(kwl, {})
+        pos = gsc_pos.get(kwl)
+        cur_pos = int(round(pos)) if isinstance(pos, (int, float)) else None
+        best = prev_best.get(kwl)
+        if cur_pos is not None:
+            best = cur_pos if best is None else min(best, cur_pos)
         persisted.append({
             "keyword": kw,
             "volume": v.get("volume", k.get("estimated_volume", 0)),
-            "difficulty": 0,
+            "difficulty": difficulty.get(kwl, k.get("estimated_difficulty", 0) or 0),
             "intent": k.get("intent") or "informational",
             "target_url": k.get("target_url_hint") or "",
+            "current_position": cur_pos,
+            "best_position": best,
         })
     inserted = repo.upsert_keywords(site_id, persisted)
 

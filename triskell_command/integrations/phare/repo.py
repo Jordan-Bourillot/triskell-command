@@ -251,6 +251,7 @@ def upsert_keywords(site_id: str, keywords: list[dict]) -> int:
             "intent": kw.get("intent") or "informational",
             "target_url": kw.get("target_url") or "",
             "current_position": kw.get("current_position"),
+            "best_position": kw.get("best_position"),
             "last_checked_at": datetime.now(timezone.utc).isoformat(),
         })
     try:

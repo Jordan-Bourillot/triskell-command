@@ -2,6 +2,7 @@
 
 Fonctions exposées :
 - search_volume(keywords)        → volumes mensuels FR
+- keyword_difficulty(keywords)   → difficulté SEO réelle (0-100) par mot-clé
 - keyword_suggestions(seed)      → idées de mots-clés long-traîne
 - serp_competitors(keyword)      → top 10 SERP Google.fr
 - backlinks_summary(domain)      → résumé profil backlinks d'un domaine
@@ -81,6 +82,38 @@ def search_volume(keywords: list[str]) -> list[dict]:
                 "competition": res.get("competition") or "",
                 "cpc": float(res.get("cpc") or 0.0),
             })
+    return out
+
+
+def keyword_difficulty(keywords: list[str]) -> dict[str, int]:
+    """Difficulté SEO réelle (0-100) par mot-clé, via DataForSEO Labs.
+
+    La difficulté = à quel point c'est dur d'entrer dans le top 10 Google
+    pour ce mot. Un seul appel groupé pour toute la liste (jusqu'à 1000 mots),
+    pas un appel par mot → coût minime.
+
+    Renvoie un dict {mot_clé_minuscule: difficulté}. Vide si non configuré ou
+    si l'API ne répond pas — l'appelant retombe alors sur l'estimation, jamais
+    sur un 0 trompeur.
+    """
+    if not keywords:
+        return {}
+    body = [{
+        "keywords": keywords[:1000],
+        "location_code": DFS_LOCATION_FR,
+        "language_code": DFS_LANGUAGE_FR,
+    }]
+    data = _post("dataforseo_labs/google/bulk_keyword_difficulty/live", body)
+    if not data:
+        return {}
+    out: dict[str, int] = {}
+    for task in data.get("tasks", []) or []:
+        for res in task.get("result", []) or []:
+            for item in res.get("items", []) or []:
+                kw = (item.get("keyword") or "").lower()
+                kd = item.get("keyword_difficulty")
+                if kw and kd is not None:
+                    out[kw] = int(kd)
     return out
 
 
