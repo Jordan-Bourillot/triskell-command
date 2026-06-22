@@ -4135,6 +4135,60 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)[:200]}
 
+    def _prog_sync_sitemap(self, workdir: str, domain: str, sb,
+                           site_id: str, new_urls: list) -> None:
+        """Ajoute les pages en série au plan du site (sitemap.xml) pour que
+        Google les découvre. Préserve les URLs déjà là ; crée le fichier s'il
+        manque. Best-effort : ne bloque jamais une publication."""
+        import os as _os
+        urls = list(new_urls or [])
+        try:
+            rows = (sb.table("phare_programmatic_pages").select("generated_url")
+                    .eq("site_id", site_id).eq("status", "published")
+                    .execute().data) or []
+            for r in rows:
+                u = (r.get("generated_url") or "").strip()
+                if not u:
+                    continue
+                if not u.startswith("/"):
+                    u = "/" + u
+                if u.endswith(".html"):
+                    u = u[:-5]
+                urls.append(f"https://{domain}{u}")
+        except Exception as exc:
+            logger.debug("prog sitemap query: %s", exc)
+        seen, clean = set(), []
+        for u in urls:
+            if u and u not in seen:
+                seen.add(u)
+                clean.append(u)
+        if not clean:
+            return
+        path = _os.path.join(workdir, "sitemap.xml")
+        today = self._geo_now()[:10]
+        try:
+            if _os.path.exists(path):
+                with open(path, encoding="utf-8") as fh:
+                    xml = fh.read()
+            else:
+                xml = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+                       '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+                       '</urlset>\n')
+            blocks = [f"  <url>\n    <loc>{u}</loc>\n"
+                      f"    <lastmod>{today}</lastmod>\n  </url>"
+                      for u in clean if u not in xml]
+            if not blocks:
+                return
+            addition = "\n".join(blocks) + "\n"
+            if "</urlset>" in xml:
+                xml = xml.replace("</urlset>", addition + "</urlset>")
+            else:
+                xml = xml.rstrip() + "\n" + addition
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(xml)
+        except Exception as exc:
+            logger.debug("prog sitemap write: %s", exc)
+
     def phare_prog_publish(self, payload: dict) -> dict:
         """Met en ligne (push GitHub) les pages relues et assez bonnes d'un
         modèle. C'est le « circuit de publication » qui manquait : clone du
@@ -4216,8 +4270,15 @@ class Api:
                 published.append((pg["id"], canonical))
             if not published:
                 return {"ok": True, "published": 0}
+            # Ajoute les pages au « plan du site » (sitemap.xml) pour que Google
+            # les découvre — sinon elles sont en ligne mais invisibles pour lui.
+            # On inclut TOUTES les pages en série déjà publiées de ce site (donc
+            # un nouveau lot rattrape aussi les anciennes absentes du plan).
+            self._prog_sync_sitemap(workdir, domain, sb,
+                                    tpl[0].get("site_id") or "",
+                                    [c for _, c in published])
             if not gitp.commit_all(
-                    workdir, f"Pages en série : {len(published)} nouvelle(s) page(s)"):
+                    workdir, f"Pages en série : {len(published)} nouvelle(s) page(s) + plan du site"):
                 return {"ok": True, "published": 0,
                         "message": "Rien de nouveau à publier."}
             if not gitp.push_branch(workdir, branch):
