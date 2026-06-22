@@ -4181,10 +4181,29 @@ class Api:
             f'<a class="btn btn-primary" href="/">Découvrir {n}</a>'
             "</section>")
 
-    def _prog_decorate_article(self, content_html: str):
-        """Ajoute un id à chaque <h2> et construit le sommaire cliquable.
-        Renvoie (sommaire_html, contenu_avec_ancres)."""
+    def _prog_pick_pullquote(self, content_html: str) -> str:
+        """Choisit une phrase « qui claque » (avec un chiffre) à mettre en
+        avant en gros dans l'article. Ne lit QUE les paragraphes (jamais les
+        titres) pour ne pas mélanger. Renvoie '' si rien de convaincant."""
         import re as _re
+        paras = _re.findall(r"<p>(.*?)</p>", content_html or "", _re.DOTALL)
+        text = " ".join(_re.sub(r"<[^>]+>", " ", p) for p in paras)
+        text = _re.sub(r"\s+", " ", text).strip()
+        cands = []
+        for s in _re.split(r"(?<=[.!?])\s+", text):
+            s = s.strip().rstrip(".")
+            if 60 <= len(s) <= 160 and _re.search(r"\d", s) and not s.endswith("?"):
+                cands.append(s + ".")
+        if not cands:
+            return ""
+        return cands[len(cands) // 2]   # une phrase du milieu (pas l'intro)
+
+    def _prog_decorate_article(self, content_html: str):
+        """Met en page le contenu : ids + sommaire cliquable, citation mise en
+        avant, et la section « erreurs » transformée en encart d'alerte.
+        Renvoie (sommaire_html, contenu_décoré)."""
+        import re as _re
+        html = content_html or ""
         toc = []
 
         def _h2(m):
@@ -4194,8 +4213,7 @@ class Api:
             toc.append((slug, text))
             return f'<h2 id="{slug}">{inner}</h2>'
 
-        decorated = _re.sub(r"<h2>(.*?)</h2>", _h2, content_html or "",
-                            flags=_re.DOTALL)
+        html = _re.sub(r"<h2>(.*?)</h2>", _h2, html, flags=_re.DOTALL)
         toc_html = ""
         if len(toc) >= 2:
             items = "".join(
@@ -4204,7 +4222,25 @@ class Api:
             toc_html = ('<nav class="geo-toc" aria-label="Sommaire">'
                         '<div class="geo-toc-label">Au sommaire</div>'
                         f'<ol>{items}</ol></nav>')
-        return toc_html, decorated
+        pull = self._prog_pick_pullquote(html)
+
+        def _is_err(t):
+            return any(k in t.lower() for k in
+                       ("erreur", "à éviter", "a eviter", "piège", "piege"))
+
+        parts = _re.split(r'(?=<h2 id=)', html)
+        out = [parts[0]]
+        for i, sec in enumerate(parts[1:]):
+            hm = _re.search(r'<h2 id="[^"]*">(.*?)</h2>', sec, _re.DOTALL)
+            htext = _re.sub(r"<[^>]+>", "", hm.group(1)).strip() if hm else ""
+            if _is_err(htext):
+                out.append(f'<aside class="geo-callout">{sec}</aside>')
+            else:
+                out.append(sec)
+            if i == 0 and pull:
+                out.append('<blockquote class="geo-pull"><p>'
+                           f'{self._geo_esc_attr(pull)}</p></blockquote>')
+        return toc_html, "".join(out)
 
     def _prog_build_native_page(self, *, title: str, content_html: str,
                                 shell: dict, site_name: str,
@@ -4255,11 +4291,20 @@ class Api:
     .geo-toc li {{ margin: 7px 0; }}
     .geo-toc a {{ color: var(--text, #15201A); text-decoration: none; }}
     .geo-toc a:hover {{ color: var(--emerald, #1B7849); text-decoration: underline; }}
-    .geo-body {{ font-size: 1.13rem; line-height: 1.8; }}
+    .geo-body {{ font-size: 1.13rem; line-height: 1.8; counter-reset: gsec; }}
     .geo-body > p:first-of-type {{ font-size: 1.22rem; color: var(--text, #15201A); }}
+    .geo-body > p:first-of-type::first-letter {{
+      font-family: var(--font-display, Georgia, serif); font-weight: 700;
+      font-size: 3.4em; line-height: .82; float: left; margin: .06em .14em 0 0;
+      color: var(--emerald, #1B7849); }}
+    .geo-body > h2 {{ counter-increment: gsec; }}
+    .geo-body > h2::before {{ content: counter(gsec, decimal-leading-zero);
+      display: block; font-family: var(--font-mono, ui-monospace, monospace);
+      font-size: .82rem; letter-spacing: .08em; color: var(--gold, #B58A2B);
+      margin-bottom: .35em; }}
     .geo-body h2 {{ font-family: var(--font-display, Georgia, serif); font-weight: 600;
                     font-size: 1.72rem; line-height: 1.25; color: var(--text, #15201A);
-                    margin: 2em 0 .55em; padding-top: .7em;
+                    margin: 2.1em 0 .55em; padding-top: .8em;
                     border-top: 1px solid var(--border, #E5DFD0); scroll-margin-top: 24px; }}
     .geo-body h3 {{ font-family: var(--font-display, Georgia, serif); font-weight: 600;
                     font-size: 1.28rem; color: var(--text, #15201A); margin: 1.7em 0 .4em; }}
@@ -4284,6 +4329,21 @@ class Api:
                                   padding: 10px 14px; text-align: left; }}
     .geo-body th {{ background: var(--bg-soft, #F4F0E6); font-weight: 600;
                     color: var(--text, #15201A); }}
+    .geo-pull {{ margin: 2.6em 0; padding: .1em 0 .1em 1.2em;
+                 border-left: 4px solid var(--emerald, #1B7849); }}
+    .geo-pull p {{ font-family: var(--font-display, Georgia, serif); font-weight: 500;
+                   font-size: 1.6rem; line-height: 1.4; color: var(--text, #15201A);
+                   margin: 0; }}
+    .geo-callout {{ background: var(--bg-soft, #F4F0E6);
+                    border: 1px solid var(--border, #E5DFD0);
+                    border-left: 4px solid var(--gold, #B58A2B);
+                    border-radius: var(--radius, 12px);
+                    padding: 4px 28px 26px; margin: 2.6em 0; }}
+    .geo-callout > h2 {{ border-top: 0; padding-top: .9em; }}
+    .geo-callout > h2::before {{ content: "À éviter"; display: block;
+      font-family: var(--font-body, sans-serif); font-weight: 700; font-size: .78rem;
+      letter-spacing: .1em; text-transform: uppercase; color: var(--gold, #B58A2B);
+      margin-bottom: .3em; }}
     .geo-cta {{ margin: 56px auto 72px; padding: 44px 32px; text-align: center;
                 background: var(--emerald-deep, #0E5C36); color: #fff;
                 border-radius: var(--radius-lg, 20px); }}
