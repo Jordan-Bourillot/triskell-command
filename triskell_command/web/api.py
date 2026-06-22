@@ -4157,6 +4157,18 @@ class Api:
         return (f"https://images.unsplash.com/{pid}"
                 "?w=1600&q=80&auto=format&fit=crop") if pid else ""
 
+    # Images « concept » réutilisables sur toutes les pages (illustrent un
+    # point précis). Vérifiées visuellement.
+    _PROG_CONCEPT_IMAGES = {
+        "gbp":  "photo-1548345680-f5475ea5df84",   # téléphone Google Maps
+        "avis": "photo-1633613286991-611fe299c4be",  # 5 étoiles
+    }
+
+    def _prog_concept_image(self, kind: str) -> str:
+        pid = self._PROG_CONCEPT_IMAGES.get(kind)
+        return (f"https://images.unsplash.com/{pid}"
+                "?w=1200&q=80&auto=format&fit=crop") if pid else ""
+
     def _extract_site_shell(self, workdir: str) -> dict:
         """Lit l'index.html du site cloné et en extrait l'habillage : liens
         CSS/polices du <head>, l'en-tête (<header>), le pied de page (<footer>)
@@ -4221,9 +4233,11 @@ class Api:
         return cands[len(cands) // 2]   # une phrase du milieu (pas l'intro)
 
     def _prog_decorate_article(self, content_html: str):
-        """Met en page le contenu : ids + sommaire cliquable, citation mise en
-        avant, et la section « erreurs » transformée en encart d'alerte.
-        Renvoie (sommaire_html, contenu_décoré)."""
+        """Structure le contenu : sommaire cliquable, et chaque section devient
+        une BANDE pleine largeur (fonds alternés), avec image dans le corps là
+        où c'est pertinent (fiche locale, avis), une citation en bande à part,
+        et la section « erreurs » en bande d'alerte.
+        Renvoie (sommaire_html, intro_html, bandes_html)."""
         import re as _re
         html = content_html or ""
         toc = []
@@ -4246,37 +4260,56 @@ class Api:
                         f'<ol>{items}</ol></nav>')
         pull = self._prog_pick_pullquote(html)
 
-        def _is_err(t):
-            return any(k in t.lower() for k in
-                       ("erreur", "à éviter", "a eviter", "piège", "piege"))
+        def _kind(t):
+            tl = t.lower()
+            if any(k in tl for k in ("erreur", "éviter", "eviter", "piège", "piege")):
+                return "warn"
+            if "business profile" in tl or "fiche google" in tl:
+                return "gbp"
+            if "avis" in tl:
+                return "avis"
+            return ""
 
         parts = _re.split(r'(?=<h2 id=)', html)
-        out = [parts[0]]
+        intro_html = parts[0].strip()
+        bands = []
         for i, sec in enumerate(parts[1:]):
             hm = _re.search(r'<h2 id="[^"]*">(.*?)</h2>', sec, _re.DOTALL)
             htext = _re.sub(r"<[^>]+>", "", hm.group(1)).strip() if hm else ""
-            if _is_err(htext):
-                out.append(f'<aside class="geo-callout">{sec}</aside>')
-            else:
-                out.append(sec)
+            kind = _kind(htext)
+            img = self._prog_concept_image(kind) if kind in ("gbp", "avis") else ""
+            if img:
+                fig = (f'<figure class="geo-sec-img"><img src="{self._geo_esc_attr(img)}" '
+                       f'alt="{self._geo_esc_attr(htext)}" loading="lazy" /></figure>')
+                sec = _re.sub(r"(</h2>)", r"\1" + fig, sec, count=1)
+            cls = "geo-band"
+            if kind == "warn":
+                cls += " geo-band--warn"
+            elif i % 2 == 1:
+                cls += " geo-band--alt"
+            bands.append(f'<section class="{cls}"><div class="geo-band-in">{sec}</div></section>')
             if i == 0 and pull:
-                out.append('<blockquote class="geo-pull"><p>'
-                           f'{self._geo_esc_attr(pull)}</p></blockquote>')
-        return toc_html, "".join(out)
+                bands.append('<section class="geo-band geo-band--quote">'
+                             '<div class="geo-band-in"><blockquote class="geo-pull"><p>'
+                             f'{self._geo_esc_attr(pull)}</p></blockquote></div></section>')
+        return toc_html, intro_html, "".join(bands)
 
     def _prog_build_native_page(self, *, title: str, content_html: str,
                                 shell: dict, site_name: str,
                                 meta_description: str, canonical: str,
                                 jsonld_html: str = "", published_at: str = "",
                                 cta_html: str = "", hero_img_url: str = "") -> str:
-        """Page ÉDITORIALE habillée comme le site (charte via ses variables
-        CSS) : photo d'en-tête, accroche, chapô, sommaire cliquable, sections
-        aérées, encart d'action. Plus de mur de texte."""
+        """Page ÉDITORIALE structurée comme un article web : photo d'en-tête,
+        accroche, chapô, sommaire, puis des SECTIONS EN BANDES (fonds alternés,
+        images dans le corps, citation et erreurs en bandes à part), encart
+        d'action. Tout dans la charte du site (variables CSS)."""
         e = self._geo_esc_attr
         t, n, m, c = (e(title), e(site_name), e(meta_description), e(canonical))
-        toc_html, body_html = self._prog_decorate_article(content_html)
+        toc_html, intro_html, bands_html = self._prog_decorate_article(content_html)
         hero_fig = (f'<figure class="geo-hero-img"><img src="{e(hero_img_url)}" '
                     f'alt="{t}" loading="eager" /></figure>') if hero_img_url else ""
+        intro_block = (f'<div class="geo-intro-text">{intro_html}</div>'
+                       if intro_html else "")
         return f"""<!doctype html>
 <html lang="fr">
 <head>
@@ -4292,10 +4325,10 @@ class Api:
   {shell.get("head", "")}
   {jsonld_html}
   <style>
-    .geo-wrap {{ max-width: 768px; margin: 0 auto; padding: 40px 24px 8px;
-                 font-family: var(--font-body, system-ui, sans-serif);
-                 color: var(--text-mid, #3F4842); }}
-    .geo-hero-img {{ margin: 0 0 36px; border-radius: var(--radius-lg, 20px);
+    .geo-intro {{ max-width: 760px; margin: 0 auto; padding: 40px 24px 0;
+                  font-family: var(--font-body, system-ui, sans-serif);
+                  color: var(--text-mid, #3F4842); }}
+    .geo-hero-img {{ margin: 0 0 34px; border-radius: var(--radius-lg, 20px);
                      overflow: hidden; box-shadow: 0 14px 44px rgba(0,0,0,.12); }}
     .geo-hero-img img {{ width: 100%; height: clamp(220px, 40vw, 380px);
                          object-fit: cover; display: block; }}
@@ -4303,15 +4336,21 @@ class Api:
                     text-transform: uppercase; color: var(--emerald, #1B7849);
                     margin-bottom: 16px; }}
     .geo-title {{ font-family: var(--font-display, Georgia, serif); font-weight: 600;
-                  font-size: clamp(2rem, 5vw, 2.85rem); line-height: 1.1;
+                  font-size: clamp(2rem, 5vw, 2.9rem); line-height: 1.1;
                   color: var(--text, #15201A); margin: 0 0 .45em; }}
-    .geo-lead {{ font-size: 1.28rem; line-height: 1.6;
+    .geo-lead {{ font-size: 1.3rem; line-height: 1.55;
                  color: var(--text-mid, #3F4842); margin: 0; }}
     .geo-rule {{ height: 3px; width: 56px; background: var(--gold, #B58A2B);
-                 border: 0; border-radius: 3px; margin: 28px 0 40px; }}
+                 border: 0; border-radius: 3px; margin: 28px 0 32px; }}
+    .geo-intro-text {{ font-size: 1.2rem; line-height: 1.8; color: var(--text, #15201A);
+                       margin-bottom: 36px; }}
+    .geo-intro-text p:first-of-type::first-letter {{
+      font-family: var(--font-display, Georgia, serif); font-weight: 700;
+      font-size: 3.4em; line-height: .8; float: left; margin: .04em .14em 0 0;
+      color: var(--emerald, #1B7849); }}
     .geo-toc {{ background: var(--bg-soft, #F4F0E6);
                 border: 1px solid var(--border, #E5DFD0);
-                border-radius: var(--radius, 12px); padding: 20px 26px; margin: 0 0 48px; }}
+                border-radius: var(--radius, 12px); padding: 20px 26px; margin: 0; }}
     .geo-toc-label {{ font-size: .74rem; font-weight: 700; letter-spacing: .12em;
                       text-transform: uppercase; color: var(--muted, #6B746E);
                       margin-bottom: 12px; }}
@@ -4319,60 +4358,59 @@ class Api:
     .geo-toc li {{ margin: 7px 0; }}
     .geo-toc a {{ color: var(--text, #15201A); text-decoration: none; }}
     .geo-toc a:hover {{ color: var(--emerald, #1B7849); text-decoration: underline; }}
-    .geo-body {{ font-size: 1.13rem; line-height: 1.8; counter-reset: gsec; }}
-    .geo-body > p:first-of-type {{ font-size: 1.22rem; color: var(--text, #15201A); }}
-    .geo-body > p:first-of-type::first-letter {{
-      font-family: var(--font-display, Georgia, serif); font-weight: 700;
-      font-size: 3.4em; line-height: .82; float: left; margin: .06em .14em 0 0;
-      color: var(--emerald, #1B7849); }}
-    .geo-body > h2 {{ counter-increment: gsec; }}
-    .geo-body > h2::before {{ content: counter(gsec, decimal-leading-zero);
+
+    .geo-body {{ counter-reset: gsec; margin-top: 20px;
+                 font-family: var(--font-body, system-ui, sans-serif);
+                 color: var(--text-mid, #3F4842); }}
+    .geo-band {{ padding: 48px 24px; }}
+    .geo-band--alt {{ background: var(--bg-soft, #F4F0E6); }}
+    .geo-band--warn {{ background: rgba(181, 138, 43, .09);
+                       border-top: 1px solid var(--gold, #B58A2B);
+                       border-bottom: 1px solid var(--gold, #B58A2B); }}
+    .geo-band--quote {{ background: var(--emerald-deep, #0E5C36); padding: 44px 24px; }}
+    .geo-band-in {{ max-width: 760px; margin: 0 auto; font-size: 1.13rem; line-height: 1.8; }}
+    .geo-band-in h2 {{ counter-increment: gsec; font-family: var(--font-display, Georgia, serif);
+                       font-weight: 600; font-size: 1.78rem; line-height: 1.22;
+                       color: var(--text, #15201A); margin: 0 0 .6em; scroll-margin-top: 20px; }}
+    .geo-band-in h2::before {{ content: counter(gsec, decimal-leading-zero);
       display: block; font-family: var(--font-mono, ui-monospace, monospace);
-      font-size: .82rem; letter-spacing: .08em; color: var(--gold, #B58A2B);
-      margin-bottom: .35em; }}
-    .geo-body h2 {{ font-family: var(--font-display, Georgia, serif); font-weight: 600;
-                    font-size: 1.72rem; line-height: 1.25; color: var(--text, #15201A);
-                    margin: 2.1em 0 .55em; padding-top: .8em;
-                    border-top: 1px solid var(--border, #E5DFD0); scroll-margin-top: 24px; }}
-    .geo-body h3 {{ font-family: var(--font-display, Georgia, serif); font-weight: 600;
-                    font-size: 1.28rem; color: var(--text, #15201A); margin: 1.7em 0 .4em; }}
-    .geo-body p {{ margin: 0 0 1.25em; }}
-    .geo-body strong {{ color: var(--text, #15201A); font-weight: 600; }}
-    .geo-body ul, .geo-body ol {{ margin: 0 0 1.4em; padding-left: 0; list-style: none; }}
-    .geo-body ul li {{ position: relative; padding-left: 1.7em; margin: .55em 0; }}
-    .geo-body ul li::before {{ content: ""; position: absolute; left: .2em; top: .62em;
-                               width: 7px; height: 7px; border-radius: 50%;
-                               background: var(--emerald, #1B7849); }}
-    .geo-body ol {{ counter-reset: g; }}
-    .geo-body ol li {{ position: relative; padding-left: 2.4em; margin: .7em 0;
-                       counter-increment: g; }}
-    .geo-body ol li::before {{ content: counter(g); position: absolute; left: 0; top: .05em;
-                               width: 1.6em; height: 1.6em; border-radius: 50%;
-                               background: var(--emerald, #1B7849); color: #fff;
-                               font-size: .82em; font-weight: 700;
-                               display: grid; place-items: center; }}
-    .geo-body a {{ color: var(--emerald-deep, #0E5C36); }}
-    .geo-body table {{ width: 100%; border-collapse: collapse; margin: 1.5em 0; font-size: .98rem; }}
-    .geo-body th, .geo-body td {{ border: 1px solid var(--border, #E5DFD0);
-                                  padding: 10px 14px; text-align: left; }}
-    .geo-body th {{ background: var(--bg-soft, #F4F0E6); font-weight: 600;
-                    color: var(--text, #15201A); }}
-    .geo-pull {{ margin: 2.6em 0; padding: .1em 0 .1em 1.2em;
-                 border-left: 4px solid var(--emerald, #1B7849); }}
+      font-size: .84rem; letter-spacing: .08em; color: var(--gold, #B58A2B);
+      margin-bottom: .4em; }}
+    .geo-band--warn .geo-band-in h2 {{ counter-increment: none; }}
+    .geo-band--warn .geo-band-in h2::before {{ content: "\\26A0  À éviter";
+      font-family: var(--font-body, sans-serif); font-weight: 700; }}
+    .geo-band-in h3 {{ font-family: var(--font-display, Georgia, serif); font-weight: 600;
+                       font-size: 1.28rem; color: var(--text, #15201A); margin: 1.6em 0 .4em; }}
+    .geo-band-in p {{ margin: 0 0 1.25em; }}
+    .geo-band-in strong {{ color: var(--text, #15201A); font-weight: 600; }}
+    .geo-band-in ul, .geo-band-in ol {{ margin: 0 0 1.4em; padding-left: 0; list-style: none; }}
+    .geo-band-in ul li {{ position: relative; padding-left: 1.7em; margin: .55em 0; }}
+    .geo-band-in ul li::before {{ content: ""; position: absolute; left: .2em; top: .62em;
+                                  width: 7px; height: 7px; border-radius: 50%;
+                                  background: var(--emerald, #1B7849); }}
+    .geo-band-in ol {{ counter-reset: g; }}
+    .geo-band-in ol li {{ position: relative; padding-left: 2.4em; margin: .7em 0;
+                          counter-increment: g; }}
+    .geo-band-in ol li::before {{ content: counter(g); position: absolute; left: 0; top: .05em;
+                                  width: 1.6em; height: 1.6em; border-radius: 50%;
+                                  background: var(--emerald, #1B7849); color: #fff;
+                                  font-size: .82em; font-weight: 700;
+                                  display: grid; place-items: center; }}
+    .geo-band-in a {{ color: var(--emerald-deep, #0E5C36); }}
+    .geo-band-in table {{ width: 100%; border-collapse: collapse; margin: 1.4em 0; font-size: .98rem; }}
+    .geo-band-in th, .geo-band-in td {{ border: 1px solid var(--border, #E5DFD0);
+                                        padding: 10px 14px; text-align: left; }}
+    .geo-band-in th {{ background: var(--surface, #fff); font-weight: 600; color: var(--text, #15201A); }}
+    .geo-sec-img {{ margin: 6px 0 26px; border-radius: var(--radius, 12px);
+                    overflow: hidden; box-shadow: 0 8px 28px rgba(0,0,0,.10); }}
+    .geo-sec-img img {{ width: 100%; height: clamp(200px, 32vw, 300px);
+                        object-fit: cover; display: block; }}
+    .geo-pull {{ margin: 0; padding: 0; border: 0; }}
     .geo-pull p {{ font-family: var(--font-display, Georgia, serif); font-weight: 500;
-                   font-size: 1.6rem; line-height: 1.4; color: var(--text, #15201A);
-                   margin: 0; }}
-    .geo-callout {{ background: var(--bg-soft, #F4F0E6);
-                    border: 1px solid var(--border, #E5DFD0);
-                    border-left: 4px solid var(--gold, #B58A2B);
-                    border-radius: var(--radius, 12px);
-                    padding: 4px 28px 26px; margin: 2.6em 0; }}
-    .geo-callout > h2 {{ border-top: 0; padding-top: .9em; }}
-    .geo-callout > h2::before {{ content: "À éviter"; display: block;
-      font-family: var(--font-body, sans-serif); font-weight: 700; font-size: .78rem;
-      letter-spacing: .1em; text-transform: uppercase; color: var(--gold, #B58A2B);
-      margin-bottom: .3em; }}
-    .geo-cta {{ margin: 56px auto 72px; padding: 44px 32px; text-align: center;
+                   font-size: clamp(1.5rem, 3.4vw, 2rem); line-height: 1.35;
+                   color: #fff; margin: 0; }}
+    .geo-cta-wrap {{ padding: 16px 24px 0; }}
+    .geo-cta {{ max-width: 760px; margin: 40px auto 72px; padding: 44px 32px; text-align: center;
                 background: var(--emerald-deep, #0E5C36); color: #fff;
                 border-radius: var(--radius-lg, 20px); }}
     .geo-cta h2 {{ font-family: var(--font-display, Georgia, serif); font-weight: 600;
@@ -4386,19 +4424,20 @@ class Api:
 </head>
 <body>
 {shell.get("header", "")}
-  <main class="geo-wrap">
-    {hero_fig}
-    <header class="geo-hero">
+  <main>
+    <div class="geo-intro">
+      {hero_fig}
       <div class="geo-eyebrow">Guide pratique</div>
       <h1 class="geo-title">{t}</h1>
       <p class="geo-lead">{m}</p>
-    </header>
-    <hr class="geo-rule" />
-    {toc_html}
-    <article class="geo-body">
-      {body_html}
-    </article>
-    {cta_html}
+      <hr class="geo-rule" />
+      {intro_block}
+      {toc_html}
+    </div>
+    <div class="geo-body">
+      {bands_html}
+    </div>
+    <div class="geo-cta-wrap">{cta_html}</div>
   </main>
 {shell.get("footer", "")}
 {shell.get("scripts", "")}
