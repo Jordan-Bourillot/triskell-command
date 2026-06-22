@@ -4306,10 +4306,32 @@ class Api:
         e = self._geo_esc_attr
         t, n, m, c = (e(title), e(site_name), e(meta_description), e(canonical))
         toc_html, intro_html, bands_html = self._prog_decorate_article(content_html)
-        hero_fig = (f'<figure class="geo-hero-img"><img src="{e(hero_img_url)}" '
-                    f'alt="{t}" loading="eager" /></figure>') if hero_img_url else ""
+        hero_style = (
+            "background-image: linear-gradient(to top, rgba(14,92,54,.96) 0%, "
+            "rgba(14,92,54,.5) 52%, rgba(14,92,54,.32) 100%), "
+            f"url('{e(hero_img_url)}');" if hero_img_url
+            else "background: var(--emerald-deep, #0E5C36);")
+        hero_header = (
+            f'<header class="geo-hero" style="{hero_style}">'
+            '<div class="geo-hero-inner">'
+            '<div class="geo-eyebrow">Guide référencement</div>'
+            f'<h1 class="geo-title">{t}</h1>'
+            f'<p class="geo-lead">{m}</p>'
+            '</div></header>')
         intro_block = (f'<div class="geo-intro-text">{intro_html}</div>'
                        if intro_html else "")
+        pillars_html = (
+            '<div class="geo-pillars reveal">'
+            '<div class="geo-pillar"><span class="geo-pillar-ic">📍</span>'
+            '<span class="geo-pillar-t">Votre fiche Google</span>'
+            '<span class="geo-pillar-d">La vitrine locale, avant le site</span></div>'
+            '<div class="geo-pillar"><span class="geo-pillar-ic">⭐</span>'
+            '<span class="geo-pillar-t">Les avis clients</span>'
+            '<span class="geo-pillar-d">Le signal qui fait la différence</span></div>'
+            '<div class="geo-pillar"><span class="geo-pillar-ic">🔍</span>'
+            '<span class="geo-pillar-t">Le bon contenu</span>'
+            '<span class="geo-pillar-d">Pour les vraies recherches</span></div>'
+            '</div>')
         return f"""<!doctype html>
 <html lang="fr">
 <head>
@@ -4329,20 +4351,34 @@ class Api:
     .geo-intro {{ max-width: 760px; margin: 0 auto; padding: 40px 24px 0;
                   font-family: var(--font-body, system-ui, sans-serif);
                   color: var(--text-mid, #3F4842); }}
-    .geo-hero-img {{ margin: 0 0 34px; border-radius: var(--radius-lg, 20px);
-                     overflow: hidden; box-shadow: 0 14px 44px rgba(0,0,0,.12); }}
-    .geo-hero-img img {{ width: 100%; height: clamp(220px, 40vw, 380px);
-                         object-fit: cover; display: block; }}
-    .geo-eyebrow {{ font-size: .76rem; font-weight: 700; letter-spacing: .14em;
+    .geo-hero {{ position: relative; min-height: clamp(380px, 52vw, 500px);
+                 display: flex; align-items: flex-end; color: #fff;
+                 background-size: cover; background-position: center; }}
+    .geo-hero-inner {{ max-width: 760px; width: 100%; margin: 0 auto; padding: 0 24px 54px; }}
+    .geo-eyebrow {{ font-size: .78rem; font-weight: 700; letter-spacing: .14em;
                     text-transform: uppercase; color: var(--emerald, #1B7849);
                     margin-bottom: 16px; }}
     .geo-title {{ font-family: var(--font-display, Georgia, serif); font-weight: 600;
-                  font-size: clamp(2rem, 5vw, 2.9rem); line-height: 1.1;
-                  color: var(--text, #15201A); margin: 0 0 .45em; }}
-    .geo-lead {{ font-size: 1.3rem; line-height: 1.55;
+                  line-height: 1.08; color: var(--text, #15201A); margin: 0 0 .45em; }}
+    .geo-lead {{ font-size: 1.3rem; line-height: 1.5;
                  color: var(--text-mid, #3F4842); margin: 0; }}
-    .geo-rule {{ height: 3px; width: 56px; background: var(--gold, #B58A2B);
-                 border: 0; border-radius: 3px; margin: 28px 0 32px; }}
+    .geo-hero .geo-eyebrow {{ color: var(--gold, #C9A14A); }}
+    .geo-hero .geo-title {{ color: #fff; font-size: clamp(2.3rem, 5.6vw, 3.4rem);
+                            margin: 0 0 .28em; text-shadow: 0 2px 26px rgba(0,0,0,.32); }}
+    .geo-hero .geo-lead {{ color: rgba(255,255,255,.94); max-width: 600px;
+                           text-shadow: 0 1px 14px rgba(0,0,0,.3); }}
+    .geo-pillars {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+                    margin: 0 0 44px; }}
+    .geo-pillar {{ background: var(--surface, #fff); border: 1px solid var(--border, #E5DFD0);
+                   border-radius: var(--radius, 12px); padding: 24px 16px; text-align: center;
+                   transition: transform .2s ease, box-shadow .2s ease; }}
+    .geo-pillar:hover {{ transform: translateY(-3px); box-shadow: 0 12px 30px rgba(0,0,0,.10); }}
+    .geo-pillar-ic {{ font-size: 2rem; display: block; margin-bottom: 10px; }}
+    .geo-pillar-t {{ display: block; font-weight: 700; color: var(--text, #15201A);
+                     font-size: 1.04rem; margin-bottom: 4px; }}
+    .geo-pillar-d {{ display: block; font-size: .88rem; color: var(--muted, #6B746E);
+                     line-height: 1.45; }}
+    @media (max-width: 620px) {{ .geo-pillars {{ grid-template-columns: 1fr; }} }}
     .geo-intro-text {{ font-size: 1.2rem; line-height: 1.8; color: var(--text, #15201A);
                        margin-bottom: 36px; }}
     .geo-intro-text p:first-of-type::first-letter {{
@@ -4363,7 +4399,7 @@ class Api:
     .geo-body {{ counter-reset: gsec; margin-top: 20px;
                  font-family: var(--font-body, system-ui, sans-serif);
                  color: var(--text-mid, #3F4842); }}
-    .geo-band {{ padding: 48px 24px; }}
+    .geo-band {{ padding: 50px 24px; background: var(--surface, #fff); }}
     .geo-band--alt {{ background: var(--bg-soft, #F4F0E6); }}
     .geo-band--warn {{ background: rgba(181, 138, 43, .09);
                        border-top: 1px solid var(--gold, #B58A2B);
@@ -4431,6 +4467,9 @@ class Api:
       html.geo-anim .reveal {{ opacity: 0; transform: translateY(30px);
         transition: opacity .75s ease, transform .85s cubic-bezier(.2,.7,.2,1); }}
       html.geo-anim .reveal.is-visible {{ opacity: 1; transform: none; }}
+      html.geo-anim .geo-hero-inner > * {{ animation: geoIn .8s both ease-out; }}
+      html.geo-anim .geo-hero-inner > *:nth-child(2) {{ animation-delay: .12s; }}
+      html.geo-anim .geo-hero-inner > *:nth-child(3) {{ animation-delay: .24s; }}
       html.geo-anim .geo-intro > * {{ animation: geoIn .7s both ease-out; }}
       html.geo-anim .geo-intro > *:nth-child(2) {{ animation-delay: .08s; }}
       html.geo-anim .geo-intro > *:nth-child(3) {{ animation-delay: .16s; }}
@@ -4443,13 +4482,10 @@ class Api:
 <body>
 {shell.get("header", "")}
   <main>
+    {hero_header}
     <div class="geo-intro">
-      {hero_fig}
-      <div class="geo-eyebrow">Guide pratique</div>
-      <h1 class="geo-title">{t}</h1>
-      <p class="geo-lead">{m}</p>
-      <hr class="geo-rule" />
       {intro_block}
+      {pillars_html}
       {toc_html}
     </div>
     <div class="geo-body">
@@ -14587,10 +14623,22 @@ class Api:
                              jsonld_html: str = "",
                              published_at: str = "") -> str:
         """Construit une page HTML autonome stylée par le CSS du site."""
+        import re as _re
         ts = published_at or self._geo_now()
         e = self._geo_esc_attr
         title_a, name_a, meta_a = e(title), e(site_name), e(meta_description)
         canonical_a = e(canonical)
+        # Le gabarit pose déjà le titre → on retire tout <h1> du contenu
+        # pour éviter un double titre (vu sur d'anciennes pages du robot).
+        body_html = _re.sub(r"<h1\b[^>]*>.*?</h1>", "", content_html or "",
+                            flags=_re.S | _re.I).strip()
+        # Pixel Pros : on réutilise le design du blog « Conseils » (home-v3.css
+        # + geo.css) pour des pages aussi soignées que les articles écrits main.
+        if ("pixel-pros.fr" in (canonical or "")) or (site_name == "Pixel Pros"):
+            return self._geo_build_pixelpros_page(
+                title_a=title_a, meta_a=meta_a, canonical_a=canonical_a,
+                canonical=canonical, jsonld_html=jsonld_html,
+                body_html=body_html, ts=ts)
         return f"""<!doctype html>
 <html lang="fr">
 <head>
@@ -14633,6 +14681,86 @@ class Api:
       Page mise à jour le {ts[:10]} — {name_a}.
     </div>
   </main>
+</body>
+</html>
+"""
+
+    def _geo_build_pixelpros_page(self, *, title_a: str, meta_a: str,
+                                  canonical_a: str, canonical: str,
+                                  jsonld_html: str, body_html: str,
+                                  ts: str) -> str:
+        """Gabarit riche Pixel Pros : même en-tête, pied de page et design
+        (geo.css) que les articles du blog écrits à la main."""
+        logo = ('<span class="logo-mark"><svg viewBox="0 0 40 40" aria-hidden="true">'
+                '<rect x="2" y="2" width="16" height="16" rx="4" fill="#ff6b6b"/>'
+                '<rect x="22" y="2" width="16" height="16" rx="4" fill="#9fdec6"/>'
+                '<rect x="2" y="22" width="16" height="16" rx="4" fill="#f4d35e"/>'
+                '<rect x="22" y="22" width="16" height="16" rx="4" fill="#d4baee"/>'
+                '</svg></span>')
+        canon = f'<link rel="canonical" href="{canonical_a}">' if canonical else ""
+        ogurl = f'<meta property="og:url" content="{canonical_a}">' if canonical else ""
+        return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title_a} — Pixel Pros</title>
+<meta name="description" content="{meta_a}">
+{canon}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Space+Grotesk:wght@400;500;600;700&family=Caveat:wght@600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/home-v3.css?v=14">
+<link rel="stylesheet" href="/geo/geo.css?v=4">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="theme-color" content="#fdf3ec">
+<meta property="og:type" content="article">
+{ogurl}
+<meta property="og:title" content="{title_a}">
+<meta property="og:description" content="{meta_a}">
+<meta property="og:image" content="https://pixel-pros.fr/img/og-image.png">
+<meta property="og:locale" content="fr_FR">
+{jsonld_html}
+</head>
+<body data-theme="light">
+<header class="site-header">
+  <div class="header-inner">
+    <a href="/" class="logo" aria-label="Pixel Pros — Accueil">{logo}<span class="logo-word">PIXEL PROS</span></a>
+    <nav class="nav" aria-label="Menu principal">
+      <a href="/">Accueil</a>
+      <a href="/geo/">Conseils &amp; questions</a>
+      <a href="/#faq">FAQ</a>
+      <a href="/#contact">Contact</a>
+    </nav>
+    <div class="header-tools">
+      <a href="/commander.html" class="nav-cta">Commencer ⤳</a>
+    </div>
+  </div>
+</header>
+<main class="geo-main">
+  <p class="geo-breadcrumb"><a href="/">pixel-pros.fr</a> › <a href="/geo/">Conseils &amp; questions</a> › {title_a}</p>
+  <article class="geo-article">
+    <h1 class="geo-h1">{title_a}</h1>
+    <p class="geo-date">Mis à jour le {ts[:10]} · Pixel Pros, marque de Triskell Studio (Plérin, Bretagne)</p>
+    {body_html}
+    <div class="geo-cta">
+      <p><strong>Un site pro pour le prix d'un forfait téléphonique.</strong><br>24,90&nbsp;€ HT/mois, création offerte, en ligne sous 24&nbsp;h ouvrées.</p>
+      <a href="/commander.html" class="btn btn-primary">Créer mon site</a>
+    </div>
+  </article>
+</main>
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-brand">{logo}<span>© Pixel Pros · Tous les pros à égalité</span></div>
+    <nav class="footer-nav">
+      <a href="/geo/">Conseils &amp; questions</a>
+      <a href="/mentions-legales.html">Mentions légales</a>
+      <a href="/cgv.html">CGV</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+      <a href="mailto:contact@pixel-pros.fr">contact@pixel-pros.fr</a>
+    </nav>
+  </div>
+</footer>
 </body>
 </html>
 """
