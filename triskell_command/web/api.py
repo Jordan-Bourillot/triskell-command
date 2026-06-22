@@ -14372,6 +14372,36 @@ class Api:
         return s[:60] or "page"
 
     @staticmethod
+    def _geo_slug_tokens(slug: str) -> set:
+        """Mots significatifs d'un slug (sert à repérer deux pages au sujet
+        quasi identique malgré des URLs différentes)."""
+        stop = {"un", "une", "le", "la", "les", "de", "des", "du", "et", "ou",
+                "a", "au", "aux", "en", "sur", "pour", "par", "avec", "sans",
+                "comment", "pourquoi", "quel", "quelle", "est", "ce", "que",
+                "qui", "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa"}
+        return {t for t in (slug or "").split("-")
+                if t and len(t) > 2 and t not in stop}
+
+    def _geo_near_duplicate(self, new_slug: str, existing_slugs: list) -> str:
+        """Renvoie le slug existant « trop proche » du nouveau (≥70 % de mots
+        significatifs communs), ou "" si aucun. Le slug identique = simple
+        mise à jour de la même page, donc autorisé."""
+        nt = self._geo_slug_tokens(new_slug)
+        if not nt:
+            return ""
+        for ex in existing_slugs:
+            if not ex or ex == new_slug:
+                continue
+            et = self._geo_slug_tokens(ex)
+            if not et:
+                continue
+            common = len(nt & et)
+            smaller = min(len(nt), len(et))
+            if smaller and common / smaller >= 0.7:
+                return ex
+        return ""
+
+    @staticmethod
     def _geo_md_to_html(md: str) -> str:
         """Convertit le Markdown du contenu généré en HTML simple pour la page."""
         import re as _re
@@ -14853,6 +14883,19 @@ class Api:
                         "dépôt et que le token GitHub a accès."}
             target_dir = _os.path.join(workdir, folder.strip("/"))
             _os.makedirs(target_dir, exist_ok=True)
+            # Garde anti-doublon : si une page au sujet très proche existe déjà
+            # sur le site, on ne publie pas un second exemplaire (évite la
+            # cannibalisation). Le même slug = simple mise à jour, autorisé.
+            import glob as _glob
+            _existing = [_os.path.splitext(_os.path.basename(_f))[0]
+                         for _f in _glob.glob(_os.path.join(target_dir, "*.html"))]
+            _dup = self._geo_near_duplicate(slug, _existing)
+            if _dup:
+                shutil.rmtree(workdir, ignore_errors=True)
+                return {"ok": False, "duplicate": True,
+                        "error": "Une page au sujet très proche existe déjà sur "
+                                 f"le site (« {_dup}.html »). Publication évitée "
+                                 "pour ne pas créer de doublon."}
             target_file = _os.path.join(target_dir, slug + ".html")
             with open(target_file, "w", encoding="utf-8") as fh:
                 fh.write(page_html)
