@@ -43,7 +43,20 @@ Règles strictes :
 - 600 mots minimum, 1200 max
 - Unique : ne JAMAIS recopier la structure d'une page précédente
 - Pas de phrases bateau ("dans cet article nous allons voir")
-- Apporte de la VRAIE valeur localisée (chiffres, contexte spécifique)
+- VRAIMENT propre au sujet : conseils, exemples et requêtes spécifiques à
+  CETTE valeur (un restaurant n'a rien à voir avec un avocat). Jamais des
+  généralités interchangeables d'une page à l'autre — c'est ce que Google
+  sanctionne.
+- Français NORMAL, zéro tic d'IA. INTERDIT : le tiret cadratin « — » et le
+  tiret demi-cadratin « – » (utilise une virgule, une parenthèse ou un
+  point) ; le deux-points « : » en annonce dramatique ; les formules « sans
+  plus attendre », « il est important de », « n'hésitez pas », « sans
+  pression ».
+- Chiffres : n'avance un chiffre ou un pourcentage QUE s'il est largement
+  connu et exact. Dans le doute, formulation qualitative vraie (« la
+  plupart », « l'essentiel des »). N'INVENTE JAMAIS un pourcentage précis ni
+  une source (« selon une étude de… ») : un faux chiffre sur un site qui
+  vend du conseil détruit la crédibilité.
 - Voix Triskell (préambule)
 
 Format JSON strict :
@@ -79,6 +92,20 @@ def _interpolate(pattern: str, variables: dict) -> str:
         v_str = str(v).replace("<", "&lt;").replace(">", "&gt;")
         out = out.replace("{" + k + "}", v_str)
     return out
+
+
+def _strip_ai_tics(text: str) -> str:
+    """Filet de sécurité : retire les tics d'écriture « IA » même si le
+    modèle a désobéi au prompt. Surtout le tiret cadratin/demi-cadratin que
+    Jordan bannit (« ça fait totalement IA »)."""
+    if not text:
+        return text
+    t = text.replace("—", ", ").replace("–", ", ")
+    t = re.sub(r"\s*,\s*,\s*", ", ", t)     # « ,, » → « , »
+    t = re.sub(r"\s+,", ",", t)              # espace avant la virgule
+    t = re.sub(r",\s*([.;:!?])", r"\1", t)   # « ,. » → « . »
+    t = re.sub(r"[ \t]{2,}", " ", t)
+    return t.strip()
 
 
 def _slugify(s: str) -> str:
@@ -187,10 +214,11 @@ def generate_pages(template_id: str, *, batch_size: int = 20,
             continue
         if not out or not out.get("body_md"):
             continue
-        body_md = out["body_md"]
+        body_md = _strip_ai_tics(out["body_md"])
+        title = _strip_ai_tics(out.get("title", ""))
+        meta = _strip_ai_tics(out.get("meta_description", ""))
         word_count = len(body_md.split())
-        score = _quality_score(out.get("title", ""), out.get("meta_description", ""),
-                                body_md, word_count,
+        score = _quality_score(title, meta, body_md, word_count,
                                 template.get("quality_min_words", 600))
         url = _interpolate(template["url_pattern"], item)
         try:
@@ -199,8 +227,8 @@ def generate_pages(template_id: str, *, batch_size: int = 20,
                 "site_id": template["site_id"],
                 "variables": item,
                 "generated_url": url,
-                "generated_title": out.get("title", ""),
-                "generated_meta": out.get("meta_description", ""),
+                "generated_title": title,
+                "generated_meta": meta,
                 "generated_body_md": body_md,
                 "word_count": word_count,
                 "quality_score": score,
