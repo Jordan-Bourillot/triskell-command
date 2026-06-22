@@ -108,6 +108,14 @@ def _strip_ai_tics(text: str) -> str:
     return t.strip()
 
 
+def _slugify_url(path: str) -> str:
+    """Nettoie une URL en gardant sa structure « /a/b » : accents et espaces
+    retirés de chaque segment. « /referencement-électricien » devient
+    « /referencement-electricien » (le titre, lui, garde son accent)."""
+    return "/".join(_slugify(seg) if seg.strip() else ""
+                    for seg in (path or "").split("/"))
+
+
 def _slugify(s: str) -> str:
     s = s.lower().strip()
     s = re.sub(r"[àâä]", "a", s)
@@ -220,7 +228,7 @@ def generate_pages(template_id: str, *, batch_size: int = 20,
         word_count = len(body_md.split())
         score = _quality_score(title, meta, body_md, word_count,
                                 template.get("quality_min_words", 600))
-        url = _interpolate(template["url_pattern"], item)
+        url = _slugify_url(_interpolate(template["url_pattern"], item))
         try:
             sb.table("phare_programmatic_pages").insert({
                 "template_id": template_id,
