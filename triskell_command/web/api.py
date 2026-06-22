@@ -4135,6 +4135,28 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)[:200]}
 
+    # Photo d'en-tête par métier (Unsplash, hotlink libre). Clé = slug du
+    # métier (sans accent). Vérifiées visuellement avant d'être posées.
+    _PROG_HERO_IMAGES = {
+        "restaurant":  "photo-1517248135467-4c7edcad34c4",
+        "avocat":      "photo-1497366754035-f200968a6e72",
+        "plombier":    "photo-1749532125405-70950966b0e5",
+        "photographe": "photo-1779896411972-c22cd599a169",
+        "boulangerie": "photo-1556742059-47b93231f536",
+        "electricien": "photo-1682345262055-8f95f3c513ea",
+        "coiffeur":    "photo-1634449571010-02389ed0f9b0",
+        "garagiste":   "photo-1615906655593-ad0386982a0f",
+        "serrurier":   "flagged/photo-1564767609342-620cb19b2357",
+        "opticien":    "photo-1667964394328-78f6389e79ab",
+    }
+
+    def _prog_hero_image(self, metier: str) -> str:
+        """URL de la photo d'en-tête pour un métier (slug sans accent), ou ''."""
+        key = self._geo_slugify(metier or "")
+        pid = self._PROG_HERO_IMAGES.get(key)
+        return (f"https://images.unsplash.com/{pid}"
+                "?w=1600&q=80&auto=format&fit=crop") if pid else ""
+
     def _extract_site_shell(self, workdir: str) -> dict:
         """Lit l'index.html du site cloné et en extrait l'habillage : liens
         CSS/polices du <head>, l'en-tête (<header>), le pied de page (<footer>)
@@ -4246,13 +4268,15 @@ class Api:
                                 shell: dict, site_name: str,
                                 meta_description: str, canonical: str,
                                 jsonld_html: str = "", published_at: str = "",
-                                cta_html: str = "") -> str:
+                                cta_html: str = "", hero_img_url: str = "") -> str:
         """Page ÉDITORIALE habillée comme le site (charte via ses variables
-        CSS) : accroche, chapô, sommaire cliquable, sections aérées, encart
-        d'action. Plus de mur de texte."""
+        CSS) : photo d'en-tête, accroche, chapô, sommaire cliquable, sections
+        aérées, encart d'action. Plus de mur de texte."""
         e = self._geo_esc_attr
         t, n, m, c = (e(title), e(site_name), e(meta_description), e(canonical))
         toc_html, body_html = self._prog_decorate_article(content_html)
+        hero_fig = (f'<figure class="geo-hero-img"><img src="{e(hero_img_url)}" '
+                    f'alt="{t}" loading="eager" /></figure>') if hero_img_url else ""
         return f"""<!doctype html>
 <html lang="fr">
 <head>
@@ -4268,9 +4292,13 @@ class Api:
   {shell.get("head", "")}
   {jsonld_html}
   <style>
-    .geo-wrap {{ max-width: 768px; margin: 0 auto; padding: 56px 24px 8px;
+    .geo-wrap {{ max-width: 768px; margin: 0 auto; padding: 40px 24px 8px;
                  font-family: var(--font-body, system-ui, sans-serif);
                  color: var(--text-mid, #3F4842); }}
+    .geo-hero-img {{ margin: 0 0 36px; border-radius: var(--radius-lg, 20px);
+                     overflow: hidden; box-shadow: 0 14px 44px rgba(0,0,0,.12); }}
+    .geo-hero-img img {{ width: 100%; height: clamp(220px, 40vw, 380px);
+                         object-fit: cover; display: block; }}
     .geo-eyebrow {{ font-size: .76rem; font-weight: 700; letter-spacing: .14em;
                     text-transform: uppercase; color: var(--emerald, #1B7849);
                     margin-bottom: 16px; }}
@@ -4359,6 +4387,7 @@ class Api:
 <body>
 {shell.get("header", "")}
   <main class="geo-wrap">
+    {hero_fig}
     <header class="geo-hero">
       <div class="geo-eyebrow">Guide pratique</div>
       <h1 class="geo-title">{t}</h1>
@@ -4511,11 +4540,12 @@ class Api:
                 metier = (variables.get("metier")
                           or (list(variables.values()) or [""])[0])
                 cta = self._prog_cta_html(metier, pseudo["name"]) if metier else ""
+                hero = self._prog_hero_image(metier)
                 html = self._prog_build_native_page(
                     title=title, content_html=self._geo_md_to_html(body_md),
                     shell=shell, site_name=pseudo["name"], meta_description=meta,
                     canonical=canonical, jsonld_html=jsonld, published_at=now,
-                    cta_html=cta)
+                    cta_html=cta, hero_img_url=hero)
                 target = _os.path.join(workdir, rel)
                 _os.makedirs(_os.path.dirname(target) or workdir, exist_ok=True)
                 with open(target, "w", encoding="utf-8") as fh:
