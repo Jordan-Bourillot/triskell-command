@@ -4282,14 +4282,14 @@ class Api:
                 fig = (f'<figure class="geo-sec-img"><img src="{self._geo_esc_attr(img)}" '
                        f'alt="{self._geo_esc_attr(htext)}" loading="lazy" /></figure>')
                 sec = _re.sub(r"(</h2>)", r"\1" + fig, sec, count=1)
-            cls = "geo-band"
+            cls = "geo-band reveal"
             if kind == "warn":
                 cls += " geo-band--warn"
             elif i % 2 == 1:
                 cls += " geo-band--alt"
             bands.append(f'<section class="{cls}"><div class="geo-band-in">{sec}</div></section>')
             if i == 0 and pull:
-                bands.append('<section class="geo-band geo-band--quote">'
+                bands.append('<section class="geo-band geo-band--quote reveal">'
                              '<div class="geo-band-in"><blockquote class="geo-pull"><p>'
                              f'{self._geo_esc_attr(pull)}</p></blockquote></div></section>')
         return toc_html, intro_html, "".join(bands)
@@ -4315,6 +4315,7 @@ class Api:
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>document.documentElement.className += " geo-anim";</script>
   <title>{t} · {n}</title>
   <meta name="description" content="{m}" />
   {f'<link rel="canonical" href="{c}" />' if canonical else ''}
@@ -4418,8 +4419,25 @@ class Api:
     .geo-cta p {{ margin: 0 0 1.5em; font-size: 1.1rem; opacity: .9; }}
     .geo-cta a {{ display: inline-block; background: #fff;
                   color: var(--emerald-deep, #0E5C36); padding: 14px 30px;
-                  border-radius: var(--radius, 12px); font-weight: 700; text-decoration: none; }}
-    .geo-cta a:hover {{ transform: translateY(-1px); }}
+                  border-radius: var(--radius, 12px); font-weight: 700; text-decoration: none;
+                  transition: transform .2s ease, box-shadow .2s ease; }}
+    .geo-cta a:hover {{ transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,.18); }}
+    html {{ scroll-behavior: smooth; }}
+    .geo-hero-img img, .geo-sec-img img {{ transition: transform .6s ease; }}
+    .geo-hero-img:hover img, .geo-sec-img:hover img {{ transform: scale(1.045); }}
+    @keyframes geoIn {{ from {{ opacity: 0; transform: translateY(16px); }}
+                        to {{ opacity: 1; transform: none; }} }}
+    @media (prefers-reduced-motion: no-preference) {{
+      html.geo-anim .reveal {{ opacity: 0; transform: translateY(30px);
+        transition: opacity .75s ease, transform .85s cubic-bezier(.2,.7,.2,1); }}
+      html.geo-anim .reveal.is-visible {{ opacity: 1; transform: none; }}
+      html.geo-anim .geo-intro > * {{ animation: geoIn .7s both ease-out; }}
+      html.geo-anim .geo-intro > *:nth-child(2) {{ animation-delay: .08s; }}
+      html.geo-anim .geo-intro > *:nth-child(3) {{ animation-delay: .16s; }}
+      html.geo-anim .geo-intro > *:nth-child(4) {{ animation-delay: .24s; }}
+      html.geo-anim .geo-intro > *:nth-child(5) {{ animation-delay: .32s; }}
+      html.geo-anim .geo-intro > *:nth-child(6) {{ animation-delay: .40s; }}
+    }}
   </style>
 </head>
 <body>
@@ -4437,10 +4455,25 @@ class Api:
     <div class="geo-body">
       {bands_html}
     </div>
-    <div class="geo-cta-wrap">{cta_html}</div>
+    <div class="geo-cta-wrap reveal">{cta_html}</div>
   </main>
 {shell.get("footer", "")}
 {shell.get("scripts", "")}
+  <script>
+  (function() {{
+    var els = document.querySelectorAll('.reveal');
+    if (!('IntersectionObserver' in window)) {{
+      els.forEach(function(el) {{ el.classList.add('is-visible'); }});
+      return;
+    }}
+    var io = new IntersectionObserver(function(entries) {{
+      entries.forEach(function(e) {{
+        if (e.isIntersecting) {{ e.target.classList.add('is-visible'); io.unobserve(e.target); }}
+      }});
+    }}, {{ threshold: 0.12, rootMargin: '0px 0px -40px 0px' }});
+    els.forEach(function(el) {{ io.observe(el); }});
+  }})();
+  </script>
 </body>
 </html>
 """
