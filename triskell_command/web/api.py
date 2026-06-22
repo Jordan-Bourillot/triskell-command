@@ -13511,13 +13511,18 @@ class Api:
             "Tu rédiges du contenu optimisé GEO (Generative Engine "
             "Optimization) : du texte que les IA génératives comme ChatGPT, "
             "Claude, Gemini ou Perplexity adorent citer dans leurs réponses.\n\n"
-            "Règles d'écriture GEO :\n"
-            "- Phrases courtes, claires, factuelles.\n"
-            "- Définitions nettes et chiffres concrets.\n"
-            "- Structure visible (titres, listes, tableaux).\n"
-            "- Pas de superlatifs marketing (« incroyable », « unique »).\n"
-            "- Réponses directes : la première phrase doit déjà répondre.\n"
-            "- Cite des sources ou des chiffres précis si tu en connais.\n\n"
+            "Règles d'écriture GEO (ce qui fait qu'une IA cite la page) :\n"
+            "- Réponds dès la 1re phrase : une réponse directe et autonome, "
+            "avant tout titre (les IA piochent surtout ce premier bloc).\n"
+            "- Phrases courtes, claires, factuelles. Zéro superlatif "
+            "marketing (« incroyable », « leader », « unique »).\n"
+            "- Appuie chaque point sur du concret : au moins 2 chiffres, "
+            "dates ou faits précis, avec leur origine quand tu la connais "
+            "(« selon… », « en 2025… »). N'invente jamais un chiffre.\n"
+            "- Chaque section doit se comprendre seule, sortie de son "
+            "contexte (souvent l'IA n'en lira qu'un morceau).\n"
+            "- Structure visible : titres clairs, listes, tableaux, "
+            "définitions nettes.\n\n"
             f"Sujet : {topic}\n\n"
             + brand_block +
             f"{kind_instructions}\n\n"
@@ -13650,24 +13655,200 @@ class Api:
                 return l[:200]
         return md.strip().replace("\n", " ")[:200]
 
+    @staticmethod
+    def _geo_esc_attr(s: str) -> str:
+        """Échappe une chaîne pour un attribut HTML (évite de casser le balisage
+        si le sujet contient un guillemet, < ou &)."""
+        return (str(s or "")
+                .replace("&", "&amp;").replace('"', "&quot;")
+                .replace("<", "&lt;").replace(">", "&gt;"))
+
+    @staticmethod
+    def _geo_parse_faq_pairs(md: str) -> list:
+        """Repère les couples question/réponse d'un contenu Markdown.
+
+        Sert à fabriquer le balisage FAQPage (le format question-réponse que
+        Google et les IA piochent dans leurs réponses). Une question = une
+        ligne finissant par « ? » (titre #, gras **…**, ou « 1. … ? »),
+        suivie d'au moins un paragraphe de réponse.
+        """
+        import re as _re
+        if not md:
+            return []
+
+        def _as_question(line: str):
+            s = _re.sub(r"^#{1,6}\s*", "", line).strip()
+            s = _re.sub(r"^\d+[\.\)]\s*", "", s).strip()
+            s = _re.sub(r"^\*\*(.+?)\*\*$", r"\1", s).strip()
+            s = _re.sub(r"[*_`]+", "", s).strip()
+            if s.endswith("?") and 5 <= len(s) <= 200:
+                return s
+            return None
+
+        pairs, cur_q, cur_a = [], None, []
+
+        def _flush():
+            if cur_q and cur_a:
+                ans = " ".join(x.strip() for x in cur_a).strip()
+                ans = _re.sub(r"[*_`#>]+", "", ans).strip()
+                if len(ans) >= 20:
+                    pairs.append((cur_q, ans[:600]))
+
+        for line in md.splitlines():
+            q = _as_question(line)
+            if q is not None:
+                _flush()
+                cur_q, cur_a = q, []
+            elif cur_q and line.strip():
+                cur_a.append(line.strip())
+        _flush()
+        return pairs[:10]
+
+    def _geo_build_jsonld(self, *, kind: str, title: str, meta_description: str,
+                          canonical: str, site: dict, content_md: str,
+                          published_at: str, modified_at: str) -> str:
+        """Fabrique les « étiquettes invisibles » (JSON-LD schema.org) que les
+        IA et Google lisent sur la page : qui écrit, quand, et le format
+        question-réponse. Déterministe — aucune invention.
+        """
+        import json as _json
+        brand = (site.get("brand") or site.get("name") or "").strip()
+        domain = (site.get("domain") or "").strip()
+        home = (site.get("url") or (f"https://{domain}" if domain else "")).rstrip("/")
+        logo = (site.get("logo_url") or "").strip()
+        org = {"@type": "Organization", "name": brand or domain}
+        if home:
+            org["url"] = home + "/"
+        if logo:
+            org["logo"] = {"@type": "ImageObject", "url": logo}
+
+        blocks: list[dict] = []
+        article = {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "headline": (title or "")[:110],
+            "description": meta_description or "",
+            "inLanguage": "fr-FR",
+            "datePublished": published_at or modified_at,
+            "dateModified": modified_at or published_at,
+            "author": dict(org),
+            "publisher": dict(org),
+        }
+        if canonical:
+            article["url"] = canonical
+            article["mainEntityOfPage"] = {"@type": "WebPage", "@id": canonical}
+        blocks.append(article)
+
+        if kind == "faq":
+            pairs = self._geo_parse_faq_pairs(content_md)
+            if len(pairs) >= 2:
+                blocks.append({
+                    "@context": "https://schema.org",
+                    "@type": "FAQPage",
+                    "mainEntity": [
+                        {"@type": "Question", "name": q,
+                         "acceptedAnswer": {"@type": "Answer", "text": a}}
+                        for q, a in pairs
+                    ],
+                })
+
+        if canonical and home:
+            blocks.append({
+                "@context": "https://schema.org",
+                "@type": "BreadcrumbList",
+                "itemListElement": [
+                    {"@type": "ListItem", "position": 1,
+                     "name": "Accueil", "item": home + "/"},
+                    {"@type": "ListItem", "position": 2,
+                     "name": (title or "")[:110], "item": canonical},
+                ],
+            })
+
+        def _enc(b: dict) -> str:
+            s = _json.dumps(b, ensure_ascii=False, separators=(",", ":"))
+            # Neutralise toute évasion hors du <script> (sécurité + validité).
+            return (s.replace("<", "\\u003c").replace(">", "\\u003e")
+                     .replace("&", "\\u0026"))
+
+        return "\n  ".join(
+            f'<script type="application/ld+json">{_enc(b)}</script>'
+            for b in blocks
+        )
+
+    def _geo_build_llms_txt(self, site: dict, root: dict,
+                            extra: list | None = None) -> str:
+        """Construit le « plan du site pour les IA » (llms.txt) : le standard
+        qui dit aux robots IA quelles pages lire et citer en priorité.
+
+        `extra` = pages à ajouter en plus de celles déjà publiées (sert à
+        inclure la page qu'on est en train de mettre en ligne). Chaque
+        entrée : (titre, url, description).
+        """
+        brand = (site.get("brand") or site.get("name") or "").strip()
+        domain = (site.get("domain") or "").strip()
+        home = (site.get("url") or (f"https://{domain}" if domain else "")).rstrip("/")
+        sid = site.get("id")
+
+        # Pages déjà publiées pour ce site (de la plus récente à la plus
+        # ancienne — root["generated"] est trié par insert(0)).
+        entries = list(extra or [])
+        for g in root.get("generated", []):
+            for pub in g.get("publications", []):
+                if pub.get("site_id") == sid and pub.get("url"):
+                    entries.append((
+                        g.get("topic", "Page"),
+                        pub.get("url"),
+                        self._geo_extract_first_line(g.get("content", "")),
+                    ))
+
+        # Dédoublonne par URL en gardant l'ordre (1re vue = la plus à jour).
+        seen, uniq = set(), []
+        for title, url, desc in entries:
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            uniq.append((title, url, (desc or "").strip().replace("\n", " ")))
+
+        lines = [f"# {brand or domain}", ""]
+        desc_site = (site.get("description") or "").strip()
+        if desc_site:
+            lines += [f"> {desc_site}", ""]
+        else:
+            lines += [f"> Pages de référence de {brand or domain}, "
+                      "rédigées pour être citées par les IA.", ""]
+        if uniq:
+            lines += ["## Pages de référence", ""]
+            for title, url, desc in uniq:
+                lines.append(f"- [{title}]({url})" + (f": {desc}" if desc else ""))
+            lines.append("")
+        lines += ["## À propos", ""]
+        if home:
+            lines.append(f"- [Site officiel de {brand or domain}]({home}/)")
+        return "\n".join(lines).strip() + "\n"
+
     def _geo_build_html_page(self, *, title: str, content_html: str,
                              css_href: str, site_name: str,
-                             meta_description: str, canonical: str) -> str:
+                             meta_description: str, canonical: str,
+                             jsonld_html: str = "",
+                             published_at: str = "") -> str:
         """Construit une page HTML autonome stylée par le CSS du site."""
-        ts = self._geo_now()
-        # FAQPage JSON-LD si le contenu contient des H3 finissant par "?"
-        # (heuristique simple — pas obligatoire)
+        ts = published_at or self._geo_now()
+        e = self._geo_esc_attr
+        title_a, name_a, meta_a = e(title), e(site_name), e(meta_description)
+        canonical_a = e(canonical)
         return f"""<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{title} · {site_name}</title>
-  <meta name="description" content="{meta_description}" />
-  {f'<link rel="canonical" href="{canonical}" />' if canonical else ''}
-  <meta property="og:title" content="{title}" />
-  <meta property="og:description" content="{meta_description}" />
+  <title>{title_a} · {name_a}</title>
+  <meta name="description" content="{meta_a}" />
+  {f'<link rel="canonical" href="{canonical_a}" />' if canonical else ''}
+  <meta property="og:title" content="{title_a}" />
+  <meta property="og:description" content="{meta_a}" />
   <meta property="og:type" content="article" />
+  {f'<meta property="og:url" content="{canonical_a}" />' if canonical else ''}
+  {jsonld_html}
   <link rel="stylesheet" href="/{css_href.lstrip('/')}" />
   <style>
     /* Habillage minimal pour les pages GEO (le CSS du site fait le reste) */
@@ -13691,10 +13872,10 @@ class Api:
 </head>
 <body>
   <main class="geo-page-wrap">
-    <h1>{title}</h1>
+    <h1>{title_a}</h1>
     {content_html}
     <div class="geo-page-foot">
-      Page mise à jour le {ts[:10]} — {site_name}.
+      Page mise à jour le {ts[:10]} — {name_a}.
     </div>
   </main>
 </body>
@@ -13740,6 +13921,13 @@ class Api:
         canonical = (pretty_base + "/" + slug) if pretty_base else (
             (site.get("url", "").rstrip("/")) + "/" + folder + slug)
         meta_desc = self._geo_extract_first_line(item.get("content", ""))
+        # Dates pour les étiquettes invisibles : on garde la 1re mise en ligne
+        # comme date de publication, et on date la modif d'aujourd'hui (signal
+        # de fraîcheur apprécié des IA et de Google).
+        modified_at = self._geo_now()
+        prior_pub = next((pub for pub in item.get("publications", [])
+                          if pub.get("site_id") == sid and pub.get("ts")), None)
+        published_at = (prior_pub or {}).get("ts") or modified_at
         # Contenu HTML brut (audit IA) vs markdown (générateur normal)
         if item.get("kind") == "ai_audit_fix":
             # On garde tel quel, juste un fallback <h1> si pas déjà présent
@@ -13750,6 +13938,17 @@ class Api:
             content_html = _re.sub(r"^##\s+[^\n]+\n+", "", content_html)
         else:
             content_html = self._geo_md_to_html(item.get("content", ""))
+        # Étiquettes invisibles (JSON-LD) : qui écrit, quand, format Q/R.
+        jsonld_html = self._geo_build_jsonld(
+            kind=item.get("kind", "faq"),
+            title=item.get("topic", "Page"),
+            meta_description=meta_desc,
+            canonical=canonical,
+            site=site,
+            content_md=item.get("content", ""),
+            published_at=published_at,
+            modified_at=modified_at,
+        )
         page_html = self._geo_build_html_page(
             title=item.get("topic", "Page"),
             content_html=content_html,
@@ -13757,6 +13956,8 @@ class Api:
             site_name=site.get("name", site.get("brand", "")),
             meta_description=meta_desc,
             canonical=canonical,
+            jsonld_html=jsonld_html,
+            published_at=published_at,
         )
         # Clone -> écriture -> commit -> push
         import tempfile, os as _os, shutil
@@ -13772,10 +13973,26 @@ class Api:
             target_file = _os.path.join(target_dir, slug + ".html")
             with open(target_file, "w", encoding="utf-8") as fh:
                 fh.write(page_html)
+            # Met à jour le « plan du site pour les IA » (llms.txt) à la racine,
+            # en incluant la page qu'on vient d'écrire — ne bloque jamais la
+            # publication si ça échoue.
+            try:
+                llms = self._geo_build_llms_txt(
+                    site, root,
+                    extra=[(item.get("topic", "Page"), canonical, meta_desc)],
+                )
+                web_root = (site.get("web_root") or "").strip().strip("/")
+                llms_dir = _os.path.join(workdir, web_root) if web_root else workdir
+                _os.makedirs(llms_dir, exist_ok=True)
+                with open(_os.path.join(llms_dir, "llms.txt"), "w",
+                          encoding="utf-8") as fh:
+                    fh.write(llms)
+            except Exception as exc:
+                logger.debug("geo llms.txt build: %s", exc)
             # Commit
             ok_commit = gitp.commit_all(
                 workdir,
-                f"GEO: nouvelle page « {item.get('topic', '')[:60]} »",
+                f"GEO: nouvelle page « {item.get('topic', '')[:60]} » + llms.txt",
             )
             if not ok_commit:
                 return {"ok": False, "error":
@@ -13796,6 +14013,59 @@ class Api:
             })
             self._geo_save()
             return {"ok": True, "url": canonical, "path": folder + slug + ".html"}
+        finally:
+            try: shutil.rmtree(workdir, ignore_errors=True)
+            except Exception: pass
+
+    def geo_llms_publish(self, payload: dict) -> dict:
+        """Régénère et met en ligne le « plan du site pour les IA » (llms.txt)
+        à la racine du dépôt, sans créer de nouvelle page."""
+        p = payload or {}
+        sid = (p.get("site_id") or "").strip()
+        if not sid:
+            return {"ok": False, "error": "site_id requis"}
+        root = self._geo_root()
+        site = next((s for s in root["sites"] if s.get("id") == sid), None)
+        if not site:
+            return {"ok": False, "error": "Site introuvable"}
+        repo = (site.get("repo") or "").strip()
+        if not repo:
+            return {"ok": False, "error":
+                    "Le site n'a pas de dépôt GitHub configuré. Modifie le "
+                    "site et renseigne le champ « Dépôt GitHub »."}
+        try:
+            from ..integrations.phare import git_pipeline as gitp
+            token = gitp._github_token()
+        except Exception:
+            return {"ok": False, "error":
+                    "Module GitHub indisponible côté serveur."}
+        if not token:
+            return {"ok": False, "error":
+                    "Pas de token GitHub configuré (variable GITHUB_TOKEN)."}
+        branch = (site.get("branch") or "main").strip() or "main"
+        llms = self._geo_build_llms_txt(site, root)
+        import tempfile, os as _os, shutil
+        workdir = tempfile.mkdtemp(prefix="geo-llms-")
+        try:
+            if not gitp.clone_repo(repo, workdir, branch=branch):
+                return {"ok": False, "error":
+                        f"Impossible de cloner {repo}. Vérifie le nom du "
+                        "dépôt et l'accès du token GitHub."}
+            web_root = (site.get("web_root") or "").strip().strip("/")
+            llms_dir = _os.path.join(workdir, web_root) if web_root else workdir
+            _os.makedirs(llms_dir, exist_ok=True)
+            with open(_os.path.join(llms_dir, "llms.txt"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(llms)
+            if not gitp.commit_all(workdir, "GEO: mise à jour de llms.txt"):
+                return {"ok": True, "unchanged": True,
+                        "message": "llms.txt était déjà à jour."}
+            if not gitp.push_branch(workdir, branch):
+                return {"ok": False, "error":
+                        f"Échec du push sur {repo} (branche {branch})."}
+            base = site.get("url", "").rstrip("/")
+            url = base + "/" + (web_root + "/" if web_root else "") + "llms.txt"
+            return {"ok": True, "url": url}
         finally:
             try: shutil.rmtree(workdir, ignore_errors=True)
             except Exception: pass

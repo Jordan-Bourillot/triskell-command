@@ -241,6 +241,8 @@ const GEO = {
           </div>
           <div class="geo-site-actions">
             <button id="geo-edit-site" class="btn btn-secondary">✎ Modifier</button>
+            ${site.repo ? `<button id="geo-llms" class="btn btn-secondary"
+              title="Met à jour le petit fichier qui dit aux IA quelles pages de ton site citer en priorité (llms.txt).">🤖 Plan pour les IA</button>` : ''}
             <button id="geo-del-site"  class="btn btn-secondary geo-btn-danger">🗑 Supprimer</button>
           </div>
         </div>
@@ -259,6 +261,18 @@ const GEO = {
     `;
     document.getElementById('back-home').onclick = () => this._goto('home');
     document.getElementById('geo-edit-site').onclick = () => this._openSiteDialog(site);
+    const llmsBtn = document.getElementById('geo-llms');
+    if (llmsBtn) llmsBtn.onclick = async () => {
+      const old = llmsBtn.textContent;
+      llmsBtn.disabled = true; llmsBtn.textContent = 'Mise à jour…';
+      try {
+        const r = await App.api.geo_llms_publish({ site_id: site.id });
+        if (r && r.ok && r.unchanged) Toast.success('Le plan pour les IA était déjà à jour.');
+        else if (r && r.ok) Toast.success('Plan pour les IA mis à jour et mis en ligne. 🤖');
+        else Toast.error((r && r.error) || 'Mise à jour impossible.');
+      } catch (e) { Toast.friendlyError(e, 'Mise à jour impossible.'); }
+      finally { llmsBtn.disabled = false; llmsBtn.textContent = old; }
+    };
     document.getElementById('geo-del-site').onclick = async () => {
       const ok = await Dialog.confirm(
         `Supprimer ${site.name} ? Les questions et l’historique seront effacés.`,
@@ -1525,9 +1539,10 @@ const GEO = {
             <label class="geo-label mt-3">Chemin du CSS du site (pour habillage)</label>
             <input id="geo-newsite-css" type="text" class="geo-input"
                    placeholder="style.css" value="${this._esc(existing?.css_path || 'style.css')}" />
-            <label class="geo-label mt-3">URL publique du dossier (optionnel, pour le canonical)</label>
+            <label class="geo-label mt-3">Adresse publique du dossier (optionnel)</label>
             <input id="geo-newsite-pretty" type="text" class="geo-input"
                    placeholder="https://exemple.fr/geo" value="${this._esc(existing?.pretty_url_base || '')}" />
+            <p class="geo-advanced-sub">Sert à afficher la bonne adresse sous chaque page. Laisse vide si tu ne sais pas.</p>
           </div>
         </details>
         <div id="geo-newsite-msg" class="geo-msg"></div>
