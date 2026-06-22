@@ -3307,7 +3307,7 @@ class Api:
         if not sid:
             return {"ok": False, "error": "id manquant"}
         try:
-            from ..integrations.phare import repo
+            from ..integrations.phare import repo, dataforseo
             from datetime import datetime as _dt, timedelta as _td
             site = repo.get_site(sid)
             if not site:
@@ -3428,6 +3428,9 @@ class Api:
                 # Mots-clés suivis (volume, difficulté, position réelle) : triés
                 # par volume desc côté base. L'écran les affiche en clair.
                 "keywords": repo.list_keywords(sid, limit=40) or [],
+                # Source des chiffres : True = fournisseur SEO branché (volume
+                # et difficulté réels), False = valeurs estimées. L'écran le dit.
+                "dataforseo_on": dataforseo.is_configured(),
             }
         except Exception as exc:
             logger.warning("phare_site_dashboard: %s", exc)

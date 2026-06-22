@@ -320,7 +320,7 @@ const Phare = {
       </div>
 
       <!-- TES MOTS-CLÉS — ce que les gens tapent + où on est sur Google -->
-      ${this._keywordsPanel(keywords)}
+      ${this._keywordsPanel(keywords, data.dataforseo_on)}
 
       <!-- IDÉES (optionnel) — volet silencieux, AUCUNE pile de devoirs.
            Le robot fait ce qu'il sait faire ; ici, juste des pistes de contenu
@@ -1139,7 +1139,7 @@ const Phare = {
   // ── Panneau « Tes mots-clés sur Google » ──────────────────────────────
   // Affiche, en clair : le mot, combien de gens le tapent par mois, à quel
   // point c'est dur d'y arriver, et où le site se trouve sur Google.
-  _keywordsPanel(keywords) {
+  _keywordsPanel(keywords, dataforseoOn) {
     const kws = Array.isArray(keywords) ? keywords.slice() : [];
     // Les mots où on est positionné en premier (meilleure place d'abord),
     // puis ceux pas encore positionnés, les plus recherchés en tête.
@@ -1151,10 +1151,25 @@ const Phare = {
       if (pb !== null) return 1;
       return (b.volume || 0) - (a.volume || 0);
     });
+    // Coups faciles : en 2ᵉ page (place 11-20) → un petit effort = 1ʳᵉ page.
+    // Le plus proche de la 1ʳᵉ page d'abord, à volume égal le plus recherché.
+    const quick = kws
+      .filter(k => typeof k.current_position === 'number'
+                   && k.current_position >= 11 && k.current_position <= 20)
+      .sort((a, b) => (a.current_position - b.current_position)
+                      || ((b.volume || 0) - (a.volume || 0)))
+      .slice(0, 4);
+    const quickHtml = quick.length === 0 ? '' : `
+      <div class="phare-kw-quickwins">
+        <span class="phare-kw-quickwins-title">⚡ Tes coups faciles</span>
+        <span class="phare-kw-quickwins-sub">Tu es en 2ᵉ page sur ces mots — un petit coup de pouce et tu passes en 1ʳᵉ page&nbsp;:</span>
+        <span class="phare-kw-quickwins-list">${quick.map(k =>
+          `<span class="phare-kw-chip">${this._esc(k.keyword || '')} <b>#${k.current_position}</b></span>`).join('')}</span>
+      </div>`;
     const shown = kws.slice(0, 20);
     const body = kws.length === 0
       ? `<div class="phare-empty-inline">Le Veilleur n'a pas encore choisi de mots-clés pour ce site. Ils apparaîtront ici après son prochain passage.</div>`
-      : `<div class="phare-kw-table">
+      : `${quickHtml}<div class="phare-kw-table">
            <div class="phare-kw-head">
              <span>Mot-clé</span><span>Recherches/mois</span>
              <span>Difficulté</span><span>Ta place sur Google</span>
@@ -1163,12 +1178,20 @@ const Phare = {
          </div>${kws.length > shown.length
             ? `<div class="phare-kw-more">+ ${kws.length - shown.length} autres mots-clés suivis</div>`
             : ''}`;
+    // Source des chiffres — honnêteté : vrai vs estimé. La position est
+    // toujours mesurée sur Google ; volume/difficulté sont réels si le
+    // fournisseur SEO est branché, estimés sinon.
+    let sourceSub = 'Ce que les gens tapent pour te trouver — et où tu apparais.';
+    if (dataforseoOn === true)
+      sourceSub = 'Volume et difficulté : chiffres réels. Ta position : mesurée sur Google.';
+    else if (dataforseoOn === false)
+      sourceSub = '⚠️ Volume et difficulté estimés — branche ton fournisseur SEO pour du réel. Ta position : mesurée sur Google.';
     return `
       <div class="phare-section">
         <details class="phare-kw-details" open>
           <summary class="phare-kw-summary">
             <span class="phare-kw-summary-title">🎯 Tes mots-clés sur Google</span>
-            <span class="phare-section-sub">Ce que les gens tapent pour te trouver — et où tu apparais.</span>
+            <span class="phare-section-sub">${sourceSub}</span>
           </summary>
           ${body}
         </details>
@@ -1196,12 +1219,20 @@ const Phare = {
       else if (p <= 20) { cls = 'near'; tag = `#${p} · à portée`; }
       posHtml = `<span class="phare-kw-pos phare-kw-pos--${cls}">${tag}</span>`;
     }
+    // Meilleure place déjà atteinte : affichée quand tu as déjà fait mieux
+    // qu'aujourd'hui, ou quand tu es retombé hors des résultats vus.
+    const b = k.best_position;
+    let bestHtml = '';
+    if (typeof b === 'number' && b > 0) {
+      const cur = (typeof p === 'number' && p > 0) ? p : null;
+      if (cur === null || b < cur) bestHtml = `<span class="phare-kw-best">record #${b}</span>`;
+    }
     return `
       <div class="phare-kw-row">
         <span class="phare-kw-word">${this._esc(k.keyword || '—')}</span>
         <span class="phare-kw-vol">${vol}</span>
         <span>${diffHtml}</span>
-        <span>${posHtml}</span>
+        <span class="phare-kw-poscell">${posHtml}${bestHtml}</span>
       </div>`;
   },
 

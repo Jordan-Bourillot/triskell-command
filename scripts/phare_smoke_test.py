@@ -494,6 +494,79 @@ def test_sql_files_present() -> None:
     assert (sup / "06b_phare_seed_real.sql").exists(), "06b_phare_seed_real.sql manquant"
 
 
+def test_keywords_data_filling() -> None:
+    """La veille mots-clés remplit la VRAIE difficulté (DataForSEO, repli sur
+    l'estimation — jamais un 0 trompeur), la position réelle (GSC arrondie,
+    None si Google ne nous voit pas) et garde la meilleure place atteinte
+    (best_position = min avec l'historique)."""
+    from triskell_command.integrations.phare import orchestrator as orch
+    from triskell_command.integrations.phare import repo as ph_repo
+    from triskell_command.integrations.phare import gsc, dataforseo, agents
+
+    captured: dict = {}
+
+    class _FakeVeilleur:
+        def run(self, **kw):
+            return {"primary_keywords": [
+                {"keyword": "plombier rennes", "estimated_volume": 500,
+                 "estimated_difficulty": 55, "intent": "comm", "target_url_hint": "/"},
+                {"keyword": "depannage plomberie rennes", "estimated_volume": 100,
+                 "estimated_difficulty": 33, "intent": "comm"},
+                {"keyword": "plombier pas cher", "estimated_volume": 70,
+                 "estimated_difficulty": 80, "intent": "comm"},
+            ], "long_tail": []}
+
+    saved = (ph_repo.get_site, ph_repo.list_keywords, ph_repo.upsert_keywords,
+             ph_repo.expire_open_actions, ph_repo.insert_action,
+             gsc.fetch_top_queries, gsc.fetch_top_pages,
+             dataforseo.serp_top10, dataforseo.search_volume,
+             dataforseo.keyword_difficulty, agents.VeilleurMotsCles)
+    try:
+        ph_repo.get_site = lambda sid: {"id": sid, "domain": "exemple.fr", "name": "Ex"}
+        ph_repo.list_keywords = lambda sid, limit=200: [
+            {"keyword": "plombier rennes", "best_position": 2}]   # déjà monté à #2
+        ph_repo.upsert_keywords = lambda sid, rows: (
+            captured.__setitem__("rows", rows) or len(rows))
+        ph_repo.expire_open_actions = lambda *a, **k: None
+        ph_repo.insert_action = lambda *a, **k: None
+        gsc.fetch_top_queries = lambda *a, **k: [
+            {"query": "plombier rennes", "position": 3.4},
+            {"query": "depannage plomberie rennes", "position": 14.8}]
+        gsc.fetch_top_pages = lambda *a, **k: []
+        dataforseo.serp_top10 = lambda *a, **k: []
+        dataforseo.search_volume = lambda kws: [
+            {"keyword": "plombier rennes", "volume": 880}]
+        dataforseo.keyword_difficulty = lambda kws: {
+            "plombier rennes": 42, "depannage plomberie rennes": 7}
+        agents.VeilleurMotsCles = _FakeVeilleur
+        orch.run_keywords("site1")
+    finally:
+        (ph_repo.get_site, ph_repo.list_keywords, ph_repo.upsert_keywords,
+         ph_repo.expire_open_actions, ph_repo.insert_action,
+         gsc.fetch_top_queries, gsc.fetch_top_pages,
+         dataforseo.serp_top10, dataforseo.search_volume,
+         dataforseo.keyword_difficulty, agents.VeilleurMotsCles) = saved
+
+    rows = {r["keyword"]: r for r in captured.get("rows", [])}
+    assert set(rows) == {"plombier rennes", "depannage plomberie rennes",
+                         "plombier pas cher"}, rows
+    # Volume : réel DataForSEO, repli sur l'estimation sinon
+    assert rows["plombier rennes"]["volume"] == 880
+    assert rows["depannage plomberie rennes"]["volume"] == 100
+    # Difficulté : réelle DataForSEO, repli estimation (jamais 0 trompeur)
+    assert rows["plombier rennes"]["difficulty"] == 42
+    assert rows["depannage plomberie rennes"]["difficulty"] == 7
+    assert rows["plombier pas cher"]["difficulty"] == 80    # absent DFS → estimé
+    # Position : GSC arrondie ; inconnue de Google → None
+    assert rows["plombier rennes"]["current_position"] == 3
+    assert rows["depannage plomberie rennes"]["current_position"] == 15
+    assert rows["plombier pas cher"]["current_position"] is None
+    # Meilleure place : min(historique, actuelle) ; 1er relevé sinon
+    assert rows["plombier rennes"]["best_position"] == 2
+    assert rows["depannage plomberie rennes"]["best_position"] == 15
+    assert rows["plombier pas cher"]["best_position"] is None
+
+
 # ---------------------------------------------------------------------------
 def main() -> int:
     print(f"\n{DIM}Le Phare — Smoke test (sans credentials){RESET}\n")
@@ -524,6 +597,7 @@ def main() -> int:
     _run("Patcher — JSON-LD inséré dans layout", test_patcher_jsonld)
     _run("Agents — 8 agents enregistrés", test_agents_registry)
     _run("Orchestrator — ecosystem_overview structure", test_orchestrator_overview)
+    _run("Veilleur — difficulté réelle + position GSC + record gardé", test_keywords_data_filling)
     _run("Scheduler — get_status sans crash", test_scheduler_status)
     _run("Vue UI — PhareView importable", test_view_imports)
     _run("Routing — phare dans VIEW_REGISTRY", test_main_routing)
