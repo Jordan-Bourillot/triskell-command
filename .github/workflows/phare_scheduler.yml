@@ -6,17 +6,17 @@ name: Phare scheduler (cron horaire)
 
 on:
   schedule:
-    # Minute 23 (creuse) : GitHub saute/retarde beaucoup les crons des minutes
-    # 0-10, surchargées. Constaté avant le 12/06/2026 : 3 ticks sur 4 perdus
-    # avec HH:05. Le tick lui-même vérifie l'heure et lance les missions.
-    - cron: '23 * * * *'
-    # Renfort du lundi (heures UTC = 6h-23h Paris l'été) : 2e passage par
-    # heure pendant la fenêtre d'audit hebdo, car l'audit traite 1 site par
-    # tick — avec 7 sites et des ticks qui sautent, la journée ne suffisait
-    # pas (Pixel Pros et Ingrid jamais audités le 08/06). La dédup DB
-    # (_pick_next_for_mission) garantit qu'un tick en double ne refait ni ne
-    # repaye aucun travail.
-    - cron: '53 4-21 * * 1'
+    # RÉDUIT le 22/06/2026 : de 24 passages/jour (+ renfort lundi 2×/h) à 3.
+    # Pourquoi : chaque passage peut publier une correction = une reconstruction
+    # du site chez Netlify (branche/preview + merge). L'ancien rythme horaire
+    # saturait le crédit Netlify du compte (≈28 branches en 8 jours → builds
+    # refusés « credit usage exceeded »).
+    # 3 passages (heures UTC ; le code tourne en TZ=Europe/Paris) couvrent les
+    # fenêtres clés : ~10h Paris (optims du matin), ~16h (auto-merge des PR
+    # vérifiées, ≥15h), ~20h (récap quotidien, ≥19h). Les missions sont
+    # dédupliquées en base (1×/jour/site), donc un seul passage par fenêtre
+    # suffit — pas besoin du rythme horaire.
+    - cron: '23 8,14,18 * * *'
   workflow_dispatch:   # bouton « Run workflow » dans l'onglet Actions
 
 # Évite que deux ticks tournent en parallèle si un précédent traîne
