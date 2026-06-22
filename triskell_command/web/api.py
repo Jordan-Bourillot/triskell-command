@@ -4135,6 +4135,107 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)[:200]}
 
+    def _extract_site_shell(self, workdir: str) -> dict:
+        """Lit l'index.html du site cloné et en extrait l'habillage : liens
+        CSS/polices du <head>, l'en-tête (<header>), le pied de page (<footer>)
+        et les scripts, pour que les pages générées ressemblent au reste du
+        site et que leur menu/contact fonctionnent. Best-effort."""
+        import os as _os
+        out = {"head": "", "header": "", "footer": "", "scripts": ""}
+        path = _os.path.join(workdir, "index.html")
+        if not _os.path.exists(path):
+            return out
+        try:
+            from bs4 import BeautifulSoup
+            with open(path, encoding="utf-8") as fh:
+                soup = BeautifulSoup(fh.read(), "html.parser")
+            bits = []
+            if soup.head:
+                for tag in soup.head.find_all("link"):
+                    rel = " ".join(tag.get("rel") or [])
+                    href = (tag.get("href") or "").lower()
+                    if ("stylesheet" in rel or "preconnect" in rel
+                            or "preload" in rel or "icon" in rel or "font" in href):
+                        bits.append(str(tag))
+            out["head"] = "\n  ".join(bits)
+            hdr = soup.find("header")
+            if hdr:
+                out["header"] = str(hdr)
+            ftr = soup.find("footer")
+            if ftr:
+                out["footer"] = str(ftr)
+            out["scripts"] = "\n".join(
+                str(t) for t in soup.find_all("script") if t.get("src"))
+        except Exception as exc:
+            logger.debug("extract shell: %s", exc)
+        return out
+
+    def _prog_cta_html(self, metier: str, site_name: str) -> str:
+        """Encart d'appel à l'action en bas de page : transforme le lecteur en
+        contact. Utilise les classes de bouton du site (btn btn-primary)."""
+        m, n = self._geo_esc_attr(metier), self._geo_esc_attr(site_name)
+        return (
+            '<section class="geo-cta">'
+            f"<h2>Vous êtes {m} et vous voulez sortir sur Google ?</h2>"
+            f"<p>{n} s’occupe de votre référencement, de A à Z.</p>"
+            f'<a class="btn btn-primary" href="/">Découvrir {n}</a>'
+            "</section>")
+
+    def _prog_build_native_page(self, *, title: str, content_html: str,
+                                shell: dict, site_name: str,
+                                meta_description: str, canonical: str,
+                                jsonld_html: str = "", published_at: str = "",
+                                cta_html: str = "") -> str:
+        """Assemble une page habillée comme le site : son en-tête/menu, sa
+        charte (CSS + polices), le contenu, l'appel à l'action, son pied de
+        page. Plus de texte brut sur fond blanc."""
+        e = self._geo_esc_attr
+        t, n, m, c = (e(title), e(site_name), e(meta_description), e(canonical))
+        return f"""<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{t} · {n}</title>
+  <meta name="description" content="{m}" />
+  {f'<link rel="canonical" href="{c}" />' if canonical else ''}
+  <meta property="og:title" content="{t}" />
+  <meta property="og:description" content="{m}" />
+  <meta property="og:type" content="article" />
+  {f'<meta property="og:url" content="{c}" />' if canonical else ''}
+  {shell.get("head", "")}
+  {jsonld_html}
+  <style>
+    .geo-article {{ max-width: 760px; margin: 0 auto; padding: 48px 24px 8px;
+                    line-height: 1.7; }}
+    .geo-article h1 {{ font-size: 2.1rem; line-height: 1.2; margin: 0 0 .6em; }}
+    .geo-article h2 {{ font-size: 1.45rem; margin: 1.8em 0 .5em; }}
+    .geo-article h3 {{ font-size: 1.15rem; margin: 1.4em 0 .4em; }}
+    .geo-article p, .geo-article li {{ font-size: 1.05rem; }}
+    .geo-article table {{ border-collapse: collapse; width: 100%; margin: 1.2em 0; }}
+    .geo-article th, .geo-article td {{ border: 1px solid rgba(0,0,0,.12);
+                                          padding: 8px 12px; text-align: left; }}
+    .geo-cta {{ max-width: 760px; margin: 8px auto 56px; padding: 32px 28px;
+               text-align: center; border-radius: 18px; background: rgba(0,0,0,.045); }}
+    .geo-cta h2 {{ margin: 0 0 .35em; font-size: 1.45rem; }}
+    .geo-cta p {{ margin: 0 0 1.2em; opacity: .85; }}
+  </style>
+</head>
+<body>
+{shell.get("header", "")}
+  <main>
+    <article class="geo-article">
+      <h1>{t}</h1>
+      {content_html}
+    </article>
+    {cta_html}
+  </main>
+{shell.get("footer", "")}
+{shell.get("scripts", "")}
+</body>
+</html>
+"""
+
     def _prog_sync_sitemap(self, workdir: str, domain: str, sb,
                            site_id: str, new_urls: list) -> None:
         """Ajoute les pages en série au plan du site (sitemap.xml) pour que
@@ -4220,14 +4321,20 @@ class Api:
                     "Le site n'est pas relié à son code (Réglages du site)."}
         if not gitp._github_token():
             return {"ok": False, "error": "Jeton GitHub manquant."}
-        pages = (sb.table("phare_programmatic_pages").select("*")
-                 .eq("template_id", tid).eq("status", "draft").execute().data) or []
-        pages = [pg for pg in pages if (pg.get("quality_score") or 0) >= min_q]
-        if not pages:
+        # On met en ligne les pages assez bonnes en attente (drafts) ET on
+        # re-fabrique les pages déjà publiées du modèle, pour leur appliquer le
+        # dernier habillage (en-tête/menu/pied de page du site + bouton).
+        drafts = [pg for pg in (sb.table("phare_programmatic_pages").select("*")
+                  .eq("template_id", tid).eq("status", "draft").execute().data or [])
+                  if (pg.get("quality_score") or 0) >= min_q]
+        live = (sb.table("phare_programmatic_pages").select("*")
+                .eq("template_id", tid).eq("status", "published").execute().data) or []
+        new_ids = {pg["id"] for pg in drafts}
+        render = drafts + live
+        if not render:
             return {"ok": True, "published": 0,
                     "message": f"Aucune page prête (qualité ≥ {min_q})."}
         domain = (site.get("domain") or "").strip().strip("/")
-        css_path = (site.get("css_path") or "style.css")
         pseudo = {"brand": site.get("name") or domain,
                   "name": site.get("name") or domain,
                   "url": f"https://{domain}", "domain": domain}
@@ -4238,9 +4345,11 @@ class Api:
         try:
             if not gitp.clone_repo(repo_gh, workdir, branch=branch):
                 return {"ok": False, "error": f"Impossible de cloner {repo_gh}."}
+            # Habillage repris du site (en-tête, menu, pied de page, charte).
+            shell = self._extract_site_shell(workdir)
             now = self._geo_now()
-            published = []
-            for pg in pages:
+            written = []
+            for pg in render:
                 public = (pg.get("generated_url") or "").strip()
                 if not public:
                     continue
@@ -4250,46 +4359,50 @@ class Api:
                     public = public[:-5]
                 rel = public.lstrip("/") + ".html"
                 canonical = f"https://{domain}{public}"
-                body_html = self._geo_md_to_html(pg.get("generated_body_md") or "")
+                title = pg.get("generated_title") or ""
+                meta = pg.get("generated_meta") or ""
+                body_md = pg.get("generated_body_md") or ""
                 jsonld = self._geo_build_jsonld(
-                    kind="article", title=pg.get("generated_title") or "",
-                    meta_description=pg.get("generated_meta") or "",
-                    canonical=canonical, site=pseudo,
-                    content_md=pg.get("generated_body_md") or "",
+                    kind="article", title=title, meta_description=meta,
+                    canonical=canonical, site=pseudo, content_md=body_md,
                     published_at=now, modified_at=now)
-                html = self._geo_build_html_page(
-                    title=pg.get("generated_title") or "",
-                    content_html=body_html, css_href=css_path,
-                    site_name=pseudo["name"],
-                    meta_description=pg.get("generated_meta") or "",
-                    canonical=canonical, jsonld_html=jsonld, published_at=now)
+                variables = pg.get("variables") or {}
+                metier = (variables.get("metier")
+                          or (list(variables.values()) or [""])[0])
+                cta = self._prog_cta_html(metier, pseudo["name"]) if metier else ""
+                html = self._prog_build_native_page(
+                    title=title, content_html=self._geo_md_to_html(body_md),
+                    shell=shell, site_name=pseudo["name"], meta_description=meta,
+                    canonical=canonical, jsonld_html=jsonld, published_at=now,
+                    cta_html=cta)
                 target = _os.path.join(workdir, rel)
                 _os.makedirs(_os.path.dirname(target) or workdir, exist_ok=True)
                 with open(target, "w", encoding="utf-8") as fh:
                     fh.write(html)
-                published.append((pg["id"], canonical))
-            if not published:
+                written.append((pg["id"], canonical))
+            if not written:
                 return {"ok": True, "published": 0}
-            # Ajoute les pages au « plan du site » (sitemap.xml) pour que Google
-            # les découvre — sinon elles sont en ligne mais invisibles pour lui.
-            # On inclut TOUTES les pages en série déjà publiées de ce site (donc
-            # un nouveau lot rattrape aussi les anciennes absentes du plan).
+            # Plan du site (sitemap) : toutes les pages en série publiées du site.
             self._prog_sync_sitemap(workdir, domain, sb,
                                     tpl[0].get("site_id") or "",
-                                    [c for _, c in published])
-            if not gitp.commit_all(
-                    workdir, f"Pages en série : {len(published)} nouvelle(s) page(s) + plan du site"):
+                                    [c for _, c in written])
+            n_new = len(new_ids)
+            msg = (f"Pages en série : {n_new} nouvelle(s) + "
+                   f"{len(written) - n_new} réhabillée(s) + plan du site")
+            if not gitp.commit_all(workdir, msg):
                 return {"ok": True, "published": 0,
                         "message": "Rien de nouveau à publier."}
             if not gitp.push_branch(workdir, branch):
                 return {"ok": False, "error": f"Échec du push sur {repo_gh}."}
-            for pid, canon in published:
-                try:
-                    sb.table("phare_programmatic_pages").update(
-                        {"status": "published"}).eq("id", pid).execute()
-                except Exception as exc:
-                    logger.debug("prog publish mark %s: %s", pid, exc)
-            return {"ok": True, "published": len(published)}
+            for pid, _canon in written:
+                if pid in new_ids:
+                    try:
+                        sb.table("phare_programmatic_pages").update(
+                            {"status": "published"}).eq("id", pid).execute()
+                    except Exception as exc:
+                        logger.debug("prog publish mark %s: %s", pid, exc)
+            return {"ok": True, "published": len(new_ids),
+                    "refreshed": len(written) - n_new}
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
