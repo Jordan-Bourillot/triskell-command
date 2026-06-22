@@ -246,7 +246,8 @@ def classify_for_apply(action: dict, site: Optional[dict]) -> dict:
     # direct » n'a aucune « famille »). Sans ça, ces cartes tombaient dans le
     # repli « à voir ensemble » quand on a coupé l'optimisme (régression 19/06).
     agent_low = (action.get("agent") or "").lower()
-    if agent_low in ("sitemap_builder", "image_seo", "redirect_fixer"):
+    if agent_low in ("sitemap_builder", "image_seo", "redirect_fixer",
+                     "schema_architect"):
         if (site.get("repo_github") or "").strip():
             return {"can": True, "mode": "code",
                     "why": "Le robot prépare la modification, la vérifie et la publie."}

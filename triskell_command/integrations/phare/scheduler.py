@@ -297,6 +297,15 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"image_seo:{target['id']}"] = today.isoformat()
 
+    # Étiquettes invisibles (données structurées) : samedi à partir de 10h
+    if weekday == 5 and hour >= 10:
+        target = _pick_next_for_mission("schema", sites)
+        if target:
+            r = run_now("schema", target["id"], app_state=app_state)
+            actions_done.append({"mission": "schema",
+                                  "site": target["domain"], **r})
+            _LAST_RUNS_BY_MISSION[f"schema:{target['id']}"] = today.isoformat()
+
     # Refresh content : dimanche à partir de 9h
     if weekday == 6 and hour >= 9:
         target = _pick_next_for_mission("refresh", sites)
@@ -463,6 +472,7 @@ _MISSION_TO_AGENT: dict[str, str] = {
     "cannibalization":    "cannibalization",
     "zombies":            "zombies_hunter",
     "image_seo":          "image_seo",
+    "schema":             "schema_architect",
     "refresh":            "refresh",
     "competitors":        "competitors",
     "sitemap":            "sitemap_builder",
@@ -587,6 +597,8 @@ def run_now(mission: str, site_id: Optional[str] = None,
     if mission == "image_seo":
         from . import image_seo
         return image_seo.run_image_seo(site_id, app_state=app_state)
+    if mission == "schema":
+        return orchestrator.run_schema_pass(site_id, app_state=app_state)
     if mission == "refresh":
         from . import refresh
         return refresh.run_refresh(site_id, app_state=app_state)

@@ -3877,7 +3877,36 @@ class Api:
             from ..integrations.phare import repo as phare_repo
             cfg = phare_repo.get_config() or {}
             return {"ok": True,
-                    "enabled": bool(cfg.get("auto_merge_enabled", False))}
+                    "enabled": bool(cfg.get("auto_merge_enabled", False)),
+                    "auto_apply_schema": bool(cfg.get("auto_apply_schema", False)),
+                    "auto_apply_image_alts": bool(
+                        cfg.get("auto_apply_image_alts", False))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def phare_autoapply_set(self, payload: dict) -> dict:
+        """Active/coupe une automatisation SÛRE et ciblée, indépendamment de la
+        publication automatique globale :
+          - schema      : poser tout seul les étiquettes invisibles (données
+                          structurées) ;
+          - image_alts  : écrire tout seul le texte descriptif des images.
+        N'écrit QUE ces clés (jamais le reste de phare_config, qui a des tokens)."""
+        p = payload or {}
+        patch: dict = {}
+        if "schema" in p:
+            patch["auto_apply_schema"] = bool(p.get("schema"))
+        if "image_alts" in p:
+            patch["auto_apply_image_alts"] = bool(p.get("image_alts"))
+        if not patch:
+            return {"ok": False, "error": "Rien à régler."}
+        try:
+            from ..integrations.phare import repo as phare_repo
+            phare_repo.update_config(patch)
+            cfg = phare_repo.get_config() or {}
+            return {"ok": True,
+                    "auto_apply_schema": bool(cfg.get("auto_apply_schema", False)),
+                    "auto_apply_image_alts": bool(
+                        cfg.get("auto_apply_image_alts", False))}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -3896,6 +3925,282 @@ class Api:
             return {"ok": True, "enabled": real}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    # ══════════════════════════════════════════════════════════════════
+    #  PAGES EN SÉRIE (SEO programmatique) — moteur phare/programmatic.py
+    #  Un modèle + une liste de valeurs → des dizaines de pages utiles,
+    #  relues avant mise en ligne (jamais d'auto-publication massive).
+    # ══════════════════════════════════════════════════════════════════
+    @staticmethod
+    def _prog_missing_table(exc) -> bool:
+        m = str(exc).lower()
+        return ("does not exist" in m or "could not find" in m
+                or "pgrst" in m or "relation" in m and "exist" in m)
+
+    def phare_prog_list(self, payload: dict | None = None) -> dict:
+        """Liste les modèles de pages en série, avec les compteurs (générées,
+        prêtes à publier, déjà en ligne)."""
+        sid = ((payload or {}).get("site_id") or "").strip()
+        try:
+            from ..integrations.phare import repo as pr
+            sb = pr._sb()
+            if sb is None:
+                return {"ok": True, "templates": [], "skipped": "base indispo"}
+            q = sb.table("phare_programmatic_templates").select("*")
+            if sid:
+                q = q.eq("site_id", sid)
+            tpls = q.execute().data or []
+            sites = {s["id"]: s for s in (pr.list_sites() or [])}
+            for t in tpls:
+                t["site_name"] = (sites.get(t.get("site_id"), {}) or {}).get(
+                    "name") or (sites.get(t.get("site_id"), {}) or {}).get("domain", "")
+                try:
+                    rows = (sb.table("phare_programmatic_pages")
+                            .select("status,quality_score")
+                            .eq("template_id", t["id"]).execute().data) or []
+                except Exception:
+                    rows = []
+                t["pages_total"] = len(rows)
+                t["pages_published"] = sum(1 for r in rows
+                                           if r.get("status") == "published")
+                t["pages_ready"] = sum(
+                    1 for r in rows if r.get("status") == "draft"
+                    and (r.get("quality_score") or 0) >= 60)
+            tpls.sort(key=lambda t: t.get("created_at") or "", reverse=True)
+            return {"ok": True, "templates": tpls}
+        except Exception as exc:
+            if self._prog_missing_table(exc):
+                return {"ok": True, "templates": [], "skipped": "migration"}
+            return {"ok": False, "error": str(exc)[:200]}
+
+    def phare_prog_template_create(self, payload: dict) -> dict:
+        """Crée un modèle de pages en série. Une seule variable (ex. « ville »)
+        + une liste de valeurs (une par ligne) : c'est le besoin courant."""
+        p = payload or {}
+        sid = (p.get("site_id") or "").strip()
+        name = (p.get("name") or "").strip()
+        url_pattern = (p.get("url_pattern") or "").strip()
+        title_pattern = (p.get("title_pattern") or "").strip()
+        meta_pattern = (p.get("meta_pattern") or "").strip()
+        h1_pattern = (p.get("h1_pattern") or "").strip()
+        outline = (p.get("body_outline_md") or "").strip()
+        var_name = (p.get("var_name") or "").strip()
+        try:
+            min_words = max(300, min(2000, int(p.get("min_words") or 600)))
+        except (TypeError, ValueError):
+            min_words = 600
+        if not (sid and name and url_pattern and title_pattern and var_name):
+            return {"ok": False, "error":
+                    "Il manque un champ : site, nom, adresse, titre ou nom de "
+                    "la variable."}
+        raw = p.get("values") or ""
+        if isinstance(raw, list):
+            values = [str(v).strip() for v in raw if str(v).strip()]
+        else:
+            values = [v.strip() for v in str(raw).replace(",", "\n").splitlines()
+                      if v.strip()]
+        seen, uniq = set(), []
+        for v in values:
+            if v.lower() not in seen:
+                seen.add(v.lower())
+                uniq.append(v)
+        if not uniq:
+            return {"ok": False, "error":
+                    "Donne au moins une valeur (une par ligne), ex. tes villes."}
+        token = "{" + var_name + "}"
+        if token not in url_pattern or token not in title_pattern:
+            return {"ok": False, "error":
+                    f"L'adresse et le titre doivent contenir « {token} » "
+                    "(c'est ce qui change d'une page à l'autre)."}
+        items = [{var_name: v} for v in uniq]
+        try:
+            from ..integrations.phare import programmatic
+            return programmatic.create_template(
+                sid, name=name, url_pattern=url_pattern,
+                title_pattern=title_pattern,
+                meta_pattern=meta_pattern or title_pattern,
+                h1_pattern=h1_pattern or title_pattern,
+                body_outline_md=outline,
+                variables_payload={"items": items}, min_words=min_words)
+        except Exception as exc:
+            if self._prog_missing_table(exc):
+                return {"ok": False, "error":
+                        "La base n'a pas encore les tables des pages en série "
+                        "(migration 06d_phare_pro.sql à appliquer)."}
+            return {"ok": False, "error": str(exc)[:200]}
+
+    def phare_prog_template_delete(self, payload: dict) -> dict:
+        tid = ((payload or {}).get("id") or "").strip()
+        if not tid:
+            return {"ok": False, "error": "id requis"}
+        try:
+            from ..integrations.phare import repo as pr
+            sb = pr._sb()
+            if sb is None:
+                return {"ok": False, "error": "base indispo"}
+            sb.table("phare_programmatic_pages").delete().eq(
+                "template_id", tid).execute()
+            sb.table("phare_programmatic_templates").delete().eq(
+                "id", tid).execute()
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:200]}
+
+    def phare_prog_generate(self, payload: dict) -> dict:
+        """Lance l'écriture d'un lot de pages en arrière-plan (l'IA écrit une
+        page par valeur). Le résultat s'affiche dans la relecture."""
+        tid = ((payload or {}).get("template_id") or "").strip()
+        try:
+            batch = max(1, min(30, int((payload or {}).get("batch_size") or 10)))
+        except (TypeError, ValueError):
+            batch = 10
+        if not tid:
+            return {"ok": False, "error": "template_id requis"}
+
+        def _run():
+            try:
+                from ..integrations.phare import programmatic
+                programmatic.generate_pages(tid, batch_size=batch,
+                                            app_state=self._app_state)
+            except Exception as exc:
+                logger.warning("phare_prog_generate[%s]: %s", tid, exc)
+
+        threading.Thread(target=_run, daemon=True,
+                         name=f"ProgGen-{tid[:8]}").start()
+        return {"ok": True, "started": True, "batch_size": batch}
+
+    def phare_prog_pages_list(self, payload: dict) -> dict:
+        """Liste les pages générées d'un modèle (pour la relecture)."""
+        tid = ((payload or {}).get("template_id") or "").strip()
+        if not tid:
+            return {"ok": False, "error": "template_id requis"}
+        try:
+            from ..integrations.phare import repo as pr
+            sb = pr._sb()
+            if sb is None:
+                return {"ok": True, "pages": []}
+            rows = (sb.table("phare_programmatic_pages").select(
+                "id,generated_url,generated_title,generated_meta,"
+                "generated_body_md,word_count,quality_score,status")
+                .eq("template_id", tid).execute().data) or []
+            rows.sort(key=lambda r: (r.get("status") == "published",
+                                     -(r.get("quality_score") or 0)))
+            return {"ok": True, "pages": rows}
+        except Exception as exc:
+            if self._prog_missing_table(exc):
+                return {"ok": True, "pages": [], "skipped": "migration"}
+            return {"ok": False, "error": str(exc)[:200]}
+
+    def phare_prog_page_delete(self, payload: dict) -> dict:
+        pid = ((payload or {}).get("id") or "").strip()
+        if not pid:
+            return {"ok": False, "error": "id requis"}
+        try:
+            from ..integrations.phare import repo as pr
+            sb = pr._sb()
+            if sb is None:
+                return {"ok": False, "error": "base indispo"}
+            sb.table("phare_programmatic_pages").delete().eq("id", pid).execute()
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:200]}
+
+    def phare_prog_publish(self, payload: dict) -> dict:
+        """Met en ligne (push GitHub) les pages relues et assez bonnes d'un
+        modèle. C'est le « circuit de publication » qui manquait : clone du
+        dépôt, écriture des fichiers HTML (avec étiquettes invisibles), commit,
+        push. Jamais d'auto-publication : c'est un clic explicite de Jordan."""
+        p = payload or {}
+        tid = (p.get("template_id") or "").strip()
+        try:
+            min_q = max(0, min(100, int(p.get("min_quality") or 60)))
+        except (TypeError, ValueError):
+            min_q = 60
+        if not tid:
+            return {"ok": False, "error": "template_id requis"}
+        try:
+            from ..integrations.phare import repo as pr, git_pipeline as gitp
+        except Exception:
+            return {"ok": False, "error": "Modules Le Phare indisponibles."}
+        sb = pr._sb()
+        if sb is None:
+            return {"ok": False, "error": "base indispo"}
+        tpl = (sb.table("phare_programmatic_templates").select("*")
+               .eq("id", tid).limit(1).execute().data) or []
+        if not tpl:
+            return {"ok": False, "error": "Modèle introuvable."}
+        site = pr.get_site(tpl[0].get("site_id") or "") or {}
+        repo_gh = (site.get("repo_github") or "").strip()
+        if not repo_gh:
+            return {"ok": False, "error":
+                    "Le site n'est pas relié à son code (Réglages du site)."}
+        if not gitp._github_token():
+            return {"ok": False, "error": "Jeton GitHub manquant."}
+        pages = (sb.table("phare_programmatic_pages").select("*")
+                 .eq("template_id", tid).eq("status", "draft").execute().data) or []
+        pages = [pg for pg in pages if (pg.get("quality_score") or 0) >= min_q]
+        if not pages:
+            return {"ok": True, "published": 0,
+                    "message": f"Aucune page prête (qualité ≥ {min_q})."}
+        domain = (site.get("domain") or "").strip().strip("/")
+        css_path = (site.get("css_path") or "style.css")
+        pseudo = {"brand": site.get("name") or domain,
+                  "name": site.get("name") or domain,
+                  "url": f"https://{domain}", "domain": domain}
+        branch = site.get("repo_branch_main") or "main"
+        import tempfile, os as _os, shutil
+        root = tempfile.mkdtemp(prefix="prog-pub-")
+        workdir = _os.path.join(root, repo_gh.split("/")[-1])
+        try:
+            if not gitp.clone_repo(repo_gh, workdir, branch=branch):
+                return {"ok": False, "error": f"Impossible de cloner {repo_gh}."}
+            now = self._geo_now()
+            published = []
+            for pg in pages:
+                public = (pg.get("generated_url") or "").strip()
+                if not public:
+                    continue
+                if not public.startswith("/"):
+                    public = "/" + public
+                if public.endswith(".html"):
+                    public = public[:-5]
+                rel = public.lstrip("/") + ".html"
+                canonical = f"https://{domain}{public}"
+                body_html = self._geo_md_to_html(pg.get("generated_body_md") or "")
+                jsonld = self._geo_build_jsonld(
+                    kind="article", title=pg.get("generated_title") or "",
+                    meta_description=pg.get("generated_meta") or "",
+                    canonical=canonical, site=pseudo,
+                    content_md=pg.get("generated_body_md") or "",
+                    published_at=now, modified_at=now)
+                html = self._geo_build_html_page(
+                    title=pg.get("generated_title") or "",
+                    content_html=body_html, css_href=css_path,
+                    site_name=pseudo["name"],
+                    meta_description=pg.get("generated_meta") or "",
+                    canonical=canonical, jsonld_html=jsonld, published_at=now)
+                target = _os.path.join(workdir, rel)
+                _os.makedirs(_os.path.dirname(target) or workdir, exist_ok=True)
+                with open(target, "w", encoding="utf-8") as fh:
+                    fh.write(html)
+                published.append((pg["id"], canonical))
+            if not published:
+                return {"ok": True, "published": 0}
+            if not gitp.commit_all(
+                    workdir, f"Pages en série : {len(published)} nouvelle(s) page(s)"):
+                return {"ok": True, "published": 0,
+                        "message": "Rien de nouveau à publier."}
+            if not gitp.push_branch(workdir, branch):
+                return {"ok": False, "error": f"Échec du push sur {repo_gh}."}
+            for pid, canon in published:
+                try:
+                    sb.table("phare_programmatic_pages").update(
+                        {"status": "published"}).eq("id", pid).execute()
+                except Exception as exc:
+                    logger.debug("prog publish mark %s: %s", pid, exc)
+            return {"ok": True, "published": len(published)}
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
     # ------------------------------------------------------------------
     # Lagriffe — éditeur de templates de mail (4 mails du pipeline)

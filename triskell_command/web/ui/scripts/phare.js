@@ -30,6 +30,7 @@ const Phare = {
     this._navIntent = false;
     if (this.view === 'site')      return this._renderSite(container);
     if (this.view === 'coulisses') return this._renderCoulisses(container);
+    if (this.view === 'programmatic') return this._renderProgrammatic(container);
     return this._renderHome(container);
   },
 
@@ -1231,6 +1232,14 @@ const Phare = {
           </div>
         </header>
         <div id="ph-automerge-panel"></div>
+        <button class="phare-prog-entry" data-act="programmatic">
+          <span class="phare-prog-entry-ico">🏭</span>
+          <span class="phare-prog-entry-body">
+            <span class="phare-prog-entry-title">Pages en série</span>
+            <span class="phare-prog-entry-sub">Un modèle + une liste (tes villes, tes métiers…) → des dizaines de pages d’un coup. Tu relis chaque page avant la mise en ligne.</span>
+          </span>
+          <span class="phare-prog-entry-arrow" aria-hidden="true">→</span>
+        </button>
         <div id="ph-coulisses-grid"><div class="phare-loading">Chargement…</div></div>
       </section>
     `;
@@ -1238,6 +1247,7 @@ const Phare = {
     // mémorisé dans _go() — plus de retour vers une fiche résiduelle.
     container.querySelector('[data-act="back"]').onclick = () =>
       this._go(this._coulissesFrom === 'site' && this.selectedSite ? 'site' : 'home');
+    container.querySelector('[data-act="programmatic"]').onclick = () => this._go('programmatic');
     this._renderAutomergePanel();
     let agents = this._defaultAgents();
     if (App.api) {
@@ -1303,14 +1313,32 @@ const Phare = {
   async _renderAutomergePanel() {
     const host = document.getElementById('ph-automerge-panel');
     if (!host || !App.api || typeof App.api.phare_automerge_get !== 'function') return;
-    let enabled = false;
+    const st = { enabled: false, schema: false, alts: false };
     try {
       const res = await App.api.phare_automerge_get();
       if (!res || !res.ok) return;          // base injoignable → pas de panneau
-      enabled = !!res.enabled;
+      st.enabled = !!res.enabled;
+      st.schema = !!res.auto_apply_schema;
+      st.alts = !!res.auto_apply_image_alts;
     } catch (e) { return; }
 
-    const paint = (on, busy) => {
+    // Une ligne « automatisation ciblée » (étiquettes / images). Sans effet —
+    // et grisée « Inclus » — quand le robot agit déjà seul sur tout.
+    const granularRow = (key, on, emoji, title, desc) => `
+      <div class="phare-autoapply-row ${(on || st.enabled) ? 'is-on' : ''}">
+        <div class="phare-autoapply-text">
+          <div class="phare-autoapply-title">${(on || st.enabled) ? '🟢' : '⚪'} ${emoji} ${title}</div>
+          <p class="phare-autoapply-desc">${st.enabled
+            ? 'Déjà compris dans « le robot agit seul » au-dessus.'
+            : desc}</p>
+        </div>
+        <button class="btn btn-sm ${on ? 'btn-secondary' : 'btn-primary'}" data-toggle="${key}" ${st.enabled ? 'disabled' : ''}>
+          ${st.enabled ? 'Inclus' : (on ? 'Couper' : 'Activer')}
+        </button>
+      </div>`;
+
+    const paint = (busy) => {
+      const on = st.enabled;
       host.innerHTML = `
         <div class="phare-automerge ${on ? 'is-on' : ''}">
           <div class="phare-automerge-text">
@@ -1319,21 +1347,31 @@ const Phare = {
             </div>
             <p class="phare-automerge-desc">
               ${on
-                ? 'Le robot applique ET publie tout seul les corrections sûres (titres de pages internes, descriptions, images, plan du site, redirections) — jamais ta page d’accueil, jamais le design. Au fil de l’eau, quelques-unes par heure au maximum. Tu es prévenu à chaque fois, et tout reste annulable (surveillance du trafic 14 jours).'
-                : 'Aujourd’hui, chaque correction attend ton OK. Active pour que le robot applique ET publie tout seul les corrections sûres (titres de pages internes, descriptions, images, plan du site, redirections) — jamais ta page d’accueil, jamais le design. Il avance en douceur, te prévient à chaque fois, et tout est annulable.'}
+                ? 'Le robot applique ET publie tout seul les corrections sûres (titres de pages internes, descriptions, images, étiquettes invisibles, plan du site, redirections) — jamais ta page d’accueil, jamais le design. Au fil de l’eau, quelques-unes par heure au maximum. Tu es prévenu à chaque fois, et tout reste annulable (surveillance du trafic 14 jours).'
+                : 'Aujourd’hui, chaque correction attend ton OK. Active pour que le robot applique ET publie tout seul les corrections sûres — jamais ta page d’accueil, jamais le design. Il avance en douceur, te prévient à chaque fois, et tout est annulable.'}
             </p>
           </div>
           <button class="btn ${on ? 'btn-secondary' : 'btn-primary'}" data-act="toggle" ${busy ? 'disabled' : ''}>
             ${busy ? '…' : (on ? 'Couper' : 'Activer')}
           </button>
+        </div>
+        <div class="phare-autoapply">
+          <div class="phare-autoapply-head">Ou juste les deux plus sûres, séparément :</div>
+          ${granularRow('schema', st.schema, '🏷️', 'Étiquettes invisibles pour les IA & Google',
+              'Le robot pose tout seul, sur toutes tes pages (sauf l’accueil), l’étiquette invisible qui explique chaque page à Google et aux IA. Rien ne change pour tes visiteurs.')}
+          ${granularRow('image_alts', st.alts, '🖼️', 'Texte descriptif des images',
+              'Le robot écrit tout seul le petit texte qui décrit chaque image (ce que Google lit à la place de l’image — utile aussi pour l’accessibilité).')}
         </div>`;
+
+      // Interrupteur global
       host.querySelector('[data-act="toggle"]').onclick = async () => {
-        const next = !on;
+        const next = !st.enabled;
         if (next) {
           const sure = await Dialog.confirm(
             'Le robot va APPLIQUER et PUBLIER tout seul les corrections sûres ' +
-            '(titres de pages internes, descriptions, images, plan du site, ' +
-            'redirections) — jamais ta page d’accueil, jamais le design.\n\n' +
+            '(titres de pages internes, descriptions, images, étiquettes ' +
+            'invisibles, plan du site, redirections) — jamais ta page ' +
+            'd’accueil, jamais le design.\n\n' +
             'Il avance en douceur (quelques-unes par heure au maximum), te ' +
             'prévient à chaque fois, et tout est annulable — si le trafic d’un ' +
             'site décroche dans les 14 jours, tu es alerté pour revenir en arrière.',
@@ -1341,25 +1379,244 @@ const Phare = {
               cancelLabel: 'Annuler', danger: true });
           if (!sure) return;
         }
-        paint(on, true);
+        paint(true);
         try {
           const r = await App.api.phare_automerge_set({ enabled: next });
           if (r && r.ok) {
-            paint(!!r.enabled, false);
-            Toast.success(r.enabled
+            st.enabled = !!r.enabled;
+            paint(false);
+            Toast.success(st.enabled
               ? 'C’est parti — le robot agit seul sur les corrections sûres'
               : 'Robot autonome coupé — tout repasse par ton OK');
           } else {
-            paint(on, false);
+            paint(false);
             Toast.friendlyError(r && r.error, 'Le réglage n’a pas pu être enregistré. Réessaie dans un instant.');
           }
-        } catch (e) {
-          paint(on, false);
-          Toast.friendlyError(e);
-        }
+        } catch (e) { paint(false); Toast.friendlyError(e); }
       };
+
+      // Interrupteurs ciblés (étiquettes / images) — désactivés si le global est ON
+      host.querySelectorAll('[data-toggle]').forEach(btn => {
+        btn.onclick = async () => {
+          const key = btn.dataset.toggle;
+          const cur = key === 'schema' ? st.schema : st.alts;
+          btn.disabled = true; btn.textContent = '…';
+          try {
+            const r = await App.api.phare_autoapply_set({ [key]: !cur });
+            if (r && r.ok) {
+              st.schema = !!r.auto_apply_schema;
+              st.alts = !!r.auto_apply_image_alts;
+              paint(false);
+              const onNow = key === 'schema' ? st.schema : st.alts;
+              Toast.success(onNow ? 'Activé — le robot s’en occupe tout seul'
+                                  : 'Coupé — ça repasse par ton OK');
+            } else { paint(false); Toast.friendlyError(r && r.error, 'Réglage impossible.'); }
+          } catch (e) { paint(false); Toast.friendlyError(e); }
+        };
+      });
     };
-    paint(enabled, false);
+    paint(false);
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  //  PAGES EN SÉRIE — SEO programmatique (modèle + liste → N pages)
+  // ════════════════════════════════════════════════════════════════════
+  async _renderProgrammatic(container) {
+    container.innerHTML = `
+      <section class="phare-page animate-fade-in">
+        <button class="phare-back" data-act="back">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          Retour
+        </button>
+        <header class="phare-home-head">
+          <div class="phare-home-head-left">
+            <div class="phare-kicker">PAGES EN SÉRIE</div>
+            <h1 class="phare-title">Des dizaines de pages, d’un coup.</h1>
+            <p class="phare-subtitle">Tu écris UN modèle (« Plombier à {ville} »), tu colles ta liste, l’IA rédige une vraie page par valeur. Tu relis, tu publies.</p>
+          </div>
+        </header>
+        <div class="phare-prog-warn">
+          ⚠️ <strong>À doser.</strong> Google récompense les pages vraiment utiles et sanctionne les pages creuses fabriquées en masse. Vise des sujets où chaque page apporte une info locale réelle — et relis toujours avant de publier.
+        </div>
+        <details class="phare-prog-new">
+          <summary>+ Nouveau modèle</summary>
+          <div id="ph-prog-form"></div>
+        </details>
+        <div id="ph-prog-list"><div class="phare-loading">Chargement…</div></div>
+      </section>`;
+    container.querySelector('[data-act="back"]').onclick = () => this._go('coulisses');
+    this._progRenderForm(container.querySelector('#ph-prog-form'));
+    this._progLoad();
+  },
+
+  async _progRenderForm(host) {
+    if (!host) return;
+    let sites = this._homeSites || [];
+    if (!sites.length && App.api) {
+      try { const r = await App.api.phare_home({}); if (r && r.ok) sites = r.sites || []; } catch (e) { /* tolère */ }
+    }
+    const opts = sites.map(s => `<option value="${this._esc(s.id)}">${this._esc(s.name || s.domain)}</option>`).join('');
+    host.innerHTML = `
+      <div class="phare-prog-form">
+        <label>Sur quel site ?</label>
+        <select id="pf-site">${opts || '<option value="">Aucun site suivi</option>'}</select>
+        <label>Nom du modèle (juste pour toi)</label>
+        <input id="pf-name" placeholder="ex. Plombier par ville" />
+        <label>Le mot qui change à chaque page</label>
+        <input id="pf-var" placeholder="ex. ville" value="ville" />
+        <label>Adresse de chaque page</label>
+        <input id="pf-url" placeholder="/plombier-{ville}" />
+        <label>Titre de chaque page</label>
+        <input id="pf-title" placeholder="Plombier à {ville} : dépannage rapide" />
+        <label>Petit texte sous le titre dans Google (optionnel)</label>
+        <input id="pf-meta" placeholder="Besoin d’un plombier à {ville} ?…" />
+        <label>Plan de la page (optionnel — les grandes parties)</label>
+        <textarea id="pf-outline" rows="3" placeholder="## Nos services à {ville}&#10;## Tarifs&#10;## Pourquoi nous choisir"></textarea>
+        <label>Ta liste de valeurs (une par ligne)</label>
+        <textarea id="pf-values" rows="5" placeholder="Brest&#10;Quimper&#10;Lorient&#10;…"></textarea>
+        <div id="pf-msg" class="phare-prog-msg"></div>
+        <button class="btn btn-primary" id="pf-create">Créer le modèle</button>
+      </div>`;
+    host.querySelector('#pf-create').onclick = async () => {
+      const g = id => host.querySelector('#' + id);
+      const msg = g('pf-msg'); msg.textContent = '';
+      const payload = {
+        site_id: g('pf-site').value, name: g('pf-name').value.trim(),
+        var_name: g('pf-var').value.trim(), url_pattern: g('pf-url').value.trim(),
+        title_pattern: g('pf-title').value.trim(), meta_pattern: g('pf-meta').value.trim(),
+        body_outline_md: g('pf-outline').value.trim(), values: g('pf-values').value,
+      };
+      const btn = g('pf-create'); btn.disabled = true; const lbl = btn.textContent; btn.textContent = 'Création…';
+      try {
+        const r = await App.api.phare_prog_template_create(payload);
+        if (r && (r.ok || r.template_id)) {
+          Toast.success('Modèle créé. Clique « Écrire un lot » pour générer les pages.');
+          ['pf-name', 'pf-url', 'pf-title', 'pf-meta', 'pf-outline', 'pf-values'].forEach(id => g(id).value = '');
+          this._progLoad();
+        } else { msg.textContent = (r && r.error) || 'Création impossible.'; }
+      } catch (e) { msg.textContent = 'Création impossible.'; }
+      finally { btn.disabled = false; btn.textContent = lbl; }
+    };
+  },
+
+  async _progLoad() {
+    const host = document.getElementById('ph-prog-list');
+    if (!host) return;
+    let tpls = [];
+    try {
+      const r = await App.api.phare_prog_list({});
+      if (r && r.ok) tpls = r.templates || [];
+      else { host.innerHTML = `<div class="phare-prog-empty">Impossible de charger les modèles.</div>`; return; }
+    } catch (e) { host.innerHTML = `<div class="phare-prog-empty">Impossible de charger les modèles.</div>`; return; }
+    if (!tpls.length) { host.innerHTML = `<div class="phare-prog-empty">Aucun modèle pour l’instant. Crée-en un au-dessus.</div>`; return; }
+    host.innerHTML = tpls.map(t => this._progCard(t)).join('');
+    this._progWire(host);
+  },
+
+  _progCard(t) {
+    const ready = t.pages_ready || 0;
+    return `
+      <article class="phare-prog-card" data-tid="${this._esc(t.id)}">
+        <div class="phare-prog-card-head">
+          <div>
+            <div class="phare-prog-card-name">${this._esc(t.name)}</div>
+            <div class="phare-prog-card-sub">${this._esc(t.site_name || '')} · <code>${this._esc(t.url_pattern || '')}</code></div>
+          </div>
+          <button class="phare-prog-del" data-act="del" data-id="${this._esc(t.id)}" title="Supprimer ce modèle">🗑</button>
+        </div>
+        <div class="phare-prog-stats">
+          <span><b>${t.pages_total || 0}</b> écrites</span>
+          <span><b>${ready}</b> prêtes</span>
+          <span><b>${t.pages_published || 0}</b> en ligne</span>
+        </div>
+        <div class="phare-prog-actions">
+          <button class="btn btn-secondary btn-sm" data-act="gen" data-id="${this._esc(t.id)}">✍️ Écrire un lot</button>
+          <button class="btn btn-secondary btn-sm" data-act="review" data-id="${this._esc(t.id)}">👁 Relire (${t.pages_total || 0})</button>
+          <button class="btn btn-primary btn-sm" data-act="pub" data-id="${this._esc(t.id)}" ${ready ? '' : 'disabled'}>🚀 Mettre en ligne${ready ? ' (' + ready + ')' : ''}</button>
+        </div>
+        <div class="phare-prog-review" id="ph-prog-rev-${this._esc(t.id)}"></div>
+      </article>`;
+  },
+
+  _progWire(host) {
+    host.querySelectorAll('[data-act="del"]').forEach(b => b.onclick = () => this._progDelete(b.dataset.id));
+    host.querySelectorAll('[data-act="gen"]').forEach(b => b.onclick = () => this._progGenerate(b.dataset.id, b));
+    host.querySelectorAll('[data-act="review"]').forEach(b => b.onclick = () => this._progReview(b.dataset.id));
+    host.querySelectorAll('[data-act="pub"]').forEach(b => b.onclick = () => this._progPublish(b.dataset.id, b));
+  },
+
+  async _progGenerate(tid, btn) {
+    const sure = await Dialog.confirm(
+      'L’IA va écrire un lot de pages (jusqu’à 10) pour ce modèle. Ça prend une à deux minutes et consomme de l’IA.',
+      { title: 'Écrire un lot', okLabel: 'Écrire', cancelLabel: 'Annuler' });
+    if (!sure) return;
+    btn.disabled = true; const lbl = btn.textContent; btn.textContent = 'Lancement…';
+    try {
+      const r = await App.api.phare_prog_generate({ template_id: tid, batch_size: 10 });
+      if (r && r.ok) Toast.success('C’est parti — l’IA écrit les pages. Reviens dans une à deux minutes et clique « Relire ».');
+      else Toast.friendlyError(r && r.error, 'Lancement impossible.');
+    } catch (e) { Toast.friendlyError(e); }
+    finally { btn.disabled = false; btn.textContent = lbl; }
+  },
+
+  async _progReview(tid) {
+    const host = document.getElementById('ph-prog-rev-' + tid);
+    if (!host) return;
+    if (host.dataset.open === '1') { host.dataset.open = ''; host.innerHTML = ''; return; }
+    host.dataset.open = '1';
+    host.innerHTML = `<div class="phare-loading">Chargement des pages…</div>`;
+    let pages = [];
+    try { const r = await App.api.phare_prog_pages_list({ template_id: tid }); if (r && r.ok) pages = r.pages || []; } catch (e) { /* tolère */ }
+    if (!pages.length) { host.innerHTML = `<div class="phare-prog-empty">Aucune page écrite. Clique « Écrire un lot ».</div>`; return; }
+    host.innerHTML = pages.map(p => {
+      const q = p.quality_score || 0;
+      const cls = q >= 70 ? 'good' : q >= 50 ? 'mid' : 'low';
+      const pub = p.status === 'published';
+      return `<div class="phare-prog-page">
+        <div class="phare-prog-page-q phare-prog-page-q--${cls}" title="Note de qualité sur 100">${q}</div>
+        <div class="phare-prog-page-main">
+          <div class="phare-prog-page-title">${this._esc(p.generated_title || '(sans titre)')}</div>
+          <div class="phare-prog-page-meta"><code>${this._esc(p.generated_url || '')}</code> · ${p.word_count || 0} mots${pub ? ' · <b>en ligne</b>' : ''}</div>
+        </div>
+        ${pub ? '' : `<button class="phare-prog-del" data-pdel="${this._esc(p.id)}" title="Jeter cette page">🗑</button>`}
+      </div>`;
+    }).join('');
+    host.querySelectorAll('[data-pdel]').forEach(b => b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await App.api.phare_prog_page_delete({ id: b.dataset.pdel });
+        if (r && r.ok) b.closest('.phare-prog-page').remove();
+        else Toast.friendlyError(r && r.error, 'Suppression impossible.');
+      } catch (e) { Toast.friendlyError(e); }
+    });
+  },
+
+  async _progPublish(tid, btn) {
+    const sure = await Dialog.confirm(
+      'Mettre en ligne les pages relues et assez bonnes (note ≥ 60) de ce modèle ? Elles seront publiées sur le site, avec leurs étiquettes invisibles pour Google et les IA.',
+      { title: 'Mettre en ligne', okLabel: 'Publier', cancelLabel: 'Annuler', danger: true });
+    if (!sure) return;
+    btn.disabled = true; const lbl = btn.textContent; btn.textContent = 'Publication…';
+    try {
+      const r = await App.api.phare_prog_publish({ template_id: tid });
+      if (r && r.ok) {
+        Toast.success(r.published ? `${r.published} page(s) mises en ligne 🚀` : (r.message || 'Rien à publier.'));
+        this._progLoad();
+      } else Toast.friendlyError(r && r.error, 'Publication impossible.');
+    } catch (e) { Toast.friendlyError(e); }
+    finally { btn.disabled = false; btn.textContent = lbl; }
+  },
+
+  async _progDelete(tid) {
+    const sure = await Dialog.confirm(
+      'Supprimer ce modèle et toutes ses pages écrites non publiées ? (Les pages déjà en ligne restent sur le site.)',
+      { title: 'Supprimer le modèle', okLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true });
+    if (!sure) return;
+    try {
+      const r = await App.api.phare_prog_template_delete({ id: tid });
+      if (r && r.ok) { Toast.success('Modèle supprimé.'); this._progLoad(); }
+      else Toast.friendlyError(r && r.error, 'Suppression impossible.');
+    } catch (e) { Toast.friendlyError(e); }
   },
 
   // ════════════════════════════════════════════════════════════════════

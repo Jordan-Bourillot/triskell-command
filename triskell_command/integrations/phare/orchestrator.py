@@ -348,6 +348,47 @@ def run_onpage_optim(site_id: str, page_path: str = "/",
 
 
 # ---------------------------------------------------------------------------
+# Mission « Étiquettes invisibles » — données structurées sur tout le site
+# ---------------------------------------------------------------------------
+def run_schema_pass(site_id: str, *, app_state=None) -> dict:
+    """Repère les pages SANS étiquette invisible (données structurées) et crée
+    UNE carte par site. L'Exécuteur pose ensuite le balisage déterministe
+    (schema_architect) — jamais la page d'accueil (décision de Jordan).
+    Idempotent : si tout est déjà balisé, ne crée rien ; dedup empêche les
+    cartes en double."""
+    site = repo.get_site(site_id)
+    if not site:
+        return {"ok": False, "error": "site introuvable"}
+    pages = repo.list_pages(site_id, limit=500)
+    targets = [p for p in pages
+               if not (p.get("schema_types") or [])
+               and (p.get("path") or "/") != "/"]
+    if not targets:
+        return {"ok": True, "skipped": "déjà balisé", "pages": 0}
+    n = len(targets)
+    sample = ", ".join((p.get("path") or "/") for p in targets[:8])
+    action = repo.insert_action({
+        "site_id": site_id,
+        "agent": "schema_architect",
+        "kind": "recommandation",
+        "title": (f"Étiquettes pour les IA : {n} page"
+                  f"{'s' if n > 1 else ''} à équiper"),
+        "detail_md": (f"**{n} page{'s' if n > 1 else ''}** n'ont pas encore "
+                      "leur étiquette invisible (données structurées) que "
+                      "Google et les IA lisent.\n\n"
+                      f"Pages concernées : {sample}" + (" …" if n > 8 else "")
+                      + "."),
+        "simple_md": ("J'ajoute sur chaque page une étiquette invisible qui "
+                      "explique à Google et aux IA (ChatGPT, Perplexité) de "
+                      "quoi parle la page — sans rien changer à ce que voient "
+                      "tes visiteurs."),
+        "status": "draft",
+        "impact": 4, "effort": 1,
+    })
+    return {"ok": True, "action_id": (action or {}).get("id"), "pages": n}
+
+
+# ---------------------------------------------------------------------------
 # Mission 4 — Maillage interne et inter-sites
 # ---------------------------------------------------------------------------
 def run_tisseur(site_id: str, *, app_state=None) -> dict:
@@ -753,7 +794,8 @@ def auto_merge_verified(*, max_merges: int = 3,
 # liens — jamais le contenu visible ni le design. On exclut volontairement les
 # cartes « famille inconnue » (le filet optimiste de classify_for_apply) :
 # elles peuvent échouer ou demander un humain → pas d'auto-application.
-_AUTO_SAFE_AGENTS = ("sitemap_builder", "image_seo", "redirect_fixer")
+_AUTO_SAFE_AGENTS = ("sitemap_builder", "image_seo", "redirect_fixer",
+                     "schema_architect")
 _AUTO_SAFE_FAMILIES = {"title", "meta", "canonical", "noindex", "h1",
                        "schema", "alt", "sitemap"}
 
@@ -801,17 +843,33 @@ def auto_apply_safe(*, max_apply: int = 8, app_state=None) -> dict:
     (toutes sites), sans attendre le clic de Jordan. process_apply_queue les
     prépare, vérifie et publie ensuite — le reste attend une décision humaine.
 
+    Trois interrupteurs (phare_config, tous défaut False) :
+      - auto_merge_enabled       : le robot agit seul sur TOUTES les familles
+                                   sûres (titre, méta, h1, données structurées,
+                                   alt, plan du site…) ;
+      - auto_apply_schema        : seulement les étiquettes invisibles (données
+                                   structurées) ;
+      - auto_apply_image_alts    : seulement le texte descriptif des images.
+    Les deux derniers laissent Jordan activer le plus sûr SANS ouvrir la vanne
+    globale.
+
     Garde-fous :
-      - même interrupteur que l'auto-publication (phare_config.auto_merge_enabled,
-        défaut False) : un seul réglage = « le robot agit seul » ;
       - familles connues sûres uniquement (jamais le contenu/le design) ;
       - plafond par passage ; une carte déjà en file/préparée n'est jamais reprise ;
       - chaque modif passe par les vérifs de l'Exécuteur + reste annulable
         (rollback_watch surveille le trafic 14 j).
     """
     cfg = repo.get_config()
-    if not cfg.get("auto_merge_enabled", False):
+    global_on = bool(cfg.get("auto_merge_enabled", False))
+    schema_on = bool(cfg.get("auto_apply_schema", False))
+    alts_on = bool(cfg.get("auto_apply_image_alts", False))
+    if not (global_on or schema_on or alts_on):
         return {"ok": True, "skipped": "disabled"}
+    granular: set[str] = set()
+    if schema_on:
+        granular.add("schema")
+    if alts_on:
+        granular.add("alt")
     from . import plain_language
     drafts = repo.list_actions(status="draft", limit=200)
     enqueued: list[dict] = []
@@ -823,6 +881,19 @@ def auto_apply_safe(*, max_apply: int = 8, app_state=None) -> dict:
             continue
         if not _is_auto_safe(a):
             continue
+        # Mode granulaire (vanne globale coupée) : on n'applique QUE les familles
+        # explicitement autorisées, et UNIQUEMENT si TOUTE la carte tient dans
+        # ces familles (une carte « titre + données structurées » ne passe pas
+        # en mode « schema seul » — elle changerait aussi le titre).
+        if not global_on:
+            agent_low = (a.get("agent") or "").lower()
+            fams = set(plain_language._families_of(a))
+            if agent_low == "image_seo":
+                fams.add("alt")
+            elif agent_low == "schema_architect":
+                fams.add("schema")
+            if not (fams and fams.issubset(granular)):
+                continue
         sid = a.get("site_id") or ""
         site = sites_cache.get(sid)
         if site is None:

@@ -503,6 +503,34 @@ def _apply_one(action_id: str, *, app_state=None) -> dict:
         out = {"mode": "patches", "patches": patches,
                "simple_md": ("J'ajoute le petit texte qui décrit tes images "
                              "(ce que Google lit à la place de l'image).")}
+    elif agent_name == "schema_architect":
+        # Étiquettes invisibles (données structurées) : génération DÉTERMINISTE
+        # via schema_architect, sur les pages encore sans balisage — jamais
+        # l'accueil (décision de Jordan). Aucune IA, aucune invention.
+        from . import schema_architect
+        targets = [p for p in pages
+                   if not (p.get("schema_types") or [])
+                   and (p.get("path") or "/") != "/"]
+        patches = []
+        for p in targets[:30]:
+            try:
+                gen = schema_architect.generate_schemas(p, site)
+            except Exception as exc:
+                logger.debug("schema gen %s: %s", p.get("path"), exc)
+                continue
+            if gen.get("minified_jsonld"):
+                patches.append({"field": "head_insert",
+                                "page_path": p.get("path") or "/",
+                                "new": gen["minified_jsonld"]})
+        if not patches:
+            return _manual(action_id,
+                           "Toutes tes pages ont déjà leur étiquette invisible "
+                           "— rien à ajouter.")
+        out = {"mode": "patches", "patches": patches,
+               "simple_md": (f"J'ajoute l'étiquette invisible sur {len(patches)} "
+                             "page" + ("s" if len(patches) > 1 else "") +
+                             " — elle dit à Google et aux IA de quoi parle "
+                             "chaque page.")}
     elif agent_name == "redirect_fixer":
         # Lien interne en double étape : on le rend direct (déterministe).
         chain = _parse_redirect_chain(action.get("detail_md") or "")
@@ -605,6 +633,10 @@ _INVISIBLE_FAMILIES = {"title", "meta", "canonical", "noindex", "schema",
 
 def _is_metadata_only(action: dict) -> bool:
     """La modif ne touche QUE des métadonnées invisibles (pas le visuel) ?"""
+    # L'agent « étiquettes invisibles » n'insère que du JSON-LD dans le <head> :
+    # invisible par construction, peu importe le libellé de la carte.
+    if (action.get("agent") or "").lower() == "schema_architect":
+        return True
     title_low = (action.get("title") or "").lower()
     # FAQ structurée + préchargement = insertions dans le <head>, invisibles.
     if any(k in title_low for k in ("faq", "précharg", "precharg", "preload",
