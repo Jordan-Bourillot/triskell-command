@@ -4181,16 +4181,42 @@ class Api:
             f'<a class="btn btn-primary" href="/">Découvrir {n}</a>'
             "</section>")
 
+    def _prog_decorate_article(self, content_html: str):
+        """Ajoute un id à chaque <h2> et construit le sommaire cliquable.
+        Renvoie (sommaire_html, contenu_avec_ancres)."""
+        import re as _re
+        toc = []
+
+        def _h2(m):
+            inner = m.group(1)
+            text = _re.sub(r"<[^>]+>", "", inner).strip()
+            slug = self._geo_slugify(text) if text else f"s{len(toc) + 1}"
+            toc.append((slug, text))
+            return f'<h2 id="{slug}">{inner}</h2>'
+
+        decorated = _re.sub(r"<h2>(.*?)</h2>", _h2, content_html or "",
+                            flags=_re.DOTALL)
+        toc_html = ""
+        if len(toc) >= 2:
+            items = "".join(
+                f'<li><a href="#{s}">{self._geo_esc_attr(t)}</a></li>'
+                for s, t in toc)
+            toc_html = ('<nav class="geo-toc" aria-label="Sommaire">'
+                        '<div class="geo-toc-label">Au sommaire</div>'
+                        f'<ol>{items}</ol></nav>')
+        return toc_html, decorated
+
     def _prog_build_native_page(self, *, title: str, content_html: str,
                                 shell: dict, site_name: str,
                                 meta_description: str, canonical: str,
                                 jsonld_html: str = "", published_at: str = "",
                                 cta_html: str = "") -> str:
-        """Assemble une page habillée comme le site : son en-tête/menu, sa
-        charte (CSS + polices), le contenu, l'appel à l'action, son pied de
-        page. Plus de texte brut sur fond blanc."""
+        """Page ÉDITORIALE habillée comme le site (charte via ses variables
+        CSS) : accroche, chapô, sommaire cliquable, sections aérées, encart
+        d'action. Plus de mur de texte."""
         e = self._geo_esc_attr
         t, n, m, c = (e(title), e(site_name), e(meta_description), e(canonical))
+        toc_html, body_html = self._prog_decorate_article(content_html)
         return f"""<!doctype html>
 <html lang="fr">
 <head>
@@ -4206,27 +4232,82 @@ class Api:
   {shell.get("head", "")}
   {jsonld_html}
   <style>
-    .geo-article {{ max-width: 760px; margin: 0 auto; padding: 48px 24px 8px;
-                    line-height: 1.7; }}
-    .geo-article h1 {{ font-size: 2.1rem; line-height: 1.2; margin: 0 0 .6em; }}
-    .geo-article h2 {{ font-size: 1.45rem; margin: 1.8em 0 .5em; }}
-    .geo-article h3 {{ font-size: 1.15rem; margin: 1.4em 0 .4em; }}
-    .geo-article p, .geo-article li {{ font-size: 1.05rem; }}
-    .geo-article table {{ border-collapse: collapse; width: 100%; margin: 1.2em 0; }}
-    .geo-article th, .geo-article td {{ border: 1px solid rgba(0,0,0,.12);
-                                          padding: 8px 12px; text-align: left; }}
-    .geo-cta {{ max-width: 760px; margin: 8px auto 56px; padding: 32px 28px;
-               text-align: center; border-radius: 18px; background: rgba(0,0,0,.045); }}
-    .geo-cta h2 {{ margin: 0 0 .35em; font-size: 1.45rem; }}
-    .geo-cta p {{ margin: 0 0 1.2em; opacity: .85; }}
+    .geo-wrap {{ max-width: 768px; margin: 0 auto; padding: 56px 24px 8px;
+                 font-family: var(--font-body, system-ui, sans-serif);
+                 color: var(--text-mid, #3F4842); }}
+    .geo-eyebrow {{ font-size: .76rem; font-weight: 700; letter-spacing: .14em;
+                    text-transform: uppercase; color: var(--emerald, #1B7849);
+                    margin-bottom: 16px; }}
+    .geo-title {{ font-family: var(--font-display, Georgia, serif); font-weight: 600;
+                  font-size: clamp(2rem, 5vw, 2.85rem); line-height: 1.1;
+                  color: var(--text, #15201A); margin: 0 0 .45em; }}
+    .geo-lead {{ font-size: 1.28rem; line-height: 1.6;
+                 color: var(--text-mid, #3F4842); margin: 0; }}
+    .geo-rule {{ height: 3px; width: 56px; background: var(--gold, #B58A2B);
+                 border: 0; border-radius: 3px; margin: 28px 0 40px; }}
+    .geo-toc {{ background: var(--bg-soft, #F4F0E6);
+                border: 1px solid var(--border, #E5DFD0);
+                border-radius: var(--radius, 12px); padding: 20px 26px; margin: 0 0 48px; }}
+    .geo-toc-label {{ font-size: .74rem; font-weight: 700; letter-spacing: .12em;
+                      text-transform: uppercase; color: var(--muted, #6B746E);
+                      margin-bottom: 12px; }}
+    .geo-toc ol {{ margin: 0; padding-left: 1.2em; }}
+    .geo-toc li {{ margin: 7px 0; }}
+    .geo-toc a {{ color: var(--text, #15201A); text-decoration: none; }}
+    .geo-toc a:hover {{ color: var(--emerald, #1B7849); text-decoration: underline; }}
+    .geo-body {{ font-size: 1.13rem; line-height: 1.8; }}
+    .geo-body > p:first-of-type {{ font-size: 1.22rem; color: var(--text, #15201A); }}
+    .geo-body h2 {{ font-family: var(--font-display, Georgia, serif); font-weight: 600;
+                    font-size: 1.72rem; line-height: 1.25; color: var(--text, #15201A);
+                    margin: 2em 0 .55em; padding-top: .7em;
+                    border-top: 1px solid var(--border, #E5DFD0); scroll-margin-top: 24px; }}
+    .geo-body h3 {{ font-family: var(--font-display, Georgia, serif); font-weight: 600;
+                    font-size: 1.28rem; color: var(--text, #15201A); margin: 1.7em 0 .4em; }}
+    .geo-body p {{ margin: 0 0 1.25em; }}
+    .geo-body strong {{ color: var(--text, #15201A); font-weight: 600; }}
+    .geo-body ul, .geo-body ol {{ margin: 0 0 1.4em; padding-left: 0; list-style: none; }}
+    .geo-body ul li {{ position: relative; padding-left: 1.7em; margin: .55em 0; }}
+    .geo-body ul li::before {{ content: ""; position: absolute; left: .2em; top: .62em;
+                               width: 7px; height: 7px; border-radius: 50%;
+                               background: var(--emerald, #1B7849); }}
+    .geo-body ol {{ counter-reset: g; }}
+    .geo-body ol li {{ position: relative; padding-left: 2.4em; margin: .7em 0;
+                       counter-increment: g; }}
+    .geo-body ol li::before {{ content: counter(g); position: absolute; left: 0; top: .05em;
+                               width: 1.6em; height: 1.6em; border-radius: 50%;
+                               background: var(--emerald, #1B7849); color: #fff;
+                               font-size: .82em; font-weight: 700;
+                               display: grid; place-items: center; }}
+    .geo-body a {{ color: var(--emerald-deep, #0E5C36); }}
+    .geo-body table {{ width: 100%; border-collapse: collapse; margin: 1.5em 0; font-size: .98rem; }}
+    .geo-body th, .geo-body td {{ border: 1px solid var(--border, #E5DFD0);
+                                  padding: 10px 14px; text-align: left; }}
+    .geo-body th {{ background: var(--bg-soft, #F4F0E6); font-weight: 600;
+                    color: var(--text, #15201A); }}
+    .geo-cta {{ margin: 56px auto 72px; padding: 44px 32px; text-align: center;
+                background: var(--emerald-deep, #0E5C36); color: #fff;
+                border-radius: var(--radius-lg, 20px); }}
+    .geo-cta h2 {{ font-family: var(--font-display, Georgia, serif); font-weight: 600;
+                   font-size: 1.7rem; margin: 0 0 .35em; color: #fff; }}
+    .geo-cta p {{ margin: 0 0 1.5em; font-size: 1.1rem; opacity: .9; }}
+    .geo-cta a {{ display: inline-block; background: #fff;
+                  color: var(--emerald-deep, #0E5C36); padding: 14px 30px;
+                  border-radius: var(--radius, 12px); font-weight: 700; text-decoration: none; }}
+    .geo-cta a:hover {{ transform: translateY(-1px); }}
   </style>
 </head>
 <body>
 {shell.get("header", "")}
-  <main>
-    <article class="geo-article">
-      <h1>{t}</h1>
-      {content_html}
+  <main class="geo-wrap">
+    <header class="geo-hero">
+      <div class="geo-eyebrow">Guide pratique</div>
+      <h1 class="geo-title">{t}</h1>
+      <p class="geo-lead">{m}</p>
+    </header>
+    <hr class="geo-rule" />
+    {toc_html}
+    <article class="geo-body">
+      {body_html}
     </article>
     {cta_html}
   </main>
