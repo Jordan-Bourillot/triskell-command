@@ -48,6 +48,7 @@ const VIEW_COLOR_MAP = {
   // ATELIER — lime
   catalogue: 'lime',
   brain: 'lime',
+  flux_studio: 'lime',
   eliks: 'lime',
   // SYSTÈME — emerald
   health: 'emerald',
@@ -60,7 +61,7 @@ const KNOWN_VIEWS = [
   'morning', 'replies', 'mails', 'brain', 'drafts', 'funnel', 'revenue',
   'clients', 'eliks', 'clients_master', 'phare', 'geo', 'wow', 'rankus',
   'lagriffe', 'pixelpros', 'pixelpros-affiliates', 'mail_templates',
-  'obelisk', 'prospects_crm', 'catalogue', 'config', 'tutorial',
+  'obelisk', 'prospects_crm', 'catalogue', 'flux_studio', 'config', 'tutorial',
   'autopilot', 'convoy', 'prospection', 'chasseur', 'chasseur_createurs',
   'prospecteur_google', 'argus', 'eclaireur', 'delivery', 'health',
   'abtest', 'prospect_timeline', 'creators',
@@ -688,6 +689,7 @@ const App = {
       case 'prospects_crm': return Obelisk.renderCreatorsView(target, params);
       case 'creators':  return Creators.render(target);
       case 'catalogue': return Catalogue.render(target);
+      case 'flux_studio': return FluxStudio.render(target);
       case 'config':    return Config.render(target, params);
       case 'tutorial':  return Tutorial.render(target);
       case 'autopilot': return Autopilot.render(target);

@@ -3035,6 +3035,60 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
+    # Studio d'images — génération FLUX (Black Forest Labs)
+    # ------------------------------------------------------------------
+    def flux_models(self) -> dict:
+        """Styles et formats du Studio d'images (génération gratuite)."""
+        from ..integrations import flux_studio
+        return {
+            "ok": True,
+            "free": True,
+            "styles": flux_studio.list_styles(),
+            "formats": flux_studio.list_formats(),
+            "default_style": flux_studio.DEFAULT_STYLE,
+            "default_format": flux_studio.DEFAULT_FORMAT,
+        }
+
+    def flux_generate(self, payload: dict) -> dict:
+        """Génère une image (gratuit). payload = {prompt, style?, format?, seed?}.
+        Renvoie {ok, image:{id, prompt, url, data_url, ...}} ou {ok:False, error}."""
+        from ..integrations import flux_studio
+        p = payload or {}
+        return flux_studio.generate(
+            p.get("prompt"),
+            style_id=(p.get("style") or flux_studio.DEFAULT_STYLE),
+            format_id=(p.get("format") or flux_studio.DEFAULT_FORMAT),
+            seed=p.get("seed"),
+            client=self._supabase(),
+            app_state=self._app_state,
+        )
+
+    def flux_history(self) -> dict:
+        """Images déjà générées (les plus récentes d'abord)."""
+        from ..integrations import flux_studio
+        try:
+            return {"ok": True,
+                    "items": flux_studio.list_history(self._supabase())}
+        except Exception as exc:
+            logger.warning("flux_history: %s", exc)
+            return {"ok": True, "items": []}
+
+    def flux_delete(self, payload: dict) -> dict:
+        """Retire une image de l'historique. payload = {id}."""
+        from ..integrations import flux_studio
+        p = payload or {}
+        img_id = (p.get("id") or "").strip()
+        if not img_id:
+            return {"ok": False, "error": "id requis"}
+        try:
+            res = flux_studio.delete_history_item(
+                img_id, client=self._supabase())
+            return {"ok": True, "items": res.get("history", [])}
+        except Exception as exc:
+            logger.warning("flux_delete: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
     # Le Phare — agence SEO autonome multi-sites
     # ------------------------------------------------------------------
     def phare_overview(self) -> dict:
