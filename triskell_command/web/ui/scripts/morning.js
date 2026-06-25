@@ -672,6 +672,13 @@ const Morning = {
   _startAutoRefresh() {
     if (this._refreshTimer) clearInterval(this._refreshTimer);
     this._refreshTimer = setInterval(() => this._softRefresh(), this._refreshIntervalMs);
+    // Dès qu'on quitte le Cockpit, on COUPE ce rafraîchissement. Sans ça il
+    // survivait à la navigation (l'audit minuteurs du 10/06 l'avait oublié) :
+    // comme la Boîte de réception réutilise l'id « m-content », il réinjectait
+    // le tableau de bord par-dessus les mails.
+    App.onViewCleanup(() => {
+      if (this._refreshTimer) { clearInterval(this._refreshTimer); this._refreshTimer = null; }
+    });
     if (!this._visibilityBound) {
       this._visibilityBound = true;
       document.addEventListener('visibilitychange', () => {
@@ -789,6 +796,14 @@ const Morning = {
   },
 
   async _softRefresh() {
+    // Garde-fou : on n'est plus sur le Cockpit ? On coupe net, sans rien
+    // écrire. La Boîte de réception utilise le MÊME id « m-content » — sans
+    // ce contrôle, le digest du Cockpit s'injectait dans les mails (le
+    // tableau de bord apparaissait au milieu de la boîte de réception).
+    if (typeof App !== 'undefined' && App.currentView !== 'morning') {
+      if (this._refreshTimer) { clearInterval(this._refreshTimer); this._refreshTimer = null; }
+      return;
+    }
     const slot = document.getElementById('m-content');
     if (!slot) {
       // Vue détruite — on coupe le timer
