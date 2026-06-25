@@ -77,6 +77,7 @@ PUBLIC_API_PATHS = {
     "/api/pixelpros/contact",  # Formulaire de contact des sites clients (public, rate-limité)
     "/api/pixelpros/contact_studio",  # Formulaire de contact de pixel-pros.fr (public, rate-limité)
     "/api/unsubscribe",  # Désinscription en 1 clic (lien signé dans les mails de prospection)
+    "/api/relay_send",  # Relais d'envoi pour un service externe (protégé par jeton RELAY_MAIL_TOKEN)
 }
 
 # Utilisateurs reconnus (étendre ici si on ajoute du monde)

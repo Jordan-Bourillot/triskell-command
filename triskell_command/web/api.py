@@ -5634,6 +5634,60 @@ class Api:
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
+    # Relais d'envoi pour un service externe (ex : le site « Taillé pour
+    # le poste » sur Netlify) — protégé par un jeton dédié, PAS par la
+    # session admin (un service tiers ne doit jamais détenir le mot de
+    # passe de Triskell Command).
+    # ------------------------------------------------------------------
+    def relay_send(self, payload: dict) -> dict:
+        """Envoie UN mail au nom d'un service externe autorisé.
+
+        Sécurité : exige le jeton `RELAY_MAIL_TOKEN` (variable d'env de
+        l'hébergeur). Sans jeton configuré, le relais refuse tout. Le jeton
+        est comparé en temps constant (anti timing attack).
+
+        L'envoi passe par `mail_send` (compte 'primary' =
+        contact@triskell-studio.fr par défaut) → le mail est tracé dans
+        « Mails envoyés » exactement comme les autres. `force=True` car c'est
+        un mail transactionnel (livraison d'un achat) : on ne bloque pas sur
+        les avertissements « déjà contacté / déjà client ».
+
+        Payload : { token, to, subject, body, body_html (optionnel),
+                    bcc (optionnel), account_id (optionnel, défaut 'primary') }
+        """
+        import hmac
+        import os
+
+        p = payload or {}
+        expected = (os.environ.get("RELAY_MAIL_TOKEN") or "").strip()
+        token = (p.get("token") or "").strip()
+        if not expected:
+            return {"ok": False, "error": "Relais d'envoi non configuré (RELAY_MAIL_TOKEN absent)."}
+        if not token or not hmac.compare_digest(token, expected):
+            return {"ok": False, "error": "Non autorisé."}
+
+        to = (p.get("to") or "").strip()
+        subject = (p.get("subject") or "").strip()
+        body = (p.get("body") or "").strip()
+        body_html = (p.get("body_html") or "").strip()
+        if not to or "@" not in to:
+            return {"ok": False, "error": "Destinataire invalide."}
+        if not subject:
+            return {"ok": False, "error": "Sujet manquant."}
+        if not body and not body_html:
+            return {"ok": False, "error": "Message vide."}
+
+        return self.mail_send({
+            "account_id": (p.get("account_id") or "primary").strip(),
+            "to": to,
+            "subject": subject,
+            "body": body,
+            "body_html": body_html,
+            "bcc": p.get("bcc") or "",
+            "force": True,
+        })
+
+    # ------------------------------------------------------------------
     # Mails programmés (envoi différé)
     # ------------------------------------------------------------------
     def mail_schedule(self, payload: dict) -> dict:
