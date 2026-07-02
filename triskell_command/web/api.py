@@ -3932,6 +3932,144 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    # ------------------------------------------------------------------
+    # Écran de TRI « sites à refaire » — l'œil de Jordan tranche les cas
+    # que la machine ne sait pas juger (« semble daté mais techniquement OK »).
+    # Pool = fiches que l'ancien œil avait flaguées puis que l'outil objectif
+    # a relâchées (note « Verdict visuel retiré »). Capture propre + 2 boutons.
+    # ------------------------------------------------------------------
+    def oeil_tri_candidates(self, payload: dict | None = None) -> dict:
+        """Renvoie un petit lot de candidats PAS encore triés à la main."""
+        limit = int((payload or {}).get("limit") or 20)
+        try:
+            from triskell_core.db import get_client
+            sb = get_client().raw
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        try:
+            rows = (sb.table("prospects")
+                    .select("id,name,city,industry,website,tags")
+                    .ilike("notes", "%Verdict visuel retiré%")
+                    .limit(500).execute().data) or []
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        # Un même site peut appartenir à plusieurs fiches (plusieurs contacts
+        # d'une même boîte). Le verdict porte sur le SITE, pas la fiche : on ne
+        # le montre donc qu'UNE fois (sinon Jordan jugerait deux fois le même
+        # site, et la 2e décision réécrirait les mêmes fiches).
+        out, reste, seen = [], 0, set()
+        for r in rows:
+            tags = r.get("tags") or []
+            if "oeil_trie_oui" in tags or "oeil_trie_non" in tags:
+                continue
+            site = (r.get("website") or "").strip()
+            if not site:
+                continue
+            key = site.lower().rstrip("/")
+            if key in seen:
+                continue
+            seen.add(key)
+            reste += 1
+            if len(out) < limit:
+                out.append({"id": r["id"], "name": r.get("name") or "",
+                            "website": site,
+                            "ville": r.get("city") or "",
+                            "metier": r.get("industry") or ""})
+        return {"ok": True, "candidates": out, "reste": reste}
+
+    def oeil_tri_capture(self, payload: dict | None = None) -> dict:
+        """Capture LIVE et propre du site d'un candidat (base64 PNG)."""
+        url = ((payload or {}).get("website") or "").strip()
+        if not url:
+            return {"ok": False, "error": "site manquant"}
+        try:
+            import base64
+            from ..integrations import site_vision
+            png = site_vision.screenshot_site(url)
+            if not png:
+                return {"ok": False, "error": "capture impossible"}
+            return {"ok": True, "image": base64.b64encode(png).decode("ascii")}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def oeil_tri_decide(self, payload: dict | None = None) -> dict:
+        """Décision de Jordan : 'refaire' → ajoute aux à refaire (validé
+        humain) ; 'non' → marqué trié (ne revient plus). Écriture directe."""
+        p = payload or {}
+        website = (p.get("website") or "").strip()
+        verdict = (p.get("verdict") or "").strip()
+        if not website or verdict not in ("refaire", "non"):
+            return {"ok": False, "error": "paramètres invalides"}
+        try:
+            from triskell_core.db import get_client
+            sb = get_client().raw
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        try:
+            rows = (sb.table("prospects").select("id,tags,notes")
+                    .eq("website", website).execute().data) or []
+            if not rows:
+                return {"ok": False, "error": "fiche introuvable"}
+            # État DÉTERMINISTE : on repart d'une ardoise propre (on retire
+            # TOUS les tags de décision, y compris site_a_refaire /
+            # a_refaire_humain) puis on pose ceux du verdict courant. Sans
+            # ça, un « il est bien » laissait site_a_refaire en place → le
+            # site restait dans la liste « à refaire », l'inverse du choix.
+            _DECISION_TAGS = ("oeil_trie_oui", "oeil_trie_non",
+                              "site_a_refaire", "a_refaire_humain")
+            _NOTE_MARKERS = ("validé à l'œil par Jordan",
+                             "Vu par Jordan — site OK")
+            for r in rows:
+                tags = [t for t in (r.get("tags") or [])
+                        if t not in _DECISION_TAGS]
+                # Note idempotente : on efface une éventuelle décision œil
+                # précédente avant d'écrire la nouvelle (pas d'empilement,
+                # pas de verdicts contradictoires qui se cumulent).
+                note = "\n".join(
+                    l for l in (r.get("notes") or "").splitlines()
+                    if not any(m in l for m in _NOTE_MARKERS)).strip()
+                if verdict == "refaire":
+                    tags += ["site_a_refaire", "a_refaire_humain", "oeil_trie_oui"]
+                    note = (note + "\n✅ À refaire — validé à l'œil par Jordan").strip()
+                else:
+                    tags.append("oeil_trie_non")
+                    note = (note + "\n🟢 Vu par Jordan — site OK").strip()
+                sb.table("prospects").update(
+                    {"tags": tags, "notes": note}).eq("id", r["id"]).execute()
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def oeil_tri_undo(self, payload: dict | None = None) -> dict:
+        """Annule la dernière décision de tri : retire les étiquettes posées à
+        la main et les notes de décision → la fiche redevient « à trier »."""
+        website = ((payload or {}).get("website") or "").strip()
+        if not website:
+            return {"ok": False, "error": "fiche non identifiée"}
+        try:
+            from triskell_core.db import get_client
+            sb = get_client().raw
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        remove = {"oeil_trie_oui", "oeil_trie_non", "a_refaire_humain",
+                  "site_a_refaire"}
+        try:
+            rows = (sb.table("prospects").select("id,tags,notes")
+                    .eq("website", website).execute().data) or []
+            if not rows:
+                return {"ok": False, "error": "fiche introuvable"}
+            for r in rows:
+                tags = [t for t in (r.get("tags") or []) if t not in remove]
+                note = "\n".join(
+                    l for l in (r.get("notes") or "").splitlines()
+                    if "validé à l'œil par Jordan" not in l
+                    and "Vu par Jordan — site OK" not in l).strip()
+                sb.table("prospects").update(
+                    {"tags": tags, "notes": note}).eq("id", r["id"]).execute()
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def phare_automerge_get(self) -> dict:
         """Lit l'état de la publication automatique des modifs vérifiées.
         Endpoint dédié (et non un settings_set générique) pour ne JAMAIS

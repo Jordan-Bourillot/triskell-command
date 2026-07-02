@@ -84,6 +84,40 @@ _WAIT_IMAGES_JS = r"""async () => {
   }))));
 }"""
 
+# Masque les bandeaux cookies / consentement (ils polluaient la capture et
+# faisaient juger l'IA sur un popup « vieillot » au lieu du vrai site). On vise
+# UNIQUEMENT les conteneurs de consentement (sûr — on ne touche pas au hero).
+_DISMISS_OVERLAYS_JS = r"""() => {
+  const hide = e => { try { e.style.setProperty('display','none','important'); } catch(_){} };
+  // 1) Bandeaux cookies / consentement (ciblage par mots-clés — sûr).
+  const sels = ['[id*="cookie" i]','[class*="cookie" i]','[id*="consent" i]',
+    '[class*="consent" i]','[id*="tarteaucitron" i]','[id*="axeptio" i]',
+    '[id*="didomi" i]','[class*="cookieconsent" i]','[id*="rgpd" i]',
+    '[class*="rgpd" i]','[id*="gdpr" i]','[class*="gdpr" i]',
+    '[aria-label*="cookie" i]','[class*="tarteaucitron" i]'];
+  document.querySelectorAll(sels.join(',')).forEach(hide);
+  // 2) Pop-ups / modales (promo « de retour », newsletter…) qui RECOUVRENT la
+  //    page. On ne masque QUE ce qui flotte au-dessus ET couvre le centre de
+  //    l'écran — jamais le contenu normal (leçon « De retour ! » 21/06).
+  const cx = innerWidth / 2, cy = innerHeight / 2;
+  const pop = '[role="dialog"],[class*="popup" i],[id*="popup" i],[class*="modal" i],[id*="modal" i],[class*="newsletter" i],[id*="newsletter" i]';
+  for (const e of document.querySelectorAll(pop)) {
+    const s = getComputedStyle(e);
+    if (!['fixed', 'absolute', 'sticky'].includes(s.position)) continue;
+    const r = e.getBoundingClientRect();
+    if (r.left <= cx && r.right >= cx && r.top <= cy && r.bottom >= cy &&
+        r.width * r.height > innerWidth * innerHeight * 0.12) hide(e);
+  }
+  // 3) Fonds de modale plein écran (overlay qui voile toute la page).
+  for (const e of document.querySelectorAll('div,section,aside')) {
+    const s = getComputedStyle(e);
+    if (!['fixed', 'absolute'].includes(s.position)) continue;
+    if ((parseInt(s.zIndex) || 0) < 1000) continue;
+    const r = e.getBoundingClientRect();
+    if (r.width >= innerWidth * 0.9 && r.height >= innerHeight * 0.9) hide(e);
+  }
+}"""
+
 
 def _is_blank(png: bytes) -> bool:
     """Vrai si la capture est quasi unie OU dominée par une teinte NEUTRE
@@ -108,7 +142,14 @@ def _is_blank(png: bytes) -> bool:
         # une image de fond pas encore chargée.
         lum = (r + g + b) / 3.0
         neutral = (max(r, g, b) - min(r, g, b)) < 22
-        return neutral and 105 <= lum <= 205 and frac > 0.48
+        if neutral and 105 <= lum <= 205 and frac > 0.48:
+            return True
+        # Hero SOMBRE non chargé = quasi NOIR uniforme (image/vidéo de fond pas
+        # arrivée). Un VRAI site sombre a une photo variée → frac bas ; un noir
+        # quasi uni = capture ratée (cas « Aux Délices » tout noir, 21/06).
+        if lum < 45 and frac > 0.60:
+            return True
+        return False
     except Exception:
         return False
 
@@ -201,7 +242,29 @@ def _shoot(url: str, timeout_ms: int) -> bytes | None:
                     page.evaluate(_WAIT_IMAGES_JS)
                 except Exception:
                     pass
-                page.wait_for_timeout(1800)  # laisse apparaître hero/bandeaux
+                try:
+                    page.wait_for_load_state("networkidle", timeout=5000)
+                except Exception:
+                    pass
+                try:
+                    page.evaluate(_DISMISS_OVERLAYS_JS)  # masque les bandeaux cookies
+                except Exception:
+                    pass
+                page.wait_for_timeout(1500)  # laisse le rendu se stabiliser
+                # Page MAL RENDUE (CSS/images pas chargés → logo en texte alt,
+                # contenu brut sur blanc) : on ne peut pas juger le design → on
+                # abandonne (sinon faux « à refaire », cas sl-maçonnerie 21/06).
+                try:
+                    broken = page.evaluate(r"""() => {
+                      const im = Array.from(document.images || []);
+                      if (!im.length) return 0;
+                      const ko = im.filter(i => i.complete && i.naturalWidth === 0).length;
+                      return ko / im.length;
+                    }""")
+                    if broken is not None and broken > 0.5:
+                        return None
+                except Exception:
+                    pass
                 # On capture le HAUT (hero + 1re section) — le plus parlant
                 # pour juger un design, et net même sur les pages très longues.
                 h = page.evaluate(
@@ -223,8 +286,13 @@ def screenshot_site(url: str, timeout_ms: int = 30000) -> bytes | None:
     if not (url or "").strip():
         return None
     png = _in_thread(_shoot, url.strip(), timeout_ms)
-    if png and _is_blank(png):
-        return None  # capture quasi vide (page pas chargée) → on ne juge pas
+    # Capture ratée (vide / noire / hero pas chargé) → on RÉESSAIE une fois
+    # (souvent le 2e essai charge mieux). Si toujours raté → on ne juge pas.
+    if (png is None or _is_blank(png)):
+        png2 = _in_thread(_shoot, url.strip(), timeout_ms)
+        if png2 and not _is_blank(png2):
+            return png2
+        return None
     return png
 
 
@@ -348,7 +416,7 @@ def _vision_call(prompt: str, png_b64: str, keys: dict) -> tuple[str, str]:
                 "https://api.anthropic.com/v1/messages", timeout=90,
                 headers={"x-api-key": a, "anthropic-version": "2023-06-01",
                          "content-type": "application/json"},
-                json={"model": "claude-3-5-sonnet-latest", "max_tokens": 700,
+                json={"model": "claude-sonnet-4-6", "max_tokens": 700,
                       "messages": [{"role": "user", "content": [
                           {"type": "image", "source": {
                               "type": "base64", "media_type": "image/png",

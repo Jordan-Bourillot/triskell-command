@@ -64,7 +64,7 @@ const KNOWN_VIEWS = [
   'obelisk', 'prospects_crm', 'catalogue', 'flux_studio', 'config', 'tutorial',
   'autopilot', 'convoy', 'prospection', 'chasseur', 'chasseur_createurs',
   'prospecteur_google', 'argus', 'eclaireur', 'delivery', 'health',
-  'abtest', 'prospect_timeline', 'creators',
+  'abtest', 'prospect_timeline', 'creators', 'sites_a_refaire', 'oeil_tri',
 ];
 
 const App = {
@@ -696,6 +696,7 @@ const App = {
       case 'convoy':    return Convoy.render(target);
       case 'prospection': return Prospection.render(target);
       case 'sites_a_refaire': return SitesARefaire.render(target);
+      case 'oeil_tri': return OeilTri.render(target);
       case 'chasseur':  return Chasseur.render(target);
       case 'chasseur_createurs': return ChasseurCreateurs.render(target);
       case 'prospecteur_google': return ProspecteurGoogle.render(target);
