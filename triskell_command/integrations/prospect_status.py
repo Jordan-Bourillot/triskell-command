@@ -375,6 +375,11 @@ def looks_like_bounce(from_addr: str, subject: str) -> bool:
     """Heuristique : ce mail entrant est-il un avis de non-delivrance ?"""
     f = (from_addr or "").lower()
     s = (subject or "").lower()
+    # Rapports DMARC agrégés (sujet normalisé « Report Domain: … ») :
+    # des statistiques d'authentification envoyées par Google/Yahoo/etc.,
+    # souvent depuis noreply-dmarc-*/postmaster@ — PAS des rebonds.
+    if "report domain:" in s or "dmarc" in f:
+        return False
     if any(f.startswith(sender) or f"<{sender}" in f
            for sender in BOUNCE_SENDERS):
         return True

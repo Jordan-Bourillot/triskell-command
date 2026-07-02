@@ -311,12 +311,16 @@ def _log_inbox_mail(client, account_id: str, *, from_addr: str, subject: str,
     """
     sb = client.raw
     try:
-        # Anti-doublon léger
+        # Anti-doublon léger — le in_reply_to fait partie de la clé : les DSN
+        # (rebonds) partagent tous le même sujet générique et le même
+        # mailer-daemon, seul le fil référencé les distingue (4 rebonds de
+        # juin avalés par un doublon de mai avant ce critère).
         check = (sb.table("email_history")
                  .select("id").eq("kind", "inbox_received")
                  .eq("subject", subject[:200])
                  .eq("extra->>account_id", account_id)
                  .eq("extra->>from", from_addr)
+                 .eq("extra->>in_reply_to", in_reply_to or "")
                  .limit(1).execute())
         if check.data:
             return ""
@@ -497,6 +501,10 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
             msgid_to_prospect, from_to_prospect = _get_prospect_index(client)
 
             max_uid_seen = last_uid
+            # Premier UID dont le traitement a échoué : le curseur ne doit
+            # jamais le dépasser, sinon ce mail ne sera plus jamais relu
+            # (4 rebonds de juin perdus comme ça).
+            first_error_uid = 0
 
             for uid in uids:
                 uid_int = int(uid)
@@ -506,6 +514,8 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                     typ, msg_data = M.uid("fetch", uid, "(BODY.PEEK[])")
                     if typ != "OK" or not msg_data:
                         counters["errors"] += 1
+                        if not first_error_uid:
+                            first_error_uid = uid_int
                         continue
                     headers, body, body_html = _parse_fetch_response(msg_data)
                     in_reply_to = _extract_msg_id(headers.get("In-Reply-To", ""))
@@ -758,8 +768,14 @@ def _poll_one_account(client, app_state, account: dict, ai_settings: dict,
                 except Exception as exc:
                     logger.warning("UID %s [%s]: %s", uid_int, account_id, exc)
                     counters["errors"] += 1
+                    if not first_error_uid:
+                        first_error_uid = uid_int
 
-            # Persiste le dernier UID vu pour ce compte
+            # Persiste le dernier UID vu pour ce compte — sans jamais dépasser
+            # un mail en échec : il sera rejoué au prochain cycle (les logs
+            # réponse/inbox ont chacun leur anti-doublon, rejouer est sûr).
+            if first_error_uid:
+                max_uid_seen = max(last_uid, first_error_uid - 1)
             if max_uid_seen > last_uid:
                 try:
                     client.set_shared_setting(last_uid_key, max_uid_seen)
@@ -1018,31 +1034,54 @@ def _resolve_ai_settings(app_state, client) -> dict:
 
 def _build_prospect_index(client) -> tuple[dict, dict]:
     """Renvoie (msgid → prospect_id, from_email → prospect_id) en lisant
-    prospects + email_history (kind=email_sent)."""
+    prospects + email_history (kind=email_sent).
+
+    Lecture PAGINÉE : PostgREST plafonne toute réponse à 1000 lignes, or la
+    base dépasse 11 000 prospects — sans pagination l'index ignorait en
+    silence tout prospect au-delà des 1000 premiers (rebond/réponse non
+    reconnus). Lève RuntimeError si la lecture échoue : un index vide mis en
+    cache ferait traiter tout le courrier en « inconnu » pendant 10 minutes
+    (c'est comme ça que 4 rebonds ont été perdus mi-juin)."""
     msgid_to: dict = {}
     from_to: dict = {}
     sb = client.raw
+    page = 1000
     try:
-        # Tous les prospects (id + emails)
-        res = sb.table("prospects").select("id,emails").execute()
-        for row in res.data or []:
-            pid = row.get("id")
-            emails = row.get("emails") or []
-            for em in emails:
-                if em:
-                    from_to[str(em).lower().strip()] = pid
-        # Tous les message_id envoyés
-        res2 = (sb.table("email_history").select("prospect_id,message_id")
-                .eq("kind", "email_sent").execute())
-        for row in res2.data or []:
-            mid = (row.get("message_id") or "").strip()
-            pid = row.get("prospect_id")
-            if mid and pid:
-                clean = _extract_msg_id(mid)
-                if clean:
-                    msgid_to[clean] = pid
+        # Tous les prospects (id + emails), par pages
+        start = 0
+        while True:
+            res = (sb.table("prospects").select("id,emails")
+                   .order("id").range(start, start + page - 1).execute())
+            rows = res.data or []
+            for row in rows:
+                pid = row.get("id")
+                emails = row.get("emails") or []
+                for em in emails:
+                    if em:
+                        from_to[str(em).lower().strip()] = pid
+            if len(rows) < page:
+                break
+            start += page
+        # Tous les message_id envoyés, par pages
+        start = 0
+        while True:
+            res2 = (sb.table("email_history").select("prospect_id,message_id")
+                    .eq("kind", "email_sent")
+                    .order("id").range(start, start + page - 1).execute())
+            rows2 = res2.data or []
+            for row in rows2:
+                mid = (row.get("message_id") or "").strip()
+                pid = row.get("prospect_id")
+                if mid and pid:
+                    clean = _extract_msg_id(mid)
+                    if clean:
+                        msgid_to[clean] = pid
+            if len(rows2) < page:
+                break
+            start += page
     except Exception as exc:
         logger.warning("build_prospect_index: %s", exc)
+        raise RuntimeError(f"index prospects indisponible: {exc}") from exc
     return msgid_to, from_to
 
 

@@ -30,6 +30,49 @@ logger = logging.getLogger(__name__)
 SEGMENTS = ("all", "creators", "b2b_local")
 PERIODS = ("7d", "30d", "90d", "all")
 
+# PostgREST plafonne CHAQUE réponse à 1000 lignes, quel que soit .limit().
+# Leçon du 02/07/2026 : les fetchs « limit(5000/20000) » ne ramenaient que
+# 1000 lignes en silence → l'écran Conversions affichait 1000 prospects et
+# 19 envois au lieu de 11 690 et 127.
+_PAGE = 1000
+
+_KNOWN_STATUSES = (
+    "new", "qualified", "contacted", "replied", "interested",
+    "client", "won", "lost", "refused", "unsubscribed", "bounced",
+)
+
+_CREATOR_INDUSTRIES = ("youtube", "twitch", "reddit", "bluesky", "mastodon",
+                       "podcast", "dailymotion", "kick", "github")
+
+
+def _fetch_all(make_query, page: int = _PAGE) -> list[dict]:
+    """Lit TOUTES les lignes d'une requête, par pages de 1000.
+
+    make_query = callable qui renvoie un builder FRAIS (déjà filtré + trié) ;
+    on lui ajoute juste le .range() de la page courante."""
+    rows: list[dict] = []
+    start = 0
+    while True:
+        chunk = (make_query().range(start, start + page - 1)
+                 .execute().data) or []
+        rows.extend(chunk)
+        if len(chunk) < page:
+            break
+        start += page
+    return rows
+
+
+def _segment_ids(sb, segment: str) -> set:
+    """Ids des prospects du segment — id seul, filtré côté serveur, paginé."""
+    def q():
+        base = sb.table("prospects").select("id").order("id")
+        if segment == "creators":
+            return base.in_("industry", list(_CREATOR_INDUSTRIES))
+        if segment == "b2b_local":
+            return base.not_.is_("naf_code", "null").neq("naf_code", "")
+        return base
+    return {r["id"] for r in _fetch_all(q) if r.get("id")}
+
 
 def _get_client():
     try:
@@ -101,23 +144,29 @@ def compute_funnel(period: str = "30d", segment: str = "all") -> dict[str, Any]:
 
     sb = client.raw
 
+    # Compteurs de fiches : counts EXACTS côté serveur (head=True, zéro ligne
+    # rapatriée) — plus jamais un total plafonné à 1000.
+    def _count(status: str | None = None) -> int:
+        q = sb.table("prospects").select("id", count="exact", head=True)
+        if status:
+            q = q.eq("status", status)
+        if segment == "creators":
+            q = q.in_("industry", list(_CREATOR_INDUSTRIES))
+        elif segment == "b2b_local":
+            q = q.not_.is_("naf_code", "null").neq("naf_code", "")
+        return int(q.execute().count or 0)
+
     try:
-        prospects_res = (sb.table("prospects")
-                         .select("id,industry,naf_code,status,tags")
-                         .limit(5000).execute())
-        prospects = prospects_res.data or []
+        out["stages"]["prospects"] = _count()
+        status_counter: Counter = Counter()
+        for st in _KNOWN_STATUSES:
+            n = _count(st)
+            if n:
+                status_counter[st] = n
     except Exception as exc:
         out["error"] = f"prospects: {exc}"
         return out
 
-    seg_ids = _segment_filter(prospects, segment)
-    out["stages"]["prospects"] = len(seg_ids)
-
-    # Compteurs sur les statuts (intéressant pour la jauge)
-    status_counter: Counter = Counter()
-    for p in prospects:
-        if p.get("id") in seg_ids:
-            status_counter[p.get("status") or "new"] += 1
     out["by_status"] = dict(status_counter)
     out["stages"]["won"] = status_counter.get("won", 0)
     # Nouveaux statuts du systeme de protection mail — exposes pour les
@@ -127,52 +176,69 @@ def compute_funnel(period: str = "30d", segment: str = "all") -> dict[str, Any]:
     out["stages"]["unsubscribed"] = status_counter.get("unsubscribed", 0)
     out["stages"]["bounced"] = status_counter.get("bounced", 0)
     # Taux de delivrabilite (sain si tres bas)
-    total_with_attempt = (sent_targets := 0)  # placeholder, recalc plus bas
     out["health"] = {
         "bounced_rate": 0.0,        # rempli apres le comptage des sent
         "unsubscribe_rate": 0.0,
     }
 
+    # Envoi = prospection uniquement (prospect_id non nul, définition du
+    # 17/06). Lignes paginées : jamais tronquées en silence.
     try:
-        hist_res = (sb.table("email_history")
-                    .select("prospect_id,kind,ts,extra")
-                    .gte("ts", since).limit(20000).execute())
-        hist_rows = hist_res.data or []
+        sent_rows = _fetch_all(lambda: (
+            sb.table("email_history").select("prospect_id,extra")
+            .eq("kind", "email_sent").not_.is_("prospect_id", "null")
+            .gte("ts", since).order("id")))
+        reply_rows = _fetch_all(lambda: (
+            sb.table("email_history").select("prospect_id,extra")
+            .eq("kind", "reply_received").gte("ts", since).order("id")))
     except Exception as exc:
         out["error"] = f"email_history: {exc}"
         return out
+
+    seg_ids: set | None = None
+    if segment != "all":
+        try:
+            seg_ids = _segment_ids(sb, segment)
+        except Exception as exc:
+            out["error"] = f"segment: {exc}"
+            return out
 
     by_product: Counter = Counter()
     by_category: Counter = Counter()
     sent_count = 0
     reply_count = 0
     interested_count = 0
-    for h in hist_rows:
-        pid = h.get("prospect_id")
-        if pid not in seg_ids:
+    for h in sent_rows:
+        if seg_ids is not None and h.get("prospect_id") not in seg_ids:
             continue
-        kind = h.get("kind", "")
         extra = h.get("extra") or {}
         if isinstance(extra, str):
             try:
                 extra = json.loads(extra)
             except Exception:
                 extra = {}
-        if kind == "email_sent":
-            sent_count += 1
-            # On essaie d'inférer le produit promu : extra.product OU
-            # extra.template_key (heuristique)
-            prod = (extra.get("product") or extra.get("template_key")
-                    or "").lower().strip()
-            if prod:
-                by_product[prod] += 1
-        elif kind == "reply_received":
-            reply_count += 1
-            cat = ((extra.get("classification") or {})
-                   .get("category") or "unknown")
-            by_category[cat] += 1
-            if cat == "interested":
-                interested_count += 1
+        sent_count += 1
+        # On essaie d'inférer le produit promu : extra.product OU
+        # extra.template_key (heuristique)
+        prod = (extra.get("product") or extra.get("template_key")
+                or "").lower().strip()
+        if prod:
+            by_product[prod] += 1
+    for h in reply_rows:
+        if seg_ids is not None and h.get("prospect_id") not in seg_ids:
+            continue
+        extra = h.get("extra") or {}
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except Exception:
+                extra = {}
+        reply_count += 1
+        cat = ((extra.get("classification") or {})
+               .get("category") or "unknown")
+        by_category[cat] += 1
+        if cat == "interested":
+            interested_count += 1
 
     out["stages"]["sent"] = sent_count
     out["stages"]["replies"] = reply_count
@@ -291,19 +357,18 @@ def compute_template_performance(period: str = "90d") -> dict[str, Any]:
     since = _period_start(period)
     sb = client.raw
     try:
-        sent_res = (sb.table("email_history")
-                    .select("prospect_id,ts,template_key,extra")
-                    .eq("kind", "email_sent")
-                    .gte("ts", since).limit(20000).execute())
-        reply_res = (sb.table("email_history")
-                     .select("prospect_id,ts,extra")
-                     .eq("kind", "reply_received")
-                     .gte("ts", since).limit(20000).execute())
+        sent_rows = _fetch_all(lambda: (
+            sb.table("email_history")
+            .select("prospect_id,ts,template_key,extra")
+            .eq("kind", "email_sent").gte("ts", since).order("id")))
+        reply_rows = _fetch_all(lambda: (
+            sb.table("email_history")
+            .select("prospect_id,ts,extra")
+            .eq("kind", "reply_received").gte("ts", since).order("id")))
     except Exception as exc:
         out["error"] = f"email_history: {exc}"
         return out
-    out["rows"] = aggregate_template_performance(
-        sent_res.data or [], reply_res.data or [])
+    out["rows"] = aggregate_template_performance(sent_rows, reply_rows)
     out["ok"] = True
     return out
 
@@ -329,14 +394,21 @@ def compute_target_performance(period: str = "90d") -> dict[str, Any]:
     since = _period_start(period)
     sb = client.raw
     try:
-        prospects = (sb.table("prospects").select("id,industry")
-                     .limit(20000).execute()).data or []
-        sent = (sb.table("email_history").select("prospect_id")
-                .eq("kind", "email_sent").gte("ts", since)
-                .limit(40000).execute()).data or []
-        reply = (sb.table("email_history").select("prospect_id,extra")
-                 .eq("kind", "reply_received").gte("ts", since)
-                 .limit(40000).execute()).data or []
+        sent = _fetch_all(lambda: (
+            sb.table("email_history").select("prospect_id")
+            .eq("kind", "email_sent").gte("ts", since).order("id")))
+        reply = _fetch_all(lambda: (
+            sb.table("email_history").select("prospect_id,extra")
+            .eq("kind", "reply_received").gte("ts", since).order("id")))
+        # Le métier : seulement pour les fiches réellement contactées de la
+        # période (par paquets de 100), pas les 11 000+ fiches de la base.
+        pids = sorted({h.get("prospect_id")
+                       for h in (sent + reply) if h.get("prospect_id")})
+        prospects: list[dict] = []
+        for i in range(0, len(pids), 100):
+            chunk = pids[i:i + 100]
+            prospects.extend((sb.table("prospects").select("id,industry")
+                              .in_("id", chunk).execute()).data or [])
     except Exception as exc:
         out["error"] = f"db: {exc}"
         return out
