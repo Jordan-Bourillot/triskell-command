@@ -40,12 +40,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ai_provider": "google",
     "ai_model": "gemini-2.5-flash",
     "tone_brief": (
-        "Mail très court (≤ 8 lignes) à un prospect qui m'avait dit "
-        "« pas maintenant » il y a quelques mois. Le ton : léger, sans "
-        "pression, on revient juste prendre des nouvelles + glisser une "
-        "proposition simple. Tutoiement chaleureux. "
-        "Rappelle brièvement (1 phrase) ce dont on avait parlé sans citer "
-        "le mail original. Pas d'emojis, pas de jargon."
+        "Mail très court (8 lignes maximum) à un prospect qui avait dit "
+        "« pas maintenant » il y a quelques mois. Ton léger et chaleureux, "
+        "VOUVOIEMENT obligatoire, on ne force rien : on revient prendre des "
+        "nouvelles et glisser une proposition simple. "
+        "Rappelez brièvement en une phrase ce dont on avait parlé sans "
+        "citer le mail original. Pas d'emojis, pas de jargon, aucun "
+        "impératif qui pousse, ne jamais proposer d'appel téléphonique."
     ),
     "subject_template": "On reprend là où on s'était arrêtés ?",
 }

@@ -193,6 +193,16 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.warning("disk_janitor indisponible : %s", exc)
 
+        # Promotion des commissions affiliés (toutes les 6 h) : ce worker
+        # n'était démarré QUE par l'app desktop → sur le serveur, les
+        # commissions n'avançaient jamais. On le lance ici avec les autres.
+        try:
+            from ..integrations.pixelpros import affiliate_payouts_runner
+            affiliate_payouts_runner.start_worker(
+                getattr(api_instance, "_app_state", None))
+        except Exception as exc:
+            logger.warning("affiliate_payouts_runner indisponible : %s", exc)
+
         # Le guetteur du copilote : dépose les évènements (réponse de
         # prospect, chasse finie, rappels) dans le fil + push si chaud.
         try:
@@ -1406,6 +1416,8 @@ def _register_route(app: FastAPI, name: str, method) -> None:
     params = [p for p in sig.parameters.values() if p.name != "self"]
     takes_payload = len(params) >= 1
 
+    from starlette.concurrency import run_in_threadpool
+
     async def handler(request: Request) -> JSONResponse:
         try:
             payload: Any = None
@@ -1416,11 +1428,15 @@ def _register_route(app: FastAPI, name: str, method) -> None:
                     payload = (await request.json()) if raw else None
                 except Exception:
                     payload = None
-            # Appel synchrone (Api est sync)
+            # La méthode Api est SYNCHRONE et peut être longue (versement de
+            # milliers de prospects, rendu Playwright…). On l'exécute dans le
+            # threadpool au lieu de la boucle événementielle : sinon un seul
+            # appel lent gèle TOUT le serveur (une requête à la fois, y
+            # compris /api/_health → healthcheck Docker en échec → 503).
             if takes_payload:
-                result = method(payload)
+                result = await run_in_threadpool(method, payload)
             else:
-                result = method()
+                result = await run_in_threadpool(method)
             return JSONResponse(content=result if result is not None else {"ok": True})
         except Exception as exc:
             logger.exception("API method %s failed", name)

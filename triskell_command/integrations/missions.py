@@ -143,9 +143,27 @@ def save_missions(missions: list[dict], client=None) -> bool:
     if c is None:
         return False
     try:
-        # Les plus récentes d'abord, liste plafonnée
-        missions = sorted(missions, key=lambda m: m.get("created_at") or "",
-                          reverse=True)[:MAX_MISSIONS]
+        ordered = sorted(missions, key=lambda m: m.get("created_at") or "",
+                         reverse=True)
+        if len(ordered) > MAX_MISSIONS:
+            # On garde TOUJOURS les missions encore actives (chasse en cours
+            # ou versement en attente) : sans ça, une mission active mais
+            # ancienne était éjectée en silence et ses prospects n'étaient
+            # jamais versés. Le plafond ne rogne que les missions terminées.
+            active = [m for m in ordered if m.get("status") in ACTIVE_STATUSES]
+            finished = [m for m in ordered if m.get("status") not in ACTIVE_STATUSES]
+            keep_finished = finished[:max(0, MAX_MISSIONS - len(active))]
+            dropped = len(finished) - len(keep_finished)
+            if dropped:
+                logger.info("save_missions : %d mission(s) terminée(s) "
+                            "écartée(s) du plafond (%d actives conservées).",
+                            dropped, len(active))
+            kept = active + keep_finished
+            # Recompose dans l'ordre récent-d'abord.
+            missions = sorted(kept, key=lambda m: m.get("created_at") or "",
+                              reverse=True)
+        else:
+            missions = ordered
         c.set_shared_setting(SHARED_KEY, missions)
         return True
     except Exception as exc:
