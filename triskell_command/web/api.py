@@ -1203,7 +1203,30 @@ class Api:
         except Exception as exc:
             logger.warning("get_drafts: creator_drafts KO: %s", exc)
 
+        # ---- total EXACT ------------------------------------------------
+        # Le plafond d'affichage (200/source) ne doit plus se faire passer
+        # pour un total : l'écran disait « 203 » alors que 384 brouillons
+        # attendaient en base (constat du 02/07/2026).
+        total_pending = None
+        try:
+            total_pending = 0
+            for _tbl in ("prospect_drafts", "convoy_drafts"):
+                try:
+                    _r = (sb.table(_tbl).select("id", count="exact", head=True)
+                          .eq("status", "pending").execute())
+                    total_pending += int(_r.count or 0)
+                except Exception:
+                    pass
+            # + les sources hors tables (créateurs, secours local), déjà
+            # toutes présentes dans rows
+            total_pending += sum(
+                1 for r in rows
+                if (r.get("source") or "prospect") not in ("prospect", "convoy"))
+        except Exception:
+            total_pending = None
+
         return {"ok": True, "rows": rows, "truncated": truncated,
+                "total_pending": total_pending,
                 "limit_per_source": self._DRAFTS_LIMIT_PER_SOURCE}
 
     def _get_drafts_local_fallback(self) -> dict:
@@ -1302,9 +1325,15 @@ class Api:
             try:
                 cols = ("id, subject, body, body_html, template_key, status, "
                         f"prospects:prospect_id({_emb})")
-                res = (sb.table("prospect_drafts").select(cols)
-                         .eq("status", "pending")
-                         .order("created_at", desc=True).limit(limit).execute())
+                q = (sb.table("prospect_drafts").select(cols)
+                     .eq("status", "pending"))
+                # Ciblage direct par id : sans ça, un brouillon plus ancien
+                # que les `limit` plus récents était introuvable (8 brouillons
+                # jamais relus hors fenêtre, constat du 03/07/2026).
+                if only_id:
+                    q = q.eq("id", only_id)
+                res = (q.order("created_at", desc=True)
+                       .limit(limit).execute())
                 rows = res.data or []
                 break
             except Exception:
