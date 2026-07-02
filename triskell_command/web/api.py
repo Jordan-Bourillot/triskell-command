@@ -27,6 +27,45 @@ from ..state import AppState
 logger = logging.getLogger(__name__)
 
 
+def _friendly_error(exc: Exception, *, where: str = "") -> str:
+    """Traduit une exception technique en une phrase FRANÇAISE lisible.
+
+    Jordan n'est pas technicien : renvoyer `str(exc)` brut (« KeyError »,
+    « JWT expired », une trace PostgREST) à l'écran n'a aucun sens pour lui.
+    On JOURNALISE le détail technique côté serveur (pour le débogage) et on
+    ne renvoie au front qu'un message clair, choisi selon la famille de
+    panne. Remplace les ~360 `"error": _friendly_error(exc)` de ce fichier.
+    """
+    detail = f"{type(exc).__name__}: {exc}"
+    logger.warning("erreur%s : %s", (f" [{where}]" if where else ""), detail)
+    low = f"{type(exc).__name__} {exc}".lower()
+
+    def has(*keys: str) -> bool:
+        return any(k in low for k in keys)
+
+    if has("jwt", "expired", "unauthorized", "invalid token", "auth"):
+        return ("La connexion à la base a expiré côté serveur — "
+                "réessaie dans un instant.")
+    if has("supabasenotconfigured", "not configured", "non configuré",
+           "not_connected", "not connected"):
+        return "La base partagée n'est pas connectée pour le moment."
+    if has("connection", "timed out", "timeout", "network", "getaddrinfo",
+           "connexion", "unreachable", "temporarily unavailable",
+           "max retries", "read timed", "502", "503", "504"):
+        return ("La base est momentanément injoignable — "
+                "réessaie dans quelques secondes.")
+    if has("permission", "denied", "not allowed", "row-level security",
+           "rls", "forbidden", "403"):
+        return "Action non autorisée sur la base."
+    if has("does not exist", "not found", "introuvable", "no rows",
+           "0 rows", "pgrst116"):
+        return "Élément introuvable (il a peut-être déjà été supprimé)."
+    if has("duplicate", "already exists", "unique", "conflict", "409"):
+        return "Cet élément existe déjà (doublon)."
+    return ("Une erreur est survenue de notre côté — réessaie ; "
+            "si ça continue, dis-le-moi.")
+
+
 # SÉCURITÉ : les clés API ne vivent plus JAMAIS en dur dans le code.
 # Elles se règlent via Réglages (stockées dans settings.json / Supabase)
 # ou par variables d'environnement. Les anciennes clés par défaut qui
@@ -178,7 +217,7 @@ class Api:
         try:
             self._app_state.save()
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
         return {"ok": True, "mode": m}
 
     def cycle_theme(self) -> dict:
@@ -232,7 +271,7 @@ class Api:
             self._app_state.save()
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Matinale
@@ -243,7 +282,7 @@ class Api:
             return morning_digest.compute_digest()
         except Exception as exc:
             logger.warning("morning_digest: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Allô Claude (sync + proactif)
@@ -262,7 +301,7 @@ class Api:
             )
         except Exception as exc:
             logger.warning("claude_ask: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def claude_chat(self, payload: dict) -> dict:
         """Conversation vocale libre avec Claude.
@@ -281,7 +320,7 @@ class Api:
             )
         except Exception as exc:
             logger.warning("claude_chat: %s", exc)
-            return {"ok": False, "text": "", "error": str(exc)}
+            return {"ok": False, "text": "", "error": _friendly_error(exc)}
 
     def claude_consume_pending(self) -> dict | None:
         """Renvoie le conseil proactif en attente ({ok: False} si rien).
@@ -309,7 +348,7 @@ class Api:
             return copilot.thread_for_ui(copilot.current_user_id())
         except Exception as exc:
             logger.warning("copilot_thread: %s", exc)
-            return {"ok": False, "error": str(exc), "messages": []}
+            return {"ok": False, "error": _friendly_error(exc), "messages": []}
 
     def copilot_send(self, payload: dict) -> dict:
         """Un tour de copilote SANS streaming (secours navigateur / desktop).
@@ -330,7 +369,7 @@ class Api:
             )
         except Exception as exc:
             logger.warning("copilot_send: %s", exc)
-            return {"ok": False, "text": "", "error": str(exc)}
+            return {"ok": False, "text": "", "error": _friendly_error(exc)}
 
     def copilot_clear(self, payload: dict | None = None) -> dict:
         """Efface le fil de discussion (« nouvelle discussion »)."""
@@ -340,7 +379,7 @@ class Api:
             return {"ok": True}
         except Exception as exc:
             logger.warning("copilot_clear: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def copilot_append(self, payload: dict) -> dict:
         """Reverse des tours de conversation au fil persisté — utilisé à la
@@ -356,7 +395,7 @@ class Api:
             return {"ok": True, "added": added}
         except Exception as exc:
             logger.warning("copilot_append: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def copilot_memory(self, payload: dict | None = None) -> dict:
         """Le carnet du copilote (ce qu'il a retenu) — pour l'écran
@@ -366,7 +405,7 @@ class Api:
             return copilot.memory_for_ui(copilot.current_user_id())
         except Exception as exc:
             logger.warning("copilot_memory: %s", exc)
-            return {"ok": False, "error": str(exc), "notes": []}
+            return {"ok": False, "error": _friendly_error(exc), "notes": []}
 
     def copilot_memory_add(self, payload: dict) -> dict:
         """Ajoute une note au carnet à la main. payload = {text: str}."""
@@ -381,7 +420,7 @@ class Api:
             return {"ok": True, "note": note}
         except Exception as exc:
             logger.warning("copilot_memory_add: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def copilot_memory_delete(self, payload: dict) -> dict:
         """Supprime une note du carnet. payload = {id: str}."""
@@ -395,7 +434,7 @@ class Api:
                                           "error": "Note introuvable."}
         except Exception as exc:
             logger.warning("copilot_memory_delete: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def copilot_prefs(self, payload: dict | None = None) -> dict:
         """Le niveau d'initiative du copilote (off/discret/normal/bavard)."""
@@ -405,7 +444,7 @@ class Api:
                     **copilot.get_prefs(copilot.current_user_id())}
         except Exception as exc:
             logger.warning("copilot_prefs: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def copilot_prefs_set(self, payload: dict) -> dict:
         """Règle le niveau d'initiative et/ou le curseur de confiance.
@@ -423,7 +462,7 @@ class Api:
                                      initiative=initiative, trust=trust)
         except Exception as exc:
             logger.warning("copilot_prefs_set: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def copilot_action_confirm(self, payload: dict) -> dict:
         """Jordan a cliqué Confirmer sur une carte du fil : exécute LA
@@ -461,7 +500,7 @@ class Api:
                 limit=int((payload or {}).get("limit") or 60))
         except Exception as exc:
             logger.warning("copilot_journal: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def copilot_shortcuts(self, payload: dict | None = None) -> dict:
         """Les raccourcis de l'utilisateur (barre ⚡ + écran 📌)."""
@@ -471,7 +510,7 @@ class Api:
                 copilot.current_user_id())}
         except Exception as exc:
             logger.warning("copilot_shortcuts: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def copilot_shortcut_create(self, payload: dict) -> dict:
         """Création MANUELLE d'un raccourci-question (écran 📌).
@@ -487,7 +526,7 @@ class Api:
                 source="manuel")
         except Exception as exc:
             logger.warning("copilot_shortcut_create: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def copilot_shortcut_delete(self, payload: dict) -> dict:
         try:
@@ -497,7 +536,7 @@ class Api:
                 str((payload or {}).get("id") or ""))
         except Exception as exc:
             logger.warning("copilot_shortcut_delete: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def copilot_shortcut_pause(self, payload: dict) -> dict:
         """Met un rendez-vous en pause / le réveille. payload={id, paused}."""
@@ -509,7 +548,7 @@ class Api:
                 str(p.get("id") or ""), bool(p.get("paused")))
         except Exception as exc:
             logger.warning("copilot_shortcut_pause: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def copilot_shortcut_run(self, payload: dict) -> dict:
         """Clic sur un bouton ⚡ : rejoue l'action STOCKÉE côté serveur
@@ -576,7 +615,7 @@ class Api:
                 with_schedule=bool(p.get("with_schedule")))
         except Exception as exc:
             logger.warning("copilot_habit_accept: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def copilot_habit_dismiss(self, payload: dict) -> dict:
         """Carte 💡 : « non merci » — silence définitif sur ce motif."""
@@ -587,7 +626,7 @@ class Api:
                 str((payload or {}).get("id") or ""))
         except Exception as exc:
             logger.warning("copilot_habit_dismiss: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def set_active_view(self, payload: dict) -> dict:
         """Mémorise l'écran que l'utilisateur regarde (le front l'envoie à
@@ -662,7 +701,7 @@ class Api:
             return {"ok": True, "rows": out, "prospects": prospects}
         except Exception as exc:
             logger.warning("get_replies: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def reply_send_now(self, payload: dict) -> dict:
         """Force l'envoi d'un brouillon de réponse suggéré.
@@ -687,7 +726,7 @@ class Api:
                 out["ok"] = bool(out.get("success"))
             return out
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def reply_cancel(self, payload: dict) -> dict:
         rid = (payload or {}).get("id") or ""
@@ -698,7 +737,7 @@ class Api:
             from ..integrations import reply_responder
             return reply_responder.cancel_draft(client, rid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def reply_update(self, payload: dict) -> dict:
         p = payload or {}
@@ -713,7 +752,7 @@ class Api:
             return reply_responder.update_draft(
                 client, rid, subject=subject, body=body)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def reply_mark_handled(self, payload: dict) -> dict:
         rid = (payload or {}).get("id") or ""
@@ -737,7 +776,7 @@ class Api:
                 "id", rid).execute()
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def replies_poll_now(self) -> dict:
         try:
@@ -746,7 +785,7 @@ class Api:
             # lancé »), le tour des boîtes (~45 s) ne bloque pas l'appel HTTP.
             return replies_poller.poll_now_async(self._app_state)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mail_dns_check(self, payload: dict | None = None) -> dict:
         """Vérifie les 3 tampons de délivrabilité (SPF / DKIM / DMARC) +
@@ -774,7 +813,7 @@ class Api:
             from ..integrations import mail_dns_doctor
             return mail_dns_doctor.check_domain(domain)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mail_health(self) -> dict:
         """Renvoie l'etat de sante du systeme mail : status du poller IMAP,
@@ -1173,7 +1212,7 @@ class Api:
             from triskell_core.prospect.pipeline import list_pending_drafts
             pairs = list_pending_drafts()
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "rows": []}
+            return {"ok": False, "error": _friendly_error(exc), "rows": []}
         rows = []
         for prospect, draft in pairs:
             platform_url = getattr(prospect, "platform_url", "") or ""
@@ -1891,7 +1930,7 @@ class Api:
                 "id", draft_id).execute()
             return {"ok": True, "queued": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ----- créateurs : source "creator" dans Brouillons à valider -------
     @staticmethod
@@ -2603,7 +2642,7 @@ class Api:
                         prospect_id, exc)
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ----- fallback CRM local ------------------------------------------
     def _approve_local_draft(self, key: str, body) -> dict:
@@ -2652,7 +2691,7 @@ class Api:
                 )
             return res
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def _log_sent_email_to_history(self, *, message_id: str,
                                    captured: dict) -> None:
@@ -2732,7 +2771,7 @@ class Api:
             crm.save()
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Conversions (Funnel)
@@ -2746,7 +2785,7 @@ class Api:
                 segment=p.get("segment") or "all",
             )
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def funnel_by_template(self, payload: dict | None = None) -> dict:
         """Performance par modèle de mail : envois, réponses, intéressés
@@ -2759,7 +2798,7 @@ class Api:
                 period=p.get("period") or "90d",
             )
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Projets clients
@@ -2770,7 +2809,7 @@ class Api:
             grouped = clients_repo.list_grouped()
             return {"ok": True, "groups": grouped}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def client_create(self, payload: dict) -> dict:
         try:
@@ -2778,7 +2817,7 @@ class Api:
             p = clients_repo.create_project(payload or {})
             return {"ok": bool(p), "project": p}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def client_update(self, payload: dict) -> dict:
         p = payload or {}
@@ -2788,7 +2827,7 @@ class Api:
                                               p.get("patch") or {})
             return {"ok": ok}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def client_transition(self, payload: dict) -> dict:
         p = payload or {}
@@ -2798,7 +2837,7 @@ class Api:
                                           p.get("status") or "")
             return {"ok": ok}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def client_delete(self, payload: dict) -> dict:
         p = payload or {}
@@ -2807,7 +2846,7 @@ class Api:
             ok = clients_repo.delete_project(p.get("id") or "")
             return {"ok": ok}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Fichier clients (table master `clients` — vue 360°)
@@ -2825,7 +2864,7 @@ class Api:
             )
             return {"ok": True, "clients": rows, "total": len(rows)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def get_client_master(self, payload: dict) -> dict:
         """Fiche détaillée d'un client : ligne clients_360 + timeline."""
@@ -2841,7 +2880,7 @@ class Api:
             timeline = cm.get_client_timeline(cid, limit=80)
             return {"ok": True, "client": client, "timeline": timeline}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def client_master_update(self, payload: dict) -> dict:
         """Met à jour les champs autorisés d'un client (whitelist côté repo)."""
@@ -2857,9 +2896,9 @@ class Api:
         except ValueError as exc:
             # Refus métier (email invalide / déjà pris) — message français
             # écrit pour être affiché tel quel à l'utilisateur.
-            return {"ok": False, "error": str(exc), "user_message": True}
+            return {"ok": False, "error": _friendly_error(exc), "user_message": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def client_master_add_tag(self, payload: dict) -> dict:
         p = payload or {}
@@ -2872,7 +2911,7 @@ class Api:
             ok = cm.add_tag(cid, tag)
             return {"ok": ok}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def client_master_remove_tag(self, payload: dict) -> dict:
         """Retire un tag d'une fiche client (miroir de add_tag)."""
@@ -2886,7 +2925,7 @@ class Api:
             ok = cm.remove_tag(cid, tag)
             return {"ok": ok}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Réglages
@@ -3038,7 +3077,7 @@ class Api:
                                                         app_state=self._app_state)
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Studio d'images — génération FLUX (Black Forest Labs)
@@ -3092,7 +3131,7 @@ class Api:
             return {"ok": True, "items": res.get("history", [])}
         except Exception as exc:
             logger.warning("flux_delete: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Le Phare — agence SEO autonome multi-sites
@@ -3102,7 +3141,7 @@ class Api:
             from ..integrations.phare import orchestrator
             return orchestrator.ecosystem_overview()
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_sites(self, payload: dict | None = None) -> dict:
         """Liste les sites Phare. Payload optionnel :
@@ -3120,7 +3159,7 @@ class Api:
                 sites = [s for s in sites if not s.get("is_external_client")]
             return {"ok": True, "sites": sites}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_site(self, payload: dict) -> dict:
         sid = (payload or {}).get("id") or ""
@@ -3137,7 +3176,7 @@ class Api:
                 "actions": actions, "briefs": briefs,
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_pending_actions(self) -> dict:
         try:
@@ -3145,7 +3184,7 @@ class Api:
             actions = repo.list_actions(status="pending_review")
             return {"ok": True, "actions": actions}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_dashboard_pulse(self) -> dict:
         """Pulse de la salle de contrôle : tout d'un coup pour la home du Phare.
@@ -3162,7 +3201,7 @@ class Api:
             from ..integrations.phare import scheduler
             out["scheduler"] = scheduler.get_status()
         except Exception as exc:
-            out["scheduler"] = {"running": False, "error": str(exc)}
+            out["scheduler"] = {"running": False, "error": _friendly_error(exc)}
         # 2. Dernières actions persistées (10 max, tous sites confondus)
         try:
             from ..integrations.phare import repo
@@ -3198,7 +3237,7 @@ class Api:
                               name=f"PhareAudit-{sid[:8]}").start()
             return {"ok": True, "started": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_merge_action(self, payload: dict) -> dict:
         aid = (payload or {}).get("id") or ""
@@ -3207,7 +3246,7 @@ class Api:
             from ..integrations.phare import orchestrator
             return orchestrator.merge_action(aid, force=force)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_reject_action(self, payload: dict) -> dict:
         """Refuse une recommandation : status → 'rejected'.
@@ -3222,7 +3261,7 @@ class Api:
             from ..integrations.phare import orchestrator
             return orchestrator.reject_action(aid, reason=reason)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_archive_action(self, payload: dict) -> dict:
         """Cache une action 'merged' de la liste 'Ce qui a été fait'.
@@ -3236,7 +3275,7 @@ class Api:
             from ..integrations.phare import orchestrator
             return orchestrator.archive_action(aid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_revert_action(self, payload: dict) -> dict:
         """Annule une modification PUBLIÉE : commit inverse + PR mergée.
@@ -3256,7 +3295,7 @@ class Api:
             return revert.revert_action(aid)
         except Exception as exc:
             logger.warning("phare_revert_action: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_home(self, payload: dict | None = None) -> dict:
         """Vue d'accueil 1-minute : 1 carte par site avec son état global.
@@ -3349,7 +3388,7 @@ class Api:
             return out
         except Exception as exc:
             logger.warning("phare_home: %s", exc)
-            return {"ok": False, "error": str(exc), "sites": []}
+            return {"ok": False, "error": _friendly_error(exc), "sites": []}
 
     def phare_site_dashboard(self, payload: dict) -> dict:
         """Vue détail 1-minute d'un site : tout en 1 appel.
@@ -3494,7 +3533,7 @@ class Api:
             }
         except Exception as exc:
             logger.warning("phare_site_dashboard: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_site_quick_add(self, payload: dict) -> dict:
         """Ajoute un site avec UNE seule info : son URL.
@@ -3515,10 +3554,10 @@ class Api:
                 return {"ok": False, "error": "Impossible d'enregistrer le site (Supabase non joignable)."}
             return {"ok": True, "site": row, "autoconfig": autoconfig}
         except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
         except Exception as exc:
             logger.warning("phare_site_quick_add: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_site_upsert(self, payload: dict) -> dict:
         """Crée ou met à jour un site dans Le Phare.
@@ -3555,7 +3594,7 @@ class Api:
             return {"ok": True, "site": row}
         except Exception as exc:
             logger.warning("phare_site_upsert: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_site_deactivate(self, payload: dict) -> dict:
         sid = (payload or {}).get("id") or ""
@@ -3566,7 +3605,7 @@ class Api:
             ok = repo.deactivate_site(sid)
             return {"ok": ok}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_site_activate(self, payload: dict) -> dict:
         """Réactive un site précédemment désactivé."""
@@ -3578,7 +3617,7 @@ class Api:
             row = repo.upsert_site({"id": sid, "is_active": True})
             return {"ok": True, "site": row}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_agents_status(self) -> dict:
         """Renvoie le statut des 8 agents (nom, modèle, cadence, dernier passage).
@@ -3724,7 +3763,7 @@ class Api:
                               name=f"PhareAgent-{agent}").start()
             return {"ok": True, "started": True, "agent": agent, "site_id": site_id}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_apply_action(self, payload: dict) -> dict:
         """Bouton « OK, fais-le » : le robot transforme une recommandation en
@@ -3741,7 +3780,7 @@ class Api:
             return executor.request_apply(action_id, app_state=self._app_state)
         except Exception as exc:
             logger.warning("phare_apply_action: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_apply_retry(self, payload: dict) -> dict:
         """Relance une action « OK, fais-le » qui a échoué."""
@@ -3753,7 +3792,7 @@ class Api:
             return executor.retry_apply(action_id, app_state=self._app_state)
         except Exception as exc:
             logger.warning("phare_apply_retry: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_action_status(self, payload: dict) -> dict:
         """Statut léger d'une action (polling de la carte pendant que le
@@ -3782,7 +3821,7 @@ class Api:
                     "simple_what": plain_language.explain(a)}
         except Exception as exc:
             logger.warning("phare_action_status: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_auto_build_get(self) -> dict:
         """Lit l'interrupteur de construction automatique des sites payés."""
@@ -3790,7 +3829,7 @@ class Api:
             from ..integrations.pixelpros import auto_builder
             return {"ok": True, "enabled": auto_builder.is_enabled()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_auto_build_set(self, payload: dict) -> dict:
         """Active/coupe la construction automatique des sites payés."""
@@ -3802,7 +3841,7 @@ class Api:
                 return {"ok": False, "error": msg}
             return {"ok": True, "enabled": auto_builder.is_enabled()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def oeil_visuel_status(self) -> dict:
         """État de « l'œil » : robot qui repère visuellement les sites à
@@ -3811,7 +3850,7 @@ class Api:
             from ..integrations import site_vision_worker
             return {"ok": True, **site_vision_worker.get_status()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def oeil_visuel_set(self, payload: dict) -> dict:
         """Active / coupe l'œil (interrupteur shared_settings)."""
@@ -3823,7 +3862,7 @@ class Api:
                 return {"ok": False, "error": msg}
             return {"ok": True, "enabled": site_vision_worker.is_enabled()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def oeil_visuel_run_now(self) -> dict:
         """Force un passage tout de suite (un petit paquet) — debug/contrôle."""
@@ -3831,7 +3870,7 @@ class Api:
             from ..integrations import site_vision_worker
             return {"ok": True, "result": site_vision_worker.run_now()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def oeil_visuel_list(self, payload: dict | None = None) -> dict:
         """Liste les prospects « à refaire » (sûr) et « à vérifier » avec leur
@@ -3843,7 +3882,7 @@ class Api:
             from triskell_core.prospect.core.crm import get_crm
             crm = get_crm()
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
         labels = {
             "redo_visuel": "Look daté (vu à l'œil)",
@@ -3886,7 +3925,7 @@ class Api:
                 }
                 (sure if is_sure else verify).append(item)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
         sure.sort(key=lambda x: (x["name"] or "").lower())
         verify.sort(key=lambda x: (x["name"] or "").lower())
@@ -3908,7 +3947,7 @@ class Api:
             c = get_client()
             sb = c.raw
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
         remove = {"site_a_refaire", "redo_visuel", "a_verifier_look",
                   "redo_no_site", "redo_free_host", "redo_old", "redo_down"}
         try:
@@ -3930,7 +3969,7 @@ class Api:
                 n += 1
             return {"ok": True, "updated": n}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Écran de TRI « sites à refaire » — l'œil de Jordan tranche les cas
@@ -3945,14 +3984,14 @@ class Api:
             from triskell_core.db import get_client
             sb = get_client().raw
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
         try:
             rows = (sb.table("prospects")
                     .select("id,name,city,industry,website,tags")
                     .ilike("notes", "%Verdict visuel retiré%")
                     .limit(500).execute().data) or []
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
         # Un même site peut appartenir à plusieurs fiches (plusieurs contacts
         # d'une même boîte). Le verdict porte sur le SITE, pas la fiche : on ne
         # le montre donc qu'UNE fois (sinon Jordan jugerait deux fois le même
@@ -3990,7 +4029,7 @@ class Api:
                 return {"ok": False, "error": "capture impossible"}
             return {"ok": True, "image": base64.b64encode(png).decode("ascii")}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def oeil_tri_decide(self, payload: dict | None = None) -> dict:
         """Décision de Jordan : 'refaire' → ajoute aux à refaire (validé
@@ -4004,7 +4043,7 @@ class Api:
             from triskell_core.db import get_client
             sb = get_client().raw
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
         try:
             rows = (sb.table("prospects").select("id,tags,notes")
                     .eq("website", website).execute().data) or []
@@ -4038,7 +4077,7 @@ class Api:
                     {"tags": tags, "notes": note}).eq("id", r["id"]).execute()
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def oeil_tri_undo(self, payload: dict | None = None) -> dict:
         """Annule la dernière décision de tri : retire les étiquettes posées à
@@ -4050,7 +4089,7 @@ class Api:
             from triskell_core.db import get_client
             sb = get_client().raw
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
         remove = {"oeil_trie_oui", "oeil_trie_non", "a_refaire_humain",
                   "site_a_refaire"}
         try:
@@ -4068,7 +4107,7 @@ class Api:
                     {"tags": tags, "notes": note}).eq("id", r["id"]).execute()
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_automerge_get(self) -> dict:
         """Lit l'état de la publication automatique des modifs vérifiées.
@@ -4083,7 +4122,7 @@ class Api:
                     "auto_apply_image_alts": bool(
                         cfg.get("auto_apply_image_alts", False))}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_autoapply_set(self, payload: dict) -> dict:
         """Active/coupe une automatisation SÛRE et ciblée, indépendamment de la
@@ -4109,7 +4148,7 @@ class Api:
                     "auto_apply_image_alts": bool(
                         cfg.get("auto_apply_image_alts", False))}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_automerge_set(self, payload: dict) -> dict:
         """Active/coupe la publication automatique (phare_config.auto_merge_enabled).
@@ -4125,7 +4164,7 @@ class Api:
                         "Le réglage n'a pas pu être enregistré (base injoignable ?)."}
             return {"ok": True, "enabled": real}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_deep_rank_get(self) -> dict:
         """Lit l'état du suivi de position avancé (payant)."""
@@ -4135,7 +4174,7 @@ class Api:
             return {"ok": True,
                     "enabled": bool(cfg.get("deep_rank_tracking", False))}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_deep_rank_set(self, payload: dict) -> dict:
         """Active/coupe le suivi de position avancé (phare_config.deep_rank_tracking).
@@ -4152,7 +4191,7 @@ class Api:
                         "Le réglage n'a pas pu être enregistré (base injoignable ?)."}
             return {"ok": True, "enabled": real}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ══════════════════════════════════════════════════════════════════
     #  PAGES EN SÉRIE (SEO programmatique) — moteur phare/programmatic.py
@@ -4199,7 +4238,7 @@ class Api:
         except Exception as exc:
             if self._prog_missing_table(exc):
                 return {"ok": True, "templates": [], "skipped": "migration"}
-            return {"ok": False, "error": str(exc)[:200]}
+            return {"ok": False, "error": _friendly_error(exc)[:200]}
 
     def phare_prog_template_create(self, payload: dict) -> dict:
         """Crée un modèle de pages en série. Une seule variable (ex. « ville »)
@@ -4255,7 +4294,7 @@ class Api:
                 return {"ok": False, "error":
                         "La base n'a pas encore les tables des pages en série "
                         "(migration 06d_phare_pro.sql à appliquer)."}
-            return {"ok": False, "error": str(exc)[:200]}
+            return {"ok": False, "error": _friendly_error(exc)[:200]}
 
     def phare_prog_template_delete(self, payload: dict) -> dict:
         tid = ((payload or {}).get("id") or "").strip()
@@ -4272,7 +4311,7 @@ class Api:
                 "id", tid).execute()
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)[:200]}
+            return {"ok": False, "error": _friendly_error(exc)[:200]}
 
     def phare_prog_generate(self, payload: dict) -> dict:
         """Lance l'écriture d'un lot de pages en arrière-plan (l'IA écrit une
@@ -4317,7 +4356,7 @@ class Api:
         except Exception as exc:
             if self._prog_missing_table(exc):
                 return {"ok": True, "pages": [], "skipped": "migration"}
-            return {"ok": False, "error": str(exc)[:200]}
+            return {"ok": False, "error": _friendly_error(exc)[:200]}
 
     def phare_prog_page_delete(self, payload: dict) -> dict:
         pid = ((payload or {}).get("id") or "").strip()
@@ -4331,7 +4370,7 @@ class Api:
             sb.table("phare_programmatic_pages").delete().eq("id", pid).execute()
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)[:200]}
+            return {"ok": False, "error": _friendly_error(exc)[:200]}
 
     # Photo d'en-tête par métier (Unsplash, hotlink libre). Clé = slug du
     # métier (sans accent). Vérifiées visuellement avant d'être posées.
@@ -4894,7 +4933,7 @@ class Api:
             from ..integrations.lagriffe import mail_templates
             return {"ok": True, "templates": mail_templates.list_templates()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def lagriffe_mail_template_save(self, payload: dict) -> dict:
         """Sauvegarde un template de mail Lagriffe.
@@ -4929,7 +4968,7 @@ class Api:
                 return {"ok": False, "error": "impossible d'enregistrer (Supabase indispo ou clé inconnue)"}
             return {"ok": True, "template": row}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Studio WoW — validations et plomberie
@@ -4950,7 +4989,7 @@ class Api:
             rows = wow_repo.list_intakes(status=status, limit=limit)
             return {"ok": True, "intakes": rows}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def wow_get_intake(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -4964,7 +5003,7 @@ class Api:
             timeline = wow_repo.intake_timeline(iid)
             return {"ok": True, "intake": intake, "timeline": timeline}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def wow_approve_intake(self, payload: dict) -> dict:
         """Approuve un intake : status → 'approved'. Le cron Netlify
@@ -4979,7 +5018,7 @@ class Api:
             ok = wow_repo.approve_intake(iid)
             return {"ok": bool(ok)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def wow_reject_intake(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -4991,7 +5030,7 @@ class Api:
             ok = wow_repo.reject_intake(iid, reason)
             return {"ok": bool(ok)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def wow_dispatch_now(self, payload: dict) -> dict:
         """Force le déclenchement immédiat du pipeline preview pour un
@@ -5005,7 +5044,7 @@ class Api:
             ok, msg = wow_repo.dispatch_now(iid)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def wow_pipeline_state(self) -> dict:
         """Renvoie l'état agrégé du pipeline WoW : compteurs par status
@@ -5017,7 +5056,7 @@ class Api:
             recent = wow_repo.list_intakes(limit=5)
             return {"ok": True, "counts": counts, "recent": recent}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Vue Mails — lecture de la table email_history
@@ -5099,7 +5138,7 @@ class Api:
                 self._signatures_save(sigs)
                 return {"ok": True}
             except Exception as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _friendly_error(exc)}
 
         # Mode nouveau : { signature: {dict complet} }
         sig = (p.get("signature") or {})
@@ -5123,7 +5162,7 @@ class Api:
             self._signatures_save(sigs)
             return {"ok": True, "id": sid}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def signature_remove(self, payload: dict) -> dict:
         sid = ((payload or {}).get("id") or "").strip()
@@ -5135,7 +5174,7 @@ class Api:
             self._signatures_save(sigs)
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def signature_get(self) -> dict:
         """Backward-compat : renvoie la 1re signature au format legacy."""
@@ -5173,14 +5212,14 @@ class Api:
             )
             return {"ok": True, "notes": notes}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def brain_list_by_category(self) -> dict:
         try:
             from ..integrations import brain
             return {"ok": True, "groups": brain.list_by_category(client=self._supabase())}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def brain_add(self, payload: dict) -> dict:
         p = payload or {}
@@ -5201,7 +5240,7 @@ class Api:
                 return {"ok": False, "error": "Insertion échouée"}
             return {"ok": True, "note": note}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def brain_upload(self, payload: dict) -> dict:
         """Upload d'un fichier (base64) → URL publique dans le bucket."""
@@ -5225,7 +5264,7 @@ class Api:
                 return {"ok": False, "error": "Upload échoué"}
             return {"ok": True, "url": url}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def brain_update(self, payload: dict) -> dict:
         p = payload or {}
@@ -5251,7 +5290,7 @@ class Api:
             ok = brain.update_note(nid, patch, client=self._supabase())
             return {"ok": bool(ok)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def brain_process_reminders(self, payload: dict | None = None) -> dict:
         """Envoie les rappels push pour les notes dont remind_at est échu.
@@ -5263,7 +5302,7 @@ class Api:
             res = brain.process_reminders(client=self._supabase(), dry_run=dry)
             return {"ok": True, **res}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def brain_due_reminders(self, payload: dict | None = None) -> dict:
         """Liste les notes 'open' dont remind_at est échu ET pas encore
@@ -5291,7 +5330,7 @@ class Api:
                     or n.get("assigned_to") in (None, "", me)]
             return {"ok": True, "notes": mine}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def brain_dismiss_reminder(self, payload: dict) -> dict:
         """Marque un rappel comme vu (sans toucher au statut de la note)."""
@@ -5307,7 +5346,7 @@ class Api:
                                     client=self._supabase())
             return {"ok": bool(ok)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def brain_delete(self, payload: dict) -> dict:
         nid = ((payload or {}).get("id") or "").strip()
@@ -5317,7 +5356,7 @@ class Api:
             from ..integrations import brain
             return {"ok": bool(brain.delete_note(nid, client=self._supabase()))}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def brain_edit(self, payload: dict) -> dict:
         p = payload or {}
@@ -5344,7 +5383,7 @@ class Api:
                 return {"ok": False, "error": "Édition échouée"}
             return {"ok": True, "note": note}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def brain_reply(self, payload: dict) -> dict:
         p = payload or {}
@@ -5362,7 +5401,7 @@ class Api:
                 return {"ok": False, "error": "Réponse échouée"}
             return {"ok": True, "note": note}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Templates HTML pour mails (réutilisables, partagés Jordan/Thomas)
@@ -5388,7 +5427,7 @@ class Api:
             templates.sort(key=lambda t: (t.get("name") or "").lower())
             return {"ok": True, "templates": templates}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def user_mail_template_save(self, payload: dict) -> dict:
         """Crée ou met à jour un template par id. Si id absent, génère un nouveau."""
@@ -5420,7 +5459,7 @@ class Api:
             client.set_shared_setting("mail_templates", {"templates": templates})
             return {"ok": True, "id": tid}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def user_mail_template_remove(self, payload: dict) -> dict:
         tid = ((payload or {}).get("id") or "").strip()
@@ -5436,7 +5475,7 @@ class Api:
             client.set_shared_setting("mail_templates", {"templates": templates})
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     @staticmethod
     def _normalize_addr_list(val) -> list:
@@ -5775,7 +5814,7 @@ class Api:
 
             return {"ok": True, "message_id": msg_id}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Relais d'envoi pour un service externe (ex : le site « Taillé pour
@@ -5903,7 +5942,7 @@ class Api:
                 return {"ok": False, "error": "Sauvegarde impossible."}
             return {"ok": True, "id": saved.get("id"), "scheduled_at": scheduled_at}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mail_scheduled_list(self, payload: dict | None = None) -> dict:
         """Liste les mails programmés (pending). Si payload.include_done=True,
@@ -5914,7 +5953,7 @@ class Api:
             from ..integrations import scheduled_mail_runner
             return {"ok": True, "mails": scheduled_mail_runner.list_pending(include_done)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def prospect_generate_mail(self, payload: dict) -> dict:
         """Analyse l'URL d'un site cible et génère un mail de prospection
@@ -5965,7 +6004,7 @@ class Api:
                                           subtype=subtype)
         except Exception as exc:
             logger.exception("prospect_generate_mail failed")
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mail_scheduled_cancel(self, payload: dict) -> dict:
         """Annule un mail programmé (s'il est encore pending)."""
@@ -5978,7 +6017,7 @@ class Api:
             ok = scheduled_mail_runner.cancel(mail_id)
             return {"ok": ok, "cancelled": ok}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Revenue overview (Stripe + AppSumo + manuel)
@@ -6149,7 +6188,7 @@ class Api:
             }
         except Exception as exc:
             logger.exception("revenue_overview")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Backups locaux
@@ -6160,7 +6199,7 @@ class Api:
             from ..integrations import backup_runner
             return backup_runner.run_now(self._app_state)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def backup_list(self, payload: dict | None = None) -> dict:
         """Liste les backups disponibles."""
@@ -6168,7 +6207,7 @@ class Api:
             from ..integrations import backup_runner
             return {"ok": True, "backups": backup_runner.list_backups()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def backup_preview(self, payload: dict) -> dict:
         """Renvoie un aperçu d'un backup donné (résumé, pas tout le contenu)."""
@@ -6191,7 +6230,7 @@ class Api:
             }
             return {"ok": True, "summary": summary}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def backup_download(self, payload: dict) -> dict:
         """Renvoie le contenu complet d'une sauvegarde, encodé en base64 —
@@ -6216,7 +6255,7 @@ class Api:
                 "size_bytes": len(raw),
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Signalement de bug (depuis le bouton flottant côté front)
@@ -6287,7 +6326,7 @@ class Api:
                                 if alerted else "Rapport enregistré.")}
         except Exception as exc:
             logger.exception("bug_report")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mail_delete(self, payload: dict) -> dict:
         """Supprime une entrée d'email_history (mail envoyé / reçu).
@@ -6303,7 +6342,7 @@ class Api:
             client.raw.table("email_history").delete().eq("id", mid).execute()
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mails_delete(self, payload: dict) -> dict:
         """Supprime plusieurs entrées d'email_history en une seule requête.
@@ -6322,7 +6361,7 @@ class Api:
             client.raw.table("email_history").delete().in_("id", ids).execute()
             return {"ok": True, "deleted": len(ids)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mails_list(self, payload: dict | None = None) -> dict:
         """Liste les mails enregistrés dans email_history.
@@ -6382,7 +6421,7 @@ class Api:
                          not in _internal][:limit]
             return {"ok": True, "mails": mails}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mail_mark_read(self, payload: dict) -> dict:
         """Marque un mail comme lu côté serveur (extra.read_at sur
@@ -6412,7 +6451,7 @@ class Api:
             sb.table("email_history").update({"extra": extra}).eq("id", mid).execute()
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Comptes mail secondaires (en plus du compte principal smtp_config)
@@ -6427,7 +6466,7 @@ class Api:
             return {"ok": True, "accounts": shared_secrets.get_all_mail_accounts(
                 client=client, app_state=self._app_state)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mail_account_save(self, payload: dict) -> dict:
         """Ajoute ou met à jour un compte secondaire. Pour le compte
@@ -6446,7 +6485,7 @@ class Api:
             ok = shared_secrets.add_or_update_mail_account(acc, client=client)
             return {"ok": bool(ok)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mail_account_remove(self, payload: dict) -> dict:
         try:
@@ -6460,7 +6499,7 @@ class Api:
             ok = shared_secrets.remove_mail_account(aid, client=client)
             return {"ok": bool(ok)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mail_account_test(self, payload: dict) -> dict:
         """Teste la connexion SMTP+IMAP d'un compte (par id ou par dict).
@@ -6499,7 +6538,7 @@ class Api:
             out["ok"] = out["smtp"] and out["imap"]
             return out
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Auth Supabase — login utilisateur, restore session, sign out
@@ -6527,7 +6566,7 @@ class Api:
                 "display_name": getattr(c, "user_display_name", None),
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def auth_sign_in(self, payload: dict) -> dict:
         """Connecte un utilisateur Supabase via email/mot de passe."""
@@ -6545,9 +6584,9 @@ class Api:
                 info = c.sign_in(email, password)
                 return {"ok": True, **(info or {})}
             except Exception as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _friendly_error(exc)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def auth_sign_out(self) -> dict:
         try:
@@ -6559,7 +6598,7 @@ class Api:
             c.sign_out()
             return {"ok": True, "connected": False}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # RankUs Studio — mêmes endpoints que WoW, sur la table rankus_intakes
@@ -6573,7 +6612,7 @@ class Api:
             from ..integrations.rankus import repo as r
             return {"ok": True, "intakes": r.list_intakes(status=status, limit=limit)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def rankus_get_intake(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6584,7 +6623,7 @@ class Api:
             if intake is None: return {"ok": False, "error": "intake introuvable"}
             return {"ok": True, "intake": intake, "timeline": r.intake_timeline(iid)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def rankus_approve_intake(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6593,7 +6632,7 @@ class Api:
             from ..integrations.rankus import repo as r
             return {"ok": bool(r.approve_intake(iid))}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def rankus_reject_intake(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6603,7 +6642,7 @@ class Api:
             from ..integrations.rankus import repo as r
             return {"ok": bool(r.reject_intake(iid, reason))}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def rankus_dispatch_now(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6613,14 +6652,14 @@ class Api:
             ok, msg = r.dispatch_now(iid)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def rankus_pipeline_state(self) -> dict:
         try:
             from ..integrations.rankus import repo as r
             return {"ok": True, "counts": r.count_by_status(), "recent": r.list_intakes(limit=5)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def rankus_mark_contact_handled(self, payload: dict) -> dict:
         """Marque un message de contact / demande de rappel venu de
@@ -6636,7 +6675,7 @@ class Api:
             ok, msg = r.mark_contact_handled(iid, handled=handled)
             return {"ok": True, "message": msg} if ok else {"ok": False, "error": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Lagriffe Studio — mêmes endpoints + approve_final_and_send (validation
@@ -6651,7 +6690,7 @@ class Api:
             from ..integrations.lagriffe import repo as r
             return {"ok": True, "intakes": r.list_intakes(status=status, limit=limit)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def lagriffe_get_intake(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6662,7 +6701,7 @@ class Api:
             if intake is None: return {"ok": False, "error": "intake introuvable"}
             return {"ok": True, "intake": intake, "timeline": r.intake_timeline(iid)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def lagriffe_approve_intake(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6671,7 +6710,7 @@ class Api:
             from ..integrations.lagriffe import repo as r
             return {"ok": bool(r.approve_intake(iid))}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def lagriffe_reject_intake(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6681,7 +6720,7 @@ class Api:
             from ..integrations.lagriffe import repo as r
             return {"ok": bool(r.reject_intake(iid, reason))}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def lagriffe_dispatch_now(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6691,14 +6730,14 @@ class Api:
             ok, msg = r.dispatch_now(iid)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def lagriffe_pipeline_state(self) -> dict:
         try:
             from ..integrations.lagriffe import repo as r
             return {"ok": True, "counts": r.count_by_status(), "recent": r.list_intakes(limit=5)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def lagriffe_approve_final(self, payload: dict) -> dict:
         """Valide le site final (status final_ready_review) et déclenche
@@ -6711,7 +6750,7 @@ class Api:
             ok, msg = r.approve_final_and_send(iid)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def lagriffe_finalize_now(self, payload: dict) -> dict:
         """Forcer la finalisation manuelle d'un intake 'paid' (utilisé quand
@@ -6726,7 +6765,7 @@ class Api:
             ok, msg = r.trigger_finalize(iid)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def lagriffe_mark_contact_handled(self, payload: dict) -> dict:
         """Marque un message de contact / demande de rappel venu de
@@ -6742,7 +6781,7 @@ class Api:
             ok, msg = r.mark_contact_handled(iid, handled=handled)
             return {"ok": True, "message": msg} if ok else {"ok": False, "error": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Pipeline settings (toggles AUTO/MANUEL par produit × étape)
@@ -6755,7 +6794,7 @@ class Api:
             from ..integrations.lagriffe import repo as r
             return r.pipeline_settings_read(product)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pipeline_settings_write(self, payload: dict) -> dict:
         """Met à jour le mode auto/manuel pour (product, stage).
@@ -6775,7 +6814,7 @@ class Api:
             updated_by = self.get_user_name() or "triskell-command"
             return r.pipeline_settings_write(product, stage, mode, updated_by)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Pixel Pros — pipeline (draft → paid → building → live)
@@ -6789,7 +6828,7 @@ class Api:
             from ..integrations.pixelpros import repo as r
             return {"ok": True, "intakes": r.list_intakes(status=status, limit=limit)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_get_intake(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6800,7 +6839,7 @@ class Api:
             if intake is None: return {"ok": False, "error": "intake introuvable"}
             return {"ok": True, "intake": intake, "timeline": r.intake_timeline(iid)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_analytics(self, payload: dict) -> dict:
         """Stats de fréquentation du site vitrine sur une période (7d/30d/all)."""
@@ -6812,7 +6851,7 @@ class Api:
             from ..integrations.pixelpros import repo as r
             return {"ok": True, "period": period, "stats": r.analytics_summary(since)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_dispatch_build(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6822,7 +6861,7 @@ class Api:
             ok, msg = r.dispatch_build(iid)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_mark_failed(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6832,7 +6871,7 @@ class Api:
             from ..integrations.pixelpros import repo as r
             return {"ok": bool(r.mark_failed(iid, error_message=reason))}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_delete_intake(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6842,7 +6881,7 @@ class Api:
             ok, msg = r.delete_intake(iid)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_mark_paid_manual(self, payload: dict) -> dict:
         """Override manuel : passe un draft au statut paid sans Stripe."""
@@ -6853,7 +6892,7 @@ class Api:
             ok, msg = r.mark_paid_manual(iid)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_simulate_full_flow(self, payload: dict) -> dict:
         """Simule un paiement Stripe complet : passe en 'paid', envoie le mail
@@ -6897,7 +6936,7 @@ class Api:
                     "message": "Tout déclenché." if all_ok
                                else "Lancé avec des avertissements (voir détails)."}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ----- Templates mails Pixel Pros (paid / live) -----
     def pixelpros_mail_template_get(self, payload: dict | None = None) -> dict:
@@ -6908,7 +6947,7 @@ class Api:
             from ..integrations.pixelpros import mailer as m
             return {"ok": True, "template": m.load_template(kind)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_mail_template_save(self, payload: dict) -> dict:
         p = payload or {}
@@ -6923,7 +6962,7 @@ class Api:
             ok, msg = m.save_template(kind, subject, body_text, body_html)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_mail_template_reset(self, payload: dict) -> dict:
         kind = ((payload or {}).get("kind") or "").strip()
@@ -6934,7 +6973,7 @@ class Api:
             ok, msg = m.reset_template(kind)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_pipeline_state(self) -> dict:
         try:
@@ -6942,7 +6981,7 @@ class Api:
             return {"ok": True, "counts": r.count_by_status(),
                     "recent": r.list_intakes(limit=5)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_resend_paid_mail(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6954,7 +6993,7 @@ class Api:
             ok, msg = m.send_paid_mail(intake)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_resend_live_mail(self, payload: dict) -> dict:
         iid = ((payload or {}).get("id") or "").strip()
@@ -6966,7 +7005,7 @@ class Api:
             ok, msg = m.send_live_mail(intake)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_update_contact(self, payload: dict) -> dict:
         """Met à jour l'email et/ou le téléphone d'un intake Pixel Pros."""
@@ -6980,7 +7019,7 @@ class Api:
             ok, msg = r.update_intake_contact(iid, email=email, phone=phone)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_mark_contact_handled(self, payload: dict) -> dict:
         """Marque un message de contact / demande de rappel comme « traité »
@@ -6996,7 +7035,7 @@ class Api:
             ok, msg = r.mark_contact_handled(iid, handled=handled)
             return {"ok": bool(ok), "message": msg} if ok else {"ok": False, "error": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_update_data(self, payload: dict) -> dict:
         """Modifie des champs du formulaire (textes, listes) d'un intake.
@@ -7017,7 +7056,7 @@ class Api:
             ok, msg = r.update_intake_data(iid, patch)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_upload_photo(self, payload: dict) -> dict:
         """Ajoute une photo à un intake (logo, hero, à-propos, galerie).
@@ -7048,7 +7087,7 @@ class Api:
             ok, msg, photo = r.add_photo(iid, kind, filename=filename, content=content)
             return {"ok": bool(ok), "message": msg, "photo": photo}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_delete_photo(self, payload: dict) -> dict:
         """Supprime une photo d'un intake (repérée par son chemin de stockage)."""
@@ -7064,7 +7103,7 @@ class Api:
             ok, msg = r.delete_photo(iid, path)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_mail_auto_get(self, payload: dict | None = None) -> dict:
         """Renvoie l'état auto/manuel des mails 'paid' et 'live'."""
@@ -7075,7 +7114,7 @@ class Api:
                 "live": m.is_auto("live"),
             }}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_mail_auto_set(self, payload: dict) -> dict:
         """Bascule un mail en auto (True) ou manuel (False)."""
@@ -7088,7 +7127,7 @@ class Api:
             ok, msg = m.set_auto(kind, value)
             return {"ok": ok, "message": msg, "auto": m.is_auto(kind)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Pixel Pros — Programme d'affiliation
@@ -7104,7 +7143,7 @@ class Api:
                     "affiliates": a.list_affiliates(status=status, limit=limit),
                     "counts": a.count_by_status()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_affiliate_get(self, payload: dict) -> dict:
         aid = ((payload or {}).get("id") or "").strip()
@@ -7118,7 +7157,7 @@ class Api:
                     "stats": a.affiliate_stats(aid),
                     "sales": a.list_sales(affiliate_id=aid, limit=200)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_affiliate_set_status(self, payload: dict) -> dict:
         aid = ((payload or {}).get("id") or "").strip()
@@ -7130,7 +7169,7 @@ class Api:
             ok, msg = a.set_affiliate_status(aid, new_status)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_affiliate_sales_list(self, payload: dict | None = None) -> dict:
         p = payload or {}
@@ -7142,7 +7181,7 @@ class Api:
             return {"ok": True,
                     "sales": a.list_sales_with_affiliate(payout_status=status, limit=limit)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_affiliate_mark_sales_paid(self, payload: dict) -> dict:
         ids = (payload or {}).get("ids") or []
@@ -7154,7 +7193,7 @@ class Api:
             n, msg = a.mark_sales_paid(ids, batch_ref=batch_ref)
             return {"ok": n > 0, "count": n, "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_affiliate_cancel_sale(self, payload: dict) -> dict:
         sid = ((payload or {}).get("id") or "").strip()
@@ -7165,7 +7204,7 @@ class Api:
             ok, msg = a.cancel_sale(sid, reason=reason)
             return {"ok": bool(ok), "message": msg}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_affiliate_prepare_payouts(self, payload: dict | None = None) -> dict:
         """Calcule la liste des paiements à effectuer (commissions 'available'
@@ -7176,7 +7215,7 @@ class Api:
             total_cents = sum(p["total_cents"] for p in payouts)
             return {"ok": True, "payouts": payouts, "total_cents": total_cents}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def pixelpros_affiliate_promote_pending(self, payload: dict | None = None) -> dict:
         """Passe en 'available' toutes les ventes 'pending' > 30 jours.
@@ -7189,7 +7228,7 @@ class Api:
             return {"ok": True, "promoted": n,
                     "message": f"{n} commission(s) passée(s) en 'versable'."}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Modèles mails éditables (zone "Modèles Mails" dans la sidebar)
@@ -7200,7 +7239,7 @@ class Api:
             from ..integrations.lagriffe import repo as r
             return r.mail_templates_list()
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mail_templates_get(self, payload: dict) -> dict:
         """Charge un template complet (sujet + corps HTML)."""
@@ -7212,7 +7251,7 @@ class Api:
             from ..integrations.lagriffe import repo as r
             return r.mail_templates_get(product, key)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mail_templates_save(self, payload: dict) -> dict:
         """Enregistre les modifs d'un template (sujet, corps, expéditeur…)."""
@@ -7228,7 +7267,7 @@ class Api:
             updated_by = self.get_user_name() or "triskell-command"
             return r.mail_templates_save(product, key, fields, updated_by)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def mail_templates_delete(self, payload: dict) -> dict:
         """Supprime un template (la fonction Netlify retombe sur son fallback)."""
@@ -7240,7 +7279,7 @@ class Api:
             from ..integrations.lagriffe import repo as r
             return r.mail_templates_delete(product, key)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ==================================================================
     # OBELISK — Prospection créateurs (ex-app standalone, fusionnée 2026-05-16)
@@ -7271,7 +7310,7 @@ class Api:
                 offset=int(p.get("offset") or 0),
             )
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "rows": [], "count": 0}
+            return {"ok": False, "error": _friendly_error(exc), "rows": [], "count": 0}
 
     def obelisk_get_creator(self, payload: dict) -> dict:
         pid = ((payload or {}).get("id") or "").strip()
@@ -7281,7 +7320,7 @@ class Api:
             from ..integrations.obelisk import repo as r
             return r.get_creator(pid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_update_creator(self, payload: dict) -> dict:
         pid = ((payload or {}).get("id") or "").strip()
@@ -7294,7 +7333,7 @@ class Api:
             from ..integrations.obelisk import repo as r
             return r.update_creator(pid, fields)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_delete_creator(self, payload: dict) -> dict:
         pid = ((payload or {}).get("id") or "").strip()
@@ -7304,7 +7343,7 @@ class Api:
             from ..integrations.obelisk import repo as r
             return r.delete_creator(pid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_delete_creators_bulk(self, payload: dict) -> dict:
         """Suppression de plusieurs créateurs par leurs IDs."""
@@ -7315,7 +7354,7 @@ class Api:
             from ..integrations.obelisk import repo as r
             return r.delete_creators_bulk(ids)
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "deleted": 0}
+            return {"ok": False, "error": _friendly_error(exc), "deleted": 0}
 
     def obelisk_delete_creators_filtered(self, payload: dict | None = None) -> dict:
         """Supprime tous les créateurs qui matchent les filtres en cours.
@@ -7344,7 +7383,7 @@ class Api:
                 contacted=str(p.get("contacted") or "").strip(),
             )
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "deleted": 0}
+            return {"ok": False, "error": _friendly_error(exc), "deleted": 0}
 
     def obelisk_delete_all_creators(self, payload: dict | None = None) -> dict:
         """⚠ Supprime TOUS les créateurs. Le client doit avoir affiché une
@@ -7358,14 +7397,14 @@ class Api:
             from ..integrations.obelisk import repo as r
             return r.delete_all_creators()
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "deleted": 0}
+            return {"ok": False, "error": _friendly_error(exc), "deleted": 0}
 
     def obelisk_stats(self, payload: dict | None = None) -> dict:
         try:
             from ..integrations.obelisk import repo as r
             return r.stats()
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "stats": {}}
+            return {"ok": False, "error": _friendly_error(exc), "stats": {}}
 
     def obelisk_audit_non_french(self, payload: dict | None = None) -> dict:
         """Scan de la base → renvoie le nombre de prospects non-francophones
@@ -7375,7 +7414,7 @@ class Api:
             return r.audit_non_francophones()
         except Exception as exc:
             logger.exception("obelisk_audit_non_french failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_purge_non_french(self, payload: dict | None = None) -> dict:
         """Supprime les non-francophones de la base.
@@ -7386,7 +7425,7 @@ class Api:
             return r.purge_non_francophones(confirm=confirm)
         except Exception as exc:
             logger.exception("obelisk_purge_non_french failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_audit_guessed_emails(self, payload: dict | None = None) -> dict:
         """Scan de la base → renvoie le nombre de prospects dont tous les
@@ -7396,7 +7435,7 @@ class Api:
             return r.audit_guessed_emails()
         except Exception as exc:
             logger.exception("obelisk_audit_guessed_emails failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_purge_guessed_emails(self, payload: dict | None = None) -> dict:
         """Supprime tous les prospects dont les emails sont uniquement
@@ -7407,7 +7446,7 @@ class Api:
             return r.purge_guessed_emails(confirm=confirm)
         except Exception as exc:
             logger.exception("obelisk_purge_guessed_emails failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_purge_below_subs(self, payload: dict | None = None) -> dict:
         """Supprime les prospects avec moins de N abonnés (les sans-valeur
@@ -7422,7 +7461,7 @@ class Api:
             return r.purge_below_subscribers(threshold=threshold, confirm=confirm)
         except Exception as exc:
             logger.exception("obelisk_purge_below_subs failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_export(self, payload: dict | None = None) -> dict:
         """Exporte la liste filtrée de prospects en xlsx ou pdf.
@@ -7501,7 +7540,7 @@ class Api:
             }
         except Exception as exc:
             logger.exception("obelisk_export failed")
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_import_file(self, payload: dict) -> dict:
         """Import d'un fichier Excel/CSV de prospects → table Supabase prospects.
@@ -7749,7 +7788,7 @@ class Api:
             user_email = self._safe_user_email()
             return r.get_user_config(user_email)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_save_config(self, payload: dict) -> dict:
         cfg = (payload or {}).get("config") or {}
@@ -7760,7 +7799,7 @@ class Api:
             user_email = self._safe_user_email()
             return r.save_user_config(user_email, cfg)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_start_search(self, payload: dict) -> dict:
         """Lance une recherche dans un thread background. Retourne le job_id
@@ -7794,7 +7833,7 @@ class Api:
             return runner.start_search(user_email, niche, platforms, max_pp,
                                         config_overrides=filters)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_pending_list(self, payload: dict | None = None) -> dict:
         """Créateurs en attente de validation (mode « relire avant d'ajouter »)."""
@@ -7803,7 +7842,7 @@ class Api:
             from ..integrations.obelisk import repo as r
             return r.list_pending(jid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "rows": [], "count": 0}
+            return {"ok": False, "error": _friendly_error(exc), "rows": [], "count": 0}
 
     def obelisk_pending_approve(self, payload: dict | None = None) -> dict:
         """Verse les créateurs en attente dans la base, puis vide la file."""
@@ -7812,7 +7851,7 @@ class Api:
             from ..integrations.obelisk import repo as r
             return r.approve_pending(jid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "approved": 0}
+            return {"ok": False, "error": _friendly_error(exc), "approved": 0}
 
     def obelisk_pending_discard(self, payload: dict | None = None) -> dict:
         """Ignore (supprime) les créateurs en attente sans les verser."""
@@ -7821,7 +7860,7 @@ class Api:
             from ..integrations.obelisk import repo as r
             return r.discard_pending(jid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "discarded": 0}
+            return {"ok": False, "error": _friendly_error(exc), "discarded": 0}
 
     def obelisk_get_job(self, payload: dict) -> dict:
         jid = ((payload or {}).get("job_id") or "").strip()
@@ -7831,7 +7870,7 @@ class Api:
             from ..integrations.obelisk import repo as r
             return r.get_search_job(jid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def obelisk_list_jobs(self, payload: dict | None = None) -> dict:
         try:
@@ -7840,7 +7879,7 @@ class Api:
             limit = int((payload or {}).get("limit") or 10)
             return r.list_recent_jobs(user_email, limit=limit)
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "jobs": []}
+            return {"ok": False, "error": _friendly_error(exc), "jobs": []}
 
     def obelisk_unseen_done_jobs(self, payload: dict | None = None) -> dict:
         """Renvoie les jobs Obelisk terminés (status=done) après la date
@@ -7873,7 +7912,7 @@ class Api:
                 } for j in done[:5]],
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "count": 0, "jobs": []}
+            return {"ok": False, "error": _friendly_error(exc), "count": 0, "jobs": []}
 
     # ==================================================================
     # CRÉATEURS — Suivi de prospection des créateurs (YouTube/Instagram…)
@@ -7904,7 +7943,7 @@ class Api:
                                   limit=int(p.get("limit") or 300))
         except Exception as exc:
             logger.exception("creators_list failed")
-            return {"ok": False, "error": str(exc), "rows": [], "count": 0}
+            return {"ok": False, "error": _friendly_error(exc), "rows": [], "count": 0}
 
     def creators_get(self, payload: dict | None = None) -> dict:
         """Une fiche du carnet créateurs."""
@@ -7913,7 +7952,7 @@ class Api:
             return book.get_one(((payload or {}).get("id") or "").strip())
         except Exception as exc:
             logger.exception("creators_get failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def creators_save(self, payload: dict | None = None) -> dict:
         """Crée (sans id) ou met à jour (avec id) un créateur du carnet.
@@ -7927,7 +7966,7 @@ class Api:
             return book.save(payload or {})
         except Exception as exc:
             logger.exception("creators_save failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def creators_delete(self, payload: dict | None = None) -> dict:
         """Supprime un créateur du carnet."""
@@ -7936,7 +7975,7 @@ class Api:
             return book.delete(((payload or {}).get("id") or "").strip())
         except Exception as exc:
             logger.exception("creators_delete failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def creators_queue_draft(self, payload: dict | None = None) -> dict:
         """Met un créateur (ou tous les non contactés prêts) dans l'écran
@@ -8019,7 +8058,7 @@ class Api:
                     "queued": queued, "skipped": skipped}
         except Exception as exc:
             logger.exception("creators_queue_draft failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def creators_make_draft(self, payload: dict | None = None) -> dict:
         """Dépose un brouillon d'e-mail prêt à envoyer dans la boîte d'envoi
@@ -8136,7 +8175,7 @@ class Api:
                     "account": from_email, "drafts": done}
         except Exception as exc:
             logger.exception("creators_make_draft failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     @staticmethod
     def _imap_drafts_candidates(M):
@@ -8224,22 +8263,22 @@ class Api:
             from ..integrations.wow import repo as _wow
             out["wow"] = _shape("wow", _wow.list_intakes(limit=limit))
         except Exception as exc:
-            out["wow"] = {"prefix": "wow", "recent": [], "latest_change_at": "", "error": str(exc)}
+            out["wow"] = {"prefix": "wow", "recent": [], "latest_change_at": "", "error": _friendly_error(exc)}
         try:
             from ..integrations.rankus import repo as _rank
             out["rankus"] = _shape("rankus", _rank.list_intakes(limit=limit))
         except Exception as exc:
-            out["rankus"] = {"prefix": "rankus", "recent": [], "latest_change_at": "", "error": str(exc)}
+            out["rankus"] = {"prefix": "rankus", "recent": [], "latest_change_at": "", "error": _friendly_error(exc)}
         try:
             from ..integrations.lagriffe import repo as _lag
             out["lagriffe"] = _shape("lagriffe", _lag.list_intakes(limit=limit))
         except Exception as exc:
-            out["lagriffe"] = {"prefix": "lagriffe", "recent": [], "latest_change_at": "", "error": str(exc)}
+            out["lagriffe"] = {"prefix": "lagriffe", "recent": [], "latest_change_at": "", "error": _friendly_error(exc)}
         try:
             from ..integrations.pixelpros import repo as _pp
             out["pixelpros"] = _shape("pixelpros", _pp.list_intakes(limit=limit))
         except Exception as exc:
-            out["pixelpros"] = {"prefix": "pixelpros", "recent": [], "latest_change_at": "", "error": str(exc)}
+            out["pixelpros"] = {"prefix": "pixelpros", "recent": [], "latest_change_at": "", "error": _friendly_error(exc)}
         return {"ok": True, "pipelines": out}
 
     def _safe_user_email(self) -> str:
@@ -8488,7 +8527,7 @@ class Api:
             webbrowser.open(url)
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Teddy Mail — pont depuis Triskell Command
@@ -8565,7 +8604,7 @@ class Api:
                 webbrowser.open(url)
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def launch_app(self, payload: dict) -> dict:
         """Lance un outil Triskell : exe local en priorité, sinon URL web.
@@ -8602,7 +8641,7 @@ class Api:
                 webbrowser.open(url)
                 return {"ok": True, "mode": "url"}
             except Exception as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _friendly_error(exc)}
         return {"ok": False, "error": "no_target"}
 
     # ------------------------------------------------------------------
@@ -8616,7 +8655,7 @@ class Api:
             kits = delivery_kits.load_kits(client=client)
             return {"ok": True, "kits": kits}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def delivery_kits_save(self, payload: dict) -> dict:
         """Sauve le dict complet des kits (local + miroir Supabase)."""
@@ -8629,7 +8668,7 @@ class Api:
             delivery_kits.save_kits(kits, client=client)
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def delivery_kit_preview(self, payload: dict) -> dict:
         """Preview un kit rendu avec un nom client de test."""
@@ -8656,7 +8695,7 @@ class Api:
                 fus.append(rendered)
             return {"ok": True, "welcome": welcome, "follow_ups": fus}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def delivery_trigger_now(self, payload: dict) -> dict:
         """Déclenche immédiatement la livraison pour un client_project donné.
@@ -8704,7 +8743,7 @@ class Api:
             return {"ok": False, "error": "client_project_id manquant"}
         except Exception as exc:
             logger.exception("delivery_trigger_now")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def post_sale_run_now(self) -> dict:
         """Force un cycle complet du post-sale runner (utile pour debug)."""
@@ -8712,7 +8751,7 @@ class Api:
             from ..integrations import post_sale_runner
             return {"ok": True, "result": post_sale_runner.run_now(self._app_state)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def post_sale_status(self) -> dict:
         """Renvoie l'état du worker post-sale (running, last run, counters)."""
@@ -8720,7 +8759,7 @@ class Api:
             from ..integrations import post_sale_runner
             return {"ok": True, "status": post_sale_runner.get_status()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Bascule auto "prospect intéressé → projet client"
@@ -8733,7 +8772,7 @@ class Api:
                 return {"ok": True, "config": dict(lead_to_client.DEFAULT_CONFIG)}
             return {"ok": True, "config": lead_to_client.load_config(client)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def lead_to_client_save_config(self, payload: dict) -> dict:
         try:
@@ -8748,7 +8787,7 @@ class Api:
             lead_to_client.save_config(client, cfg)
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def lead_to_client_run_now(self) -> dict:
         """Force un cycle (utile en debug ou pour bouton 'tester maintenant')."""
@@ -8756,14 +8795,14 @@ class Api:
             from ..integrations import lead_to_client
             return {"ok": True, "result": lead_to_client.run_now(self._app_state)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def lead_to_client_status(self) -> dict:
         try:
             from ..integrations import lead_to_client
             return {"ok": True, "status": lead_to_client.get_status()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Tri + alertes des mails entrants (analyse de TOUS les mails reçus,
@@ -8777,7 +8816,7 @@ class Api:
                 return {"ok": True, "config": dict(inbox_triage.DEFAULT_CONFIG)}
             return {"ok": True, "config": inbox_triage.load_config(client)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def inbox_triage_save_config(self, payload: dict) -> dict:
         try:
@@ -8801,7 +8840,7 @@ class Api:
             inbox_triage.save_config(client, base)
             return {"ok": True, "config": base}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Relance multi-canal (LinkedIn DM préparé par IA)
@@ -8811,7 +8850,7 @@ class Api:
             from ..integrations import multichannel_followup
             return {"ok": True, "actions": multichannel_followup.list_pending()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def multichannel_mark_done(self, payload: dict) -> dict:
         aid = (payload or {}).get("id") or ""
@@ -8819,7 +8858,7 @@ class Api:
             from ..integrations import multichannel_followup
             return {"ok": multichannel_followup.mark_done(aid)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def multichannel_discard(self, payload: dict) -> dict:
         aid = (payload or {}).get("id") or ""
@@ -8827,14 +8866,14 @@ class Api:
             from ..integrations import multichannel_followup
             return {"ok": multichannel_followup.discard_action(aid)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def multichannel_run_now(self) -> dict:
         try:
             from ..integrations import multichannel_followup
             return {"ok": True, "result": multichannel_followup.run_now(self._app_state)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def multichannel_get_config(self) -> dict:
         try:
@@ -8842,7 +8881,7 @@ class Api:
             client = self._supabase()
             return {"ok": True, "config": multichannel_followup.load_config(client)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def multichannel_save_config(self, payload: dict) -> dict:
         try:
@@ -8853,7 +8892,7 @@ class Api:
             multichannel_followup.save_config(client, (payload or {}).get("config") or {})
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def multichannel_dispatch_phantombuster(self) -> dict:
         """Envoie toutes les actions LinkedIn pending au Phantom configuré."""
@@ -8862,7 +8901,7 @@ class Api:
             client = self._supabase()
             return multichannel_followup.auto_dispatch_to_phantombuster(client)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Phantombuster — pour DM LinkedIn auto
@@ -8879,7 +8918,7 @@ class Api:
                 safe["api_key"] = tk[:6] + "•" * 8 + tk[-4:]
             return {"ok": True, "config": safe}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phantombuster_save_config(self, payload: dict) -> dict:
         try:
@@ -8895,7 +8934,7 @@ class Api:
             pb.save_config(cfg_in, client)
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Tracking d'ouvertures de mail (pixel transparent)
@@ -8906,7 +8945,7 @@ class Api:
             client = self._supabase()
             return {"ok": True, "config": email_tracker.load_config(client)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def tracker_save_config(self, payload: dict) -> dict:
         try:
@@ -8917,7 +8956,7 @@ class Api:
             email_tracker.save_config((payload or {}).get("config") or {}, client)
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def tracker_stats(self) -> dict:
         """Renvoie les stats d'ouverture sur 7j et 30j."""
@@ -8951,7 +8990,7 @@ class Api:
                 "open_rate_30d": round(100.0 * opened_30d / max(sent_30d, 1), 1),
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def phantombuster_test(self) -> dict:
         try:
@@ -8963,7 +9002,7 @@ class Api:
                 return {"ok": False, "error": "Clé API manquante"}
             return pb.health_check(tk)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Recyclage des prospects dormants ("pas maintenant" anciens)
@@ -8974,7 +9013,7 @@ class Api:
             client = self._supabase()
             return {"ok": True, "config": dormant_recycler.load_config(client)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def dormant_save_config(self, payload: dict) -> dict:
         try:
@@ -8985,21 +9024,21 @@ class Api:
             dormant_recycler.save_config(client, (payload or {}).get("config") or {})
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def dormant_run_now(self) -> dict:
         try:
             from ..integrations import dormant_recycler
             return {"ok": True, "result": dormant_recycler.run_now(self._app_state)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def dormant_status(self) -> dict:
         try:
             from ..integrations import dormant_recycler
             return {"ok": True, "status": dormant_recycler.get_status()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Stripe — polling des paiements pour déclencher la livraison
@@ -9019,7 +9058,7 @@ class Api:
                 cfg_safe["_has_key"] = False
             return {"ok": True, "config": cfg_safe}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def stripe_save_config(self, payload: dict) -> dict:
         try:
@@ -9036,21 +9075,21 @@ class Api:
             stripe_poller.save_config(client, cfg_in)
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def stripe_run_now(self) -> dict:
         try:
             from ..integrations import stripe_poller
             return {"ok": True, "result": stripe_poller.run_now(self._app_state)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def stripe_status(self) -> dict:
         try:
             from ..integrations import stripe_poller
             return {"ok": True, "status": stripe_poller.get_status()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Tests A/B des sujets de mail
@@ -9063,7 +9102,7 @@ class Api:
                     "campaigns": subject_ab_test.get_results(client),
                     "config": subject_ab_test.load_config(client)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def ab_add_campaign(self, payload: dict) -> dict:
         p = payload or {}
@@ -9077,7 +9116,7 @@ class Api:
             camp = subject_ab_test.add_campaign(name, variants, client)
             return {"ok": True, "campaign": camp}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def ab_delete_campaign(self, payload: dict) -> dict:
         cid = (payload or {}).get("id") or ""
@@ -9086,7 +9125,7 @@ class Api:
             client = self._supabase()
             return {"ok": subject_ab_test.delete_campaign(cid, client)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def ab_save_config(self, payload: dict) -> dict:
         try:
@@ -9096,7 +9135,7 @@ class Api:
             subject_ab_test.save_config(cfg, client)
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Tableau de bord santé du système
@@ -9166,7 +9205,7 @@ class Api:
                     "name": mod_name, "label": label,
                     "running": False, "last_run_at": "",
                     "last_run_result": {}, "health": "error",
-                    "error": str(exc),
+                    "error": _friendly_error(exc),
                 })
                 out["summary"]["error"] += 1
 
@@ -9337,7 +9376,7 @@ class Api:
             return {"ok": ok}
         except Exception as exc:
             logger.exception("reply_convert_to_client")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Auto-pilote — pipeline complet (cible → recherche → IA → envoi → suivi)
@@ -9350,7 +9389,7 @@ class Api:
             cfg = PipelineConfig.load()
             return {"ok": True, "config": asdict(cfg)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def autopilot_sender_pool_status(self) -> dict:
         """Statut du pool d'adresses d'envoi, rampe de montée auto comprise.
@@ -9371,7 +9410,7 @@ class Api:
                         "next_free_at": None, "ramp_ok": True}
             return spt.pool_status_with_ramp(pool)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def autopilot_save_config(self, payload: dict) -> dict:
         """Sauve la config (et synchronise les clés API/SMTP vers le Core)."""
@@ -9385,7 +9424,7 @@ class Api:
             self._sync_keys_to_core()
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def autopilot_run(self, payload: dict | None = None) -> dict:
         """Lance le pipeline en arrière-plan. Retourne immédiatement.
@@ -9780,7 +9819,7 @@ class Api:
                 })
                 ok = bool(res and res.get("ok"))
             except Exception as exc:
-                res = {"ok": False, "error": str(exc)}
+                res = {"ok": False, "error": _friendly_error(exc)}
                 ok = False
             if ok:
                 count_by_account[_acct] = count_by_account.get(_acct, 0) + 1
@@ -10028,7 +10067,7 @@ class Api:
             rows = res.data or []
         except Exception as exc:
             logger.warning("autopilot_list_products: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
         # Recupere la liste des produits desactives dans le catalogue
         try:
@@ -10083,7 +10122,7 @@ class Api:
             client.set_shared_setting(self._AP_STAGE_SETTING_KEY, current)
         except Exception as exc:
             logger.warning("autopilot_set_stage_mode: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
         return {"ok": True, "stage": stage, "mode": mode}
 
     # ------------------------------------------------------------------
@@ -10161,7 +10200,7 @@ class Api:
             return {"ok": True}
         except Exception as exc:
             logger.exception("set_simple_mode")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Log d'une prospection manuelle — crée/upserte un prospect et le
@@ -10256,7 +10295,7 @@ class Api:
                 sb.table("prospects").update(update_row).eq("id", pid).execute()
                 return {"ok": True, "prospect_id": pid, "action": "updated"}
             except Exception as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _friendly_error(exc)}
 
         # Insert nouveau prospect
         row = {
@@ -10280,7 +10319,7 @@ class Api:
                 new_id = first.get("id", "")
             return {"ok": True, "prospect_id": new_id, "action": "created"}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Timeline d'un prospect — agrégation de tout son parcours
@@ -10476,7 +10515,7 @@ class Api:
             }
         except Exception as exc:
             logger.exception("prospect_timeline")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Setup status — bilan rapide des connexions nécessaires
@@ -10776,7 +10815,7 @@ class Api:
             }
         except Exception as exc:
             logger.debug("messages_me: %s", exc)
-            return {"ok": False, "error": str(exc), "user_id": None}
+            return {"ok": False, "error": _friendly_error(exc), "user_id": None}
 
     def messages_other_user(self) -> dict:
         """Renvoie le profil de l'autre user (Jordan voit Thomas, etc.).
@@ -10790,7 +10829,7 @@ class Api:
             return {"ok": True, "other": other}
         except Exception as exc:
             logger.debug("messages_other_user: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def messages_set_color(self, payload: dict) -> dict:
         """L'utilisateur courant change SA couleur de chat. La nouvelle
@@ -10806,7 +10845,7 @@ class Api:
             return {"ok": True, "color": get_chat_color(uid)}
         except Exception as exc:
             logger.warning("messages_set_color: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def messages_color_palette(self) -> dict:
         """Renvoie la palette de couleurs proposée dans le sélecteur + la
@@ -10823,7 +10862,7 @@ class Api:
             }
         except Exception as exc:
             logger.debug("messages_color_palette: %s", exc)
-            return {"ok": False, "error": str(exc), "palette": [], "current": None}
+            return {"ok": False, "error": _friendly_error(exc), "palette": [], "current": None}
 
     def messages_list(self, payload: dict | None = None) -> dict:
         """Renvoie la liste des derniers messages échangés (chronologique)."""
@@ -10833,7 +10872,7 @@ class Api:
             return {"ok": True, "messages": list_messages(limit)}
         except Exception as exc:
             logger.debug("messages_list: %s", exc)
-            return {"ok": False, "error": str(exc), "messages": []}
+            return {"ok": False, "error": _friendly_error(exc), "messages": []}
 
     def messages_send(self, payload: dict) -> dict:
         """Envoie un message à l'autre user. Le payload accepte :
@@ -10851,7 +10890,7 @@ class Api:
             return {"ok": bool(msg), "message": msg}
         except Exception as exc:
             logger.warning("messages_send: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def gif_search(self, payload: dict | None = None) -> dict:
         """Cherche des GIFs via Giphy (proxy serveur).
@@ -10911,7 +10950,7 @@ class Api:
             return {"ok": True, "items": items}
         except Exception as exc:
             logger.warning("gif_search: %s", exc)
-            return {"ok": False, "error": str(exc), "items": []}
+            return {"ok": False, "error": _friendly_error(exc), "items": []}
 
     def messages_delete(self, payload: dict) -> dict:
         """Supprime (soft-delete) un message envoyé par l'utilisateur
@@ -10925,7 +10964,7 @@ class Api:
             return {"ok": bool(msg), "message": msg}
         except Exception as exc:
             logger.warning("messages_delete: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def messages_react(self, payload: dict) -> dict:
         """Pose/retire une réaction emoji sur un message (toggle).
@@ -10941,7 +10980,7 @@ class Api:
             return {"ok": bool(res), "result": res}
         except Exception as exc:
             logger.warning("messages_react: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def messages_edit(self, payload: dict) -> dict:
         """Modifie le texte d'un message déjà envoyé. Payload :
@@ -10958,7 +10997,7 @@ class Api:
             return {"ok": bool(msg), "message": msg}
         except Exception as exc:
             logger.warning("messages_edit: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def messages_mark_read(self) -> dict:
         """Marque tous les messages reçus non-lus comme lus."""
@@ -10967,7 +11006,7 @@ class Api:
             return {"ok": True, "count": mark_all_read()}
         except Exception as exc:
             logger.debug("messages_mark_read: %s", exc)
-            return {"ok": False, "error": str(exc), "count": 0}
+            return {"ok": False, "error": _friendly_error(exc), "count": 0}
 
     def messages_mark_delivered(self) -> dict:
         """Marque comme « distribués » les messages reçus pas encore
@@ -10977,7 +11016,7 @@ class Api:
             return {"ok": True, "count": mark_all_delivered()}
         except Exception as exc:
             logger.debug("messages_mark_delivered: %s", exc)
-            return {"ok": False, "error": str(exc), "count": 0}
+            return {"ok": False, "error": _friendly_error(exc), "count": 0}
 
     def messages_count_unread(self) -> dict:
         """Nombre de messages reçus non lus."""
@@ -10986,7 +11025,7 @@ class Api:
             return {"ok": True, "count": count_unread()}
         except Exception as exc:
             logger.debug("messages_count_unread: %s", exc)
-            return {"ok": False, "error": str(exc), "count": 0}
+            return {"ok": False, "error": _friendly_error(exc), "count": 0}
 
     def messages_last_preview(self) -> dict:
         """Dernier message échangé (pour tooltip / aperçu)."""
@@ -10995,7 +11034,7 @@ class Api:
             return {"ok": True, "preview": last_message_preview()}
         except Exception as exc:
             logger.debug("messages_last_preview: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def messages_set_typing(self, payload: dict | None = None) -> dict:
         """Notifie que je suis (ou ne suis plus) en train d'écrire."""
@@ -11005,7 +11044,7 @@ class Api:
             return {"ok": bool(set_typing(active))}
         except Exception as exc:
             logger.debug("messages_set_typing: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def messages_peer_typing(self) -> dict:
         """L'autre user est-il en train d'écrire ?"""
@@ -11014,7 +11053,7 @@ class Api:
             return {"ok": True, "typing": peer_is_typing()}
         except Exception as exc:
             logger.debug("messages_peer_typing: %s", exc)
-            return {"ok": False, "error": str(exc), "typing": False}
+            return {"ok": False, "error": _friendly_error(exc), "typing": False}
 
     # ==================================================================
     # Appels audio / vidéo (WebRTC) dans le chat
@@ -11038,7 +11077,7 @@ class Api:
             return {"ok": bool(ok)}
         except Exception as exc:
             logger.warning("call_signal_send: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def call_signal_poll(self, payload: dict | None = None) -> dict:
         """Relève les signaux d'appel qui me sont destinés (lecture unique)."""
@@ -11047,7 +11086,7 @@ class Api:
             return {"ok": True, "signals": poll_signals()}
         except Exception as exc:
             logger.debug("call_signal_poll: %s", exc)
-            return {"ok": False, "error": str(exc), "signals": []}
+            return {"ok": False, "error": _friendly_error(exc), "signals": []}
 
     def call_clear(self, payload: dict) -> dict:
         """Purge les signaux d'une session d'appel (après raccroché)."""
@@ -11056,7 +11095,7 @@ class Api:
             return {"ok": bool(clear_call((payload or {}).get("call_id", "")))}
         except Exception as exc:
             logger.debug("call_clear: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def call_config(self) -> dict:
         """Config nécessaire à l'appel côté navigateur : qui on peut
@@ -11107,7 +11146,7 @@ class Api:
             }
         except Exception as exc:
             logger.debug("call_config: %s", exc)
-            return {"ok": False, "error": str(exc), "ice_servers": []}
+            return {"ok": False, "error": _friendly_error(exc), "ice_servers": []}
 
     # ==================================================================
     # Le Convoi — Importer une liste (PDF/Word/Excel/Image/Texte)
@@ -11209,7 +11248,7 @@ class Api:
             return {"ok": True, "catalog": catalog_repo.get_catalog()}
         except Exception as exc:
             logger.warning("convoy_get_catalog: %s", exc)
-            return {"ok": False, "error": str(exc), "catalog": []}
+            return {"ok": False, "error": _friendly_error(exc), "catalog": []}
 
     def convoy_save_catalog(self, payload: dict | None = None) -> dict:
         items = (payload or {}).get("catalog") or []
@@ -11218,7 +11257,7 @@ class Api:
             ok = catalog_repo.set_catalog(items)
             return {"ok": bool(ok), "catalog": catalog_repo.get_catalog()}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ---- Liste / lecture / création / suppression / renommage ---------------
     def convoy_list_campaigns(self) -> dict:
@@ -11239,7 +11278,7 @@ class Api:
             return {"ok": True, "campaigns": rows}
         except Exception as exc:
             logger.warning("convoy_list_campaigns: %s", exc)
-            return {"ok": False, "error": str(exc), "campaigns": []}
+            return {"ok": False, "error": _friendly_error(exc), "campaigns": []}
 
     def convoy_get_campaign(self, payload: dict | None = None) -> dict:
         cid = ((payload or {}).get("campaign_id") or "").strip()
@@ -11252,7 +11291,7 @@ class Api:
                 return {"ok": False, "error": "Campagne introuvable"}
             return {"ok": True, "campaign": self._convoy_serialize(camp)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_new_campaign(self, payload: dict | None = None) -> dict:
         try:
@@ -11280,7 +11319,7 @@ class Api:
             return {"ok": True, "campaign": self._convoy_serialize(camp)}
         except Exception as exc:
             logger.exception("convoy_new_campaign")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_rename_campaign(self, payload: dict | None = None) -> dict:
         p = payload or {}
@@ -11297,7 +11336,7 @@ class Api:
             camp.save()
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_delete_campaign(self, payload: dict | None = None) -> dict:
         cid = ((payload or {}).get("campaign_id") or "").strip()
@@ -11313,7 +11352,7 @@ class Api:
                 self._convoy_runtime.pop(cid, None)
             return {"ok": bool(ok)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ---- Étape 1 : upload + parse + (fast path tabulaire) -------------------
     def convoy_upload_and_parse(self, payload: dict | None = None) -> dict:
@@ -11356,7 +11395,7 @@ class Api:
             try:
                 parsed = convoy_parser.parse_file(target)
             except convoy_parser.ParserError as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": _friendly_error(exc)}
             text = parsed.get("text", "") or ""
             rows = parsed.get("rows", []) or []
             warnings = parsed.get("warnings", []) or []
@@ -11385,7 +11424,7 @@ class Api:
             }
         except Exception as exc:
             logger.exception("convoy_upload_and_parse")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_extract_prospects_ai(self, payload: dict | None = None) -> dict:
         """Appelle l'IA sur le texte brut du dernier upload pour structurer
@@ -11432,7 +11471,7 @@ class Api:
             return self._convoy_apply_prospects(camp, prospects)
         except Exception as exc:
             logger.exception("convoy_extract_prospects_ai")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_apply_fast_path(self, payload: dict | None = None) -> dict:
         """Reçoit la liste de prospects du fast path (mapping CSV/XLSX direct)
@@ -11452,7 +11491,7 @@ class Api:
                 return {"ok": False, "error": "Campagne introuvable"}
             return self._convoy_apply_prospects(camp, prospects)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def _convoy_apply_prospects(self, camp, prospects: list) -> dict:
         """Remplace les drafts d'une campagne par des drafts vides issus de
@@ -11510,7 +11549,7 @@ class Api:
                     return {"ok": True}
             return {"ok": False, "error": "Brouillon introuvable"}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ---- Étape 3 : brief + catalogue + génération IA ------------------------
     def convoy_save_compose(self, payload: dict | None = None) -> dict:
@@ -11531,7 +11570,7 @@ class Api:
             camp.save()
             return {"ok": True}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_generate_messages(self, payload: dict | None = None) -> dict:
         """Lance la génération IA des mails en thread daemon, retour immédiat.
@@ -11707,7 +11746,7 @@ class Api:
             with self._convoy_lock:
                 rt = self._convoy_runtime.get(cid)
                 if rt: rt["gen_running"] = False
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_generation_status(self, payload: dict | None = None) -> dict:
         p = payload or {}
@@ -11735,7 +11774,7 @@ class Api:
             return pt.list_products_with_prospection_templates()
         except Exception as exc:
             logger.exception("convoy_list_prospection_products failed")
-            return {"ok": False, "error": str(exc), "products": []}
+            return {"ok": False, "error": _friendly_error(exc), "products": []}
 
     def convoy_save_send_settings(self, payload: dict | None = None) -> dict:
         p = payload or {}
@@ -11789,7 +11828,7 @@ class Api:
             camp.save()
             return {"ok": True, "campaign": self._convoy_serialize(camp)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_approve_draft(self, payload: dict | None = None) -> dict:
         p = payload or {}
@@ -11813,7 +11852,7 @@ class Api:
             ok = convoy_runner.approve_draft(camp, did)
             return {"ok": bool(ok)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_reject_draft(self, payload: dict | None = None) -> dict:
         p = payload or {}
@@ -11829,7 +11868,7 @@ class Api:
             ok = convoy_runner.reject_draft(camp, did)
             return {"ok": bool(ok)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_update_draft(self, payload: dict | None = None) -> dict:
         p = payload or {}
@@ -11849,7 +11888,7 @@ class Api:
             )
             return {"ok": bool(ok)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_approve_all(self, payload: dict | None = None) -> dict:
         cid = ((payload or {}).get("campaign_id") or "").strip()
@@ -11863,7 +11902,7 @@ class Api:
             n = convoy_runner.approve_all_pending(camp)
             return {"ok": True, "approved": n}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_start_send(self, payload: dict | None = None) -> dict:
         """Démarre l'envoi des mails approuvés en thread daemon."""
@@ -12010,7 +12049,7 @@ class Api:
             return {"ok": True, "started": True, "approved": len(approved)}
         except Exception as exc:
             logger.exception("convoy_start_send")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def resume_convoy_sends(self, payload: dict | None = None) -> dict:
         """Reprend automatiquement les envois Convoi interrompus par un crash
@@ -12070,7 +12109,7 @@ class Api:
             }
         except Exception as exc:
             logger.exception("resume_convoy_sends")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def convoy_send_status(self, payload: dict | None = None) -> dict:
         p = payload or {}
@@ -12361,7 +12400,7 @@ class Api:
                                             client=self._supabase())
         except Exception as exc:
             logger.exception("prospection_start")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def prospection_missions(self, payload: dict | None = None) -> dict:
         """Liste des missions (récentes d'abord) + état de l'Auto-pilote
@@ -12375,7 +12414,7 @@ class Api:
                          reverse=True)
             out["missions"] = lst[:limit]
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
         try:
             from triskell_core.prospect.pipeline import PipelineConfig
             cfg = PipelineConfig.load()
@@ -12406,7 +12445,7 @@ class Api:
                                          limit=limit)
         except Exception as exc:
             logger.debug("prospection_hunt_log: %s", exc)
-            return {"ok": False, "error": str(exc), "entries": [],
+            return {"ok": False, "error": _friendly_error(exc), "entries": [],
                     "total": 0}
 
     def prospection_estimate(self, payload: dict | None = None) -> dict:
@@ -12421,7 +12460,7 @@ class Api:
             return hunt_log.estimate_for(source, params, client=self._supabase())
         except Exception as exc:
             logger.debug("prospection_estimate: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def prospection_response_insights(self, payload: dict | None = None) -> dict:
         """Quelles cibles (métiers) répondent le mieux ? Croise les envois et
@@ -12434,7 +12473,7 @@ class Api:
                 period=p.get("period") or "90d")
         except Exception as exc:
             logger.debug("prospection_response_insights: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def apercu_preview(self, payload: dict | None = None) -> dict:
         """Génère un aperçu de site personnalisé (image PNG en base64) pour
@@ -12454,7 +12493,7 @@ class Api:
             import base64
             return {"ok": True, "png_b64": base64.b64encode(png).decode("ascii")}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def draft_refresh_apercu(self, payload: dict | None = None) -> dict:
         """Régénère l'APERÇU (capture du vrai site démo du métier, personnalisé
@@ -12655,7 +12694,7 @@ class Api:
                 client, with_dns=bool(with_dns), with_age=bool(with_age))
         except Exception as exc:
             logger.warning("mail_reputation endpoint: %s", exc)
-            return {"ok": False, "error": str(exc), "boxes": []}
+            return {"ok": False, "error": _friendly_error(exc), "boxes": []}
 
     def deliverability_keys_status(self, payload: dict | None = None) -> dict:
         """Dit ce qui est configuré pour la note Gmail et les listes noires,
@@ -12673,7 +12712,7 @@ class Api:
                                                    and pm.get("client_secret")
                                                    and pm.get("refresh_token"))}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def deliverability_keys_save(self, payload: dict | None = None) -> dict:
         """Enregistre les clés délivrabilité (note Gmail + listes noires).
@@ -12695,7 +12734,7 @@ class Api:
             return {"ok": bool(ok)}
         except Exception as exc:
             logger.warning("deliverability_keys_save: %s", exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def prospection_mission_cancel(self, payload: dict) -> dict:
         """Abandonne le suivi d'une mission (la chasse déjà lancée n'est
@@ -12707,7 +12746,7 @@ class Api:
             from ..integrations import missions
             return missions.cancel_mission(mid, client=self._supabase())
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def chasseur_presets(self, payload: dict | None = None) -> dict:
         """Renvoie la liste des secteurs préconfigurés (clé → libellé NAF)."""
@@ -12722,7 +12761,7 @@ class Api:
                 ],
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "presets": []}
+            return {"ok": False, "error": _friendly_error(exc), "presets": []}
 
     def chasseur_list_hunts(self, payload: dict | None = None) -> dict:
         try:
@@ -12730,7 +12769,7 @@ class Api:
             limit = int((payload or {}).get("limit") or 20)
             return {"ok": True, "hunts": chasseur.list_hunts(limit=limit)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "hunts": []}
+            return {"ok": False, "error": _friendly_error(exc), "hunts": []}
 
     def chasseur_get_hunt(self, payload: dict) -> dict:
         hid = ((payload or {}).get("hunt_id") or "").strip()
@@ -12758,7 +12797,7 @@ class Api:
                 },
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def chasseur_start_hunt(self, payload: dict) -> dict:
         """Lance une chasse en arrière-plan.
@@ -12798,7 +12837,7 @@ class Api:
             )
             return {"ok": True, "hunt_id": hunt.id, "label": hunt.label}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def chasseur_export_csv(self, payload: dict) -> dict:
         hid = ((payload or {}).get("hunt_id") or "").strip()
@@ -12808,7 +12847,7 @@ class Api:
             from ..integrations import chasseur
             return chasseur.export_csv(hid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def chasseur_push_to_autopilot(self, payload: dict) -> dict:
         """Envoie les prospects d'une chasse dans la base partagée pour que
@@ -12824,7 +12863,7 @@ class Api:
             from ..integrations import chasseur
             return chasseur.push_to_autopilot(hid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def chasseur_delete_hunt(self, payload: dict) -> dict:
         hid = ((payload or {}).get("hunt_id") or "").strip()
@@ -12834,7 +12873,7 @@ class Api:
             from ..integrations import chasseur
             return chasseur.delete_hunt(hid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Chasseur Créateur — chasse aux créateurs YouTube/Instagram/Facebook
@@ -12845,7 +12884,7 @@ class Api:
             limit = int((payload or {}).get("limit") or 20)
             return {"ok": True, "hunts": chasseur_createurs.list_hunts(limit=limit)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "hunts": []}
+            return {"ok": False, "error": _friendly_error(exc), "hunts": []}
 
     def chasseur_createurs_get_hunt(self, payload: dict) -> dict:
         hid = ((payload or {}).get("hunt_id") or "").strip()
@@ -12873,7 +12912,7 @@ class Api:
                 },
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def chasseur_createurs_start_hunt(self, payload: dict) -> dict:
         """Lance une chasse aux créateurs.
@@ -12923,7 +12962,7 @@ class Api:
             )
             return {"ok": True, "hunt_id": hunt.id, "label": hunt.label}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def chasseur_createurs_export_csv(self, payload: dict) -> dict:
         hid = ((payload or {}).get("hunt_id") or "").strip()
@@ -12933,7 +12972,7 @@ class Api:
             from ..integrations import chasseur_createurs
             return chasseur_createurs.export_csv(hid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def chasseur_createurs_delete_hunt(self, payload: dict) -> dict:
         hid = ((payload or {}).get("hunt_id") or "").strip()
@@ -12943,7 +12982,7 @@ class Api:
             from ..integrations import chasseur_createurs
             return chasseur_createurs.delete_hunt(hid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def chasseur_createurs_download_csv(self, payload: dict) -> dict:
         """Renvoie le contenu d'un CSV pour téléchargement direct dans le navigateur.
@@ -12971,7 +13010,7 @@ class Api:
                 "path": res["path"],
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def chasseur_createurs_download_xlsx(self, payload: dict) -> dict:
         """Génère un fichier Excel (.xlsx) et le renvoie en base64 pour
@@ -12997,7 +13036,7 @@ class Api:
                 "path": res["path"],
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def chasseur_createurs_push_to_prospects(self, payload: dict) -> dict:
         """Pousse les créateurs d'une chasse (ceux avec email) vers la base
@@ -13014,7 +13053,7 @@ class Api:
             from ..integrations import chasseur_createurs
             return chasseur_createurs.push_to_prospects(hid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ------------------------------------------------------------------
     # Prospecteur Google — recherche entreprises locales via Google Places
@@ -13025,7 +13064,7 @@ class Api:
             limit = int((payload or {}).get("limit") or 20)
             return {"ok": True, "hunts": prospecteur_google.list_hunts(limit=limit)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc), "hunts": []}
+            return {"ok": False, "error": _friendly_error(exc), "hunts": []}
 
     def prospecteur_google_get_hunt(self, payload: dict) -> dict:
         hid = ((payload or {}).get("hunt_id") or "").strip()
@@ -13053,7 +13092,7 @@ class Api:
                 },
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def prospecteur_google_start_hunt(self, payload: dict) -> dict:
         """Lance une recherche Google Places.
@@ -13098,7 +13137,7 @@ class Api:
             )
             return {"ok": True, "hunt_id": hunt.id, "label": hunt.label}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def prospecteur_google_delete_hunt(self, payload: dict) -> dict:
         hid = ((payload or {}).get("hunt_id") or "").strip()
@@ -13108,7 +13147,7 @@ class Api:
             from ..integrations import prospecteur_google
             return prospecteur_google.delete_hunt(hid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def prospecteur_google_download_csv(self, payload: dict) -> dict:
         """Renvoie le contenu d'un CSV pour téléchargement direct."""
@@ -13131,7 +13170,7 @@ class Api:
                 "path": res["path"],
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def prospecteur_google_download_xlsx(self, payload: dict) -> dict:
         """Génère un fichier Excel (.xlsx) et le renvoie en base64."""
@@ -13155,7 +13194,7 @@ class Api:
                 "path": res["path"],
             }
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def prospecteur_google_push_to_prospects(self, payload: dict) -> dict:
         """Pousse les prospects d'une chasse Google (ceux avec email) vers
@@ -13172,7 +13211,7 @@ class Api:
             from ..integrations import prospecteur_google
             return prospecteur_google.push_to_prospects(hid)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ==================================================================
     # Argus — récupération de mails B2B
@@ -13198,28 +13237,28 @@ class Api:
             from ..integrations import argus
             return argus.start_session(payload or {})
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def argus_pause(self, payload: dict | None = None) -> dict:
         try:
             from ..integrations import argus
             return argus.pause_session()
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def argus_resume(self, payload: dict | None = None) -> dict:
         try:
             from ..integrations import argus
             return argus.resume_session()
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def argus_stop(self, payload: dict | None = None) -> dict:
         try:
             from ..integrations import argus
             return argus.stop_session()
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def argus_status(self, payload: dict | None = None) -> dict:
         """Snapshot complet pour l'UI : état, sources, logs."""
@@ -13228,7 +13267,7 @@ class Api:
             log_tail = int((payload or {}).get("log_tail") or 200)
             return argus.get_status(log_tail=log_tail)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def argus_set_reference(self, payload: dict | None = None) -> dict:
         """Configure une liste d'emails à exclure du run en cours.
@@ -13255,7 +13294,7 @@ class Api:
             from ..integrations import argus
             return argus.set_reference_emails(emails)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def argus_download_xlsx(self, payload: dict | None = None) -> dict:
         """Génère le fichier Excel des emails collectés et le renvoie en base64."""
@@ -13263,7 +13302,7 @@ class Api:
             from ..integrations import argus
             return argus.export_xlsx()
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     def argus_push_to_prospects(self, payload: dict | None = None) -> dict:
         """Envoie tous les emails collectés par Argus dans la base prospects
@@ -13277,7 +13316,7 @@ class Api:
             from ..integrations import argus
             return argus.push_to_prospects()
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": _friendly_error(exc)}
 
     # ==================================================================
     # GEO — Generative Engine Optimization

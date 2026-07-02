@@ -1439,10 +1439,14 @@ def _register_route(app: FastAPI, name: str, method) -> None:
                 result = await run_in_threadpool(method)
             return JSONResponse(content=result if result is not None else {"ok": True})
         except Exception as exc:
+            # Le détail technique va dans les logs ; le front reçoit un
+            # message en français (Jordan n'est pas technicien).
             logger.exception("API method %s failed", name)
             return JSONResponse(
                 status_code=500,
-                content={"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+                content={"ok": False,
+                         "error": ("Une erreur est survenue de notre côté — "
+                                   "réessaie ; si ça continue, dis-le-moi.")},
             )
 
     handler.__name__ = f"api_{name}"
