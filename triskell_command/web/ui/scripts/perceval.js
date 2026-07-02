@@ -1620,9 +1620,13 @@ window.Guide = Perceval;
     if (typeof App !== 'undefined' && typeof App.show === 'function'
         && !App.__guideWrapped) {
       const orig = App.show.bind(App);
-      App.show = function (viewId, params) {
-        const r = orig(viewId, params);
-        try { Perceval.onViewChange(viewId); } catch (e) { /* jamais bloquant */ }
+      // On repasse TOUS les arguments (viewId, params, opts) : App.show
+      // attend un 3e argument « opts » qui pilote l'historique du navigateur.
+      // L'avaler créait une entrée d'historique fantôme à chaque changement
+      // d'écran (bouton Précédent cassé).
+      App.show = function (...args) {
+        const r = orig(...args);
+        try { Perceval.onViewChange(args[0]); } catch (e) { /* jamais bloquant */ }
         return r;
       };
       App.__guideWrapped = true;

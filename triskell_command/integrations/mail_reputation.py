@@ -340,32 +340,57 @@ def _read_history(client, *, days: int = HISTORY_WINDOW_DAYS,
     except Exception:
         return None
     now = now or _now_utc()
+    since = (now - timedelta(days=days)).isoformat()
+
+    def _base():
+        return (sb.table("email_history")
+                  .in_("kind", list(KINDS))
+                  .gte("ts", since)
+                  .order("ts", desc=False)
+                  .limit(50000))
+
     try:
-        since = (now - timedelta(days=days)).isoformat()
-        res = (sb.table("email_history")
-                 .select("ts, kind, extra")
-                 .in_("kind", list(KINDS))
-                 .gte("ts", since)
-                 .order("ts", desc=False)
-                 .limit(50000)
-                 .execute())
-        rows = res.data or []
+        # On ne lit QUE les deux clés utiles de `extra` (account_id, from) via
+        # la projection JSONB de PostgREST, au lieu de rapatrier toute la
+        # colonne (elle peut contenir de gros contenus). Divise l'egress de
+        # ce passage — appelé plusieurs fois par jour par la chauffe.
+        # Repli automatique sur la lecture complète si la syntaxe projetée
+        # n'est pas acceptée : jamais de régression.
+        try:
+            res = _base().select(
+                "ts, kind, account_id:extra->>account_id, "
+                "from_email:extra->>from").execute()
+            rows = res.data or []
+            narrow = True
+        except Exception as exc_narrow:
+            logger.debug("mail_reputation: projection JSONB refusée (%s) — "
+                         "repli lecture complète", exc_narrow)
+            res = _base().select("ts, kind, extra").execute()
+            rows = res.data or []
+            narrow = False
+
         out: list[dict] = []
         for r in rows:
-            extra = r.get("extra") or {}
-            if isinstance(extra, str):
-                try:
-                    import json as _json
-                    extra = _json.loads(extra)
-                except Exception:
+            if narrow:
+                account_id = str(r.get("account_id") or "").strip()
+                from_email = str(r.get("from_email") or "").strip().lower()
+            else:
+                extra = r.get("extra") or {}
+                if isinstance(extra, str):
+                    try:
+                        import json as _json
+                        extra = _json.loads(extra)
+                    except Exception:
+                        extra = {}
+                if not isinstance(extra, dict):
                     extra = {}
-            if not isinstance(extra, dict):
-                extra = {}
+                account_id = str(extra.get("account_id") or "").strip()
+                from_email = str(extra.get("from") or "").strip().lower()
             out.append({
                 "ts": r.get("ts") or "",
                 "kind": r.get("kind") or "",
-                "account_id": str(extra.get("account_id") or "").strip(),
-                "from_email": str(extra.get("from") or "").strip().lower(),
+                "account_id": account_id,
+                "from_email": from_email,
             })
         return out
     except Exception as exc:
