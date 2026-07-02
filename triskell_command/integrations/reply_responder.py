@@ -266,18 +266,37 @@ def _build_reply_text(*, config: dict, category: str, prospect: dict,
 
     tmpl = templates.get(template_key) or templates.get("unknown") or ""
 
+    # Modèle CENTRAL éditable (écran « Modèles mails », produit 'reply') : son
+    # corps remplace le texte par défaut s'il existe et est complet. Le sujet
+    # reste contextuel (« Re: … », on garde le fil de discussion). Tant qu'aucun
+    # modèle central n'est créé, cette étape est neutre (résolveur → None).
+    try:
+        from .mail_templates_resolver import get_transactional, html_to_text
+        central = get_transactional("reply", template_key)
+        if central:
+            central_body = (central.get("body_text") or "").strip()
+            if not central_body and (central.get("body_html") or "").strip():
+                central_body = html_to_text(central["body_html"])
+            if central_body:
+                tmpl = central_body
+    except Exception as exc:
+        logger.debug("reply central template: %s", exc)
+
     # Choix du lien produit
     products = (config.get("links") or {}).get("products") or {}
     default_pk = (config.get("links") or {}).get("default_product_key") or ""
     product_link = products.get(default_pk, "") if default_pk else ""
     product_name = default_pk.replace("-", " ").title() if default_pk else "le produit"
 
-    body = tmpl.format(
+    # Remplacement sûr (jamais de crash sur une accolade littérale d'un modèle
+    # central) — même moteur que les autres canaux.
+    from .mail_templates_resolver import safe_format
+    body = safe_format(tmpl, dict(
         name=name,
         product_link=product_link or "(lien à configurer)",
         product_name=product_name,
         signature=signature,
-    )
+    ))
 
     prefix = config.get("subject_prefix") or "Re: "
     raw_subject = (reply_subject or "").strip()
@@ -600,14 +619,28 @@ def send_now(client, app_state, history_row_id: str,
             return {"success": False, "error": "no_recipient"}
 
         # Warnings doux : adresse déjà contactée et/ou dans clients ?
+        # + garde-fou « pas de code brut » (mêmes règles que l'envoi auto) :
+        # une variable non remplie (ex. modèle central mal orthographié)
+        # n'atteint jamais le prospect sans validation explicite (force).
         if not force:
+            warns = []
             try:
                 from . import prospect_status as PS
-                warns = PS.check_manual_send_warnings(client, to)
-                if warns:
-                    return {"success": False, "warnings": warns}
+                warns = list(PS.check_manual_send_warnings(client, to) or [])
             except Exception as exc:
                 logger.debug("reply send_now warnings KO: %s", exc)
+            try:
+                from . import prospect_status as PS
+                safety = PS.mail_is_safe_to_send(sr.get("subject", ""), sr.get("body", ""))
+                if not safety.get("ok"):
+                    warns.append(
+                        "Il reste du code entre accolades dans le mail : "
+                        + ", ".join(safety.get("unrendered") or [])
+                        + ". Vérifie tes variables, ou envoie quand même si c'est voulu.")
+            except Exception as exc:
+                logger.debug("reply send_now safety KO: %s", exc)
+            if warns:
+                return {"success": False, "warnings": warns}
 
         from triskell_core.prospect.outreach.smtp_sender import send_email
         in_reply_to = sr.get("in_reply_to") or extra.get("in_reply_to") or ""

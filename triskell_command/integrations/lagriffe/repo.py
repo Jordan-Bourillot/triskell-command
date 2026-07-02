@@ -427,12 +427,65 @@ MAIL_TEMPLATE_PRODUCTS = {
 }
 
 
+def _plain_to_html(text: str) -> str:
+    """Transforme un modèle par défaut en TEXTE brut en HTML simple, pour le
+    pré-remplissage de l'éditeur (dont le corps principal est le champ HTML).
+    Paragraphes (double saut de ligne) → <p>, sauts simples → <br>. Échappement
+    MINIMAL (& < >) uniquement — on garde les apostrophes lisibles dans la
+    source. Round-trip sûr : html_to_text() côté envoi reconstruit le texte.
+    """
+    import re as _re
+    t = (text or "").strip()
+    if not t:
+        return ""
+    out = []
+    for para in _re.split(r"\n\s*\n", t):
+        esc = (para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+               .replace("\n", "<br>"))
+        out.append("<p>" + esc + "</p>")
+    # Un <p> par ligne (lisible dans l'éditeur). Le saut entre les balises est
+    # neutralisé par html_to_text (qui ramène les sauts multiples à un seul
+    # saut de paragraphe) → l'aller-retour reste exact avec le texte source.
+    return "\n".join(out)
+
+
+# Canaux « texte » dont le modèle de référence vit dans le DEFAULT_CONFIG d'un
+# worker Python. On pré-remplit l'éditeur avec CE texte (source unique : si
+# Jordan change le défaut du robot, le pré-remplissage suit). Le sujet est
+# obligatoire côté éditeur ; pour drip/reply il reste contextuel (« Re: … »)
+# à l'envoi, on met donc un sujet représentatif mais non utilisé.
+_PIPELINE_TEXT_CHANNELS = {
+    "drip": {
+        "keys": ("follow_up_7d", "follow_up_30d"),
+        "module": "..drip_runner",
+        "subjects": {"follow_up_7d": "Petit suivi de mon message",
+                     "follow_up_30d": "Dernière relance"},
+        "placeholders": ["name", "signature"],
+    },
+    "post_sale": {
+        "keys": ("cross_sell_30d", "nps_90d"),
+        "module": "..post_sale_runner",
+        "placeholders": ["client_name", "product_name", "next_product_name",
+                         "next_product_link", "signature"],
+    },
+    "reply": {
+        "keys": ("interested", "not_now", "no", "unsubscribe", "unknown"),
+        "module": "..reply_responder",
+        "subjects": {"interested": "Re: votre message", "not_now": "Re: votre message",
+                     "no": "Re: votre message", "unsubscribe": "Re: votre message",
+                     "unknown": "Re: votre message"},
+        "placeholders_by_key": {"interested": ["name", "product_name", "product_link", "signature"]},
+        "placeholders": ["name", "signature"],
+    },
+}
+
+
 def _pipeline_default_template(product: str, key: str):
     """Modèle par DÉFAUT d'un produit dont le texte de référence vit dans le
     code Python (pas en base ni côté Netlify). Sert à pré-remplir l'éditeur
-    « Modèles mails » : sans ça, ouvrir un mail Pixel Pros pas encore
-    personnalisé donnait une page blanche. Renvoie un dict template (marqué
-    `_is_default`) ou None si le produit/clé n'a pas de défaut Python connu.
+    « Modèles mails » : sans ça, ouvrir un mail pas encore personnalisé donnait
+    une page blanche. Renvoie un dict template (marqué `_is_default`) ou None si
+    le produit/clé n'a pas de défaut Python connu.
     """
     if product == "pixelpros" and key in ("paid", "live"):
         try:
@@ -450,6 +503,35 @@ def _pipeline_default_template(product: str, key: str):
                 "from_name": "Pixel Pros",
                 "enabled": True,
                 "placeholders": ph,
+                "_is_default": True,
+            }
+        except Exception as exc:
+            logger.debug("_pipeline_default_template(%s,%s): %s", product, key, exc)
+        return None
+
+    spec = _PIPELINE_TEXT_CHANNELS.get(product)
+    if spec and key in spec["keys"]:
+        try:
+            import importlib
+            mod = importlib.import_module(spec["module"], __package__)
+            cfg = getattr(mod, "DEFAULT_CONFIG", {}) or {}
+            txt = (cfg.get("templates") or {}).get(key)
+            if not txt:
+                return None
+            subj = (spec.get("subjects") or {}).get(key)
+            if subj is None:  # post_sale : sujet réel par défaut du robot
+                subj = (cfg.get("subject_templates") or {}).get(key, "")
+            ph = (spec.get("placeholders_by_key") or {}).get(key) or spec["placeholders"]
+            return {
+                "product": product, "key": key,
+                "category": "transactionnel",
+                "subject": subj,
+                "body_text": "",
+                "body_html": _plain_to_html(txt),
+                "from_address": "contact@triskell-studio.fr",
+                "from_name": "Jordan Bourillot",
+                "enabled": True,
+                "placeholders": list(ph),
                 "_is_default": True,
             }
         except Exception as exc:
@@ -506,9 +588,10 @@ def mail_templates_get(product: str, key: str) -> dict:
                   .execute().data or [])
         if not rows:
             # Pas encore personnalisé en base : pour les produits dont le
-            # défaut vit en Python (Pixel Pros), on renvoie ce défaut pour que
-            # l'éditeur s'ouvre PRÉ-REMPLI (pas une page blanche). L'UI le
-            # marque « Par défaut » via `_is_default`.
+            # défaut vit en Python (Pixel Pros, relances, après-vente, réponses
+            # IA), on renvoie ce défaut pour que l'éditeur s'ouvre PRÉ-REMPLI
+            # (pas une page blanche). L'UI le marque « Par défaut » via
+            # `_is_default`.
             default_tpl = _pipeline_default_template(product, key)
             if default_tpl is not None:
                 return {"ok": True, "template": default_tpl}

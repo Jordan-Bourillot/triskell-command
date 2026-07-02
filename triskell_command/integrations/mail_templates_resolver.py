@@ -42,7 +42,12 @@ def html_to_text(html_body: str) -> str:
     # unescape décode TOUTES les entités (accents, guillemets, codes &#233;…) ;
     # l'espace insécable (&nbsp; → \xa0) redevient une espace normale, plus
     # propre dans un mail texte.
-    return _html.unescape(h).replace("\xa0", " ").strip()
+    h = _html.unescape(h).replace("\xa0", " ")
+    # Les espaces/sauts autour des balises de bloc ne comptent pas en HTML : on
+    # ramène 3 sauts ou plus (une balise + un saut source) à un simple saut de
+    # paragraphe. Un mail texte n'a jamais besoin de plus d'une ligne vide.
+    h = _re.sub(r"\n{3,}", "\n\n", h)
+    return h.strip()
 
 
 def safe_format(template: str, values: dict) -> str:
