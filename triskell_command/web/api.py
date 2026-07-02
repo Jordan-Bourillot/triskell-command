@@ -9221,6 +9221,38 @@ class Api:
         except Exception as exc:
             logger.debug("system_health phare virtual worker: %s", exc)
 
+        # 1ter) Le GEO tourne dans un thread « maison » (pas un module) : sans
+        # cette entrée, une panne/non-démarrage du robot GEO était totalement
+        # invisible du chien de garde. Même logique que le Phare : éteint
+        # volontairement = jamais d'alerte ; devrait tourner mais absent = rouge.
+        try:
+            geo_running = bool(getattr(self, "_geo_autopilot_thread", None)
+                               and self._geo_autopilot_thread.is_alive())
+            geo_enabled = bool(self._geo_autopilot_settings().get("enabled"))
+            geo_last = getattr(self, "_geo_autopilot_last_check_at", "") or ""
+            geo_result = getattr(self, "_geo_autopilot_last_result", {}) or {}
+            _GEO_LABEL = "GEO — être cité par les IA"
+            if not geo_enabled:
+                gw = {"name": "geo_autopilot", "label": _GEO_LABEL,
+                      "running": geo_running, "last_run_at": geo_last,
+                      "last_run_result": {"skipped_reason": "disabled"},
+                      "health": "healthy"}
+            elif not geo_running:
+                gw = {"name": "geo_autopilot", "label": _GEO_LABEL,
+                      "running": False, "last_run_at": geo_last,
+                      "last_run_result": {"error": "le robot GEO ne tourne pas"},
+                      "health": "error"}
+            else:
+                gw = {"name": "geo_autopilot", "label": _GEO_LABEL,
+                      "running": True, "last_run_at": geo_last,
+                      "last_run_result": geo_result, "health": "healthy",
+                      # Check horaire → muet plus de 3 h = vrai souci.
+                      "stale_after_hours": 3.0}
+            out["workers"].append(gw)
+            out["summary"][gw["health"]] += 1
+        except Exception as exc:
+            logger.debug("system_health geo worker: %s", exc)
+
         # 2) Métriques de délivrabilité (envois + réponses sur 24h et 7j)
         client = self._supabase()
         deliv = {
@@ -15698,16 +15730,29 @@ class Api:
         except Exception as exc:
             logger.debug("geo_autopilot unlock: %s", exc)
         import time as _time
+        import datetime as _datetime
 
         def loop():
             logger.info("geo_autopilot: thread démarré (check 60min)")
             _time.sleep(120)   # delai initial pour ne pas surcharger le boot
             while True:
                 try:
+                    # Battement de cœur : on note l'heure du passage À CHAQUE
+                    # tour (même quand rien n'est dû). Sans ça, le worker GEO
+                    # était le SEUL robot invisible du chien de garde — il
+                    # pouvait mourir sans aucune alerte.
+                    self._geo_autopilot_last_check_at = (
+                        _datetime.datetime.now().isoformat(timespec="seconds"))
                     s = self._geo_autopilot_settings()
-                    if s.get("enabled") and not s.get("running"):
+                    if not s.get("enabled"):
+                        self._geo_autopilot_last_result = {"skipped_reason": "disabled"}
+                    elif s.get("running"):
+                        self._geo_autopilot_last_result = {"skipped_reason": "cycle en cours"}
+                    else:
                         self._geo_autopilot_run_safe(force=False)
+                        self._geo_autopilot_last_result = {"ran": True}
                 except Exception as exc:
+                    self._geo_autopilot_last_result = {"error": str(exc)[:200]}
                     logger.exception("geo_autopilot loop: %s", exc)
                 _time.sleep(3600)  # 1 heure entre les checks
         self._geo_autopilot_thread = threading.Thread(
