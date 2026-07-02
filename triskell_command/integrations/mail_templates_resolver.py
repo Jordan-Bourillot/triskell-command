@@ -18,9 +18,47 @@ expéditeur a ses variables : {firstname}/{business} pour Pixel Pros,
 """
 from __future__ import annotations
 
+import html as _html
 import logging
+import re as _re
 
 logger = logging.getLogger(__name__)
+
+
+def html_to_text(html_body: str) -> str:
+    """Convertit un corps HTML en texte propre pour un mail texte.
+
+    L'éditeur « Modèles mails » met le contenu principal dans le champ HTML.
+    Quand un expéditeur envoie en TEXTE (relances, après-vente), il faut donc
+    aplatir ce HTML : sauts de ligne pour <br>/</p>, balises retirées, PUIS
+    décodage de TOUTES les entités (accents &eacute;, guillemets &laquo;,
+    codes &#233;…) via html.unescape — jamais un décodage maison partiel qui
+    laisserait « R&eacute;serv&eacute; » chez le client.
+    """
+    h = html_body or ""
+    h = _re.sub(r"(?i)<br\s*/?>", "\n", h)
+    h = _re.sub(r"(?i)</p\s*>", "\n\n", h)
+    h = _re.sub(r"<[^>]+>", "", h)
+    # unescape décode TOUTES les entités (accents, guillemets, codes &#233;…) ;
+    # l'espace insécable (&nbsp; → \xa0) redevient une espace normale, plus
+    # propre dans un mail texte.
+    return _html.unescape(h).replace("\xa0", " ").strip()
+
+
+def safe_format(template: str, values: dict) -> str:
+    """Remplace les placeholders {clef} un par un, sans str.format().
+
+    str.format() plante dès qu'une accolade littérale ({, }, emoji, JSON) ou un
+    placeholder mal orthographié traîne dans un modèle édité par Jordan. On fait
+    donc un simple remplacement clef par clef : un modèle central s'affiche
+    TOUJOURS (accolades littérales gardées), aucune exception, comportement
+    identique au moteur Pixel Pros (_safe_format). Un placeholder inconnu reste
+    visible tel quel — signal lisible d'une faute de frappe, jamais un crash.
+    """
+    out = template or ""
+    for k, v in (values or {}).items():
+        out = out.replace("{" + str(k) + "}", str(v))
+    return out
 
 
 def _sb():

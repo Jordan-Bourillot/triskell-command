@@ -419,11 +419,42 @@ def pipeline_settings_write(product: str, stage: str, mode: str, updated_by: str
 # Liste les expéditeurs reconnus + leur libellé Triskell Command. Si on ajoute
 # un nouveau produit/expéditeur, c'est ici qu'on le déclare.
 MAIL_TEMPLATE_PRODUCTS = {
-    "lagriffe": "Lagriffe Studio",
-    "rankus":   "RankUs Studio",
-    "wow":      "Studio WoW",
-    "shared":   "Triskell (transversal)",
+    "lagriffe":  "Lagriffe Studio",
+    "rankus":    "RankUs Studio",
+    "wow":       "Studio WoW",
+    "pixelpros": "Pixel Pros",
+    "shared":    "Triskell (transversal)",
 }
+
+
+def _pipeline_default_template(product: str, key: str):
+    """Modèle par DÉFAUT d'un produit dont le texte de référence vit dans le
+    code Python (pas en base ni côté Netlify). Sert à pré-remplir l'éditeur
+    « Modèles mails » : sans ça, ouvrir un mail Pixel Pros pas encore
+    personnalisé donnait une page blanche. Renvoie un dict template (marqué
+    `_is_default`) ou None si le produit/clé n'a pas de défaut Python connu.
+    """
+    if product == "pixelpros" and key in ("paid", "live"):
+        try:
+            from ..pixelpros import mailer
+            d = mailer.load_template(key)  # défaut + override historique
+            ph = ["firstname", "business",
+                  "complete_url" if key == "paid" else "site_url"]
+            return {
+                "product": "pixelpros", "key": key,
+                "category": "transactionnel",
+                "subject": d.get("subject", ""),
+                "body_text": d.get("body_text", ""),
+                "body_html": d.get("body_html", ""),
+                "from_address": "contact@pixel-pros.fr",
+                "from_name": "Pixel Pros",
+                "enabled": True,
+                "placeholders": ph,
+                "_is_default": True,
+            }
+        except Exception as exc:
+            logger.debug("_pipeline_default_template(%s,%s): %s", product, key, exc)
+    return None
 
 
 def mail_templates_list() -> dict:
@@ -474,6 +505,13 @@ def mail_templates_get(product: str, key: str) -> dict:
                   .limit(1)
                   .execute().data or [])
         if not rows:
+            # Pas encore personnalisé en base : pour les produits dont le
+            # défaut vit en Python (Pixel Pros), on renvoie ce défaut pour que
+            # l'éditeur s'ouvre PRÉ-REMPLI (pas une page blanche). L'UI le
+            # marque « Par défaut » via `_is_default`.
+            default_tpl = _pipeline_default_template(product, key)
+            if default_tpl is not None:
+                return {"ok": True, "template": default_tpl}
             return {"ok": False, "error": "introuvable"}
         return {"ok": True, "template": rows[0]}
     except Exception as exc:

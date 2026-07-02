@@ -280,15 +280,28 @@ def load_template(kind: str) -> dict:
         logger.debug("pixelpros.mailer.load_template: %s", exc)
         return default
 
-    if not isinstance(override, dict):
-        return default
-
-    # Champs obligatoires : si l'un manque, on prend la valeur défaut
     out = dict(default)
-    out["is_custom"] = True
-    for key in ("subject", "body_text", "body_html"):
-        if override.get(key):
-            out[key] = override[key]
+    # 1) Override HISTORIQUE (shared_settings) : rétrocompat, ne casse rien.
+    if isinstance(override, dict):
+        out["is_custom"] = True
+        for key in ("subject", "body_text", "body_html"):
+            if override.get(key):
+                out[key] = override[key]
+
+    # 2) Modèle CENTRAL éditable (écran « Modèles mails », table unique). Il
+    # prime s'il existe ET est complet — sinon repli sur ce qui précède.
+    # Objectif : un seul endroit pour éditer ce mail. Tant qu'aucun modèle
+    # central n'est créé, cette étape est neutre (résolveur → None).
+    try:
+        from ..mail_templates_resolver import get_transactional
+        central = get_transactional("pixelpros", kind)  # kind = 'paid'/'live'
+        if central:
+            out["is_custom"] = True
+            for key in ("subject", "body_text", "body_html"):
+                if central.get(key):
+                    out[key] = central[key]
+    except Exception as exc:
+        logger.debug("pixelpros.mailer central template: %s", exc)
     return out
 
 

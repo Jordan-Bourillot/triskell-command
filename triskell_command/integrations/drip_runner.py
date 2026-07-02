@@ -431,7 +431,7 @@ def _create_drip_draft(client, app_state, sent_row: dict,
     # le sujet « Re: … » (le fil de discussion). Tant qu'aucun modèle central
     # n'est créé, cette étape est neutre (résolveur → None).
     try:
-        from .mail_templates_resolver import get_transactional
+        from .mail_templates_resolver import get_transactional, html_to_text
         central = get_transactional("drip", stage)
         if central:
             # Le brouillon de relance part en TEXTE simple. Or dans l'éditeur
@@ -441,14 +441,7 @@ def _create_drip_draft(client, app_state, sent_row: dict,
             # relance éditée dans le grand champ est bien prise en compte.
             central_body = (central.get("body_text") or "").strip()
             if not central_body and (central.get("body_html") or "").strip():
-                import re as _re
-                h = central["body_html"]
-                h = _re.sub(r"(?i)<br\s*/?>", "\n", h)
-                h = _re.sub(r"(?i)</p\s*>", "\n\n", h)
-                h = _re.sub(r"<[^>]+>", "", h)
-                central_body = (h.replace("&nbsp;", " ").replace("&amp;", "&")
-                                .replace("&lt;", "<").replace("&gt;", ">")
-                                .replace("&#39;", "'").strip())
+                central_body = html_to_text(central["body_html"])
             if central_body:
                 template = central_body
     except Exception as exc:
@@ -457,14 +450,11 @@ def _create_drip_draft(client, app_state, sent_row: dict,
         "outreach", "from_name", default="") or ""
     # name / soft_hook gardes pour compat avec d'anciens textes custom
     # sauves en reglages ; les textes par defaut n'en utilisent plus.
-    try:
-        body = template.format(name=name, signature=signature,
-                               soft_hook="votre activité")
-    except Exception:
-        # Placeholder inconnu dans un modèle central mal saisi → repli strict
-        # sur le texte par défaut (jamais de mail cassé chez un prospect).
-        body = default_template.format(name=name, signature=signature,
-                                       soft_hook="votre activité")
+    # Remplacement sûr (jamais de crash sur une accolade littérale) — même
+    # moteur que Pixel Pros, cohérent sur tous les canaux.
+    from .mail_templates_resolver import safe_format
+    body = safe_format(template, dict(name=name, signature=signature,
+                                      soft_hook="votre activité"))
     original_subject = (sent_row.get("subject") or "").strip()
     if original_subject:
         subj_tmpl = config.get("subject_template") or "Re: {original_subject}"

@@ -410,16 +410,39 @@ def _create_post_sale_draft(client, app_state, proj: dict,
     else:
         # Stages legacy (cross_sell_30d, nps_90d) : templates dans la config
         next_default = config.get("next_product_default") or {}
-        body_tmpl = (config.get("templates") or {}).get(stage, "")
-        subj_tmpl = (config.get("subject_templates") or {}).get(stage, "")
-        body = body_tmpl.format(
+        default_body = (config.get("templates") or {}).get(stage, "")
+        default_subj = (config.get("subject_templates") or {}).get(stage, "")
+        body_tmpl = default_body
+        subj_tmpl = default_subj
+        # Modèle CENTRAL éditable (écran « Modèles mails », produit 'post_sale') :
+        # remplace corps + sujet s'il existe et est complet. Le mail part en
+        # texte → on prend le corps texte, sinon on convertit le HTML (l'éditeur
+        # met le corps principal dans le champ HTML). Repli blindé sinon.
+        try:
+            from .mail_templates_resolver import get_transactional, html_to_text
+            central = get_transactional("post_sale", stage)
+            if central:
+                c_body = (central.get("body_text") or "").strip()
+                if not c_body and (central.get("body_html") or "").strip():
+                    c_body = html_to_text(central["body_html"])
+                if c_body:
+                    body_tmpl = c_body
+                if (central.get("subject") or "").strip():
+                    subj_tmpl = central["subject"]
+        except Exception as exc:
+            logger.debug("post_sale central template: %s", exc)
+        _fmt = dict(
             client_name=client_name,
             product_name=product_name,
             next_product_name=next_default.get("name", "un autre outil Triskell"),
             next_product_link=next_default.get("link", ""),
             signature=signature,
         )
-        subject = subj_tmpl.format(product_name=product_name)
+        # Remplacement sûr (jamais de crash sur une accolade littérale d'un
+        # modèle central) — même moteur que Pixel Pros, cohérent partout.
+        from .mail_templates_resolver import safe_format
+        body = safe_format(body_tmpl, _fmt)
+        subject = safe_format(subj_tmpl, _fmt)
 
     if not subject and not body:
         out["error"] = "empty_template"

@@ -155,12 +155,24 @@ const MailTemplates = {
       description: '30 jours après l\'achat, proposition d\'un produit complémentaire.',
       placeholders: ['client_name', 'product_name', 'next_product_name', 'next_product_link', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
-      runtime: 'pipeline' },
+      runtime: 'live' },
     { product: 'post_sale', key: 'nps_90d', label: 'Sondage satisfaction J+90',
       description: '90 jours après l’achat, demande d’avis (note de satisfaction).',
       placeholders: ['client_name', 'product_name', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
-      runtime: 'pipeline' },
+      runtime: 'live' },
+
+    // ============ contact@pixel-pros.fr — Pixel Pros (mails clients) ============
+    { product: 'pixelpros', key: 'paid', label: 'Paiement reçu — décris ton activité',
+      description: 'Envoyé juste après le paiement Stripe : invite le client à décrire son activité.',
+      placeholders: ['firstname', 'business', 'complete_url'],
+      from_address: 'contact@pixel-pros.fr', from_name: 'Pixel Pros',
+      runtime: 'live' },
+    { product: 'pixelpros', key: 'live', label: 'Ton site est en ligne',
+      description: 'Envoyé quand le site du client est publié sur son adresse.',
+      placeholders: ['firstname', 'business', 'site_url'],
+      from_address: 'contact@pixel-pros.fr', from_name: 'Pixel Pros',
+      runtime: 'live' },
 
     // ============ contact@triskell-studio.fr — Livraisons produits Triskell ============
     { product: 'delivery_pack_elec', key: 'welcome', label: 'Pack Électricien Pro — Bienvenue',
@@ -1162,6 +1174,10 @@ const MailTemplates = {
         category: res.template.category || 'transactionnel',
         _runtime: known.runtime || 'netlify',
         _label: res.template.label || known.label,
+        // Modèle par défaut pré-rempli (produit dont le texte vit en Python,
+        // ex. Pixel Pros) : on le marque comme « fallback » pour que la
+        // pastille dise « Par défaut » tant que Jordan n'a rien enregistré.
+        _source: res.template._is_default ? 'fallback' : undefined,
       };
     } else if (notInDb) {
       // Pas en base : template "à créer". Pré-rempli depuis le catalogue connu.
