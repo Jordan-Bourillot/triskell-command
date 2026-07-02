@@ -147,10 +147,10 @@ const MailTemplates = {
 
     // ============ contact@triskell-studio.fr — Post-vente (suivi client) ============
     { product: 'post_sale', key: 'welcome_at_paid', label: 'Bienvenue après achat',
-      description: 'Envoyé automatiquement à l\'instant du paiement (paid_at).',
+      description: 'Envoyé automatiquement à l\'instant du paiement. Se règle dans l\'écran Livraisons (avec les liens de téléchargement du produit).',
       placeholders: ['client_name', 'product_name', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
-      runtime: 'pipeline' },
+      runtime: 'external', redirect: 'delivery' },
     { product: 'post_sale', key: 'cross_sell_30d', label: 'Proposition complémentaire J+30',
       description: '30 jours après l\'achat, proposition d\'un produit complémentaire.',
       placeholders: ['client_name', 'product_name', 'next_product_name', 'next_product_link', 'signature'],
@@ -176,45 +176,45 @@ const MailTemplates = {
 
     // ============ contact@triskell-studio.fr — Livraisons produits Triskell ============
     { product: 'delivery_pack_elec', key: 'welcome', label: 'Pack Électricien Pro — Bienvenue',
-      description: 'Mail de bienvenue envoyé après achat du Pack Électricien Pro.',
+      description: 'Mail de bienvenue après achat du Pack Électricien Pro. Se règle dans l\'écran Livraisons.',
       placeholders: ['client_name', 'deliverables_list', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Triskell Studio',
-      runtime: 'pipeline' },
+      runtime: 'external', redirect: 'delivery' },
     { product: 'delivery_pack_elec', key: 'followup_3d', label: 'Pack Électricien Pro — Suivi J+3',
-      description: '3 jours après livraison : on vérifie que tout est bien reçu.',
+      description: '3 jours après livraison : on vérifie que tout est bien reçu. Se règle dans l\'écran Livraisons.',
       placeholders: ['client_name', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Triskell Studio',
-      runtime: 'pipeline' },
+      runtime: 'external', redirect: 'delivery' },
     { product: 'delivery_pack_elec', key: 'followup_14d', label: 'Pack Électricien Pro — Astuce J+14',
-      description: 'À J+14 : astuce d\'utilisation pour pousser l\'engagement.',
+      description: 'À J+14 : astuce d\'utilisation pour pousser l\'engagement. Se règle dans l\'écran Livraisons.',
       placeholders: ['client_name', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Triskell Studio',
-      runtime: 'pipeline' },
+      runtime: 'external', redirect: 'delivery' },
     { product: 'delivery_pack_elec', key: 'followup_30d', label: 'Pack Électricien Pro — Avis J+30',
-      description: 'À J+30 : demande d\'avis / témoignage.',
+      description: 'À J+30 : demande d\'avis / témoignage. Se règle dans l\'écran Livraisons.',
       placeholders: ['client_name', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Triskell Studio',
-      runtime: 'pipeline' },
+      runtime: 'external', redirect: 'delivery' },
     { product: 'delivery_studio_pdf', key: 'welcome', label: 'Studio PDF — Bienvenue',
-      description: 'Mail de bienvenue après achat Studio PDF.',
+      description: 'Mail de bienvenue après achat Studio PDF. Se règle dans l\'écran Livraisons.',
       placeholders: ['client_name', 'deliverables_list', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Triskell Studio',
-      runtime: 'pipeline' },
+      runtime: 'external', redirect: 'delivery' },
     { product: 'delivery_studio_pdf', key: 'followup_3d', label: 'Studio PDF — Premier essai J+3',
-      description: '3 jours après : on demande si tout va bien avec l\'outil.',
+      description: '3 jours après : on demande si tout va bien avec l\'outil. Se règle dans l\'écran Livraisons.',
       placeholders: ['client_name', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Triskell Studio',
-      runtime: 'pipeline' },
+      runtime: 'external', redirect: 'delivery' },
     { product: 'delivery_studio_pdf', key: 'followup_30d', label: 'Studio PDF — Avis J+30',
-      description: 'À J+30 : demande d\'avis client.',
+      description: 'À J+30 : demande d\'avis client. Se règle dans l\'écran Livraisons.',
       placeholders: ['client_name', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Triskell Studio',
-      runtime: 'pipeline' },
+      runtime: 'external', redirect: 'delivery' },
     { product: 'delivery_obelisk', key: 'welcome', label: 'Obelisk — Bienvenue',
-      description: 'Mail de bienvenue après achat Obelisk.',
+      description: 'Mail de bienvenue après achat Obelisk. Se règle dans l\'écran Livraisons.',
       placeholders: ['client_name', 'deliverables_list', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Triskell Studio',
-      runtime: 'pipeline' },
+      runtime: 'external', redirect: 'delivery' },
 
     // ============ Triskell interne (résumé du matin, alertes Phare, factures) ============
     { product: 'internal', key: 'morning_digest', label: 'Triskell Matinale (résumé de 8 h)',
@@ -1025,7 +1025,9 @@ const MailTemplates = {
         const label = t._label || t.label || this._humanKey(t.key);
         let pill = '';
         const isPipeline = t._runtime === 'pipeline';
-        if (t._source === 'fallback') {
+        if (t._runtime === 'external') {
+          pill = '<span class="mt-pill" title="Ce mail se règle dans l’écran Livraisons">→ Livraisons</span>';
+        } else if (t._source === 'fallback') {
           pill = isPipeline
             ? '<span class="mt-pill mt-pill-pipeline" title="Ce mail part avec sa version par défaut — ta version sera branchée dans une prochaine mise à jour">Par défaut</span>'
             : '<span class="mt-pill" title="Pas encore personnalisé — la version par défaut est utilisée">Par défaut</span>';
@@ -1173,6 +1175,7 @@ const MailTemplates = {
         ...res.template,
         category: res.template.category || 'transactionnel',
         _runtime: known.runtime || 'netlify',
+        _redirect: known.redirect || '',
         _label: res.template.label || known.label,
         // Modèle par défaut pré-rempli (produit dont le texte vit en Python,
         // ex. Pixel Pros) : on le marque comme « fallback » pour que la
@@ -1196,6 +1199,7 @@ const MailTemplates = {
         label: '',
         _isNew: true,
         _runtime: known.runtime || 'netlify',
+        _redirect: known.redirect || '',
         _label: known.label,
       };
     } else {
@@ -1288,6 +1292,32 @@ const MailTemplates = {
     const senderLabel = this.SENDER_LABELS[senderAddr.toLowerCase()] || '';
     const headerLabel = t._label || t.label || this._humanKey(t.key);
     const isPipeline = t._runtime === 'pipeline';
+
+    // Mail « externe » : édité dans un autre écran (ex. Livraisons, qui gère
+    // aussi les liens de téléchargement du produit). On ne montre PAS un
+    // formulaire mort ici — on redirige honnêtement vers le bon écran.
+    if (t._runtime === 'external') {
+      const target = t._redirect || 'delivery';
+      const targetLabel = (target === 'delivery') ? 'Livraisons' : target;
+      const addr = (t.from_address || '').trim();
+      e.innerHTML = `
+        <div class="mb-4 pb-3 border-b border-border">
+          <div class="flex items-center gap-2 mb-2 flex-wrap">
+            <span class="mt-chip mt-chip-auto" title="Mail automatique après achat">🤖 Auto</span>
+            ${addr ? `<span class="mt-chip mt-chip-target">${this._esc(addr)}</span>` : ''}
+          </div>
+          <h2 class="text-lg font-bold leading-tight">${this._esc(headerLabel)}</h2>
+          ${t.description ? `<p class="text-[12.5px] text-text-muted mt-1 leading-snug">${this._esc(t.description)}</p>` : ''}
+        </div>
+        <div class="mt-warn" style="margin-bottom:16px;">
+          ✋ Ce mail se règle dans l’écran <strong>${this._esc(targetLabel)}</strong> — c’est là que tu modifies aussi les liens de téléchargement et les accès envoyés au client. Le modifier ici ne changerait rien.
+        </div>
+        <button id="mt-goto-external" class="btn btn-primary">Ouvrir l’écran ${this._esc(targetLabel)} →</button>
+      `;
+      const gbtn = document.getElementById('mt-goto-external');
+      if (gbtn) gbtn.onclick = () => { try { App.show(target); } catch (_) {} };
+      return;
+    }
 
     // Adresses d’envoi configurées → liste de choix pour le câblage
     // modèle→adresse (champ « Envoyé depuis » des modèles de prospection).
