@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -661,7 +661,10 @@ def ecosystem_overview() -> dict:
         totals["actions_pending"] += actions_pending
         if latest:
             totals["audits_count"] += 1
-    return {"generated_at": datetime.now().isoformat(timespec="seconds"),
+    # "ok" est obligatoire : les consommateurs (MCP sites_overview, front)
+    # traitent toute réponse sans ce drapeau comme une erreur.
+    return {"ok": True,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
             "sites": out_sites, "totals": totals,
             "config_status": {
                 "gsc": gsc.is_configured(),
@@ -737,6 +740,49 @@ def merge_action(action_id: str, *, force: bool = False,
     return {"ok": ok}
 
 
+# Plafond quotidien GLOBAL des publications automatiques (auto_merge_verified
+# ET auto_apply_safe confondus). C'est le garde-fou « 3 max/jour » documenté :
+# chaque publication = une reconstruction du site chez l'hébergeur, dont le
+# crédit est limité (saturé une fois en juin). Les clics de Jordan ne comptent
+# pas dans ce budget.
+AUTO_PUBLISH_DAILY_CAP = 3
+
+
+def _utc_day(days_back: int = 0) -> str:
+    # UTC partout : le runner GitHub et le serveur n'ont pas le même fuseau,
+    # deux « aujourd'hui » différents feraient sauter le plafond à minuit.
+    d = datetime.now(timezone.utc).date()
+    if days_back:
+        d = d - timedelta(days=days_back)
+    return d.isoformat()
+
+
+def _auto_publish_spent_today(cfg: dict | None = None) -> int:
+    cfg = cfg if cfg is not None else repo.get_config()
+    log = cfg.get("auto_publish_log")
+    if not isinstance(log, dict):
+        return 0
+    try:
+        return int(log.get(_utc_day(), 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _auto_publish_note(n: int = 1) -> None:
+    """Consomme n unités du budget quotidien (jour courant + veille gardés)."""
+    try:
+        log = repo.get_config().get("auto_publish_log")
+        log = dict(log) if isinstance(log, dict) else {}
+        today = _utc_day()
+        keep = {today: _auto_publish_spent_today({"auto_publish_log": log}) + n}
+        yesterday = _utc_day(1)
+        if log.get(yesterday):
+            keep[yesterday] = log[yesterday]
+        repo.update_config({"auto_publish_log": keep})
+    except Exception as exc:
+        logger.debug("auto_publish_note: %s", exc)
+
+
 def auto_merge_verified(*, max_merges: int = 3,
                         min_age_minutes: int = 45) -> dict:
     """Publie tout seul les PRs en attente qui passent TOUTES les vérifs.
@@ -759,11 +805,18 @@ def auto_merge_verified(*, max_merges: int = 3,
     cfg = repo.get_config()
     if not cfg.get("auto_merge_enabled", False):
         return {"ok": True, "skipped": "auto_merge_disabled"}
+    budget = AUTO_PUBLISH_DAILY_CAP - _auto_publish_spent_today(cfg)
+    if budget <= 0:
+        return {"ok": True, "skipped": "plafond quotidien de publications atteint"}
+    max_merges = min(max_merges, budget)
 
     pending = repo.list_actions(status="preview", limit=50)
     merged: list[dict] = []
     held: list[dict] = []
-    now = datetime.now()
+    # UTC des deux côtés : created_at (Supabase) est en UTC, alors que le
+    # runner GitHub tourne en heure de Paris — comparer en heure locale
+    # gonflait l'âge des PRs de 1-2 h et neutralisait la fenêtre de veto.
+    now = datetime.now(timezone.utc)
     for action in pending:
         if len(merged) >= max_merges:
             break
@@ -781,16 +834,21 @@ def auto_merge_verified(*, max_merges: int = 3,
         try:
             created = datetime.fromisoformat(
                 str(action.get("created_at") or "").replace("Z", "+00:00"))
-            age_min = (now - created.replace(tzinfo=None)).total_seconds() / 60.0
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_min = (now - created).total_seconds() / 60.0
             if age_min < min_age_minutes:
                 continue
         except Exception:
-            pass
+            # Date illisible → on ne peut pas garantir la fenêtre de veto :
+            # cette PR attendra un clic humain (jamais fail-open).
+            continue
         r = merge_action(action["id"], force=False, auto=True)
         entry = {"action_id": action["id"], "title": action.get("title", ""),
                  "site_id": action.get("site_id", "")}
         if r.get("ok"):
             merged.append(entry)
+            _auto_publish_note()
             try:
                 from . import notifications
                 site = repo.get_site(action.get("site_id", "")) or {}
@@ -893,6 +951,14 @@ def auto_apply_safe(*, max_apply: int = 8, app_state=None) -> dict:
     # rien à la qualité : il étale juste le rattrapage initial.
     if not global_on:
         max_apply = min(max_apply, 3)
+    # Budget quotidien GLOBAL (partagé avec auto_merge_verified) : chaque mise
+    # en file déclenche vérifications + publication dans la foulée, donc on
+    # compte ici, à la source. Sans ce plafond, ce chemin publiait jusqu'à
+    # 8 corrections par tick × 3 ticks/jour en contournant le « 3 max/jour ».
+    budget = AUTO_PUBLISH_DAILY_CAP - _auto_publish_spent_today(cfg)
+    if budget <= 0:
+        return {"ok": True, "skipped": "plafond quotidien de publications atteint"}
+    max_apply = min(max_apply, budget)
     from . import plain_language
     drafts = repo.list_actions(status="draft", limit=200)
     enqueued: list[dict] = []
@@ -933,6 +999,7 @@ def auto_apply_safe(*, max_apply: int = 8, app_state=None) -> dict:
             enqueued.append({"id": a["id"], "title": a.get("title", ""),
                              "site_id": sid})
     if enqueued:
+        _auto_publish_note(len(enqueued))
         logger.info("phare auto_apply: %d corrections mises en file", len(enqueued))
     return {"ok": True, "enqueued": enqueued, "drafts_seen": len(drafts)}
 

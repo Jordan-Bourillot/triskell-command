@@ -68,6 +68,7 @@ RESCUE_WINDOW_HOURS = 24    # repêchage des missions tuées AVANT ce déploieme
 # (jamais une vraie panne métier type clé API manquante).
 _RESUMABLE_MARKERS = (
     "interrompue par un redémarrage",   # hunt_zombies.ZOMBIE_ERROR_MESSAGE
+    "recherche interrompue",            # obelisk.repo._ZOMBIE_JOB_MSG
     "chasse introuvable",               # fichier parti avec l'ancien conteneur
     "job introuvable",                  # équivalent Obélisk
 )
@@ -344,9 +345,14 @@ def hunt_state_for(source: str, hunt_ref: str) -> dict:
             job = r.get("job") or {}
             stats = job.get("stats") or {}
             status = (job.get("status") or "").lower()
-            # Normalise les statuts obélisk → vocabulaire mission
+            # Normalise les statuts obélisk → vocabulaire mission.
+            # ⚠️ Obélisk dit « failed » (jamais « error ») pour un job mort :
+            # sans cette traduction, la mission restait « en chasse » pour
+            # toujours après un redéploiement (audit du 01/07/2026).
             if status in ("pending", "running"):
                 status = "searching"
+            elif status == "failed":
+                status = "error"
             found = int(stats.get("found") or stats.get("created")
                         or stats.get("total") or 0)
             return {"status": status, "progress": int(job.get("progress") or 0),

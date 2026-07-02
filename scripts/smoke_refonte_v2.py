@@ -87,12 +87,20 @@ print("1bis) Battement de cœur du Phare…")
 from triskell_command.integrations.phare import heartbeat as ph_hb  # noqa: E402
 
 _tick_fresh = (_now - timedelta(hours=2)).isoformat(timespec="seconds")
-_tick_old = (_now - timedelta(hours=12)).isoformat(timespec="seconds")
+# Le cron ne passe plus que 3 fois/jour depuis le 22/06 : le trou nocturne
+# fait ~14 h (+ retards GitHub fréquents), donc 12 h de silence = NORMAL
+# (c'était la fausse alerte de chaque nuit). La panne ne se déclare
+# qu'au-delà du seuil (20 h).
+_tick_night = (_now - timedelta(hours=12)).isoformat(timespec="seconds")
+_tick_old = (_now - timedelta(hours=24)).isoformat(timespec="seconds")
 w = ph_hb.evaluate({"enabled": True, "last_tick_at": _tick_fresh}, now=_now)
 check("tick frais (2h) → robot Phare sain",
       w is not None and w["health"] == "healthy" and w["running"])
+w = ph_hb.evaluate({"enabled": True, "last_tick_at": _tick_night}, now=_now)
+check("tick de la veille au soir (12h, trou nocturne) → PAS de fausse panne",
+      w is not None and w["health"] == "healthy" and w["running"])
 w = ph_hb.evaluate({"enabled": True, "last_tick_at": _tick_old}, now=_now)
-check("tick vieux (12h) → robot Phare en panne",
+check("un jour entier sans tick (24h) → robot Phare en panne",
       w is not None and w["health"] == "error" and not w["running"])
 check("…avec une erreur qui pointe vers GitHub Actions",
       w is not None and "github" in (w["last_run_result"].get("error") or "").lower())
@@ -116,7 +124,7 @@ w_ok = ph_hb.evaluate({"enabled": True, "last_tick_at": _old}, now=_now)
 check("Phare : 5h sans tick GitHub = toléré par le chien de garde",
       w_ok is not None and not diagnose_workers([w_ok]))
 w_ko = ph_hb.evaluate({"enabled": True, "last_tick_at": _tick_old}, now=_now)
-check("Phare : 12h sans tick = alerte du chien de garde",
+check("Phare : 24h sans tick = alerte du chien de garde",
       w_ko is not None and len(diagnose_workers([w_ko])) == 1)
 
 print("1ter) Construction auto Pixel Pros (simulation à blanc)…")

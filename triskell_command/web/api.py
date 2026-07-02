@@ -1707,12 +1707,18 @@ class Api:
         # l'envoi — pas seulement à la création du brouillon.
         from ..integrations import prospect_status as PS
         _last_send_ts = ""
+        _kind = (d.get("kind") or "").lower().strip()
         try:
             _rec = PS.has_recent_send(client,
                                        prospect_id=prospect.get("id") or "",
                                        email=to, forever=True,
                                        check_clients=True)
-            if _rec.get("recent") and _rec.get("last_kind") == "client":
+            # Un mail APRÈS-VENTE s'adresse PAR DÉFINITION à un client : le
+            # blocage « déjà dans ta base clients » ne vaut que pour la
+            # prospection (sinon les brouillons après-vente restaient
+            # invalidables pour toujours — audit du 01/07/2026).
+            if (_rec.get("recent") and _rec.get("last_kind") == "client"
+                    and not PS._is_post_sale_kind(_kind)):
                 return {"ok": False, "blocked": "client",
                         "error": "cette adresse est déjà dans ta base "
                                  "clients — rien envoyé"}
@@ -8992,6 +8998,7 @@ class Api:
             ("pixelpros.auto_builder", "Construction auto des sites payés"),
             ("pixelpros.content_chaser", "Relances des sites payés à compléter"),
             ("site_vision_worker",    "L'œil — repère les sites à refaire"),
+            ("disk_janitor",          "Concierge disque + filet GEO"),
         ]
         for mod_name, label in worker_modules:
             try:

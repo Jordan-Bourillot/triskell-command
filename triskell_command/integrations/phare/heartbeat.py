@@ -12,8 +12,10 @@ Désormais :
     intégré à system_health() donc surveillé par worker_watchdog comme
     n'importe quel robot (alerte push si silence trop long).
 
-Seuils : le cron GitHub Actions est très élastique (gaps observés de 4-5 h
-la nuit) → 9 h de silence sur le battement fin avant alerte. Tant que le
+Seuils : le cron ne passe plus que 3 fois par jour (08:23/14:23/18:23 UTC,
+trou nocturne ~14 h) et GitHub Actions est très élastique (retards de
+plusieurs heures observés) → 20 h de silence sur le battement fin avant
+alerte. Tant que le
 battement n'a jamais été posé (vieux scheduler pas encore déployé), on
 retombe sur les dates jour du scheduler_log avec un seuil de 54 h
 (= la dernière mission globale date d'avant-hier ou plus → panne sûre).
@@ -26,7 +28,13 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 # Silence toléré avant alerte (voir docstring pour la justification).
-STALE_HOURS_FINE = 9.0      # battement fin (timestamp à chaque tick)
+# Depuis le 22/06/2026 le cron est réduit à 3 passages/jour (08:23, 14:23,
+# 18:23 UTC) : le trou nocturne fait ~14 h → un seuil sous 14 h déclenchait
+# une fausse alerte « en panne » chaque nuit + un « rétabli » chaque matin.
+# On ajoute la vraie élasticité des crons GitHub (départs vus 4-5 h en
+# retard) + la durée du tick : 14 + 5 + marge ≈ 20 h. La panne multi-jours
+# reste couverte par le fallback daylog (54 h).
+STALE_HOURS_FINE = 20.0     # battement fin (trou nocturne 14 h + retards GitHub)
 STALE_HOURS_DAYLOG = 54.0   # fallback sur les dates jour de scheduler_log
 
 WORKER_NAME = "phare_scheduler"

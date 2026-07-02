@@ -644,9 +644,29 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
     # (le placeholder peut être enveloppé de <strong>…</strong>).
     if not ville.strip():
         import re as _re_loc
+        _ph_ville = (r"(?:<strong>\s*)?(?:\{ville\}|\{\{city\}\})"
+                     r"(?:\s*</strong>)?")
+        # 1) En TÊTE de texte (l'objet du mail, typiquement) : pas d'espace
+        # devant la préposition, donc la passe « milieu » ne matche pas —
+        # « À {{city}}, vos clients… » devenait « À , vos clients… ». On
+        # retire l'amorce + la ponctuation qui suit et on remet la majuscule.
+        # Tourne AVANT la passe milieu, sinon « Près de {{city}} » se fait
+        # manger son « de {{city}} » et laisse « Près » orphelin. « a » nu
+        # est accepté ici (le « À » est très souvent tapé sans accent) car
+        # le placeholder ville suit obligatoirement. Les balises ouvrantes
+        # d'un corps HTML (<p>…) sont conservées.
+        m = _re_loc.match(
+            r"(\s*(?:<[^>]+>\s*)*)"
+            r"(?:à|a|de|sur|près\s+de|proche\s+de)\s+" + _ph_ville
+            + r"\s*[,;:]?\s*",
+            text, flags=_re_loc.IGNORECASE)
+        if m:
+            rest = text[m.end():]
+            if rest.strip():
+                text = m.group(1) + rest[:1].upper() + rest[1:]
+        # 2) En milieu de texte : l'amorce a un espace devant.
         text = _re_loc.sub(
-            r"\s+(?:à|de|sur|près\s+de|proche\s+de)\s+"
-            r"(?:<strong>\s*)?(?:\{ville\}|\{\{city\}\})(?:\s*</strong>)?",
+            r"\s+(?:à|de|sur|près\s+de|proche\s+de)\s+" + _ph_ville,
             "", text, flags=_re_loc.IGNORECASE)
 
     out = text

@@ -72,10 +72,47 @@ def clean_business_name(name: str) -> str:
         "Institut Embellia (Deguilhem Delphine)" -> "Institut Embellia"
         "Mr Moustache ( uniquement SANS RENDEZ - VOUS)" -> "Mr Moustache"
     Garde le nom tel quel si le retrait le viderait (nom = juste « (...) »).
+
+    Coupe aussi les noms Google Maps « raison sociale : descriptif
+    kilométrique » (« FABBI PATRICK PEINTURE: Artisan peintre en bâtiment
+    Rénovation façade… » → « FABBI PATRICK PEINTURE ») et plafonne la
+    longueur : au-delà de ~70 caractères ce n'est plus un nom, c'est une
+    description — un objet de mail qui l'embarque tel quel fait fuir.
     """
     n = (name or "").strip()
     stripped = re.sub(r"\s*\([^()]*\)\s*$", "", n).strip()
-    return stripped or n
+    n = stripped or n
+    # « Nom : slogan/services » — tout ce qui suit le « : » est du descriptif
+    # (seulement si la suite est longue : « Institut : Beauté » reste intact,
+    # et jamais si le préfixe gardé est trop court ou n'est qu'une forme
+    # juridique : « SARL: Boulangerie Martin » ne doit pas devenir « SARL »).
+    m = re.match(r"^(.{2,60}?)\s*[:|]\s+.{15,}$", n)
+    if m:
+        prefix = m.group(1).strip(" .,-—·|")
+        if len(prefix) >= 6 and prefix.lower() not in _LEGAL_FORMS:
+            n = prefix
+    if len(n) > 70:
+        cut = n[:60]
+        n = (cut[:cut.rfind(" ")] if " " in cut else cut)
+        # Retire les mots-outils pendants (« … de la » en fin de nom coupé).
+        words = n.split()
+        while words and words[-1].lower().strip("'’") in _TRAILING_STOPWORDS:
+            words.pop()
+        n = (" ".join(words) or cut).strip(" .,-—·|:;")
+    return n or (name or "").strip()
+
+
+# Formes juridiques seules : jamais un « nom » à garder après une coupe.
+_LEGAL_FORMS = frozenset({
+    "sarl", "sas", "sasu", "eurl", "sci", "sa", "snc", "scop", "scp",
+    "ei", "eirl", "selarl", "sasu.", "auto-entrepreneur",
+})
+
+# Mots-outils qui ne doivent jamais terminer un nom coupé.
+_TRAILING_STOPWORDS = frozenset({
+    "de", "la", "le", "les", "du", "des", "et", "à", "a", "en",
+    "d", "l", "au", "aux", "pour", "sur", "chez",
+})
 
 
 # ===========================================================================
@@ -110,7 +147,9 @@ _DEMO_MAP: dict[str, str] = {
     "carrel": "demo-carreleur", "faienc": "demo-carreleur",
     "macon": "demo-macon", "maconn": "demo-macon",
     "menuis": "demo-menuisier", "ebenist": "demo-menuisier",
-    "agenc": "demo-menuisier",
+    # ⚠️ jamais « agenc » tout court : « AGENCE immobilière » le contient et
+    # recevait une démo de MENUISIER (audit du 01/07/2026).
+    "agencement": "demo-menuisier", "agenceur": "demo-menuisier",
     # charpente / toiture → couvreur (16/06/2026)
     "couvr": "demo-couvreur", "charpent": "demo-couvreur",
     "toitur": "demo-couvreur", "zinguer": "demo-couvreur",

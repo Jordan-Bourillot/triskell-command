@@ -354,6 +354,21 @@ m, _ = MI.advance_mission(
 check("chasse introuvable (conteneur neuf) → relancée aussi",
       m["status"] == MI.ST_HUNTING and m["relaunches"] == 1)
 
+# Job Obélisk requalifié zombie : son statut est « failed » (jamais
+# « error ») et SON message d'interruption à lui → même reprise. Avant le
+# 02/07/2026 la mission créateurs restait « en chasse » pour toujours.
+ZOMBIE_OBELISK = ("Recherche interrompue (redémarrage du serveur ou "
+                  "plantage). Relance-la pour repartir.")
+check("le message zombie d'Obélisk est reconnu comme reprenable",
+      MI._is_resumable_hunt_error(ZOMBIE_OBELISK))
+m, _ = MI.advance_mission(
+    mk_mission(source="createurs"),
+    hunt_state=lambda s, r: {"status": "error", "error": ZOMBIE_OBELISK},
+    push=lambda s, r: None, kick_autopilot=KICK_OK,
+    relaunch=RELAUNCH_OK)
+check("job créateurs interrompu → mission relancée (pas coincée en chasse)",
+      m["status"] == MI.ST_HUNTING and m["relaunches"] == 1)
+
 # Une VRAIE panne ne se relance pas (clé API, réseau…)
 calls = []
 m, _ = MI.advance_mission(

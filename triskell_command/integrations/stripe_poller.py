@@ -208,7 +208,7 @@ def _do_one_cycle(app_state) -> dict:
 
     if not sessions:
         if max_ts > cursor:
-            _save_cursor(max_ts)
+            _save_cursor(max_ts, client=client)
         _set_run(counters)
         return counters
 
@@ -260,9 +260,32 @@ def _do_one_cycle(app_state) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Une session Stripe reste payable ~24 h après sa CRÉATION : on re-balaie
+# toujours cette fenêtre derrière le curseur (25 h de marge).
+_CURSOR_OVERLAP_SECONDS = 25 * 3600
+# Premier passage (curseur vierge/perdu) : ne JAMAIS remonter tout
+# l'historique du compte — ça recréerait des projets (et leurs mails de
+# bienvenue) pour de VIEUX paiements. On démarre sur les dernières 48 h.
+_FIRST_RUN_WINDOW_SECONDS = 48 * 3600
+_MAX_PAGES = 20     # garde-fou pagination (20 × 100 sessions)
+
+
 def _list_completed_sessions_since(secret_key: str, since_ts: int):
-    """Liste les checkout.session payées depuis `since_ts` (Unix).
-    Retourne (liste, max_ts vu)."""
+    """Liste les checkout.session payées autour de `since_ts` (Unix).
+
+    ⚠️ Le curseur est basé sur `created` (l'OUVERTURE du paiement), pas sur
+    le moment où le client paie. Un client qui ouvre le paiement, hésite,
+    et paie APRÈS un passage du poller était définitivement perdu avec un
+    filtre strict `created > curseur`. On repart donc 25 h en arrière du
+    curseur : les sessions déjà traitées re-listées par ce chevauchement
+    sont absorbées par l'idempotence (stripe_session_id, cf. _do_one_cycle).
+
+    Le curseur (max_ts) avance sur TOUTES les sessions vues, payées ou non :
+    une session non payée plus vieille que 25 h est expirée côté Stripe,
+    donc la fenêtre de chevauchement suffit — et sans ça, une longue période
+    sans vente faisait re-balayer une fenêtre qui grossissait sans fin.
+    Retourne (liste, max_ts vu).
+    """
     import requests
 
     headers = {"Authorization": f"Bearer {secret_key}"}
@@ -271,30 +294,39 @@ def _list_completed_sessions_since(secret_key: str, since_ts: int):
         "expand[]": "data.line_items",
     }
     if since_ts > 0:
-        # Stripe accepte created[gte] = unix timestamp
-        params["created[gte]"] = since_ts + 1   # strict > pour pas re-piocher
+        params["created[gte]"] = max(0, since_ts - _CURSOR_OVERLAP_SECONDS)
+    else:
+        params["created[gte]"] = int(time.time()) - _FIRST_RUN_WINDOW_SECONDS
 
-    r = requests.get(
-        "https://api.stripe.com/v1/checkout/sessions",
-        headers=headers, params=params, timeout=15,
-    )
-    if r.status_code >= 400:
-        try:
-            err = r.json().get("error", {}).get("message", r.text)
-        except Exception:
-            err = r.text
-        raise RuntimeError(f"Stripe API HTTP {r.status_code}: {err}")
-
-    data = r.json().get("data", []) or []
-    # Garde uniquement les sessions complétées et payées
-    completed = [s for s in data
-                  if s.get("status") == "complete"
-                  and s.get("payment_status") == "paid"]
+    completed: list[dict] = []
     max_ts = since_ts
-    for s in completed:
-        ts = int(s.get("created") or 0)
-        if ts > max_ts:
-            max_ts = ts
+    # Pagination Stripe (has_more/starting_after) : sans elle, plus de 100
+    # sessions dans la fenêtre = les plus anciennes jamais vues.
+    for _page in range(_MAX_PAGES):
+        r = requests.get(
+            "https://api.stripe.com/v1/checkout/sessions",
+            headers=headers, params=params, timeout=15,
+        )
+        if r.status_code >= 400:
+            try:
+                err = r.json().get("error", {}).get("message", r.text)
+            except Exception:
+                err = r.text
+            raise RuntimeError(f"Stripe API HTTP {r.status_code}: {err}")
+        payload = r.json()
+        data = payload.get("data", []) or []
+        for s in data:
+            ts = int(s.get("created") or 0)
+            if ts > max_ts:
+                max_ts = ts
+        # Garde uniquement les sessions complétées et payées
+        completed.extend(s for s in data
+                         if s.get("status") == "complete"
+                         and s.get("payment_status") == "paid")
+        if not (payload.get("has_more") and data):
+            break
+        params["starting_after"] = data[-1].get("id")
+
     return completed, max_ts
 
 

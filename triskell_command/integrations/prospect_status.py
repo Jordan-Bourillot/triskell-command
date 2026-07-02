@@ -571,9 +571,35 @@ def should_contact(client, prospect_id: str, *, email: str = "",
 #
 # Les relances (kind=follow_up_*) ont par nature un envoi antérieur : pour
 # elles, seul un envoi APRÈS la création du brouillon bloque.
+# ⚠️ Ces kinds doivent matcher ce que les producteurs écrivent VRAIMENT :
+# dormant_recycler écrit « dormant_recycle », post_sale_runner écrit ses
+# stages (« welcome_at_paid », « cross_sell_30d », « nps_90d »,
+# « delivery_followup_N »). Avant l'alignement du 02/07/2026, aucun ne
+# matchait → tous ces brouillons étaient invalidables (« déjà contacté »).
 FOLLOW_UP_DRAFT_KINDS = frozenset({
     "follow_up_7d", "follow_up_30d", "post_sale", "dormant",
+    "dormant_recycle",
+    "welcome_at_paid", "cross_sell_30d", "nps_90d",
 })
+
+# Préfixes de kinds de relance à numéro variable (delivery_followup_1, _2…).
+_FOLLOW_UP_KIND_PREFIXES = ("follow_up_", "delivery_followup_")
+
+# Kinds APRÈS-VENTE : ils s'adressent VOLONTAIREMENT à des clients — le
+# statut « won » ne doit pas les bloquer (désinscrit/rebond/refus, si).
+POST_SALE_DRAFT_KINDS = frozenset({
+    "post_sale", "welcome_at_paid", "cross_sell_30d", "nps_90d",
+})
+
+
+def _is_follow_up_kind(kind: str) -> bool:
+    return (kind in FOLLOW_UP_DRAFT_KINDS
+            or kind.startswith(_FOLLOW_UP_KIND_PREFIXES))
+
+
+def _is_post_sale_kind(kind: str) -> bool:
+    return (kind in POST_SALE_DRAFT_KINDS
+            or kind.startswith("delivery_followup_"))
 
 # Libellés humains des statuts bloquants (affichés tels quels dans l'UI).
 _NO_CONTACT_LABELS = {
@@ -601,14 +627,18 @@ def draft_approval_check(*, status: str, draft_kind: str = "",
     à l'utilisateur tel quel.
     """
     st = (status or "").lower().strip()
+    kind = (draft_kind or "").lower().strip()
     if st in NO_CONTACT_STATUSES:
-        return {"ok": False,
-                "reason": _NO_CONTACT_LABELS.get(
-                    st, f"statut bloquant : {st}")}
+        # Exception : un mail APRÈS-VENTE s'adresse par définition à un
+        # client — « won » ne le bloque pas. Les autres statuts (désinscrit,
+        # rebond, refus, perdu) restent bloquants même en après-vente.
+        if not (st == "won" and _is_post_sale_kind(kind)):
+            return {"ok": False,
+                    "reason": _NO_CONTACT_LABELS.get(
+                        st, f"statut bloquant : {st}")}
     if not last_send_ts:
         return {"ok": True, "reason": ""}
-    kind = (draft_kind or "").lower().strip()
-    if kind in FOLLOW_UP_DRAFT_KINDS:
+    if _is_follow_up_kind(kind):
         # Relance : un envoi antérieur est attendu. On ne bloque que si un
         # envoi est parti APRÈS la création de cette relance (quelqu'un est
         # déjà repassé derrière).

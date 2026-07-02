@@ -181,6 +181,18 @@ def create_app() -> FastAPI:
         # Demande Jordan le 18/06/2026 (le ping vient d'Europe = bonne « porte »).
         _start_keepwarm_thread()
 
+        # Concierge disque + filet GEO : purge quotidienne des vieux exports
+        # et chasses terminées (un disque plein = les 503 de juin), copie
+        # cloud des données GEO au boot puis chaque jour, et restauration
+        # automatique si le volume serveur est reparti de zéro.
+        try:
+            from ..integrations import disk_janitor
+            _janitor_state = getattr(api_instance, "_app_state", None)
+            if _janitor_state is not None:
+                disk_janitor.start_worker(_janitor_state)
+        except Exception as exc:
+            logger.warning("disk_janitor indisponible : %s", exc)
+
         # Le guetteur du copilote : dépose les évènements (réponse de
         # prospect, chasse finie, rappels) dans le fil + push si chaud.
         try:
@@ -836,11 +848,45 @@ def create_app() -> FastAPI:
                 return JSONResponse(status_code=404,
                                     content={"ok": False, "error": "intake introuvable"})
 
-            if m.is_auto("paid"):
+            # Idempotence : Stripe REJOUE le webhook en cas de timeout. Sans
+            # ce marqueur, chaque rejeu renvoyait push + mail + build.
+            _data = intake.get("data") or {}
+            if isinstance(_data, dict) and _data.get("paid_hook_done_at"):
+                return JSONResponse(content={"ok": True, "already": True})
+
+            mail_auto = m.is_auto("paid")
+            # Notification INCONDITIONNELLE : un paiement ne doit JAMAIS être
+            # silencieux. En mode mail manuel + construction coupée, sans ce
+            # push le client payait et rien ni personne n'était prévenu.
+            try:
+                _pp_name = (intake.get("business_name")
+                            or intake.get("business-name")
+                            or intake.get("name")
+                            or intake.get("email") or draft_id)
+                _pp_hint = ("" if mail_auto
+                            else " — mail de bienvenue à envoyer depuis l'écran Pixel Pros")
+                tcpush.send_push(
+                    f"💳 Paiement reçu — {_pp_name}",
+                    f"Nouveau site Pixel Pros payé{_pp_hint}.",
+                    user_id="jordan", priority="urgent",
+                    tag=f"pp_paid_{draft_id}", tag_group="pixelpros",
+                    url="/?view=pixelpros",
+                    extra_data={"type": "pp_paid", "draft_id": draft_id},
+                )
+            except Exception:
+                logger.exception("pixelpros.on_paid : push paiement KO")
+
+            if mail_auto:
                 mail_ok, mail_msg = m.send_paid_mail(intake)
             else:
                 mail_ok, mail_msg = False, "skipped (mode manuel — déclencher depuis l'UI)"
             build_ok, build_msg = r.dispatch_build(draft_id)
+            try:
+                r.update_intake_data(draft_id, {
+                    "paid_hook_done_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                })
+            except Exception:
+                logger.exception("pixelpros.on_paid : marqueur idempotence KO")
             return JSONResponse(content={
                 "ok": True,
                 "mail": {"ok": mail_ok, "message": mail_msg},
@@ -1178,7 +1224,22 @@ def create_app() -> FastAPI:
         # Catch-all pour les fichiers à la racine de ui/
         @app.get("/{filename:path}")
         async def static_root(filename: str) -> FileResponse:
-            target = UI_DIR / filename
+            # Un GET /api/<méthode inconnue> retombe ici : réponse JSON claire
+            # plutôt qu'un 404 fichier trompeur.
+            if filename.startswith("api/"):
+                return JSONResponse(
+                    status_code=404,
+                    content={"ok": False, "error": "Cette méthode n'existe pas (ou pas encore) sur ce serveur."},
+                )
+            # Confinement : ne JAMAIS servir un fichier hors du dossier ui/
+            # (bloque les chemins du type ../../api.py, même percent-encodés).
+            try:
+                target = (UI_DIR / filename).resolve()
+                ui_root = UI_DIR.resolve()
+            except (OSError, ValueError):
+                raise HTTPException(status_code=404, detail="Not found")
+            if ui_root not in target.parents:
+                raise HTTPException(status_code=404, detail="Not found")
             if target.is_file():
                 return FileResponse(str(target))
             # Fallback SPA-style : rediriger vers index pour routes non trouvées
