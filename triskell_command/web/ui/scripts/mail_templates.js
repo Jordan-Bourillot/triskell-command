@@ -138,12 +138,12 @@ const MailTemplates = {
       description: 'Première relance prospect, 7 jours après le premier mail si pas de réponse.',
       placeholders: ['name', 'signature'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
-      runtime: 'pipeline' },
+      runtime: 'live' },
     { product: 'drip', key: 'follow_up_30d', label: 'Relance J+30 — dernier rappel',
       description: 'Relance finale, 30 jours après le premier mail.',
       placeholders: ['name', 'signature', 'soft_hook'],
       from_address: 'contact@triskell-studio.fr', from_name: 'Jordan Bourillot',
-      runtime: 'pipeline' },
+      runtime: 'live' },
 
     // ============ contact@triskell-studio.fr — Post-vente (suivi client) ============
     { product: 'post_sale', key: 'welcome_at_paid', label: 'Bienvenue après achat',

@@ -424,13 +424,47 @@ def _create_drip_draft(client, app_state, sent_row: dict,
         return out
     to = str(emails[0]).strip()
 
-    template = (config.get("templates") or {}).get(stage) or ""
+    default_template = (config.get("templates") or {}).get(stage) or ""
+    template = default_template
+    # Modèle CENTRAL éditable (écran « Modèles mails », produit 'drip') : son
+    # corps remplace le texte par défaut s'il existe et est complet. On garde
+    # le sujet « Re: … » (le fil de discussion). Tant qu'aucun modèle central
+    # n'est créé, cette étape est neutre (résolveur → None).
+    try:
+        from .mail_templates_resolver import get_transactional
+        central = get_transactional("drip", stage)
+        if central:
+            # Le brouillon de relance part en TEXTE simple. Or dans l'éditeur
+            # « Modèles mails », le corps PRINCIPAL est le champ HTML. On prend
+            # donc le texte s'il est rempli, sinon on convertit le HTML en
+            # texte (jamais de balises brutes dans un mail texte) — ainsi une
+            # relance éditée dans le grand champ est bien prise en compte.
+            central_body = (central.get("body_text") or "").strip()
+            if not central_body and (central.get("body_html") or "").strip():
+                import re as _re
+                h = central["body_html"]
+                h = _re.sub(r"(?i)<br\s*/?>", "\n", h)
+                h = _re.sub(r"(?i)</p\s*>", "\n\n", h)
+                h = _re.sub(r"<[^>]+>", "", h)
+                central_body = (h.replace("&nbsp;", " ").replace("&amp;", "&")
+                                .replace("&lt;", "<").replace("&gt;", ">")
+                                .replace("&#39;", "'").strip())
+            if central_body:
+                template = central_body
+    except Exception as exc:
+        logger.debug("drip central template: %s", exc)
     signature = config.get("signature") or app_state.get(
         "outreach", "from_name", default="") or ""
     # name / soft_hook gardes pour compat avec d'anciens textes custom
     # sauves en reglages ; les textes par defaut n'en utilisent plus.
-    body = template.format(name=name, signature=signature,
-                           soft_hook="votre activité")
+    try:
+        body = template.format(name=name, signature=signature,
+                               soft_hook="votre activité")
+    except Exception:
+        # Placeholder inconnu dans un modèle central mal saisi → repli strict
+        # sur le texte par défaut (jamais de mail cassé chez un prospect).
+        body = default_template.format(name=name, signature=signature,
+                                       soft_hook="votre activité")
     original_subject = (sent_row.get("subject") or "").strip()
     if original_subject:
         subj_tmpl = config.get("subject_template") or "Re: {original_subject}"
