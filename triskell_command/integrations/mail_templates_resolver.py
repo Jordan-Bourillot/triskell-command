@@ -50,6 +50,24 @@ def html_to_text(html_body: str) -> str:
     return h.strip()
 
 
+def text_to_html(text: str) -> str:
+    """Transforme un corps en TEXTE brut en HTML simple (opération inverse de
+    html_to_text). Paragraphes (double saut) → <p>, sauts simples → <br>,
+    échappement minimal (& < >) pour garder les apostrophes lisibles. Sert au
+    pré-remplissage de l'éditeur et aux canaux multipart (facture) quand seul un
+    corps texte central est fourni. Aller-retour exact avec html_to_text.
+    """
+    t = (text or "").strip()
+    if not t:
+        return ""
+    out = []
+    for para in _re.split(r"\n\s*\n", t):
+        esc = (para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+               .replace("\n", "<br>"))
+        out.append("<p>" + esc + "</p>")
+    return "\n".join(out)
+
+
 def safe_format(template: str, values: dict) -> str:
     """Remplace les placeholders {clef} un par un, sans str.format().
 

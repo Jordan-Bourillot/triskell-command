@@ -240,10 +240,10 @@ const MailTemplates = {
 
     // ============ billing@triskell-studio.fr — Factures Stripe ============
     { product: 'billing', key: 'invoice_email', label: 'Facture émise',
-      description: 'Mail envoyé au client après un paiement réussi, avec la facture PDF en pièce jointe.',
-      placeholders: ['client_name', 'invoice_number', 'amount', 'currency'],
+      description: 'Mail envoyé au client après un paiement réussi, avec la facture PDF en pièce jointe. La pièce jointe PDF reste attachée quoi que tu écrives.',
+      placeholders: ['first_name', 'invoice_number', 'period', 'total'],
       from_address: 'billing@triskell-studio.fr', from_name: 'Triskell Studio (facturation)',
-      runtime: 'pipeline' },
+      runtime: 'live' },
   ],
 
   // Libellés humains des regroupements par adresse mail. Les adresses

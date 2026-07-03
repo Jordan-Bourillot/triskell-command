@@ -428,25 +428,11 @@ MAIL_TEMPLATE_PRODUCTS = {
 
 
 def _plain_to_html(text: str) -> str:
-    """Transforme un modèle par défaut en TEXTE brut en HTML simple, pour le
-    pré-remplissage de l'éditeur (dont le corps principal est le champ HTML).
-    Paragraphes (double saut de ligne) → <p>, sauts simples → <br>. Échappement
-    MINIMAL (& < >) uniquement — on garde les apostrophes lisibles dans la
-    source. Round-trip sûr : html_to_text() côté envoi reconstruit le texte.
-    """
-    import re as _re
-    t = (text or "").strip()
-    if not t:
-        return ""
-    out = []
-    for para in _re.split(r"\n\s*\n", t):
-        esc = (para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-               .replace("\n", "<br>"))
-        out.append("<p>" + esc + "</p>")
-    # Un <p> par ligne (lisible dans l'éditeur). Le saut entre les balises est
-    # neutralisé par html_to_text (qui ramène les sauts multiples à un seul
-    # saut de paragraphe) → l'aller-retour reste exact avec le texte source.
-    return "\n".join(out)
+    """Texte brut → HTML simple pour pré-remplir l'éditeur. Délègue à l'outil
+    partagé du résolveur (une seule implémentation, aller-retour exact avec
+    html_to_text)."""
+    from ..mail_templates_resolver import text_to_html
+    return text_to_html(text)
 
 
 # Canaux « texte » dont le modèle de référence vit dans le DEFAULT_CONFIG d'un
@@ -503,6 +489,27 @@ def _pipeline_default_template(product: str, key: str):
                 "from_name": "Pixel Pros",
                 "enabled": True,
                 "placeholders": ph,
+                "_is_default": True,
+            }
+        except Exception as exc:
+            logger.debug("_pipeline_default_template(%s,%s): %s", product, key, exc)
+        return None
+
+    if product == "billing" and key == "invoice_email":
+        # Le défaut vit en HTML dans invoice_emit (mail multipart) : on le
+        # renvoie tel quel (comme Pixel Pros), pas de conversion.
+        try:
+            from ..billing_saas import invoice_emit as _inv
+            return {
+                "product": "billing", "key": key,
+                "category": "transactionnel",
+                "subject": _inv.DEFAULT_INVOICE_SUBJECT,
+                "body_text": _inv.DEFAULT_INVOICE_BODY_TEXT,
+                "body_html": _inv.DEFAULT_INVOICE_BODY_HTML,
+                "from_address": "billing@triskell-studio.fr",
+                "from_name": "Triskell Studio (facturation)",
+                "enabled": True,
+                "placeholders": ["first_name", "invoice_number", "period", "total"],
                 "_is_default": True,
             }
         except Exception as exc:

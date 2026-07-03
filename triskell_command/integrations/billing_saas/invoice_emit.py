@@ -25,6 +25,39 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
+# Modèle par DÉFAUT du mail de facture. Variables : {first_name},
+# {invoice_number}, {period}, {total}. Sert au rendu ci-dessous ET au
+# pré-remplissage de l'éditeur « Modèles mails » (produit 'billing', clé
+# 'invoice_email'). Le PDF reste toujours attaché, quel que soit le texte.
+DEFAULT_INVOICE_SUBJECT = "Votre facture Triskell Command {invoice_number} — {period}"
+DEFAULT_INVOICE_BODY_TEXT = (
+    "Bonjour {first_name},\n\n"
+    "Voici votre facture {invoice_number} pour votre abonnement "
+    "Triskell Command — {period}.\n\n"
+    "Montant prélevé : {total}\n\n"
+    "La facture est en pièce jointe (PDF).\n\n"
+    "Pour toute question sur votre abonnement ou votre facturation, "
+    "répondez simplement à cet email.\n\n"
+    "À très vite,\n"
+    "Jordan — Triskell Studio\n"
+    "https://triskell-studio.fr"
+)
+DEFAULT_INVOICE_BODY_HTML = """\
+<!doctype html>
+<html><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#222; max-width:600px;">
+<p>Bonjour {first_name},</p>
+<p>Voici votre facture <strong>{invoice_number}</strong> pour votre abonnement
+<strong>Triskell Command — {period}</strong>.</p>
+<p>Montant prélevé : <strong>{total}</strong></p>
+<p>La facture est en pièce jointe (PDF).</p>
+<p>Pour toute question sur votre abonnement ou votre facturation,
+répondez simplement à cet email.</p>
+<p>À très vite,<br>
+Jordan — Triskell Studio<br>
+<a href="https://triskell-studio.fr">triskell-studio.fr</a></p>
+</body></html>"""
+
+
 # ---------------------------------------------------------------------------
 # Point d'entrée appelé depuis le webhook
 # ---------------------------------------------------------------------------
@@ -261,40 +294,65 @@ def _send_invoice_email(*, to_email: str, to_name: str,
     period_human = _period_human(subscription_period)
     first_name = (to_name or "").split(" ")[0] or "Bonjour"
 
-    body_text = (
-        f"Bonjour {first_name},\n\n"
-        f"Voici votre facture {invoice_number} pour votre abonnement "
-        f"Triskell Command — {period_human}.\n\n"
-        f"Montant prélevé : {total_eur:.2f} €\n\n"
-        f"La facture est en pièce jointe (PDF).\n\n"
-        f"Pour toute question sur votre abonnement ou votre facturation, "
-        f"répondez simplement à cet email.\n\n"
-        f"À très vite,\n"
-        f"Jordan — Triskell Studio\n"
-        f"https://triskell-studio.fr"
-    )
+    _vars = {
+        "first_name": first_name,
+        "invoice_number": invoice_number,
+        "period": period_human,
+        "total": f"{total_eur:.2f} €",
+    }
 
-    body_html = f"""\
-<!doctype html>
-<html><body style="font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; color:#222; max-width:600px;">
-<p>Bonjour {first_name},</p>
-<p>Voici votre facture <strong>{invoice_number}</strong> pour votre abonnement
-<strong>Triskell Command — {period_human}</strong>.</p>
-<p>Montant prélevé : <strong>{total_eur:.2f} €</strong></p>
-<p>La facture est en pièce jointe (PDF).</p>
-<p>Pour toute question sur votre abonnement ou votre facturation,
-répondez simplement à cet email.</p>
-<p>À très vite,<br>
-Jordan — Triskell Studio<br>
-<a href="https://triskell-studio.fr">triskell-studio.fr</a></p>
-</body></html>"""
+    subj_tmpl = DEFAULT_INVOICE_SUBJECT
+    text_tmpl = DEFAULT_INVOICE_BODY_TEXT
+    html_tmpl = DEFAULT_INVOICE_BODY_HTML
+    # Modèle CENTRAL éditable (écran « Modèles mails », produit 'billing') :
+    # remplace sujet + corps s'il existe et est complet. Repli blindé (toute
+    # anomalie garde le modèle par défaut). Le PDF reste TOUJOURS attaché plus
+    # bas, quel que soit le texte.
+    try:
+        from ..mail_templates_resolver import (
+            get_transactional, html_to_text, text_to_html)
+        central = get_transactional("billing", "invoice_email")
+        if central:
+            if (central.get("subject") or "").strip():
+                subj_tmpl = central["subject"]
+            c_html = (central.get("body_html") or "").strip()
+            c_text = (central.get("body_text") or "").strip()
+            if c_html:
+                html_tmpl = c_html
+                # HTML sans aucun mot (balises seules) → jamais une partie
+                # texte vide : on garde le texte par défaut.
+                text_tmpl = (c_text or html_to_text(c_html)
+                             or DEFAULT_INVOICE_BODY_TEXT)
+            elif c_text:
+                text_tmpl = c_text
+                html_tmpl = text_to_html(c_text)
+    except Exception as exc:
+        logger.debug("invoice central template: %s", exc)
+
+    # Rendu blindé : même si le résolveur partagé est en panne, la facture
+    # part avec son texte par défaut correctement rempli (repli ultime en
+    # remplacement direct, zéro dépendance).
+    try:
+        from ..mail_templates_resolver import safe_format
+        subject = safe_format(subj_tmpl, _vars)
+        body_text = safe_format(text_tmpl, _vars)
+        body_html = safe_format(html_tmpl, _vars)
+    except Exception as exc:
+        logger.warning("invoice safe_format KO, repli défaut : %s", exc)
+        subject, body_text, body_html = (
+            DEFAULT_INVOICE_SUBJECT, DEFAULT_INVOICE_BODY_TEXT,
+            DEFAULT_INVOICE_BODY_HTML)
+        for k, v in _vars.items():
+            subject = subject.replace("{" + k + "}", str(v))
+            body_text = body_text.replace("{" + k + "}", str(v))
+            body_html = body_html.replace("{" + k + "}", str(v))
 
     msg = EmailMessage()
     from_name = smtp_cfg.get("from_name") or "Triskell Studio"
     from_email = smtp_cfg["from_email"]
     msg["From"] = f"{from_name} <{from_email}>"
     msg["To"] = to_email
-    msg["Subject"] = f"Votre facture Triskell Command {invoice_number} — {period_human}"
+    msg["Subject"] = subject
     msg["Date"] = formatdate(localtime=True)
     domain = from_email.split("@", 1)[1] if "@" in from_email else "triskell-studio.fr"
     msg["Message-ID"] = make_msgid(domain=domain)
