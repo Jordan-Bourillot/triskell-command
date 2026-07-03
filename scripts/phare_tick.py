@@ -38,6 +38,10 @@ logger = logging.getLogger("phare_tick")
 
 
 def main() -> int:
+    # Vrai run de production : autorise le récap quotidien des publications
+    # (notifications.notify_auto_merged/flush — muets sans ce marqueur, pour
+    # que les tests locaux ne remplissent plus le carnet avec du fictif).
+    os.environ.setdefault("PHARE_REAL_RUN", "1")
     # ----- Validation des env vars -----
     if not os.environ.get("SUPABASE_URL"):
         logger.error("SUPABASE_URL manquante.")

@@ -22,6 +22,7 @@ Tout échoue gracieusement : aucune notif ne casse jamais le tick scheduler.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 from typing import Any, Optional
 
@@ -32,6 +33,20 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_EMAIL = "contact@triskell-studio.fr"
 DEFAULT_USER_ID = "jordan"
+
+# Garde-fou « vrai robot seulement » : le récap quotidien des publications ne
+# doit être alimenté/envoyé QUE par un processus de production (serveur web,
+# tick GitHub Actions), qui pose PHARE_REAL_RUN=1 au démarrage. Sans ce
+# marqueur, on ne touche à RIEN : les batteries de tests et les essais locaux
+# parlent à la VRAIE base (machine locale = prod) et ont déjà rempli deux fois
+# le récap avec des corrections fictives (mails « 49 » du 02/07 et « 23 » du
+# 03/07 — pages de test /realisations). Le stub du smoke ne suffisait pas :
+# tout script qui importe l'exécuteur en direct contournait la protection.
+REAL_RUN_ENV = "PHARE_REAL_RUN"
+
+
+def _is_real_run() -> bool:
+    return os.environ.get(REAL_RUN_ENV) == "1"
 
 # Récap quotidien des publications automatiques (« publié tout seul ») :
 # au lieu d'un mail par correction, on empile les publications du jour dans
@@ -262,6 +277,10 @@ def notify_auto_merged(*, site: dict, action: dict) -> dict:
     Le mail groupé part une fois par jour via flush_auto_merged_digest(),
     déclenché par le scheduler. Jordan reste informé (transparence) sans être
     noyé sous un mail par correction."""
+    if not _is_real_run():
+        logger.info("notify_auto_merged ignoré (pas un vrai run — "
+                    "poser %s=1 pour un robot de production)", REAL_RUN_ENV)
+        return {"buffered": False, "skipped": "not_real_run"}
     site_name = site.get("name") or site.get("domain") or "ton site"
     action_title = action.get("title") or "modification SEO"
     try:
@@ -282,6 +301,9 @@ def flush_auto_merged_digest() -> dict:
     """Envoie UN mail récap de toutes les publications auto accumulées, puis
     vide le buffer. Appelé 1×/jour par le scheduler. N'envoie RIEN (et ne
     touche à rien) si le buffer est vide : pas de mail inutile."""
+    if not _is_real_run():
+        logger.info("flush_auto_merged_digest ignoré (pas un vrai run)")
+        return {"ok": True, "sent": False, "reason": "not_real_run"}
     items = _read_digest()
     if not items:
         return {"ok": True, "sent": False, "reason": "empty"}

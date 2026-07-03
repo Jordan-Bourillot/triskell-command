@@ -48,6 +48,35 @@ def check(label: str, cond: bool, detail: str = "") -> None:
 # quotidien — d'où le mail fantôme « 49 corrections publiées » du 02/07.
 # On neutralise donc tout buffer/envoi de notifications pour la durée du test.
 from triskell_command.integrations.phare import notifications as _notifications
+
+# Depuis le 04/07/2026 la protection vit AUSSI à la source : sans
+# PHARE_REAL_RUN=1 (posé uniquement par le serveur web et le tick GitHub
+# Actions), notify_auto_merged/flush refusent d'écrire — même un script SANS
+# stub ne peut plus remplir le récap de prod avec du fictif (mails fantômes
+# « 49 corrections » du 02/07 et « 23 corrections » du 03/07, dont 21 sur la
+# page de test /realisations).
+print("— notifications.py : garde-fou vrai-run —")
+import os as _os
+from unittest import mock as _mock
+_had_env = _os.environ.pop("PHARE_REAL_RUN", None)
+_r = _notifications.notify_auto_merged(site={"name": "Test"},
+                                       action={"title": "test"})
+check("sans PHARE_REAL_RUN : le récap refuse d'écrire",
+      _r.get("skipped") == "not_real_run" and not _r.get("buffered"))
+_r = _notifications.flush_auto_merged_digest()
+check("sans PHARE_REAL_RUN : aucun mail récap ne part",
+      _r.get("reason") == "not_real_run" and not _r.get("sent"))
+_os.environ["PHARE_REAL_RUN"] = "1"
+with _mock.patch.object(_notifications.repo, "_sb", return_value=None):
+    _r = _notifications.notify_auto_merged(site={"name": "Test"},
+                                           action={"title": "test"})
+check("avec PHARE_REAL_RUN=1 : le récap accepte à nouveau",
+      _r.get("buffered") is True)
+if _had_env is None:
+    _os.environ.pop("PHARE_REAL_RUN", None)
+else:
+    _os.environ["PHARE_REAL_RUN"] = _had_env
+
 _notifications.notify_auto_merged = lambda **kw: {"ok": True, "stubbed": True}
 _notifications.flush_auto_merged_digest = lambda: {"ok": True, "stubbed": True}
 

@@ -125,6 +125,11 @@ def create_app() -> FastAPI:
     except Exception as exc:
         logger.debug("server_presence indisponible : %s", exc)
 
+    # Vrai run de production : autorise le récap quotidien des publications
+    # du Phare (notifications muettes sans ce marqueur — les tests locaux ont
+    # déjà rempli deux fois le carnet avec des corrections fictives).
+    os.environ.setdefault("PHARE_REAL_RUN", "1")
+
     # Rôle du process : "all" (défaut, comportement historique = web +
     # robots), "web" (sert le site/API + l'état local : auto-pilote GEO,
     # sauvegarde GEO, ménage disque) ou "workers" (robots de fond sur la
