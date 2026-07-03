@@ -391,6 +391,7 @@ const GEO = {
             <div class="geo-score-text">
               <div class="geo-score-verdict">${verdict}</div>
               <div class="geo-score-meta">Concrètement : ton site est ressorti <b>${surv.cited} fois sur ${surv.total} tests</b> (questions posées à ${(n => `${n} IA différente${n > 1 ? 's' : ''}`)(new Set((surv.results || []).map(x => x.provider).filter(Boolean)).size)}) · <a href="#" data-show-details>voir le détail</a></div>
+              ${surv.note ? `<div class="geo-score-meta">⚠️ ${this._esc(surv.note)}</div>` : ''}
             </div>
           </div>
           <div id="geo-surv-details" hidden class="mt-4">
@@ -493,7 +494,7 @@ const GEO = {
       <div class="geo-run-line">
         <div class="geo-run-line-head">
           <span class="geo-run-prov">${this._esc(res.provider || '')}</span>
-          <span class="geo-run-cited ${res.cited ? 'is-cited' : 'is-not'}">${res.cited ? '✓ cité' : '✗ pas cité'}</span>
+          <span class="geo-run-cited ${res.cited ? 'is-cited' : 'is-not'}">${res.empty ? '🔇 IA muette (pas de réponse)' : res.cited ? '✓ cité' : '✗ pas cité'}</span>
         </div>
         <div class="geo-run-q">« ${this._esc(res.question || '')} »</div>
         ${res.snippet ? `<div class="geo-run-snip">${this._esc(res.snippet)}</div>` : ''}
@@ -1456,7 +1457,8 @@ const GEO = {
         msg.textContent = (r && r.error) || 'Erreur inconnue.';
         msg.className = 'geo-msg geo-msg--err';
       } else {
-        msg.textContent = `Surveillance terminée : ${r.run.cited}/${r.run.total} citations (${r.run.score}%).`;
+        const extra = r.run.note ? ` ⚠️ ${r.run.note}` : '';
+        msg.textContent = `Surveillance terminée : ${r.run.cited}/${r.run.total} citations (${r.run.score}%).${extra}`;
         msg.className = 'geo-msg geo-msg--ok';
         Toast.success(`Surveillance terminée : ${r.run.cited}/${r.run.total} citations (${r.run.score}%).`);
         this._renderBody(); // recharge la vue site
@@ -1478,16 +1480,17 @@ const GEO = {
       <div class="geo-run">
         <button class="geo-run-head" data-toggle-run>
           <div class="geo-run-when">${this._fmtDate(r.ts)}</div>
-          <div class="geo-run-stat">${r.cited}/${r.total} citations</div>
+          <div class="geo-run-stat">${r.cited}/${r.total} citations${(r.mutes && r.mutes.length) ? ` · 🔇 ${r.mutes.length} IA muette${r.mutes.length > 1 ? 's' : ''}` : ''}</div>
           <div class="geo-run-score geo-run-score--${cls}">${r.score}%</div>
           <div class="geo-run-caret">▾</div>
         </button>
         <div class="geo-run-body">
+          ${r.note ? `<div class="geo-run-line"><div class="geo-run-q">⚠️ ${this._esc(r.note)}</div></div>` : ''}
           ${(r.results || []).map(x => `
             <div class="geo-run-line">
               <div class="geo-run-line-head">
                 <span class="geo-run-prov">${this._esc(x.provider_label || x.provider)}</span>
-                <span class="geo-run-cited ${x.cited ? 'is-cited' : 'is-not'}">${x.cited ? '✓ cité' : '✗ pas cité'}</span>
+                <span class="geo-run-cited ${x.cited ? 'is-cited' : 'is-not'}">${x.empty ? '🔇 IA muette (pas de réponse)' : x.cited ? '✓ cité' : '✗ pas cité'}</span>
               </div>
               <div class="geo-run-q">« ${this._esc(x.question)} »</div>
               ${x.cited && x.snippet ? `<div class="geo-run-snip">${this._esc(x.snippet)}</div>` : ''}

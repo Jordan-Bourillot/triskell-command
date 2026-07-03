@@ -194,9 +194,9 @@ def _tick(app_state) -> dict:
     except Exception as exc:
         logger.warning("phare apply_queue: %s", exc)
 
-    # Audit hebdo : 1 site/heure le lundi 6-22h (rotation par dédup DB)
+    # Audit hebdo : 1 site/heure le lundi 6-22h (rotation par ancienneté)
     if weekday == 0 and 6 <= hour <= 22:
-        target = _pick_next_for_mission("audit", sites)
+        target = _pick_next_for_audit(sites)
         if target:
             r = orchestrator.run_audit(target["id"], app_state=app_state)
             actions_done.append({"mission": "audit", "site": target["domain"], **r})
@@ -510,6 +510,37 @@ def _ran_today_in_db(mission: str, site_id: str) -> bool:
     except Exception as exc:
         logger.debug("_ran_today_in_db(%s, %s): %s", mission, site_id, exc)
         return False
+
+
+def _pick_next_for_audit(sites: list[dict]) -> Optional[dict]:
+    """Choisit le prochain site à auditer : jamais audité d'abord, puis le
+    plus vieux dernier audit (priorité en cas d'égalité).
+
+    Deux défauts vécus avec l'ancien tirage par priorité + dédup phare_actions :
+    1. le dédup regardait phare_actions (agent=auditeur), or un audit qui ne
+       produit que des doublons n'insère AUCUNE carte → le même site était
+       ré-audité à chaque tick du lundi (pixel-pros ×3 le 29/06) ;
+    2. avec 3 passages/jour, la priorité seule aurait re-servi les 3 mêmes
+       sites chaque lundi et affamé les autres (Ingrid : rien depuis le 12/06).
+    La vérité vit dans phare_audits (un audit y écrit TOUJOURS sa trace)."""
+    today_iso = date.today().isoformat()
+    candidates: list[tuple[str, float, dict]] = []
+    for s in sites:
+        if _LAST_RUNS_BY_MISSION.get(f"audit:{s['id']}") == today_iso:
+            continue
+        last = ""
+        try:
+            row = repo.latest_audit(s["id"])
+            last = str((row or {}).get("ran_at") or "")
+        except Exception as exc:
+            logger.debug("_pick_next_for_audit(%s): %s", s.get("domain"), exc)
+        if last[:10] == today_iso:
+            continue  # déjà audité aujourd'hui (dédup cross-process GH Actions)
+        candidates.append((last, -(s.get("priority") or 0), s))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: (t[0], t[1]))
+    return candidates[0][2]
 
 
 def _pick_next_for_mission(mission: str, sites: list[dict]) -> Optional[dict]:

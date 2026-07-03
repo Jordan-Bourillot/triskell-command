@@ -42,6 +42,15 @@ def check(label: str, cond: bool, detail: str = "") -> None:
         print(f"  ❌ {label}" + (f" — {detail}" if detail else ""))
 
 
+# Le smoke mocke git/repo/agents, mais notifications écrivait pour de VRAI
+# dans la base partagée (la machine locale voit la base de prod) : chaque
+# exécution empilait de fausses « corrections publiées » dans le récap
+# quotidien — d'où le mail fantôme « 49 corrections publiées » du 02/07.
+# On neutralise donc tout buffer/envoi de notifications pour la durée du test.
+from triskell_command.integrations.phare import notifications as _notifications
+_notifications.notify_auto_merged = lambda **kw: {"ok": True, "stubbed": True}
+_notifications.flush_auto_merged_digest = lambda: {"ok": True, "stubbed": True}
+
 # ===========================================================================
 print("— dedup.py —")
 from triskell_command.integrations.phare import dedup

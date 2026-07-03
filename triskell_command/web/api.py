@@ -3208,9 +3208,17 @@ class Api:
             return {"ok": False, "error": _friendly_error(exc)}
 
     def phare_pending_actions(self) -> dict:
+        """Actions Phare en attente = brouillons + aperçus, comme l'overview.
+
+        L'ancien filtre (status="pending_review") ne matchait JAMAIS — aucun
+        agent n'écrit ce statut — donc l'endpoint répondait « aucune action »
+        pendant que l'overview en comptait 85.
+        """
         try:
             from ..integrations.phare import repo
-            actions = repo.list_actions(status="pending_review")
+            actions = (repo.list_actions(status="draft", limit=200)
+                       + repo.list_actions(status="preview", limit=200))
+            actions.sort(key=lambda a: a.get("created_at") or "", reverse=True)
             return {"ok": True, "actions": actions}
         except Exception as exc:
             return {"ok": False, "error": _friendly_error(exc)}
@@ -14488,13 +14496,35 @@ class Api:
         brand = (site.get("brand") or "").lower()
         results: list[dict] = []
         cited_count = 0
-        total = 0
+        asked = 0
+        answered = 0
+        prov_stats: dict[str, dict] = {}
         for q in questions:
             for prov in providers:
-                total += 1
+                asked += 1
                 answer = self._geo_ask_provider(prov, q["text"])
-                answer_lower = (answer or "").lower()
-                cited = bool(answer) and (
+                st = prov_stats.setdefault(
+                    prov["id"], {"label": prov["label"], "asked": 0, "empty": 0})
+                st["asked"] += 1
+                if not answer:
+                    # Réponse vide = IA muette (clé/quota/panne). Avant, ces
+                    # non-réponses comptaient « pas cité » et gonflaient le
+                    # dénominateur : 3 IA muettes sur 5 → un score écrasé en
+                    # silence, sans que rien ne le signale à l'écran.
+                    st["empty"] += 1
+                    results.append({
+                        "question":  q["text"],
+                        "provider":  prov["id"],
+                        "provider_label": prov["label"],
+                        "cited":     False,
+                        "empty":     True,
+                        "snippet":   "",
+                        "answer_preview": "",
+                    })
+                    continue
+                answered += 1
+                answer_lower = answer.lower()
+                cited = (
                     (domain and domain in answer_lower) or
                     (brand and len(brand) >= 3 and brand in answer_lower)
                 )
@@ -14519,17 +14549,30 @@ class Api:
                     "provider":  prov["id"],
                     "provider_label": prov["label"],
                     "cited":     cited,
+                    "empty":     False,
                     "snippet":   snippet,
-                    "answer_preview": (answer or "")[:400],
+                    "answer_preview": answer[:400],
                 })
-        score = int(round((cited_count / total) * 100)) if total else 0
+        # Le score ne compte que les IA qui ont VRAIMENT répondu.
+        score = int(round((cited_count / answered) * 100)) if answered else 0
+        mutes = sorted(st["label"] for st in prov_stats.values()
+                       if st["asked"] and st["empty"] == st["asked"])
+        note = ""
+        if mutes:
+            note = (f"{len(mutes)} IA muette{'s' if len(mutes) > 1 else ''} "
+                    f"sur {len(providers)} ({', '.join(mutes)}) — clé ou quota "
+                    "à vérifier dans Réglages. Le score ne compte que les IA "
+                    "qui ont répondu.")
         run = {
             "id":      self._geo_uid(),
             "site_id": sid,
             "ts":      self._geo_now(),
             "score":   score,
             "cited":   cited_count,
-            "total":   total,
+            "total":   answered,
+            "asked":   asked,
+            "mutes":   mutes,
+            "note":    note,
             "results": results,
         }
         root["surveillance_runs"].insert(0, run)

@@ -586,11 +586,14 @@ def list_briefs(site_id: str, status: Optional[str] = None, limit: int = 50) -> 
 # ---------------------------------------------------------------------------
 # Configuration partagée (shared_settings.phare_config)
 # ---------------------------------------------------------------------------
-def get_config() -> dict:
-    """Renvoie la config Le Phare (shared_settings.phare_config)."""
+def _read_config() -> Optional[dict]:
+    """Config brute, ou None si la LECTURE a échoué (panne base/réseau).
+    None ≠ {} : une clé absente est une config réellement vide (écrire est
+    sans danger) ; une lecture en panne veut dire qu'on ne sait PAS ce qui
+    existe (écrire écraserait tout)."""
     sb = _sb()
     if sb is None:
-        return {}
+        return None
     try:
         rows = (sb.table("shared_settings").select("value")
                 .eq("key", "phare_config").limit(1).execute().data)
@@ -599,14 +602,29 @@ def get_config() -> dict:
         return rows[0].get("value") or {}
     except Exception as exc:
         logger.warning("phare.get_config: %s", exc)
-        return {}
+        return None
+
+
+def get_config() -> dict:
+    """Renvoie la config Le Phare (shared_settings.phare_config)."""
+    return _read_config() or {}
 
 
 def update_config(patch: dict) -> bool:
     sb = _sb()
     if sb is None:
         return False
-    cur = get_config()
+    # Lire-modifier-réécrire : si la lecture échoue, écrire quand même
+    # réécrirait la config amputée de tout ce qu'on n'a pas pu lire —
+    # jetons GitHub/Netlify compris (vécu : tokens volatilisés fin juin,
+    # circuit PR à l'arrêt). Dans ce cas on refuse l'écriture : perdre un
+    # battement de scheduler_log est bénin, perdre les clés ne l'est pas.
+    cur = _read_config()
+    if cur is None:
+        logger.warning("phare.update_config: lecture de la config impossible — "
+                       "écriture refusée pour ne pas écraser les clés existantes "
+                       "(patch ignoré : %s)", list(patch.keys()))
+        return False
     cur.update(patch)
     # PK composite (workspace_id, key) depuis la migration 20 : l'ancien
     # upsert on_conflict="key" plantait en 42P10 et la config ne
