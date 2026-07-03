@@ -342,8 +342,14 @@ def _read_history(client, *, days: int = HISTORY_WINDOW_DAYS,
     now = now or _now_utc()
     since = (now - timedelta(days=days)).isoformat()
 
-    def _base():
+    def _base(cols: str):
+        # `.select()` DOIT venir en premier : le SDK supabase-py n'expose les
+        # filtres (.in_, .gte…) que sur l'objet rendu par .select(). Les poser
+        # avant plantait à chaque appel ('SyncRequestBuilder' has no attribute
+        # 'in_') → toutes les boîtes affichées « Non vérifié » et le robot de
+        # chauffe traitait les boîtes rodées comme neuves.
         return (sb.table("email_history")
+                  .select(cols)
                   .in_("kind", list(KINDS))
                   .gte("ts", since)
                   .order("ts", desc=False)
@@ -357,15 +363,14 @@ def _read_history(client, *, days: int = HISTORY_WINDOW_DAYS,
         # Repli automatique sur la lecture complète si la syntaxe projetée
         # n'est pas acceptée : jamais de régression.
         try:
-            res = _base().select(
-                "ts, kind, account_id:extra->>account_id, "
-                "from_email:extra->>from").execute()
+            res = _base("ts, kind, account_id:extra->>account_id, "
+                        "from_email:extra->>from").execute()
             rows = res.data or []
             narrow = True
         except Exception as exc_narrow:
             logger.debug("mail_reputation: projection JSONB refusée (%s) — "
                          "repli lecture complète", exc_narrow)
-            res = _base().select("ts, kind, extra").execute()
+            res = _base("ts, kind, extra").execute()
             rows = res.data or []
             narrow = False
 
