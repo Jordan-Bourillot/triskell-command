@@ -49,26 +49,31 @@ const MailTemplates = {
   //                ; en attendant on l'indique clairement dans l'éditeur.
   KNOWN: [
     // ============ noreply@triskell-studio.fr — Lagriffe Studio (sites) ============
+    // ⚠ Les 4 mails du circuit Lagriffe (brief reçu, maquette, paiement,
+    // livraison) sont des mails à CASES (titre, accroche, bouton) injectées
+    // dans la maquette de marque — ils s'éditent via le bouton ✉️ de chaque
+    // étape de l'écran Lagriffe (table lagriffe_mail_templates, lue par le
+    // site). Les éditer ici n'aurait AUCUN effet → on redirige honnêtement.
     { product: 'lagriffe', key: 'brief_received', label: 'Confirmation de brief reçu',
-      description: 'Envoyé dès que le client soumet sa demande de site sur lagriffe-studio.fr.',
+      description: 'Envoyé dès que le client soumet sa demande de site sur lagriffe-studio.fr. S\'édite dans l\'écran Lagriffe (bouton ✉️ sur l\'étape 1).',
       placeholders: ['first_name'],
       from_address: 'noreply@triskell-studio.fr', from_name: 'Lagriffe Studio',
-      runtime: 'netlify' },
+      runtime: 'external', redirect: 'lagriffe' },
     { product: 'lagriffe', key: 'preview_ready', label: 'Maquette prête à personnaliser',
-      description: 'Envoyé quand la maquette est en ligne et que le client peut commencer la personnalisation.',
+      description: 'Envoyé quand la maquette est en ligne et que le client peut commencer la personnalisation. S\'édite dans l\'écran Lagriffe (bouton ✉️ sur l\'étape).',
       placeholders: ['first_name', 'customize_url'],
       from_address: 'noreply@triskell-studio.fr', from_name: 'Lagriffe Studio',
-      runtime: 'netlify' },
+      runtime: 'external', redirect: 'lagriffe' },
     { product: 'lagriffe', key: 'payment_confirmed', label: 'Confirmation de paiement',
-      description: 'Envoyé automatiquement juste après un paiement réussi.',
+      description: 'Envoyé automatiquement juste après un paiement réussi. S\'édite dans l\'écran Lagriffe (bouton ✉️ sur l\'étape).',
       placeholders: ['first_name'],
       from_address: 'noreply@triskell-studio.fr', from_name: 'Lagriffe Studio',
-      runtime: 'netlify' },
+      runtime: 'external', redirect: 'lagriffe' },
     { product: 'lagriffe', key: 'site_delivered', label: 'Site final livré',
-      description: 'Envoyé quand le site final passe en production.',
+      description: 'Envoyé quand le site final passe en production. S\'édite dans l\'écran Lagriffe (bouton ✉️ sur l\'étape).',
       placeholders: ['first_name', 'site_url'],
       from_address: 'noreply@triskell-studio.fr', from_name: 'Lagriffe Studio',
-      runtime: 'netlify' },
+      runtime: 'external', redirect: 'lagriffe' },
     { product: 'lagriffe', key: 'reminder_j2', label: 'Relance J+2 (rappel doux)',
       description: 'Envoyée 2 jours après l\'invitation à personnaliser, si le client n\'a rien fait.',
       placeholders: ['first_name', 'customize_url', 'mockup_url', 'company_name'],
@@ -86,25 +91,27 @@ const MailTemplates = {
       runtime: 'netlify' },
 
     // ============ noreply@triskell-studio.fr — Studio WoW ============
+    // Vérité terrain (03/07/2026) : ce mail est COMPOSÉ à l'envoi par le site
+    // WoW (send-site-ready-email.js) — lien de paiement Stripe créé au moment
+    // même, contenu et prix selon la formule détectée. Un texte libre ne peut
+    // pas exprimer cette mécanique de vente → marqué « fabriqué ».
     { product: 'wow', key: 'first_version_ready', label: 'Première version en ligne',
-      description: 'Envoyé quand le site Studio WoW est déployé pour la première fois.',
+      description: 'Envoyé quand la première version du site Studio WoW est en ligne. Contenu composé automatiquement à l\'envoi : lien de paiement créé au moment même, sections et prix selon la formule du client.',
       placeholders: ['first_name', 'site_url'],
       from_address: 'noreply@triskell-studio.fr', from_name: 'Studio WoW',
-      runtime: 'netlify' },
+      runtime: 'generated' },
 
-    // ============ noreply@triskell-studio.fr — RankUs Studio (SEO) ============
-    { product: 'rankus', key: 'welcome', label: 'Bienvenue suivi SEO',
-      description: 'Envoyé quand le client active l\'addon SEO après livraison Lagriffe.',
-      placeholders: ['first_name'],
-      from_address: 'noreply@triskell-studio.fr', from_name: 'RankUs Studio',
-      runtime: 'netlify' },
+    // (RankUs « bienvenue suivi SEO » retiré le 03/07/2026 : AUCUN code ne
+    // l'envoie — ni le site RankUs, ni Lagriffe, ni le serveur — et aucune
+    // ligne en base. Lister un mail qui n'existe pas induisait en erreur.
+    // À recréer le jour où le circuit d'envoi sera construit.)
 
     // ============ rapports@rankus-studio.fr — Phare (rapports SEO mensuels) ============
     { product: 'phare', key: 'monthly_report', label: 'Rapport SEO mensuel',
-      description: 'Envoyé chaque 1er du mois aux clients RankUs/Le Phare, avec le PDF du rapport en pièce jointe.',
+      description: 'Envoyé chaque 1er du mois aux clients RankUs/Le Phare, avec le PDF du rapport en pièce jointe. Le contenu (chiffres, graphiques) est fabriqué automatiquement à chaque envoi. L\'adresse d\'expéditeur réelle se règle dans la configuration du Phare.',
       placeholders: ['client_name', 'month', 'year'],
       from_address: 'rapports@rankus-studio.fr', from_name: 'RankUs Studio',
-      runtime: 'pipeline' },
+      runtime: 'generated' },
 
     // ============ contact@triskell-studio.fr — Réponses IA aux prospects ============
     { product: 'reply', key: 'interested', label: 'Réponse IA — intéressé',
@@ -254,6 +261,16 @@ const MailTemplates = {
     'rapports@rankus-studio.fr':   'RankUs / Le Phare (rapports)',
     'jordan@triskell-studio.fr':   'Notifications internes',
     'billing@triskell-studio.fr':  'Facturation',
+  },
+
+  // Écrans d'édition « externes » : les mails runtime:'external' se règlent
+  // dans un autre écran (plus riche que l'éditeur central). `hint` explique
+  // pourquoi c'est là-bas que ça se passe.
+  REDIRECT_TARGETS: {
+    delivery: { view: 'delivery', label: 'Livraisons',
+      hint: 'c’est là que tu modifies aussi les liens de téléchargement et les accès envoyés au client' },
+    lagriffe: { view: 'lagriffe', label: 'Lagriffe',
+      hint: 'clique sur le bouton ✉️ de l’étape concernée — ces mails utilisent la maquette de marque (titre, accroche, bouton), pas un texte libre' },
   },
 
   // Ordre d'affichage des regroupements (les adresses non listées suivent dans
@@ -844,6 +861,7 @@ const MailTemplates = {
           _source: 'db',
           _label: meta.label,
           _runtime: meta.runtime || 'netlify',
+          _redirect: meta.redirect || '',
           _placeholders: meta.placeholders || t.placeholders || [],
           _default_from_address: meta.from_address || '',
           _default_from_name: meta.from_name || '',
@@ -865,6 +883,7 @@ const MailTemplates = {
         _source: 'fallback',
         _label: k.label,
         _runtime: k.runtime || 'netlify',
+        _redirect: k.redirect || '',
         _placeholders: k.placeholders || [],
         _default_from_address: k.from_address || '',
         _default_from_name: k.from_name || '',
@@ -1026,7 +1045,8 @@ const MailTemplates = {
         let pill = '';
         const isPipeline = t._runtime === 'pipeline';
         if (t._runtime === 'external') {
-          pill = '<span class="mt-pill" title="Ce mail se règle dans l’écran Livraisons">→ Livraisons</span>';
+          const rt = this.REDIRECT_TARGETS[t._redirect] || this.REDIRECT_TARGETS.delivery;
+          pill = `<span class="mt-pill" title="Ce mail se règle dans l’écran ${this._esc(rt.label)}">→ ${this._esc(rt.label)}</span>`;
         } else if (t._runtime === 'generated') {
           pill = '<span class="mt-pill" title="Contenu fabriqué automatiquement à partir des chiffres du moment — pas un modèle à éditer">Automatique</span>';
         } else if (t._source === 'fallback') {
@@ -1299,25 +1319,24 @@ const MailTemplates = {
     // aussi les liens de téléchargement du produit). On ne montre PAS un
     // formulaire mort ici — on redirige honnêtement vers le bon écran.
     if (t._runtime === 'external') {
-      const target = t._redirect || 'delivery';
-      const targetLabel = (target === 'delivery') ? 'Livraisons' : target;
+      const rt = this.REDIRECT_TARGETS[t._redirect] || this.REDIRECT_TARGETS.delivery;
       const addr = (t.from_address || '').trim();
       e.innerHTML = `
         <div class="mb-4 pb-3 border-b border-border">
           <div class="flex items-center gap-2 mb-2 flex-wrap">
-            <span class="mt-chip mt-chip-auto" title="Mail automatique après achat">🤖 Auto</span>
+            <span class="mt-chip mt-chip-auto" title="Mail automatique">🤖 Auto</span>
             ${addr ? `<span class="mt-chip mt-chip-target">${this._esc(addr)}</span>` : ''}
           </div>
           <h2 class="text-lg font-bold leading-tight">${this._esc(headerLabel)}</h2>
           ${t.description ? `<p class="text-[12.5px] text-text-muted mt-1 leading-snug">${this._esc(t.description)}</p>` : ''}
         </div>
         <div class="mt-warn" style="margin-bottom:16px;">
-          ✋ Ce mail se règle dans l’écran <strong>${this._esc(targetLabel)}</strong> — c’est là que tu modifies aussi les liens de téléchargement et les accès envoyés au client. Le modifier ici ne changerait rien.
+          ✋ Ce mail se règle dans l’écran <strong>${this._esc(rt.label)}</strong> — ${this._esc(rt.hint)}. Le modifier ici ne changerait rien.
         </div>
-        <button id="mt-goto-external" class="btn btn-primary">Ouvrir l’écran ${this._esc(targetLabel)} →</button>
+        <button id="mt-goto-external" class="btn btn-primary">Ouvrir l’écran ${this._esc(rt.label)} →</button>
       `;
       const gbtn = document.getElementById('mt-goto-external');
-      if (gbtn) gbtn.onclick = () => { try { App.show(target); } catch (_) {} };
+      if (gbtn) gbtn.onclick = () => { try { App.show(rt.view); } catch (_) {} };
       return;
     }
 
@@ -1329,15 +1348,15 @@ const MailTemplates = {
       e.innerHTML = `
         <div class="mb-4 pb-3 border-b border-border">
           <div class="flex items-center gap-2 mb-2 flex-wrap">
-            <span class="mt-chip mt-chip-auto" title="Notification interne">🤖 Auto</span>
+            <span class="mt-chip mt-chip-auto" title="Mail automatique">🤖 Auto</span>
             ${addr ? `<span class="mt-chip mt-chip-target">${this._esc(addr)}</span>` : ''}
           </div>
           <h2 class="text-lg font-bold leading-tight">${this._esc(headerLabel)}</h2>
           ${t.description ? `<p class="text-[12.5px] text-text-muted mt-1 leading-snug">${this._esc(t.description)}</p>` : ''}
         </div>
         <div class="mt-warn" style="margin-bottom:16px;">
-          🤖 Ce mail t’est adressé à toi, et son contenu est <strong>fabriqué automatiquement</strong>
-          au moment de l’envoi (chiffres du jour, alertes…). Il n’y a pas de texte
+          🤖 Le contenu de ce mail est <strong>fabriqué automatiquement</strong> au moment
+          de l’envoi (chiffres du jour, rapport, alertes…). Il n’y a pas de texte
           à modifier ici — il change tout seul à chaque envoi.
         </div>
       `;
