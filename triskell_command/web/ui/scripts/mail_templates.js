@@ -218,25 +218,25 @@ const MailTemplates = {
 
     // ============ Triskell interne (résumé du matin, alertes Phare, factures) ============
     { product: 'internal', key: 'morning_digest', label: 'Triskell Matinale (résumé de 8 h)',
-      description: 'Envoyé chaque matin à 8 h : résumé des chiffres clés et des alertes.',
+      description: 'Envoyé chaque matin à 8 h : résumé des chiffres clés et des alertes. Contenu fabriqué automatiquement à partir des chiffres du moment — pas un modèle à éditer.',
       placeholders: [],
       from_address: 'jordan@triskell-studio.fr', from_name: 'Triskell Matinale',
-      runtime: 'pipeline' },
+      runtime: 'generated' },
     { product: 'internal', key: 'phare_analyst_report', label: 'Alerte Phare — rapport analyste',
       description: 'Notification interne quand un analyste du Phare termine un rapport.',
       placeholders: ['title', 'body'],
       from_address: 'jordan@triskell-studio.fr', from_name: 'Le Phare',
-      runtime: 'pipeline' },
+      runtime: 'generated' },
     { product: 'internal', key: 'phare_validation_alert', label: 'Alerte Phare — validation de page',
       description: 'Notification interne quand un changement sur une page attend ta validation.',
       placeholders: ['title', 'body'],
       from_address: 'jordan@triskell-studio.fr', from_name: 'Le Phare',
-      runtime: 'pipeline' },
+      runtime: 'generated' },
     { product: 'internal', key: 'phare_reject_alert', label: 'Alerte Phare — modification refusée',
       description: 'Notification interne quand une modification du Phare est refusée.',
       placeholders: ['title', 'body'],
       from_address: 'jordan@triskell-studio.fr', from_name: 'Le Phare',
-      runtime: 'pipeline' },
+      runtime: 'generated' },
 
     // ============ billing@triskell-studio.fr — Factures Stripe ============
     { product: 'billing', key: 'invoice_email', label: 'Facture émise',
@@ -1027,6 +1027,8 @@ const MailTemplates = {
         const isPipeline = t._runtime === 'pipeline';
         if (t._runtime === 'external') {
           pill = '<span class="mt-pill" title="Ce mail se règle dans l’écran Livraisons">→ Livraisons</span>';
+        } else if (t._runtime === 'generated') {
+          pill = '<span class="mt-pill" title="Contenu fabriqué automatiquement à partir des chiffres du moment — pas un modèle à éditer">Automatique</span>';
         } else if (t._source === 'fallback') {
           pill = isPipeline
             ? '<span class="mt-pill mt-pill-pipeline" title="Ce mail part avec sa version par défaut — ta version sera branchée dans une prochaine mise à jour">Par défaut</span>'
@@ -1316,6 +1318,29 @@ const MailTemplates = {
       `;
       const gbtn = document.getElementById('mt-goto-external');
       if (gbtn) gbtn.onclick = () => { try { App.show(target); } catch (_) {} };
+      return;
+    }
+
+    // Mail « fabriqué » : son contenu est calculé au moment de l'envoi
+    // (chiffres du jour, rapport…). Il n'y a AUCUN texte à éditer — on
+    // l'explique au lieu d'afficher un formulaire qui ne servirait à rien.
+    if (t._runtime === 'generated') {
+      const addr = (t.from_address || '').trim();
+      e.innerHTML = `
+        <div class="mb-4 pb-3 border-b border-border">
+          <div class="flex items-center gap-2 mb-2 flex-wrap">
+            <span class="mt-chip mt-chip-auto" title="Notification interne">🤖 Auto</span>
+            ${addr ? `<span class="mt-chip mt-chip-target">${this._esc(addr)}</span>` : ''}
+          </div>
+          <h2 class="text-lg font-bold leading-tight">${this._esc(headerLabel)}</h2>
+          ${t.description ? `<p class="text-[12.5px] text-text-muted mt-1 leading-snug">${this._esc(t.description)}</p>` : ''}
+        </div>
+        <div class="mt-warn" style="margin-bottom:16px;">
+          🤖 Ce mail t’est adressé à toi, et son contenu est <strong>fabriqué automatiquement</strong>
+          au moment de l’envoi (chiffres du jour, alertes…). Il n’y a pas de texte
+          à modifier ici — il change tout seul à chaque envoi.
+        </div>
+      `;
       return;
     }
 
