@@ -84,6 +84,11 @@ def diagnose_workers(workers: list[dict],
         # Robot volontairement désactivé / en retrait → pas une panne
         if skipped in ("disabled", "server_active"):
             continue
+        # Séparation site/robots : un robot « délégué » tourne volontairement
+        # sur L'AUTRE conteneur (cartes delegated de system_health). Son
+        # absence ICI n'est jamais une panne — jamais d'aboiement pour ça.
+        if w.get("delegated"):
+            continue
 
         if health in ("error", "warning"):
             err = ""

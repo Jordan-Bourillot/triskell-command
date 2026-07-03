@@ -9214,7 +9214,30 @@ class Api:
             ("site_vision_worker",    "L'œil — repère les sites à refaire"),
             ("disk_janitor",          "Concierge disque + filet GEO"),
         ]
+        # Séparation site/robots : la page Santé est servie par le conteneur
+        # web, mais les robots base-partagée tournent sur le conteneur
+        # robots. Un robot qui tourne AILLEURS n'est pas une panne — on le
+        # marque « délégué » (vert) au lieu de tout peindre en rouge. Seul le
+        # concierge disque tourne dans tous les rôles (chacun son disque).
+        try:
+            from ..integrations import process_role as _pr_health
+            _here_runs_workers = _pr_health.runs_workers()
+            _here_owns_ui = _pr_health.owns_ui_state()
+        except Exception:
+            _here_runs_workers = True
+            _here_owns_ui = True
         for mod_name, label in worker_modules:
+            if not _here_runs_workers and mod_name != "disk_janitor":
+                out["workers"].append({
+                    "name": mod_name, "label": label,
+                    "running": False, "last_run_at": "",
+                    "last_run_result": {
+                        "skipped_reason": "délégué au conteneur robots "
+                                          "(séparation site/robots)"},
+                    "health": "healthy", "delegated": True,
+                })
+                out["summary"]["healthy"] += 1
+                continue
             try:
                 mod = __import__(
                     f"triskell_command.integrations.{mod_name}",
@@ -9269,7 +9292,16 @@ class Api:
             geo_last = getattr(self, "_geo_autopilot_last_check_at", "") or ""
             geo_result = getattr(self, "_geo_autopilot_last_result", {}) or {}
             _GEO_LABEL = "GEO — être cité par les IA"
-            if not geo_enabled:
+            if not _here_owns_ui:
+                # Conteneur robots : le GEO (état local + écran) vit côté
+                # site — ici il est VOLONTAIREMENT absent, jamais une panne.
+                gw = {"name": "geo_autopilot", "label": _GEO_LABEL,
+                      "running": False, "last_run_at": "",
+                      "last_run_result": {
+                          "skipped_reason": "délégué au conteneur site "
+                                            "(l'état GEO vit là-bas)"},
+                      "health": "healthy", "delegated": True}
+            elif not geo_enabled:
                 gw = {"name": "geo_autopilot", "label": _GEO_LABEL,
                       "running": geo_running, "last_run_at": geo_last,
                       "last_run_result": {"skipped_reason": "disabled"},
@@ -10807,8 +10839,19 @@ class Api:
         # Les anciennes clés en dur ont fuité dans l'historique git → elles
         # doivent être RÉVOQUÉES côté Google/DeepSeek et remplacées.
 
-        # Démarrage des workers (best-effort, no-op si dépendances absentes)
+        # Démarrage des workers (best-effort, no-op si dépendances absentes).
+        # ⚠️ boot() est un endpoint PUBLIC appelé par le front à CHAQUE
+        # chargement de page : en rôle « web » (séparation site/robots), il ne
+        # doit JAMAIS démarrer les robots base-partagée ici, sinon le
+        # conteneur site les ferait tourner en DOUBLE du conteneur robots
+        # (doubles mails). La restauration de session et la sync des clés IA
+        # ci-dessus restent utiles dans tous les rôles.
         worker_status = {}
+        try:
+            from ..integrations import process_role
+            _start_shared_workers = process_role.runs_workers()
+        except Exception:
+            _start_shared_workers = True  # comportement historique
         for mod_name, starter, label in [
             ("replies_poller",  "start_poller", "imap_replies"),
             ("reply_responder", "start_worker", "auto_responder"),
@@ -10828,6 +10871,9 @@ class Api:
             ("pixelpros.content_chaser", "start_worker", "pixelpros_content_chaser"),
             ("site_vision_worker",      "start_worker", "oeil_visuel"),
         ]:
+            if not _start_shared_workers:
+                worker_status[label] = False
+                continue
             try:
                 mod = __import__(
                     f"triskell_command.integrations.{mod_name}",
@@ -10840,11 +10886,20 @@ class Api:
                 worker_status[label] = False
 
         # Auto-pilote GEO : thread interne (pas dans integrations/ car il
-        # utilise des méthodes de l'instance Api directement).
+        # utilise des méthodes de l'instance Api directement). Ses données
+        # vivent dans l'AppState LOCAL → il ne démarre que là où cet état est
+        # celui que l'écran GEO affiche (rôles « all »/« web », jamais
+        # « workers » — sinon il travaillerait sur une copie divergente de ce
+        # que Jordan voit). En rôle « web » pur, boot() n'est pas appelé :
+        # c'est http_server qui le démarre.
         try:
-            self._geo_migrate_publishing_defaults()
-            self._geo_autopilot_start_worker()
-            worker_status["geo_autopilot"] = True
+            from ..integrations import process_role
+            if process_role.owns_ui_state():
+                self._geo_migrate_publishing_defaults()
+                self._geo_autopilot_start_worker()
+                worker_status["geo_autopilot"] = True
+            else:
+                worker_status["geo_autopilot"] = False
         except Exception as exc:
             logger.debug("geo_autopilot : %s", exc)
             worker_status["geo_autopilot"] = False

@@ -126,14 +126,13 @@ def create_app() -> FastAPI:
         logger.debug("server_presence indisponible : %s", exc)
 
     # Rôle du process : "all" (défaut, comportement historique = web +
-    # robots), "web" (sert uniquement le site/API, aucun robot) ou
-    # "workers" (robots sans vocation à servir le front). Prépare la
-    # séparation serveur web / robots en 2 déploiements SANS rien casser :
-    # tant que la variable n'est pas posée, rien ne change.
-    role = (os.environ.get("TRISKELL_ROLE") or "all").strip().lower()
-    if role not in ("all", "web", "workers"):
-        role = "all"
-    run_workers = role in ("all", "workers")
+    # robots), "web" (sert le site/API + l'état local : auto-pilote GEO,
+    # sauvegarde GEO, ménage disque) ou "workers" (robots de fond sur la
+    # base partagée). Source unique : integrations/process_role.py.
+    # Tant que la variable n'est pas posée, rien ne change.
+    from ..integrations import process_role
+    role = process_role.get_role()
+    run_workers = process_role.runs_workers()
     logger.info("Rôle du process : %s (robots de fond : %s)",
                 role, "oui" if run_workers else "non")
 
@@ -160,6 +159,23 @@ def create_app() -> FastAPI:
     # Empêche l'expiration de l'access_token (durée typique : 1h).
     _start_supabase_refresh_thread()
 
+    # Restauration GEO SYNCHRONE et TÔT (avant boot() et avant le bloc rôle
+    # web) : si le volume est reparti de zéro, on restaure la sauvegarde cloud
+    # AVANT que _geo_migrate_publishing_defaults (dans boot) ne crée des sites
+    # squelettes — sinon la restauration se croirait inutile pour toujours et
+    # le miroir quotidien écraserait la sauvegarde fraîche par le squelette.
+    # (Avant, la restauration vivait dans le thread du concierge disque et
+    # gagnait la course par chance ; ici elle la gagne par construction.)
+    try:
+        from ..integrations import process_role as _pr
+        if _pr.owns_ui_state():
+            from ..integrations import disk_janitor as _dj
+            _geo_state = getattr(api_instance, "_app_state", None)
+            if _geo_state is not None:
+                _dj.restore_geo_if_missing(_geo_state)
+    except Exception as exc:
+        logger.debug("restauration GEO au boot : %s", exc)
+
     if run_workers:
         # Thread des rappels Brain : check toutes les 5 min si des notes ont
         # un remind_at échu et envoie une push notification.
@@ -180,18 +196,6 @@ def create_app() -> FastAPI:
         # à froid) attend ~1,6 s → note de vitesse mobile dans le rouge.
         # Demande Jordan le 18/06/2026 (le ping vient d'Europe = bonne « porte »).
         _start_keepwarm_thread()
-
-        # Concierge disque + filet GEO : purge quotidienne des vieux exports
-        # et chasses terminées (un disque plein = les 503 de juin), copie
-        # cloud des données GEO au boot puis chaque jour, et restauration
-        # automatique si le volume serveur est reparti de zéro.
-        try:
-            from ..integrations import disk_janitor
-            _janitor_state = getattr(api_instance, "_app_state", None)
-            if _janitor_state is not None:
-                disk_janitor.start_worker(_janitor_state)
-        except Exception as exc:
-            logger.warning("disk_janitor indisponible : %s", exc)
 
         # Promotion des commissions affiliés (toutes les 6 h) : ce worker
         # n'était démarré QUE par l'app desktop → sur le serveur, les
@@ -247,6 +251,32 @@ def create_app() -> FastAPI:
         threading.Thread(
             target=_resume_convoy_later, name="convoy-resume-boot", daemon=True,
         ).start()
+
+    # Concierge disque + filet GEO : tourne dans TOUS les rôles (chaque
+    # conteneur nettoie SON disque — un disque plein = les 503 de juin).
+    # La partie sauvegarde/restauration cloud du GEO est gérée DANS le
+    # concierge via process_role.owns_ui_state() : seul le conteneur qui
+    # possède les vraies données GEO y touche (jamais d'écrasement de la
+    # sauvegarde fraîche par une copie périmée du conteneur robots).
+    try:
+        from ..integrations import disk_janitor
+        _janitor_state = getattr(api_instance, "_app_state", None)
+        if _janitor_state is not None:
+            disk_janitor.start_worker(_janitor_state)
+    except Exception as exc:
+        logger.warning("disk_janitor indisponible : %s", exc)
+
+    # Auto-pilote GEO en rôle « web » : ses données (AppState) et son écran
+    # vivent ICI. En rôle « all », c'est boot() qui le démarre (comme avant,
+    # desktop compris) ; en rôle « workers », il ne démarre PAS (sinon il
+    # travaillerait sur une copie divergente des données que Jordan voit).
+    if role == "web":
+        try:
+            api_instance._geo_migrate_publishing_defaults()
+            api_instance._geo_autopilot_start_worker()
+            logger.info("Auto-pilote GEO démarré (rôle web : l'état GEO vit ici).")
+        except Exception as exc:
+            logger.warning("geo_autopilot (rôle web) indisponible : %s", exc)
 
     # Auto-génération des routes depuis les méthodes publiques
     method_count = 0

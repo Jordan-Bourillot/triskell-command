@@ -280,14 +280,28 @@ def get_status() -> dict:
     }
 
 
+def _geo_sync_allowed() -> bool:
+    """La sauvegarde/restauration cloud du GEO n'a de sens que là où vivent
+    les VRAIES données GEO (rôles « all »/« web »). Sur le conteneur
+    « workers », y toucher écraserait la sauvegarde fraîche avec une copie
+    périmée (split-brain). Le nettoyage disque, lui, tourne partout."""
+    try:
+        from .process_role import owns_ui_state
+        return owns_ui_state()
+    except Exception:
+        return True  # en cas de doute, comportement historique
+
+
 def _loop(app_state) -> None:
+    geo_sync = _geo_sync_allowed()
     # Restauration éventuelle dès le boot (avant le 1er versement GEO),
     # puis une copie cloud immédiate pour couvrir la journée en cours.
-    try:
-        restore_geo_if_missing(app_state)
-        mirror_geo(app_state)
-    except Exception as exc:
-        logger.debug("disk_janitor boot: %s", exc)
+    if geo_sync:
+        try:
+            restore_geo_if_missing(app_state)
+            mirror_geo(app_state)
+        except Exception as exc:
+            logger.debug("disk_janitor boot: %s", exc)
     if _WORKER_STOP.wait(INITIAL_DELAY_SECONDS):
         return
     while not _WORKER_STOP.is_set():
@@ -297,13 +311,16 @@ def _loop(app_state) -> None:
         except Exception as exc:
             result["sweep_error"] = str(exc)[:200]
             logger.warning("disk_janitor sweep: %s", exc)
-        try:
-            # Retente la restauration tant que le local est vide (le boot a
-            # pu passer avant que la base soit joignable), puis le miroir.
-            result["geo_restored"] = restore_geo_if_missing(app_state)
-            result["geo_mirror"] = mirror_geo(app_state)
-        except Exception as exc:
-            result["geo_error"] = str(exc)[:200]
+        if geo_sync:
+            try:
+                # Retente la restauration tant que le local est vide (le boot a
+                # pu passer avant que la base soit joignable), puis le miroir.
+                result["geo_restored"] = restore_geo_if_missing(app_state)
+                result["geo_mirror"] = mirror_geo(app_state)
+            except Exception as exc:
+                result["geo_error"] = str(exc)[:200]
+        else:
+            result["geo_skipped"] = "rôle workers (l'état GEO vit côté web)"
         _set_run(result)
         if _WORKER_STOP.wait(CYCLE_SECONDS):
             return

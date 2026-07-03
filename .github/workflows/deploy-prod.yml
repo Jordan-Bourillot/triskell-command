@@ -19,13 +19,29 @@ jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Coolify deploy webhook
+      - name: Ping Coolify deploy webhook (site)
         run: |
           FORCE="${{ github.event.inputs.force }}"
           FORCE="${FORCE:-false}"
           curl -fsSL -X GET \
             "http://91.99.227.241:8000/api/v1/deploy?uuid=f2l1b3v08gcoftnf631djuxn&force=${FORCE}" \
             ${COOLIFY_TOKEN:+-H "Authorization: Bearer $COOLIFY_TOKEN"} \
-            && echo "Deploy déclenché ✓ (force=${FORCE})"
+            && echo "Deploy site déclenché ✓ (force=${FORCE})"
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+
+      # 2e conteneur « robots » (séparation site/robots, TRISKELL_ROLE=workers).
+      # Ne fait RIEN tant que la variable de dépôt COOLIFY_WORKERS_UUID n'est
+      # pas posée (le jour où l'app robots existe dans Coolify) — zéro impact
+      # d'ici là.
+      - name: Ping Coolify deploy webhook (robots)
+        if: ${{ vars.COOLIFY_WORKERS_UUID != '' }}
+        run: |
+          FORCE="${{ github.event.inputs.force }}"
+          FORCE="${FORCE:-false}"
+          curl -fsSL -X GET \
+            "http://91.99.227.241:8000/api/v1/deploy?uuid=${{ vars.COOLIFY_WORKERS_UUID }}&force=${FORCE}" \
+            ${COOLIFY_TOKEN:+-H "Authorization: Bearer $COOLIFY_TOKEN"} \
+            && echo "Deploy robots déclenché ✓ (force=${FORCE})"
         env:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
