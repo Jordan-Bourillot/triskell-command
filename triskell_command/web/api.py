@@ -4480,12 +4480,19 @@ class Api:
 
     def _prog_cta_html(self, metier: str, site_name: str) -> str:
         """Encart d'appel à l'action en bas de page : transforme le lecteur en
-        contact. Utilise les classes de bouton du site (btn btn-primary)."""
+        contact. Utilise les classes de bouton du site (btn btn-primary).
+
+        `metier` peut être vide (gabarit dont la variable n'est pas un métier,
+        ex. une ville) : on garde alors une accroche générique. Le texte reste
+        FACTUEL pour tous les sites (« peut s'en occuper ») — pas de promesse
+        « de A à Z » qui ne colle pas à toutes les offres."""
         m, n = self._geo_esc_attr(metier), self._geo_esc_attr(site_name)
+        titre = (f"Vous êtes {m} et vous voulez être visible sur Google ?"
+                 if metier else "Vous voulez être visible sur Google ?")
         return (
             '<section class="geo-cta">'
-            f"<h2>Vous êtes {m} et vous voulez sortir sur Google ?</h2>"
-            f"<p>{n} s’occupe de votre référencement, de A à Z.</p>"
+            f"<h2>{titre}</h2>"
+            f"<p>{n} peut s’en occuper pour vous.</p>"
             f'<a class="btn btn-primary" href="/">Découvrir {n}</a>'
             "</section>")
 
@@ -4919,9 +4926,12 @@ class Api:
                     canonical=canonical, site=pseudo, content_md=body_md,
                     published_at=now, modified_at=now)
                 variables = pg.get("variables") or {}
-                metier = (variables.get("metier")
-                          or (list(variables.values()) or [""])[0])
-                cta = self._prog_cta_html(metier, pseudo["name"]) if metier else ""
+                # ⚠️ SEULE la variable « metier » est un métier. L'ancien repli
+                # « première variable du gabarit » produisait des absurdités
+                # quand la variable était une ville (« Vous êtes Rennes et
+                # vous voulez… ») + une photo de métier au hasard.
+                metier = (variables.get("metier") or "").strip()
+                cta = self._prog_cta_html(metier, pseudo["name"])
                 hero = self._prog_hero_image(metier)
                 html = self._prog_build_native_page(
                     title=title, content_html=self._geo_md_to_html(body_md),
