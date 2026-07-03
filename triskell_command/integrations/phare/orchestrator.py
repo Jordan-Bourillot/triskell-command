@@ -256,6 +256,21 @@ def run_onpage_optim(site_id: str, page_path: str = "/",
     if not page:
         return {"ok": False, "error": f"page {page_path} pas dans phare_pages"}
 
+    # Anti-rejeu : si une carte équivalente est déjà ouverte (ou refusée
+    # < 60 j / validée < 14 j), inutile d'appeler l'IA et d'ouvrir une PR —
+    # l'insertion serait refusée par le dédoublonnage et la PR resterait
+    # ORPHELINE, invisible dans l'app. Vécu : « Optim on-page /animalier »,
+    # 5 PRs jumelles les 23-24/06 puis 2 de plus le 03/07 au retour du jeton.
+    twin = repo.find_blocking_twin({
+        "site_id": site_id,
+        "agent": "optimiseur_onpage",
+        "title": f"Optim on-page {page_path}",
+    })
+    if twin is not None:
+        return {"ok": True, "action_id": twin.get("id"),
+                "skipped": "carte équivalente déjà ouverte — pas de nouvelle PR",
+                "existing_pr": twin.get("github_pr_url") or ""}
+
     try:
         ag = agents.OptimiseurOnPage()
         out = ag.run(site=site, page=page, target_keyword=target_keyword,
@@ -547,6 +562,12 @@ def run_analyst(site_id: str, *, app_state=None) -> dict:
         except Exception as exc:
             logger.debug("notify_bulletin failed: %s", exc)
 
+    if not out:
+        # L'IA n'a rien rendu (crédit épuisé, clé morte…) : dire la vérité.
+        # Avant : ok=True avec un bulletin vide → 7 jours de panne invisible
+        # (26/06→03/07, crédit Anthropic à sec, tous les ticks « verts »).
+        return {"ok": False, "error": "L'IA analyste n'a pas répondu "
+                "(crédit ou clé à vérifier)", "metrics_days": len(metrics)}
     return {"ok": True, "bulletin": out, "metrics_days": len(metrics)}
 
 
@@ -582,6 +603,11 @@ def run_strategy(*, app_state=None) -> dict:
                               "chiffrés. À lire — rien à publier sur le site."),
                 "status": "draft", "impact": 5, "effort": 5,
             })
+    if not out:
+        # Même vérité que l'analyste : une panne d'IA n'est pas un succès
+        # (le plan de juillet a été perdu ainsi le 01/07).
+        return {"ok": False, "error": "L'IA stratège n'a pas répondu "
+                "(crédit ou clé à vérifier)", "plan": {}}
     return {"ok": True, "plan": out}
 
 

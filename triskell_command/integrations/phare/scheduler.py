@@ -243,11 +243,15 @@ def _tick(app_state) -> dict:
                                   "page": page_path, **r})
             _LAST_RUNS_BY_MISSION[f"optim_onpage:{target['id']}"] = today.isoformat()
 
-    # Plan stratégique Opus : 1er du mois à partir de 9h
-    if today.day == 1 and hour >= 9 and not _global_ran_today("strategy:"):
+    # Plan stratégique Opus : le 1er du mois à partir de 9h, avec rattrapage
+    # jusqu'au 3 (vécu le 01/07 : IA à court de crédit, le tick a marqué
+    # « fait » sans plan → plan de juillet perdu jusqu'au mois suivant).
+    # On ne marque « fait » que si un plan a VRAIMENT été produit.
+    if today.day <= 3 and hour >= 9 and not _global_ran_today("strategy:"):
         r = orchestrator.run_strategy(app_state=app_state)
         actions_done.append({"mission": "strategy", **r})
-        _mark_ran("strategy:")
+        if r.get("ok") and r.get("plan"):
+            _mark_ran("strategy:")
 
     # ---- Missions avancées v0.5 ----
     # CTR optim : mardi à partir de 11h
@@ -417,17 +421,21 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"cro_check:{target['id']}"] = today.isoformat()
 
-    # Bulletin PDF : 1er du mois à partir de 10h (global)
-    if today.day == 1 and hour >= 10 and not _global_ran_today("bulletin_pdf:"):
+    # Bulletin PDF : 1er du mois à partir de 10h (rattrapage jusqu'au 3),
+    # marqué « fait » seulement si ça a marché — même leçon que le plan
+    # stratégique perdu le 01/07 (panne marquée comme réussite).
+    if today.day <= 3 and hour >= 10 and not _global_ran_today("bulletin_pdf:"):
         r = run_now("bulletin_pdf", None, app_state=app_state)
         actions_done.append({"mission": "bulletin_pdf", **r})
-        _mark_ran("bulletin_pdf:")
+        if r.get("ok"):
+            _mark_ran("bulletin_pdf:")
 
-    # Envoi rapports clients SEO : 1er du mois à partir de 11h (global)
-    if today.day == 1 and hour >= 11 and not _global_ran_today("client_reports_send:"):
+    # Envoi rapports clients SEO : 1er du mois à partir de 11h (même règle)
+    if today.day <= 3 and hour >= 11 and not _global_ran_today("client_reports_send:"):
         r = run_now("client_reports_send", None, app_state=app_state)
         actions_done.append({"mission": "client_reports_send", **r})
-        _mark_ran("client_reports_send:")
+        if r.get("ok"):
+            _mark_ran("client_reports_send:")
 
     # Récap quotidien des publications automatiques (« publié tout seul ») :
     # UN seul mail en fin de journée au lieu d'un par correction. À partir de
@@ -578,6 +586,24 @@ def _pick_page_to_optimize(site_id: str) -> str:
              if (p.get("path") or "/") not in ("/", "")]
     if not pages:
         return ""
+    # Écarte les pages dont la carte « Optim on-page » est déjà ouverte :
+    # sinon le tick re-choisit éternellement la même page (sa carte bloque
+    # l'insertion → aucune trace « fait aujourd'hui » → rejeu au tick
+    # suivant) et les autres pages/sites ne passent jamais.
+    try:
+        from . import dedup as _dedup
+        open_titles = {(a.get("title") or "")
+                       for a in repo.list_actions(site_id=site_id, limit=200)
+                       if a.get("agent") == "optimiseur_onpage"
+                       and (a.get("status") or "") in _dedup.OPEN_STATUSES}
+        remaining = [p for p in pages
+                     if f"Optim on-page {p.get('path')}" not in open_titles]
+        if remaining:
+            pages = remaining
+        elif open_titles:
+            return ""   # toutes les pages ont déjà leur carte ouverte → on saute
+    except Exception as exc:
+        logger.debug("_pick_page_to_optimize filtre cartes ouvertes: %s", exc)
     # Page avec le plus petit optim_score (None = pas encore évaluée → priorité)
     pages_sorted = sorted(
         pages,

@@ -349,6 +349,31 @@ _ACTION_OPTIONAL_COLS = ("simple_md", "apply_state", "apply_error",
                          "apply_requested_at")
 
 
+def find_blocking_twin(action: dict) -> Optional[dict]:
+    """La carte « équivalente » qui rendrait insert_action inutile (ou None).
+
+    Même règle que le dédoublonnage à l'insertion : carte ouverte, refusée
+    < 60 j ou validée < 14 j. Public pour que les missions puissent vérifier
+    AVANT de dépenser un appel IA et d'ouvrir une PR — le contrôle fait
+    seulement à l'insertion laissait partir des PRs jumelles orphelines
+    (vécu : « Optim on-page /animalier » ×7 fin juin/début juillet).
+    Renvoie None en cas de panne de lecture (on n'empêche jamais le travail
+    sur un doute)."""
+    sb = _sb()
+    if sb is None:
+        return None
+    try:
+        from . import dedup as _dedup
+        existing = (sb.table("phare_actions").select("*")
+                    .eq("site_id", action.get("site_id"))
+                    .order("created_at", desc=True)
+                    .limit(400).execute().data) or []
+        return _dedup.find_blocking_duplicate(existing, action)
+    except Exception as exc:
+        logger.debug("phare.find_blocking_twin: %s", exc)
+        return None
+
+
 def insert_action(action: dict, *, dedup: bool = True) -> Optional[dict]:
     """Insère une action — en refusant les doublons.
 
@@ -362,20 +387,12 @@ def insert_action(action: dict, *, dedup: bool = True) -> Optional[dict]:
     if sb is None:
         return None
     if dedup:
-        try:
-            from . import dedup as _dedup
-            existing = (sb.table("phare_actions").select("*")
-                        .eq("site_id", action.get("site_id"))
-                        .order("created_at", desc=True)
-                        .limit(400).execute().data) or []
-            twin = _dedup.find_blocking_duplicate(existing, action)
-            if twin is not None:
-                logger.info("phare.insert_action: doublon évité « %s » (≈ %s)",
-                            (action.get("title") or "")[:80],
-                            (twin.get("title") or "")[:80])
-                return {**twin, "_dedup": True}
-        except Exception as exc:
-            logger.debug("phare.insert_action dedup KO (on insère quand même): %s", exc)
+        twin = find_blocking_twin(action)
+        if twin is not None:
+            logger.info("phare.insert_action: doublon évité « %s » (≈ %s)",
+                        (action.get("title") or "")[:80],
+                        (twin.get("title") or "")[:80])
+            return {**twin, "_dedup": True}
     try:
         rows = sb.table("phare_actions").insert(action).execute().data
         return rows[0] if rows else None
