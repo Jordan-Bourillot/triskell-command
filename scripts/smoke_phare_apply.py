@@ -520,7 +520,8 @@ with tempfile.TemporaryDirectory() as tmp:
         "<body><h1>Accueil</h1></body></html>", encoding="utf-8")
     (land / "alphacast" / "index.html").write_text(
         "<html><head><title>AlphaCast — Micro-podcasts</title></head>"
-        '<body><img src="/img/alphacast-hero.jpg"><h1>AlphaCast</h1>'
+        '<body><img src="/img/alphacast-hero.jpg">'
+        '<img src="/img/studio-podcast.jpg"><h1>AlphaCast</h1>'
         "</body></html>", encoding="utf-8")
     (land / "outils-pro" / "index.html").write_text(
         "<html><head><title>Outils Pro — Triskell Studio</title></head>"
@@ -608,7 +609,43 @@ with tempfile.TemporaryDirectory() as tmp:
               == "landing/alphacast/index.html"
           and 'alt="Studio' in loc["applicable"][0]["new"])
 
-    # 8) ambiguïté : le même chemin de page existe à la racine ET dans
+    # 8) page en DOUBLE dans la recommandation (« /alphacast/ » ET
+    #    « /alphacast », héritage du sitemap) → UN seul jeu d'étiquettes,
+    #    jamais deux empilés (vécu le 03/07 : JSON-LD en double sur les 10
+    #    fiches produit, dont un périmé « Le site arrive bientôt »)
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "head_insert", "page_path": "/alphacast/",
+         "new": '<script type="application/ld+json">{"bon":1}</script>'},
+        {"field": "head_insert", "page_path": "/alphacast",
+         "new": '<script type="application/ld+json">{"perime":1}</script>'},
+    ], tr_pages)
+    check("page en double → UN seul JSON-LD posé (le premier), l'autre en revue",
+          len(loc["applicable"]) == 1 and '"bon"' in loc["applicable"][0]["new"]
+          and len(loc["needs_review"]) == 1
+          and "en double" in loc["needs_review"][0]["reason"])
+
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "title", "page_path": "/alphacast",
+         "old": "AlphaCast — Micro-podcasts", "new": "AlphaCast v2"},
+        {"field": "title", "page_path": "/alphacast/",
+         "old": "AlphaCast — Micro-podcasts", "new": "AlphaCast v3"},
+    ], tr_pages)
+    check("title en double → un seul remplacement (le premier)",
+          len(loc["applicable"]) == 1
+          and loc["applicable"][0]["new"].endswith("AlphaCast v2</title>")
+          and len(loc["needs_review"]) == 1)
+
+    # … mais DEUX images différentes sur la même page restent deux patchs
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "alt", "page_path": "/alphacast", "image": "alphacast-hero.jpg",
+         "new": "Studio du podcast"},
+        {"field": "alt", "page_path": "/alphacast", "image": "studio-podcast.jpg",
+         "new": "Micro et casque sur la table"},
+    ], tr_pages)
+    check("deux alts sur la même page → les deux passent (pas de faux doublon)",
+          len(loc["applicable"]) == 2)
+
+    # 9) ambiguïté : le même chemin de page existe à la racine ET dans
     #    landing/ → on ne devine pas, circuit classique (qui refuse ici)
     (root / "alphacast").mkdir()
     (root / "alphacast" / "index.html").write_text(

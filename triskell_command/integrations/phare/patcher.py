@@ -523,6 +523,16 @@ def localize_executor_patches(workdir: str, stack: str,
 
     applicable: list[dict] = []
     needs_review: list[dict] = []
+    # Une seule modification par (page, type de balise) : les listes de pages
+    # d'audit contiennent parfois la MÊME page en double (« /alphacast/ » ET
+    # « /alphacast », héritage du sitemap) — vécu le 03/07/2026 : deux jeux
+    # de JSON-LD empilés sur chacune des 10 fiches produit de Triskell
+    # Studio, dont un périmé « Le site arrive bientôt ». Le premier patch
+    # gagne, les suivants partent en revue. Les champs à occurrences
+    # multiples légitimes (alt : plusieurs images par page) sont exclus.
+    _singleton_fields = {"title", "meta_description", "h1", "h2",
+                         "head_insert"}
+    seen_pages: set[tuple[str, str]] = set()
 
     for p in exec_patches or []:
         field = (p.get("field") or "").lower()
@@ -530,6 +540,18 @@ def localize_executor_patches(workdir: str, stack: str,
         old = p.get("old") or ""
         new = p.get("new") or ""
         page_title = titles_by_path.get(page_path, "")
+
+        if field in _singleton_fields:
+            if (page_path, field) in seen_pages:
+                needs_review.append({
+                    "field": field, "old": old[:200], "new": new[:200],
+                    "candidates": [page_path],
+                    "reason": (f"la page {page_path} apparaît en double dans "
+                               "la recommandation — déjà traitée dans cette "
+                               "modification"),
+                })
+                continue
+            seen_pages.add((page_path, field))
 
         if field == "new_file":
             rel = (p.get("file") or "").replace("\\", "/").strip().lstrip("/")
