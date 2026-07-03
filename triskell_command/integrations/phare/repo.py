@@ -10,7 +10,7 @@ Pattern aligné sur clients_repo.py et convoy_runner.py existants.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -499,6 +499,26 @@ def last_action_by_agent(agent_name: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 # phare_metrics
 # ---------------------------------------------------------------------------
+def has_recent_metrics(days: int = 8) -> bool:
+    """Des chiffres Search Console frais existent-ils en base ?
+
+    Sert de vérité au voyant GSC de l'écran Santé : le serveur web n'a pas
+    les fichiers d'accès Google (ils vivent dans les secrets GitHub Actions),
+    donc le voyant s'affichait éteint alors que le robot collecte très bien.
+    Si des métriques récentes sont en base, la collecte marche — point."""
+    sb = _sb()
+    if sb is None:
+        return False
+    try:
+        since = (date.today() - timedelta(days=days)).isoformat()
+        r = (sb.table("phare_metrics").select("site_id", count="exact")
+             .gte("metric_date", since).limit(1).execute())
+        return (r.count or 0) > 0
+    except Exception as exc:
+        logger.debug("phare.has_recent_metrics: %s", exc)
+        return False
+
+
 def upsert_metrics(site_id: str, day: date, payload: dict, source: str = "gsc") -> bool:
     sb = _sb()
     if sb is None:

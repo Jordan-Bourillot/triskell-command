@@ -319,17 +319,22 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"refresh:{target['id']}"] = today.isoformat()
 
-    # Suivi concurrents : tous les jours à partir de 12h, top 3 sites
+    # Suivi concurrents : tous les jours à partir de 12h, top 3 sites.
+    # Service payant DataForSEO jamais souscrit → sans identifiants, on
+    # saute SANS bruit (avant : « DataForSEO non configuré » 3 fois par
+    # passage, tous les jours, dans chaque compte-rendu de tick).
     if hour >= 12:
-        for s in sites[:3]:
-            if _ran_today_in_db("competitors", s["id"]):
-                continue
-            if _LAST_RUNS_BY_MISSION.get(f"competitors:{s['id']}") == today.isoformat():
-                continue
-            r = run_now("competitors", s["id"], app_state=app_state)
-            actions_done.append({"mission": "competitors",
-                                  "site": s["domain"], **r})
-            _LAST_RUNS_BY_MISSION[f"competitors:{s['id']}"] = today.isoformat()
+        from . import dataforseo as _dataforseo
+        if _dataforseo.is_configured():
+            for s in sites[:3]:
+                if _ran_today_in_db("competitors", s["id"]):
+                    continue
+                if _LAST_RUNS_BY_MISSION.get(f"competitors:{s['id']}") == today.isoformat():
+                    continue
+                r = run_now("competitors", s["id"], app_state=app_state)
+                actions_done.append({"mission": "competitors",
+                                      "site": s["domain"], **r})
+                _LAST_RUNS_BY_MISSION[f"competitors:{s['id']}"] = today.isoformat()
 
     # Rollback check : tous les jours à partir de 13h (global, 1 fois/jour)
     if hour >= 13 and not _global_ran_today("rollback_check:"):

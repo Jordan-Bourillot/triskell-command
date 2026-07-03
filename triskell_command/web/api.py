@@ -3218,6 +3218,16 @@ class Api:
             from ..integrations.phare import repo
             actions = (repo.list_actions(status="draft", limit=200)
                        + repo.list_actions(status="preview", limit=200))
+            # Uniquement les sites ACTIFS : les vieux sites masqués gardent
+            # leurs cartes en base, mais elles ne concernent plus personne.
+            try:
+                active_ids = {s.get("id")
+                              for s in repo.list_sites(active_only=True) or []}
+                if active_ids:
+                    actions = [a for a in actions
+                               if a.get("site_id") in active_ids]
+            except Exception as exc:
+                logger.debug("phare_pending_actions filtre actifs: %s", exc)
             actions.sort(key=lambda a: a.get("created_at") or "", reverse=True)
             return {"ok": True, "actions": actions}
         except Exception as exc:

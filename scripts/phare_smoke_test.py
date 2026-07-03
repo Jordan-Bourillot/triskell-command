@@ -230,6 +230,13 @@ def test_automerge_digest() -> None:
     store: dict = {"items": []}
     mails: list = []
     saved = (N._read_digest, N._write_digest, N._send_mail, N._prefs)
+    # Depuis le garde-fou anti-faux-récap (04/07), notify_auto_merged est
+    # muet sans PHARE_REAL_RUN=1 (posé par le serveur web et le tick
+    # uniquement). Ici tout est mocké (_write_digest/_send_mail) : on ouvre
+    # la porte LE TEMPS DU TEST pour vérifier la mécanique d'empilage.
+    import os as _os
+    _prev_real_run = _os.environ.get("PHARE_REAL_RUN")
+    _os.environ["PHARE_REAL_RUN"] = "1"
     N._read_digest = lambda: list(store["items"])
     N._write_digest = lambda items: store.__setitem__(
         "items", list(items)[-N.MAX_DIGEST_ITEMS:]) or True
@@ -261,6 +268,10 @@ def test_automerge_digest() -> None:
         assert res2["sent"] is False and len(mails) == 1, "0 mail sur buffer vide"
     finally:
         (N._read_digest, N._write_digest, N._send_mail, N._prefs) = saved
+        if _prev_real_run is None:
+            _os.environ.pop("PHARE_REAL_RUN", None)
+        else:
+            _os.environ["PHARE_REAL_RUN"] = _prev_real_run
 
 
 def test_algo_watch_rss_parser() -> None:

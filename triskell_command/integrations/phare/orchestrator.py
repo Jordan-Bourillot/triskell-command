@@ -693,7 +693,10 @@ def ecosystem_overview() -> dict:
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "sites": out_sites, "totals": totals,
             "config_status": {
-                "gsc": gsc.is_configured(),
+                # GSC : configuré ICI, ou des chiffres frais en base (= le
+                # robot GH Actions collecte avec ses propres accès — le
+                # voyant ne doit pas crier faux depuis le serveur web).
+                "gsc": gsc.is_configured() or repo.has_recent_metrics(),
                 "dataforseo": dataforseo.is_configured(),
                 "github_token": bool(repo.get_config().get("github_token")),
                 "netlify_token": bool(repo.get_config().get("netlify_token")),
