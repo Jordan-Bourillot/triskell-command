@@ -5,13 +5,14 @@ Pipeline :
 2. Pour chacune, génère un email personnalisé via LLM (template + variables :
    nom du contact si trouvé, contexte du site cible, anchor proposé)
 3. Stocke dans phare_outreach_messages (status='draft')
-4. Si phare_config.outreach_auto_send = false (défaut) → bac à valider
-   dans Triskell Command
-5. Si auto_send = true → envoi via SMTP partagé (Triskell shared_settings)
-6. Suivi via IMAP (le RepliesPoller existant peut être étendu, mais on fait
+4. TOUS les brouillons vont au bac à valider dans Triskell Command — il n'y a
+   pas d'envoi automatique et il n'y en aura pas (règle Jordan : aucun mail ne
+   part sans validation). L'ancien drapeau phare_config.outreach_auto_send
+   était un fantôme (jamais lu pour décider) ; il est ignoré.
+5. Suivi via IMAP (le RepliesPoller existant peut être étendu, mais on fait
    simple : on poll les messages avec status='sent' toutes les 6h et on
    regarde dans la boîte si une réponse contient l'anchor proposé)
-7. Relance auto à J+7 et J+14 si pas de réponse, jusqu'à 2 max
+6. Relance auto à J+7 et J+14 si pas de réponse, jusqu'à 2 max
 """
 
 from __future__ import annotations
@@ -220,9 +221,11 @@ def queue_drafts(site_id: str, *, max_drafts: int = 5,
             "agent": "outreach",
             "kind": "recommandation",
             "title": f"{created} mails de démarchage backlinks à valider",
-            "detail_md": (f"Va dans Outreach → Bac pour relire chaque mail "
-                          f"avant envoi. Auto-envoi : "
-                          f"{repo.get_config().get('outreach_auto_send', False)}"),
+            # Pas de mention d'un « auto-envoi » : il n'existe pas (et n'existera
+            # pas — règle Jordan : aucun mail ne part sans validation). L'ancien
+            # drapeau phare_config.outreach_auto_send n'était lu nulle part.
+            "detail_md": ("Va dans Outreach → Bac pour relire chaque mail "
+                          "avant envoi — rien ne part sans ta validation."),
             "status": "draft",
             "impact": 4, "effort": 2,
         })
