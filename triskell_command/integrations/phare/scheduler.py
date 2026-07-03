@@ -591,24 +591,29 @@ def _pick_page_to_optimize(site_id: str) -> str:
              if (p.get("path") or "/") not in ("/", "")]
     if not pages:
         return ""
-    # Écarte les pages dont la carte « Optim on-page » est déjà ouverte :
-    # sinon le tick re-choisit éternellement la même page (sa carte bloque
-    # l'insertion → aucune trace « fait aujourd'hui » → rejeu au tick
-    # suivant) et les autres pages/sites ne passent jamais.
+    # Écarte les pages qu'une carte existante BLOQUERAIT (mêmes règles que
+    # le garde-fou anti-rejeu de run_onpage_optim : carte ouverte, refusée
+    # < 60 j ou validée < 14 j). Sinon le tick re-choisit éternellement la
+    # même page — soit pour re-pousser une PR jumelle (vécu), soit pour se
+    # faire refuser en boucle par le garde-fou pendant que les autres pages
+    # ne passent jamais.
     try:
         from . import dedup as _dedup
-        open_titles = {(a.get("title") or "")
-                       for a in repo.list_actions(site_id=site_id, limit=200)
-                       if a.get("agent") == "optimiseur_onpage"
-                       and (a.get("status") or "") in _dedup.OPEN_STATUSES}
-        remaining = [p for p in pages
-                     if f"Optim on-page {p.get('path')}" not in open_titles]
+        existing = repo.list_actions(site_id=site_id, limit=400)
+
+        def _bloquee(path: str) -> bool:
+            return _dedup.find_blocking_duplicate(existing, {
+                "site_id": site_id, "agent": "optimiseur_onpage",
+                "title": f"Optim on-page {path}",
+            }) is not None
+
+        remaining = [p for p in pages if not _bloquee(p.get("path") or "")]
         if remaining:
             pages = remaining
-        elif open_titles:
-            return ""   # toutes les pages ont déjà leur carte ouverte → on saute
+        elif existing:
+            return ""   # toutes les pages sont couvertes → on saute ce tour
     except Exception as exc:
-        logger.debug("_pick_page_to_optimize filtre cartes ouvertes: %s", exc)
+        logger.debug("_pick_page_to_optimize filtre cartes: %s", exc)
     # Page avec le plus petit optim_score (None = pas encore évaluée → priorité)
     pages_sorted = sorted(
         pages,
