@@ -1,5 +1,22 @@
-"""GEO-Surveillant — Generative Engine Optimization.
+"""GEO-Surveillant — Generative Engine Optimization. ⚰️ RETRAITÉ 03/07/2026.
 
+PLUS AUCUN PASSAGE AUTOMATIQUE (retiré du scheduler le 03/07/2026).
+Raison : mesure fantôme — ce module écrivait dans `phare_geo_mentions`,
+une table que RIEN ne lit (aucun écran, aucun rapport, aucun endpoint —
+vérifié), et ses cartes d'action avaient déjà été supprimées le 18/06 à
+la demande de Jordan. Chaque passage du jeudi dépensait des appels IA
+(Perplexity…) pour remplir un tiroir mort, en doublon de l'écran GEO
+(qui interroge jusqu'à 8 IA, AFFICHE ses résultats et alimente
+l'auto-pilote GEO). L'écran GEO est désormais la mesure unique de
+« les IA citent-elles mes sites ? ».
+
+Le module reste importable (lancement manuel via run_now("geo_check", …)
+possible pour du débogage) mais ne doit pas être re-planifié. Si un jour
+on veut mesurer Google AI Overview (seule capacité que l'écran GEO n'a
+pas), l'ajouter comme fournisseur de l'écran GEO — pas ressusciter ce
+module.
+
+--- description d'origine ---
 Surveille la présence des sites Triskell dans les réponses des moteurs
 génératifs (ChatGPT, Perplexity, Claude, Google AI Overview).
 
@@ -233,13 +250,12 @@ def run_geo_check(site_id: str, *, max_queries: int = 5,
             if detected["mentioned"]:
                 mentioned_count += 1
 
-    # 18/06/2026 (demande Jordan) : le GEO a SON propre outil dédié. On ne crée
-    # donc plus AUCUNE carte « conseil » GEO dans Le Phare (l'outil SEO) — ça
-    # faisait doublon et encombrait la pile « à toi de le faire » que Jordan ne
-    # veut plus voir. La MESURE continue (elle a déjà été écrite dans
-    # phare_geo_mentions plus haut, et alimente l'écran GEO) : seule la carte-
-    # tâche disparaît. Avant : une carte « 0/0 — 0% » à impact 4 sur tous les
-    # sites + une carte « GEO check » à chaque passage = pur bruit.
+    # 18/06/2026 (demande Jordan) : plus AUCUNE carte « conseil » GEO dans Le
+    # Phare (doublon, encombrait la pile). ⚠️ Correction 03/07/2026 : ce
+    # commentaire prétendait à tort que phare_geo_mentions « alimente l'écran
+    # GEO » — c'est FAUX, l'écran GEO a son propre stockage et RIEN ne lit
+    # cette table (tiroir mort, voir docstring en tête de module — raison du
+    # retrait du scheduler).
     if not checked:
         return {"ok": True, "checked": 0, "mentioned": 0, "coverage_pct": 0.0}
     coverage_pct = round(mentioned_count / checked * 100, 1)

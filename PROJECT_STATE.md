@@ -205,7 +205,7 @@ Module SEO autonome multi-sites livré 2026-05-06.
 | `schema_architect` | Génère JSON-LD actif (Product, Article, FAQPage, Organization, LocalBusiness, BreadcrumbList) |
 | `ctr_hacker` | Détecte high impressions / low CTR (vs courbe attendue par position) et réécrit title+meta |
 | `snippet_hunter` | Capture les featured snippets et People Also Ask sur les KW où on est dans le top 10 |
-| `geo_surveillant` | Interroge ChatGPT, Perplexity, Claude, Google AI Overview pour détecter si on est cité (GEO = Generative Engine Optimization) |
+| `geo_surveillant` | ⚰️ RETIRÉ du scheduler le 03/07/2026 (mesure fantôme : table `phare_geo_mentions` jamais lue) — la mesure « les IA me citent-elles ? » vit dans l'écran GEO, mesure unique |
 | `cannibalization` | Détecte 2+ pages qui rankent sur le même KW, propose merge/redirect/différenciation |
 | `zombies` | Pages sans clic depuis 6 mois, propose boost/redirect/delete/noindex |
 | `image_seo` | Audit images (alt, format, taille, lazy, srcset), génération auto des alts manquants |
@@ -224,7 +224,7 @@ Ajouts UI :
 Ajouts scheduler (cron logique horaire) :
 - Mardi 11h : CTR booster (1 site)
 - Mercredi 11h : Snippet hunt (1 site)
-- Jeudi 11h : GEO check (1 site)
+- ~~Jeudi 11h : GEO check (1 site)~~ (retiré le 03/07/2026 — mesure fantôme, voir tableau des modules)
 - Vendredi 11h : Cannibalisation + Zombies (1 site, en cascade)
 - Samedi 9h : Image SEO (1 site)
 - Dimanche 9h : Refresh content (1 site)

@@ -268,14 +268,14 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"snippet_hunt:{target['id']}"] = today.isoformat()
 
-    # GEO check (LLM mentions) : jeudi à partir de 11h
-    if weekday == 3 and hour >= 11:
-        target = _pick_next_for_mission("geo_check", sites)
-        if target:
-            r = run_now("geo_check", target["id"], app_state=app_state)
-            actions_done.append({"mission": "geo_check",
-                                  "site": target["domain"], **r})
-            _LAST_RUNS_BY_MISSION[f"geo_check:{target['id']}"] = today.isoformat()
+    # GEO check (mentions LLM) : RETIRÉ le 03/07/2026. C'était une mesure
+    # FANTÔME : geo_surveillant écrivait dans phare_geo_mentions, une table
+    # que RIEN ne lit (aucun écran, aucun rapport — vérifié), et ses cartes
+    # avaient déjà été supprimées le 18/06 à la demande de Jordan. La mesure
+    # « les IA citent-elles mes sites ? » vit dans l'écran GEO (8 IA,
+    # résultats affichés, auto-pilote) — mesure unique désormais. Le module
+    # geo_surveillant reste importable (lancement manuel possible) mais plus
+    # aucun passage automatique ne dépense d'appels IA pour un tiroir mort.
 
     # Cannibalisation + zombies : vendredi à partir de 11h, 1 site (les deux d'affilée)
     if weekday == 4 and hour >= 11:

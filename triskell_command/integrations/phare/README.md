@@ -24,7 +24,7 @@ triskell_command/integrations/phare/
 ├── schema_architect.py — JSON-LD actif (Product/Article/FAQ/Org/LocalBiz)
 ├── ctr_hacker.py      — détecte high impressions / low CTR + réécrit
 ├── snippet_hunter.py  — featured snippets + People Also Ask capturables
-├── geo_surveillant.py — mentions dans ChatGPT/Perplexity/AI Overview
+├── geo_surveillant.py — ⚰️ retiré du scheduler 03/07/2026 (mesure fantôme)
 ├── cannibalization.py — détecte 2+ pages sur même KW (merge/redirect)
 ├── zombies.py         — pages sans trafic 6 mois (boost/redirect/del)
 ├── image_seo.py       — alts manquants, format, taille, lazy, srcset
@@ -250,10 +250,11 @@ existe.
   publication des pages générées (`phare_programmatic_pages` → fichiers
   → PR). Gros coûts LLM et vraie décision SEO : à lancer ensemble le
   jour où un site a besoin de pages localisées en volume.
-- **geo_surveillant.py vs module GEO du site web** : les deux mesurent
-  « les IA citent-elles mes sites ? » sur deux stockages différents
-  (tables phare_* vs réglages serveur). Redondance assumée pour
-  l'instant ; fusion = choisir quel écran survit.
+- **geo_surveillant.py vs module GEO du site web** : TRANCHÉ le
+  03/07/2026 — le surveillant était une mesure fantôme (il écrivait dans
+  `phare_geo_mentions`, table que rien ne lit ; cartes déjà supprimées
+  le 18/06). Retiré du scheduler ; l'écran GEO est la mesure unique.
+  Module gardé importable pour débogage, ne pas re-planifier.
 
 ## Roadmap
 
