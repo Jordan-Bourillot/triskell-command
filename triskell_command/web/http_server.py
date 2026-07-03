@@ -176,6 +176,14 @@ def create_app() -> FastAPI:
     except Exception as exc:
         logger.debug("restauration GEO au boot : %s", exc)
 
+    # Chien de garde : alerte push si un robot est en panne / muet — dans
+    # TOUS les rôles. (La panne silencieuse de juin 2026 — 6 robots morts
+    # pendant des semaines — ne doit JAMAIS se reproduire.) Côté web, sa
+    # system_health porte le GEO, le Phare et le battement de cœur du
+    # conteneur robots : sans lui, la mort du conteneur robots ou une panne
+    # GEO n'aurait alerté personne (limite documentée le 03/07, soldée ici).
+    _start_watchdog_thread(api_instance)
+
     if run_workers:
         # Thread des rappels Brain : check toutes les 5 min si des notes ont
         # un remind_at échu et envoie une push notification.
@@ -184,11 +192,6 @@ def create_app() -> FastAPI:
         # Battement de cœur serveur (toutes les 5 min dans shared_settings) :
         # signale aux robots du desktop que le serveur travaille.
         _start_server_heartbeat_thread()
-
-        # Chien de garde : alerte push si un robot est en panne / muet.
-        # (La panne silencieuse de juin 2026 — 6 robots morts pendant des
-        # semaines — ne doit JAMAIS se reproduire.)
-        _start_watchdog_thread(api_instance)
 
         # Réchauffeur Pixel Pros : le serveur (hébergé en Europe) visite la
         # home toutes les 3 min pour que l'edge européen ne s'endorme jamais.

@@ -651,7 +651,11 @@ const Health = {
     // En PANNE : vrai bouton bien visible (le lien discret n'était jamais
     // vu — audit débutant) + marche à suivre en 3 temps.
     const inTrouble = (w.health === 'error' || !!rawError);
-    const canRestart = !w.running && w.name && w.name !== 'phare_scheduler';
+    // Jamais de « Relancer » sur : le Phare (tourne sur GitHub), un robot
+    // délégué à l'autre conteneur (le relancer ICI = double traitement),
+    // et la carte battement de cœur (un conteneur ne se relance pas d'ici).
+    const canRestart = !w.running && !w.delegated && w.name
+      && w.name !== 'phare_scheduler' && w.name !== 'workers_container';
     const restartBtn = canRestart
       ? (inTrouble
           ? `<button class="btn btn-primary text-xs mt-2 mr-3" data-restart="${this._esc(w.name)}"

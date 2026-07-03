@@ -9279,15 +9279,72 @@ class Api:
                 })
                 out["summary"]["error"] += 1
 
+        # 1bis-0) Rôle web : les cartes « délégué » ci-dessus sont vertes SUR
+        # PAROLE. La vraie preuve de vie du conteneur robots est son battement
+        # de cœur (shared_settings.server_heartbeat, posé toutes les 5 min par
+        # son thread heartbeat — rôle web ne le pose jamais). Carte dédiée :
+        # battement frais = vert, muet > 15 min = rouge — et le chien de garde
+        # de CE conteneur aboie dessus. Sans elle, la mort du conteneur robots
+        # était TOTALEMENT silencieuse (son propre chien de garde meurt avec).
+        if not _here_runs_workers:
+            _WC_LABEL = "Serveur des robots (battement de cœur)"
+            try:
+                from datetime import datetime as _hb_dt, timezone as _hb_tz
+                from ..integrations import server_presence as _sp
+                hb_client = self._supabase()
+                hb = None
+                if hb_client is not None:
+                    try:
+                        hb = hb_client.get_shared_setting(_sp.HEARTBEAT_KEY, None)
+                    except Exception:
+                        hb = None
+                hb_at = (hb.get("at") or "") if isinstance(hb, dict) else ""
+                hb_fresh = False
+                if hb_at:
+                    try:
+                        ts = _hb_dt.fromisoformat(hb_at.replace("Z", "+00:00"))
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=_hb_tz.utc)
+                        age = (_hb_dt.now(_hb_tz.utc) - ts).total_seconds()
+                        hb_fresh = age < _sp.FRESH_MAX_AGE_SEC
+                    except Exception:
+                        hb_fresh = False
+                if hb_client is None:
+                    wc = {"name": "workers_container", "label": _WC_LABEL,
+                          "running": False, "last_run_at": "",
+                          "last_run_result": {
+                              "error": "base injoignable — battement illisible"},
+                          "health": "warning"}
+                elif hb_fresh:
+                    wc = {"name": "workers_container", "label": _WC_LABEL,
+                          "running": True, "last_run_at": hb_at,
+                          "last_run_result": {"host": (hb or {}).get("host", "")},
+                          "health": "healthy"}
+                else:
+                    wc = {"name": "workers_container", "label": _WC_LABEL,
+                          "running": False, "last_run_at": hb_at,
+                          "last_run_result": {
+                              "error": "aucun battement de cœur depuis plus de "
+                                       "15 min — les robots ne tournent "
+                                       "probablement plus"},
+                          "health": "error"}
+                out["workers"].append(wc)
+                out["summary"][wc["health"]] += 1
+            except Exception as exc:
+                logger.debug("system_health workers heartbeat: %s", exc)
+
         # 1bis) Le Phare tourne sur GitHub Actions, pas ici : on l'expose en
         # robot virtuel via son battement de cœur en base, sinon une panne
         # de ses ticks est invisible (vécu : 3 échecs muets les 09-10/06).
+        # Uniquement là où vit l'interface (rôles all/web) : sinon les DEUX
+        # conteneurs aboieraient chacun pour la même panne du Phare.
         try:
-            from ..integrations.phare import heartbeat as phare_heartbeat
-            pw = phare_heartbeat.virtual_worker()
-            if pw is not None:
-                out["workers"].append(pw)
-                out["summary"][pw.get("health") or "healthy"] += 1
+            if _here_owns_ui:
+                from ..integrations.phare import heartbeat as phare_heartbeat
+                pw = phare_heartbeat.virtual_worker()
+                if pw is not None:
+                    out["workers"].append(pw)
+                    out["summary"][pw.get("health") or "healthy"] += 1
         except Exception as exc:
             logger.debug("system_health phare virtual worker: %s", exc)
 
@@ -9386,6 +9443,19 @@ class Api:
         """
         p = payload or {}
         name = (p.get("name") or "").strip()
+        # Séparation site/robots : ces robots vivent sur le conteneur robots.
+        # Les relancer ICI (rôle web) créerait une DEUXIÈME instance sur les
+        # mêmes données — exactement le double traitement que la séparation
+        # élimine. Refus propre, quel que soit le nom demandé.
+        try:
+            from ..integrations import process_role as _pr_restart
+            if not _pr_restart.runs_workers():
+                return {"ok": False,
+                        "error": ("Ce robot tourne sur le serveur des robots, "
+                                  "pas ici. S'il est vraiment en panne là-bas, "
+                                  "un redéploiement le relance.")}
+        except Exception:
+            pass
         # id system_health → (module, fonction de démarrage, app_state requis)
         restartable = {
             "replies_poller":         ("replies_poller",         "start_poller", True),
@@ -12439,27 +12509,47 @@ class Api:
         except Exception:
             pass
 
-        # Santé des robots — uniquement les statuts en mémoire (aucune requête)
+        # Santé des robots — statuts en mémoire (aucune requête)… SAUF en
+        # rôle « web » (séparation site/robots) : ces robots tournent sur le
+        # conteneur robots, pas ici. Les compter « arrêtés » faisait crier
+        # Perceval au loup (« 12 robots en panne » le soir de l'activation,
+        # 03/07/2026) alors que tout allait bien. La vérité côté web = le
+        # battement de cœur du conteneur robots : frais → tout va bien ;
+        # muet → là oui, vraie panne (et l'alerte devient MÉRITÉE).
+        _GUIDE_WORKER_MODS = ("replies_poller", "reply_responder", "drip_runner",
+                              "post_sale_runner", "lead_to_client",
+                              "multichannel_followup", "dormant_recycler",
+                              "stripe_poller", "mission_runner",
+                              "creator_followup",
+                              "autopilot_runner", "site_vision_worker")
         try:
-            for mod_name in ("replies_poller", "reply_responder", "drip_runner",
-                             "post_sale_runner", "lead_to_client",
-                             "multichannel_followup", "dormant_recycler",
-                             "stripe_poller", "mission_runner",
-                             "creator_followup",
-                             "autopilot_runner", "site_vision_worker"):
-                try:
-                    mod = __import__(
-                        f"triskell_command.integrations.{mod_name}",
-                        fromlist=["get_status"])
-                    st = mod.get_status() if hasattr(mod, "get_status") else {}
-                    running = bool(st.get("running"))
-                    res = st.get("last_run_result") or {}
-                    has_err = bool(res.get("error") or res.get("errors", 0))
-                    key = ("healthy" if running and not has_err
-                           else "warning" if running else "error")
-                    out["workers"][key] += 1
-                except Exception:
-                    out["workers"]["error"] += 1
+            from ..integrations import process_role as _pr_guide
+            _guide_local_workers = _pr_guide.runs_workers()
+        except Exception:
+            _guide_local_workers = True
+        try:
+            if _guide_local_workers:
+                for mod_name in _GUIDE_WORKER_MODS:
+                    try:
+                        mod = __import__(
+                            f"triskell_command.integrations.{mod_name}",
+                            fromlist=["get_status"])
+                        st = mod.get_status() if hasattr(mod, "get_status") else {}
+                        running = bool(st.get("running"))
+                        res = st.get("last_run_result") or {}
+                        has_err = bool(res.get("error") or res.get("errors", 0))
+                        key = ("healthy" if running and not has_err
+                               else "warning" if running else "error")
+                        out["workers"][key] += 1
+                    except Exception:
+                        out["workers"]["error"] += 1
+            elif client is not None:
+                from ..integrations import server_presence as _sp_guide
+                key = ("healthy" if _sp_guide.server_alive(client)
+                       else "error")
+                out["workers"][key] += len(_GUIDE_WORKER_MODS)
+            # client None : base injoignable → état inconnu, on ne crie pas
+            # au loup (les compteurs restent à zéro, Perceval le voit déjà).
         except Exception:
             pass
 
