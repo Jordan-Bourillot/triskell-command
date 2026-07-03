@@ -317,14 +317,86 @@ def _file_matches_page(rel: str, page_path: str) -> bool:
     return bool(slug) and slug in rel_n
 
 
+# Indices qu'un sous-dossier est LA racine web d'un dépôt multi-dossiers
+# (ex. triskell-table-ronde : le site vit dans landing/, le reste du dépôt
+# est une app desktop). On exige un marqueur DE SITE + une page d'accueil :
+# un simple index.html ne suffit pas (backend/public/, demos…).
+_SITE_ROOT_MARKERS = ("netlify.toml", "sitemap.xml", "robots.txt")
+
+
+def _detect_site_roots(root: Path) -> list[str]:
+    """Préfixes de dossier où peut vivre le site dans le dépôt.
+
+    Renvoie toujours "" (la racine du dépôt) en premier, puis les
+    sous-dossiers de premier niveau qui portent à la fois un marqueur de
+    site (netlify.toml / sitemap.xml / robots.txt) ET une page d'accueil.
+    Né le 03/07/2026 : sur triskell-table-ronde, /alphacast vit dans
+    landing/alphacast/index.html — introuvable par convention de nommage
+    depuis la racine, donc toutes les cartes étaient refusées.
+    """
+    roots: list[str] = [""]
+    try:
+        subdirs = sorted(p for p in root.iterdir()
+                         if p.is_dir() and p.name not in IGNORE_DIRS)
+    except OSError:
+        return roots
+    for d in subdirs:
+        has_marker = any((d / m).is_file() for m in _SITE_ROOT_MARKERS)
+        has_home = ((d / "index.html").is_file()
+                    or (d / "index.htm").is_file())
+        if has_marker and has_home:
+            roots.append(d.name)
+    return roots
+
+
+def _page_name_candidates(root: Path, page_path: str) -> set[str]:
+    """Chemins relatifs (minuscules) où la page peut vivre par convention :
+    <page>.html, <page>/index.html, et les mêmes préfixés par chaque racine
+    de site détectée (ex. landing/<page>/index.html). L'accueil garde
+    volontairement SES seuls candidats historiques (index.html à la racine) :
+    sa protection vit en amont (_targets_home) et on n'y touche pas."""
+    rel = _norm_page_path(page_path).strip("/").lower()
+    if not rel:
+        return {"index.html", "index.htm"}
+    names = (f"{rel}.html", f"{rel}.htm",
+             f"{rel}/index.html", f"{rel}/index.htm")
+    wanted = set(names)
+    for prefix in _detect_site_roots(root):
+        if prefix:
+            wanted.update(f"{prefix.lower()}/{n}" for n in names)
+    return wanted
+
+
+def _page_file_by_path(root: Path, exts: tuple[str, ...],
+                       page_path: str) -> Optional[Path]:
+    """Le fichier de la page dérivé de son CHEMIN d'URL — ou None.
+
+    None si la page est l'accueil (circuit historique conservé), si aucun
+    candidat n'existe, ou si PLUSIEURS existent (ambiguïté → circuit
+    classique et ses garde-fous). Le fichier retourné doit en plus passer
+    _file_matches_page : le garde-fou « ressemble à la page » reste le
+    juge de paix, jamais contourné.
+    """
+    page = _norm_page_path(page_path)
+    if page == "/":
+        return None
+    wanted = _page_name_candidates(root, page_path)
+    found = [f for f in _walk(root, exts)
+             if str(f.relative_to(root)).replace("\\", "/").lower() in wanted]
+    if len(found) != 1:
+        return None
+    rel = str(found[0].relative_to(root))
+    if not _file_matches_page(rel, page):
+        return None
+    return found[0]
+
+
 def _files_matching_page(root: Path, exts: tuple[str, ...],
                          page_path: str, page_title: str = "") -> list[Path]:
     """Fichiers source candidats pour une page du site (par convention
-    de nommage, puis par son <title> actuel)."""
-    rel = _norm_page_path(page_path).strip("/").lower()
-    wanted_rel = ({"index.html", "index.htm"} if not rel
-                  else {f"{rel}.html", f"{rel}.htm",
-                        f"{rel}/index.html", f"{rel}/index.htm"})
+    de nommage — racines de site détectées comprises — puis par son
+    <title> actuel)."""
+    wanted_rel = _page_name_candidates(root, page_path)
     by_name: list[Path] = []
     for f in _walk(root, exts):
         relstr = str(f.relative_to(root)).replace("\\", "/").lower()
@@ -621,14 +693,30 @@ def localize_executor_patches(workdir: str, stack: str,
                 })
             continue
 
-        # title / meta_description / h1 → flux classique, désambiguïsé
-        # par la page visée quand plusieurs fichiers contiennent le texte.
+        # title / meta_description / h1 → d'abord le fichier DÉRIVÉ DU CHEMIN
+        # de la page (03/07/2026, dépôts multi-dossiers : sur triskell-table-
+        # ronde, /alphacast vit dans landing/alphacast/index.html — la
+        # recherche par contenu ne voyait que la home et refusait tout).
+        # Quand la page a SON fichier, on ne cherche le texte QUE dedans :
+        # jamais dans un autre fichier du dépôt. S'il n'y est pas, hits reste
+        # vide → plan B par balise (ressemblance exigée) ou revue humaine.
+        # Le garde-fou final _file_matches_page s'applique dans tous les cas.
         old_wrapped, new_wrapped = _build_replacement(field, old, new)
-        hits = _find_unique_match(root, exts, old_wrapped)
-        if not hits and old and old != old_wrapped:
-            hits = _find_unique_match(root, exts, old)
-            if hits:
-                old_wrapped, new_wrapped = old, new
+        page_file = _page_file_by_path(root, exts, page_path)
+        if page_file is not None:
+            _content = _read_text_safe(page_file)
+            exact = _fuzzy_find_exact(_content, old_wrapped)
+            if exact is None and old and old != old_wrapped:
+                exact = _fuzzy_find_exact(_content, old)
+                if exact is not None:
+                    old_wrapped, new_wrapped = old, new
+            hits = [(page_file, exact)] if exact is not None else []
+        else:
+            hits = _find_unique_match(root, exts, old_wrapped)
+            if not hits and old and old != old_wrapped:
+                hits = _find_unique_match(root, exts, old)
+                if hits:
+                    old_wrapped, new_wrapped = old, new
         if len(hits) > 1:
             page_files = set(_files_matching_page(root, exts, page_path, page_title))
             narrowed = [(f, e) for f, e in hits if f in page_files]

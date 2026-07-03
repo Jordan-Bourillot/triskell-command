@@ -460,9 +460,14 @@ with tempfile.TemporaryDirectory() as tmp:
          "new": "Produit — La super fiche"},
     ], [{"path": "/", "title": "Studio générique — Bientôt"},
         {"path": "/produit", "title": "Studio générique — Bientôt"}])
+    # Depuis le 03/07 la page /produit est d'abord retrouvée par son CHEMIN :
+    # le refus vient du plan B (« recommandation périmée » — le vrai title de
+    # /produit ne ressemble pas au old fourni), plus du grep. L'essentiel est
+    # inchangé : RIEN n'est appliqué, la home n'est jamais touchée.
     check("patch /produit qui ne matche que la home → REFUSÉ (needs_review)",
           not loc["applicable"] and len(loc["needs_review"]) == 1
-          and "mauvaise page" in loc["needs_review"][0]["reason"])
+          and ("mauvaise page" in loc["needs_review"][0]["reason"]
+               or "périmée" in loc["needs_review"][0]["reason"]))
     _sh.rmtree(desast, ignore_errors=True)
 
     # meta robots déjà présente → remplacée, jamais empilée
@@ -480,6 +485,138 @@ with tempfile.TemporaryDirectory() as tmp:
           and loc["applicable"][0]["field"] == "meta_robots"
           and "index, follow" in loc["applicable"][0]["old"]
           and "noindex" in loc["applicable"][0]["new"])
+
+# ===========================================================================
+# Section ajoutée le 03/07/2026 : dépôts MULTI-DOSSIERS (le cas réel
+# triskell-table-ronde) — le site vit dans landing/, la racine du dépôt
+# porte une app desktop avec son propre index.html. Avant : la recherche
+# par contenu ne trouvait que landing/index.html et TOUTES les cartes des
+# pages internes étaient refusées. Maintenant : le fichier de la page est
+# d'abord dérivé de son chemin d'URL (landing/<page>/index.html), et le
+# garde-fou « ressemble à la page » reste le juge de paix.
+print("\n— dépôts multi-dossiers : pages retrouvées par leur chemin (03/07) —")
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    # La racine du dépôt = l'app desktop (PAS le site)
+    (root / "index.html").write_text(
+        "<html><head><title>App desktop Electron</title></head>"
+        "<body>renderer</body></html>", encoding="utf-8")
+    (root / "build").mkdir()
+    (root / "build" / "index.html").write_text(
+        "<html><head><title>Build artefact</title></head></html>",
+        encoding="utf-8")
+    (root / "backend").mkdir()
+    # Le site vit dans landing/ (netlify.toml + robots + sitemap + home)
+    land = root / "landing"
+    (land / "alphacast").mkdir(parents=True)
+    (land / "outils-pro").mkdir()
+    (land / "netlify.toml").write_text('[build]\n  publish = "."\n',
+                                       encoding="utf-8")
+    (land / "robots.txt").write_text("User-agent: *\n", encoding="utf-8")
+    (land / "sitemap.xml").write_text("<urlset></urlset>", encoding="utf-8")
+    (land / "index.html").write_text(
+        "<html><head><title>Triskell Studio — Bientôt</title></head>"
+        "<body><h1>Accueil</h1></body></html>", encoding="utf-8")
+    (land / "alphacast" / "index.html").write_text(
+        "<html><head><title>AlphaCast — Micro-podcasts</title></head>"
+        '<body><img src="/img/alphacast-hero.jpg"><h1>AlphaCast</h1>'
+        "</body></html>", encoding="utf-8")
+    (land / "outils-pro" / "index.html").write_text(
+        "<html><head><title>Outils Pro — Triskell Studio</title></head>"
+        "<body><h1>Outils</h1></body></html>", encoding="utf-8")
+    tr_pages = [
+        {"path": "/", "title": "Triskell Studio — Bientôt"},
+        {"path": "/alphacast/", "title": "AlphaCast — Micro-podcasts"},
+        {"path": "/outils-pro/", "title": "Outils Pro — Triskell Studio"},
+    ]
+
+    roots = patcher._detect_site_roots(root)
+    check("landing/ détecté comme racine du site (jamais build/ ni backend/)",
+          roots == ["", "landing"])
+
+    # 1) title d'une page interne, old correct → le bon fichier, par chemin
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "title", "page_path": "/alphacast",
+         "old": "AlphaCast — Micro-podcasts",
+         "new": "AlphaCast — Le micro-podcast quotidien"},
+    ], tr_pages)
+    check("title /alphacast localisé dans landing/alphacast/index.html",
+          len(loc["applicable"]) == 1
+          and loc["applicable"][0]["file"].replace("\\", "/")
+              == "landing/alphacast/index.html")
+
+    # 2) JSON-LD (head_insert) sur une page interne → le bon fichier
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "head_insert", "page_path": "/alphacast/",
+         "new": '<script type="application/ld+json">{"@type":"WebPage"}</script>'},
+    ], tr_pages)
+    check("head_insert JSON-LD /alphacast → landing/alphacast/index.html",
+          len(loc["applicable"]) == 1
+          and loc["applicable"][0]["file"].replace("\\", "/")
+              == "landing/alphacast/index.html"
+          and loc["applicable"][0]["old"] == "</head>")
+
+    # 3) meta description ABSENTE ajoutée via head_insert sur /outils-pro
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "head_insert", "page_path": "/outils-pro",
+         "new": '<meta name="description" content="Outils en ligne pour PME." />'},
+    ], tr_pages)
+    check("meta description ajoutée dans landing/outils-pro/index.html",
+          len(loc["applicable"]) == 1
+          and loc["applicable"][0]["file"].replace("\\", "/")
+              == "landing/outils-pro/index.html")
+
+    # 4) old PÉRIMÉ (le title générique de la home) sur une page réelle →
+    #    refus « périmée », et surtout JAMAIS landing/index.html touché
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "title", "page_path": "/alphacast",
+         "old": "Triskell Studio — Bientôt",
+         "new": "AlphaCast — nouveau titre"},
+    ], tr_pages)
+    check("old périmé (title de la home) → refusé, home jamais touchée",
+          not loc["applicable"] and len(loc["needs_review"]) == 1
+          and "périmée" in loc["needs_review"][0]["reason"])
+
+    # 5) page SANS fichier (servie par la redirection attrape-tout, ex.
+    #    /productivite sur le vrai site) → toujours refusée : le garde-fou
+    #    « ressemble à la page » n'a pas bougé
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "title", "page_path": "/productivite",
+         "old": "Triskell Studio — Bientôt",
+         "new": "Outils de productivité — Triskell Studio"},
+    ], tr_pages + [{"path": "/productivite", "title": "Triskell Studio — Bientôt"}])
+    check("page fantôme /productivite → toujours REFUSÉE (garde-fou intact)",
+          not loc["applicable"] and bool(loc["needs_review"])
+          and "mauvaise page" in loc["needs_review"][0]["reason"])
+
+    # 6) l'ACCUEIL garde exactement son circuit historique (aucun candidat
+    #    préfixé n'est ajouté pour « / ») — sa protection vit en amont
+    check("candidats de l'accueil inchangés (index.html racine seulement)",
+          patcher._page_name_candidates(root, "/")
+          == {"index.html", "index.htm"}
+          and patcher._page_file_by_path(root, (".html", ".htm"), "/") is None)
+
+    # 7) texte d'image (alt) : la bonne page est trouvée par son chemin
+    loc = patcher.localize_executor_patches(str(root), "html", [
+        {"field": "alt", "page_path": "/alphacast", "image": "alphacast-hero.jpg",
+         "new": "Studio d'enregistrement du podcast AlphaCast"},
+    ], tr_pages)
+    check("alt posé sur l'image de landing/alphacast/index.html",
+          len(loc["applicable"]) == 1
+          and loc["applicable"][0]["file"].replace("\\", "/")
+              == "landing/alphacast/index.html"
+          and 'alt="Studio' in loc["applicable"][0]["new"])
+
+    # 8) ambiguïté : le même chemin de page existe à la racine ET dans
+    #    landing/ → on ne devine pas, circuit classique (qui refuse ici)
+    (root / "alphacast").mkdir()
+    (root / "alphacast" / "index.html").write_text(
+        "<html><head><title>Doublon racine</title></head></html>",
+        encoding="utf-8")
+    check("candidat en double (racine + landing/) → pas de pari, None",
+          patcher._page_file_by_path(root, (".html", ".htm"), "/alphacast")
+          is None)
 
 # ===========================================================================
 print("\n— executor._apply_one (mocks complets, ni git ni Supabase) —")
