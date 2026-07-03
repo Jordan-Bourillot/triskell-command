@@ -15169,7 +15169,7 @@ class Api:
     <h1>{title_a}</h1>
     {content_html}
     <div class="geo-page-foot">
-      Page mise à jour le {ts[:10]} — {name_a}.
+      Page mise à jour le {ts[:10]} · {name_a}.
     </div>
   </main>
 </body>
@@ -15195,7 +15195,7 @@ class Api:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title_a} — Pixel Pros</title>
+<title>{title_a} | Pixel Pros</title>
 <meta name="description" content="{meta_a}">
 {canon}
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15216,7 +15216,7 @@ class Api:
 <body data-theme="light">
 <header class="site-header">
   <div class="header-inner">
-    <a href="/" class="logo" aria-label="Pixel Pros — Accueil">{logo}<span class="logo-word">PIXEL PROS</span></a>
+    <a href="/" class="logo" aria-label="Accueil Pixel Pros">{logo}<span class="logo-word">PIXEL PROS</span></a>
     <nav class="nav" aria-label="Menu principal">
       <a href="/">Accueil</a>
       <a href="/geo/">Conseils &amp; questions</a>
