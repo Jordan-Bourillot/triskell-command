@@ -128,6 +128,53 @@ check("perceval.js recommande les améliorations GEO",
       "geo_pending_fixes" in perceval_js)
 check("style du badge présent", ".geo-site-fixes" in css)
 
+print("6) Garde-fou anti-invention (avant mise en ligne)…")
+# Bloque tout bloc citant un montant/pourcentage/loi/lien absent de la vraie
+# page (l'IA fabrique des faits — vécu le 04/07 : faux prix Lagriffe 49,97 €
+# au lieu de 49 €, faux article de loi sur le site client Ingrid, taux inventé
+# Eliks, URL LinkedIn inventée WoW). Laisse passer les faits réellement repris.
+_g = api._geo_unsupported_facts
+
+_src_lag = ("Lagriffe Studio, agence web. Sites a partir de 49 EUR HT par mois. "
+            "Sans engagement. 2500 a 5000 EUR ailleurs.")
+_bad = _g("<p>~600 EUR annuels (49,97 EUR/mois). Fonde en 2026.</p>", _src_lag)
+check("faux prix 49,97 EUR (page dit 49) → bloqué",
+      any("49,97" in b["value"] for b in _bad))
+check("'fondé en 2026' absent de la page → bloqué",
+      any(b["kind"] == "année" for b in _bad))
+
+_src_ing = ("Ingrid Services, aide a domicile a Blanzy 71450. 22 EUR de l'heure. "
+            "Credit d'impot article 293 B.")
+_bad = _g("<p>Article L. 248-1 du code monetaire et financier, plafonne a "
+          "12 000 EUR par an.</p>", _src_ing)
+check("faux article de loi L.248-1 → bloqué",
+      any(b["kind"] == "référence légale" for b in _bad))
+check("'code monétaire et financier' inventé → bloqué",
+      any(b["kind"] == "code de loi" for b in _bad))
+check("plafond 12 000 EUR absent de la page → bloqué",
+      any(b["kind"] == "montant" for b in _bad))
+
+_src_eliks = "Eliks Studio. Commission pure, zero fixe. 48h appel gratuit. Max 6 clients."
+check("taux '10-30%' inventé → bloqué",
+      any(b["kind"] == "pourcentage"
+          for b in _g("<p>Commission de 10-30% sur les ventes.</p>", _src_eliks)))
+
+_src_wow = "Studio WoW. 80+ projets dans 14 pays. Paiement 30/30/40."
+check("URL LinkedIn inventée → bloquée",
+      any(b["kind"] == "lien" for b in _g(
+          '<a href="https://linkedin.com/company/wow-studio">Nous</a>', _src_wow)))
+
+# Faits RÉELS repris depuis la page → rien ne doit être bloqué.
+_src_rk = ("RankUs Studio SEO. Creation de site des 490 EUR HT. Premiers "
+           "resultats en moins de 3 mois. Sans engagement.")
+check("FAQ qui reprend 490 EUR / 3 mois réels → rien bloqué",
+      _g("<p>Des 490 EUR HT, resultats en moins de 3 mois, sans engagement.</p>",
+         _src_rk) == [])
+check("séparateur de liste '71450, 22 EUR' non fusionné en faux nombre",
+      _g("<p>Blanzy 71450, 22 EUR de l'heure, article 293 B.</p>", _src_ing) == [])
+check("entiers structurels (3 questions, 5 critères) → ignorés",
+      _g("<p>3 questions, 5 criteres.</p>", _src_rk) == [])
+
 print()
 print(f"{len(PASS)} OK / {len(FAIL)} échec(s)")
 sys.exit(1 if FAIL else 0)

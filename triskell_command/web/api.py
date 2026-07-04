@@ -14377,14 +14377,31 @@ class Api:
             '      "title": "Titre court du problème (max 60 car)",\n'
             '      "problem": "Pourquoi c\'est un problème pour le GEO (2 phrases)",\n'
             '      "fix_title": "Titre court de la solution (max 50 car)",\n'
-            '      "fix_html": "Bloc HTML PRÊT À COLLER tel quel sur la page : utilise <section>, <h2>, <h3>, <p>, <ul>, <ol>, <table>. PAS de <html>/<body>/<head>. PAS de styles inline. Doit faire 120-250 mots. En français impeccable, factuel, citant des chiffres précis si possible. IMPORTANT : dans le JSON, échappe les sauts de ligne en \\\\n — jamais de retour à la ligne brut dans une chaîne."\n'
+            '      "fix_html": "Bloc HTML PRÊT À COLLER tel quel sur la page : utilise <section>, <h2>, <h3>, <p>, <ul>, <ol>, <table>. PAS de <html>/<body>/<head>. PAS de styles inline. Doit faire 120-250 mots. En français impeccable. IMPORTANT : dans le JSON, échappe les sauts de ligne en \\\\n — jamais de retour à la ligne brut dans une chaîne."\n'
             "    }\n"
             "  ]\n"
             "}\n\n"
-            "Concentre-toi sur les améliorations qui font vraiment bouger les "
-            "IA : FAQ visible, définition courte en tête, tableau "
-            "comparatif chiffré, liste à puces de critères, encadré de "
-            "réponse directe.\n"
+            "🚨 RÈGLE ABSOLUE — ZÉRO INVENTION.\n"
+            "Tu ne peux utiliser QUE les informations présentes dans le "
+            "« Contenu visible de la page » ci-dessus. Il t'est formellement "
+            "INTERDIT d'inventer, d'estimer, d'ajouter ou de deviner le moindre "
+            "fait qui n'y figure pas : aucun prix ni montant, aucun "
+            "pourcentage, aucune date ou année de fondation, aucun délai, "
+            "aucune garantie, aucune statistique, aucun chiffre de concurrent, "
+            "aucun article de loi ni plafond fiscal, aucune URL, aucun email, "
+            "aucun téléphone, aucune adresse, aucun lien de réseau social. "
+            "Si un fait précis renforcerait le bloc mais n'est PAS écrit sur la "
+            "page, tu l'OMETS — tu ne le fabriques jamais, même vraisemblable.\n"
+            "Conséquence directe : ne propose un TABLEAU COMPARATIF CHIFFRÉ que "
+            "si la page contient DÉJÀ les chiffres à comparer. Sinon, ne "
+            "compare pas — préfère une FAQ, une définition « qu'est-ce que… », "
+            "un encadré de réponse directe ou une liste de critères, en "
+            "REFORMULANT uniquement ce que la page dit vraiment. Une FAQ dont "
+            "les réponses sont inventées est pire que pas de FAQ.\n"
+            "Concentre-toi sur les améliorations qui font bouger les IA sans "
+            "aucun fait ajouté : FAQ visible fondée sur le contenu réel, "
+            "définition courte en tête, liste à puces de critères déjà "
+            "présents, encadré de réponse directe.\n"
             "Ne propose PAS de refonte design. Tes 'fix_html' doivent être "
             "des blocs auto-suffisants à AJOUTER à la page existante."
         )
@@ -14463,6 +14480,10 @@ class Api:
             "score_estimated": int(data.get("score_estimated") or 0),
             "findings":        findings,
             "provider":        prov["label"],
+            # Texte réel de la page au moment de l'audit : sert de VÉRITÉ au
+            # garde-fou anti-invention avant toute mise en ligne (un bloc ne
+            # peut citer un prix/chiffre/loi/lien absent d'ici).
+            "source_text":     text,
         }
         if not isinstance(root.get("ai_audits"), list):
             root["ai_audits"] = []
@@ -14479,8 +14500,113 @@ class Api:
             items = [a for a in items if a.get("site_id") == sid]
         return {"ok": True, "audits": items[:20]}
 
+    def _geo_unsupported_facts(self, fix_html: str, source_text: str) -> list:
+        """Repère les FAITS SPÉCIFIQUES d'un bloc HTML qui ne figurent PAS
+        dans le texte source (la vraie page). Déterministe, hors ligne.
+
+        On ne contrôle que les catégories où l'IA fabrique des faits qui
+        trompent réellement : montants, pourcentages, articles de loi/codes,
+        liens, emails, téléphones, année de fondation. Les entiers ordinaires
+        (« 3 questions ») sont ignorés. Un fait est « soutenu » si son cœur
+        (suite de chiffres, n° d'article, lien…) apparaît dans la page.
+        Renvoie une liste [{kind, value}] — vide = rien d'inventé.
+        """
+        import re as _re
+        txt = fix_html or ""
+        src = (source_text or "").lower()
+        plain = _re.sub(r"\s+", " ", _re.sub(r"<[^>]+>", " ", txt))
+
+        def _digits(s):
+            return _re.sub(r"\D", "", s or "")
+
+        # Un nombre = groupage de milliers par espace/point (« 12 000 ») +
+        # décimale par virgule (« 49,97 »), MAIS jamais à travers un
+        # séparateur de liste/phrase (« , » ou « . » suivi d'un espace) —
+        # sinon « 71450. 22 » serait lu comme un seul nombre 7145022 et « 22 »
+        # (pourtant sur la page) passerait pour inventé.
+        _NUM = r"\d{1,3}(?:[ .]\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?"
+        # Suites de chiffres réellement présentes sur la page, en jetons.
+        src_nums = set()
+        for _m in _re.finditer(_NUM, src):
+            _d = _digits(_m.group(0)).lstrip("0")
+            src_nums.add(_d or "0")
+
+        def _num_ok(raw):
+            return (_digits(raw).lstrip("0") or "0") in src_nums
+
+        out, seen = [], set()
+
+        def _flag(kind, value):
+            value = (value or "").strip()
+            if value and (kind, value) not in seen:
+                seen.add((kind, value))
+                out.append({"kind": kind, "value": value})
+
+        # 1. Montants (€, euros, $). Le nombre autorise un groupage de
+        # milliers par espace/point (« 12 000 ») et une décimale par virgule
+        # (« 49,97 »), mais s'arrête à un séparateur de liste « , » — sinon
+        # « 71450, 22 € » serait lu comme un seul faux nombre 7145022.
+        for _m in _re.finditer(r"(" + _NUM + r")\s*(?:€|euros?|eur\b|\$|dollars?)", plain, _re.I):
+            if not _num_ok(_m.group(1)):
+                _flag("montant", _m.group(0))
+        # 2. Pourcentages (dont fourchettes « 10-30 % »)
+        for _m in _re.finditer(r"(\d+(?:\s*[-–à]\s*\d+)?)\s*%", plain):
+            if any(not _num_ok(pp) for pp in _re.findall(r"\d+", _m.group(1))):
+                _flag("pourcentage", _m.group(0))
+        # 3. Articles de loi + codes juridiques
+        for _m in _re.finditer(r"(?:articles?|art\.?)\s*[LRD]?\.?\s*(\d+)", plain, _re.I):
+            if not _num_ok(_m.group(1)):
+                _flag("référence légale", _m.group(0))
+        for _m in _re.finditer(r"code\s+(?:mon[ée]taire[\w ]*|g[ée]n[ée]ral des imp[ôo]ts|civil|du travail|de commerce|de la consommation|de la s[ée]curit[ée] sociale)", plain, _re.I):
+            if _m.group(0).lower() not in src:
+                _flag("code de loi", _m.group(0))
+        # 4. Liens (URL, réseaux sociaux)
+        for _m in _re.finditer(r"https?://[^\s\"'<>]+|(?:www\.|linkedin\.com|facebook\.com|instagram\.com|twitter\.com|x\.com)/[^\s\"'<>]*", txt, _re.I):
+            _u = _re.sub(r"^https?://", "", _m.group(0).lower()).rstrip("/.,")
+            if _u not in src and _m.group(0).lower() not in src:
+                _flag("lien", _m.group(0))
+        # 5. Emails
+        for _m in _re.finditer(r"[\w.+-]+@[\w-]+\.[\w.-]+", txt):
+            if _m.group(0).lower() not in src:
+                _flag("email", _m.group(0))
+        # 6. Téléphones (format FR)
+        for _m in _re.finditer(r"(?:\+33|0)\s*\d(?:[\s.\-]*\d){8}", plain):
+            if _digits(_m.group(0)) not in _digits(src):
+                _flag("téléphone", _m.group(0))
+        # 7. Année de fondation / création
+        for _m in _re.finditer(r"(?:fond[ée]e?|cr[ée][ée]e?|[ée]tablie?|depuis|lanc[ée]e?)\s+en\s+((?:19|20)\d\d)", plain, _re.I):
+            if _m.group(1) not in src:
+                _flag("année", _m.group(0))
+        return out
+
+    def _geo_source_text_for(self, audit: dict) -> str:
+        """Texte de référence pour le garde-fou : celui figé à l'audit, sinon
+        re-téléchargé (vieux audits d'avant le stockage de source_text)."""
+        src = audit.get("source_text") or ""
+        if src:
+            return src
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            r = requests.get(audit.get("url") or "", timeout=15, headers={
+                "User-Agent": "Mozilla/5.0 (Triskell GEO guard) requests"})
+            if r.status_code < 400 and r.text:
+                soup = BeautifulSoup(r.text, "html.parser")
+                for t in soup(["script", "style", "noscript", "svg"]):
+                    t.decompose()
+                return soup.get_text("\n", strip=True)
+        except Exception as exc:
+            logger.debug("geo guard fetch: %s", exc)
+        return ""
+
     def geo_publish_finding(self, payload: dict) -> dict:
-        """Publie un finding d'audit IA comme nouvelle page sur le site."""
+        """Publie un finding d'audit IA comme nouvelle page sur le site.
+
+        payload.fix_html (optionnel) : version corrigée à publier à la place
+        du bloc d'origine (correction des faits inventés).
+        payload.force (optionnel)    : passe outre le garde-fou anti-invention
+        (à n'utiliser que si le fait signalé est en réalité exact).
+        """
         p = payload or {}
         audit_id   = (p.get("audit_id") or "").strip()
         finding_id = (p.get("finding_id") or "").strip()
@@ -14496,6 +14622,25 @@ class Api:
                         if f.get("id") == finding_id), None)
         if not finding:
             return {"ok": False, "error": "Suggestion introuvable"}
+        # Contenu à publier : correction fournie, sinon bloc d'origine.
+        override = (p.get("fix_html") or "").strip()
+        fix_html = override or finding.get("fix_html", "")
+        # 🚨 Garde-fou anti-invention : on refuse de mettre en ligne un bloc
+        # qui cite un montant/pourcentage/loi/lien/contact absent de la vraie
+        # page (l'IA fabrique des faits — vécu le 04/07 : faux prix Lagriffe,
+        # faux article de loi sur un site client). Contournable via force=True
+        # uniquement si le fait signalé est réellement exact.
+        if not p.get("force"):
+            bad = self._geo_unsupported_facts(
+                fix_html, self._geo_source_text_for(audit))
+            if bad:
+                return {"ok": False, "unsupported_facts": bad,
+                        "error": "Ce bloc contient des informations absentes "
+                        "de ta page (peut-être inventées par l'IA) : "
+                        + " ; ".join(f"{b['kind']} « {b['value']} »"
+                                     for b in bad[:6])
+                        + ". Corrige-les (ou publie avec force si elles sont "
+                        "exactes)."}
         # Crée un item "generated" temporaire et publie via le flow existant
         topic = finding.get("fix_title") or finding.get("title") or "amelioration"
         # Convertit le bloc HTML en pseudo-markdown pour que la machinerie
@@ -14506,7 +14651,7 @@ class Api:
             "kind":    "ai_audit_fix",
             "ts":      self._geo_now(),
             "provider": audit.get("provider", ""),
-            "content": "## " + topic + "\n\n" + finding.get("fix_html", ""),
+            "content": "## " + topic + "\n\n" + fix_html,
             "auto_source": {
                 "audit_id": audit_id,
                 "finding_id": finding_id,
