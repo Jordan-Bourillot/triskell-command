@@ -36,8 +36,14 @@ STAGE_MODES_KEY = "autopilot_stage_modes"  # poses par l'UI (etape 4 du chantier
 # du volume neuf de la boite robots -> auto-pilote muet. On la relit donc en
 # base partagee et on l'applique par-dessus le pipeline.json local.
 PIPELINE_CFG_KEY = "pipeline_config"
+# Champs qui DOIVENT traverser vers la boite robots. Au-dela de l'etat
+# (enabled/pool/produit/mode), l'HORAIRE et le VOLUME doivent suivre : sinon
+# la boite robots garde ses defauts (passage a 3h = HORS plage d'envoi 8h-19h
+# -> tout part en brouillon, rien ne s'envoie jamais). On recopie donc aussi
+# l'heure du passage, le volume par passage, la plage d'envoi et le delai.
 _SHARED_CFG_FIELDS = ("enabled", "autopilot_sender_pool", "autopilot_product",
-                      "mode")
+                      "mode", "nightly_hour", "nightly_target",
+                      "send_hour_start", "send_hour_end", "send_delay_seconds")
 STAGE_MODES_DEFAULTS = {
     "search": "auto",
     "sort":   "auto",
