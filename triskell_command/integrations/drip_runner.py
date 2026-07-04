@@ -585,8 +585,13 @@ def _create_drip_draft(client, app_state, sent_row: dict,
                 "subject": subject[:200],
                 "body": body[:2000],
                 "message_id": msg_id,
+                # account_id : indispensable pour que si une relance de relance
+                # (J+30 sur J+7) s'ancre sur CETTE ligne, _initial_sender
+                # retrouve la boîte -> la relance reste signée par la bonne
+                # personne (sinon on n'avait que l'adresse, pas l'id de compte).
                 "extra": {"drip_stage": stage, "auto_drip": True,
                           "to": to,
+                          "account_id": _initial_account or "",
                           "from": smtp_cfg.get("from_email", "")},
                 "created_by": client.user_id,
             })).execute()
