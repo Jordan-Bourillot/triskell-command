@@ -9646,6 +9646,25 @@ class Api:
             cfg = PipelineConfig(**clean)
             cfg.save()
             self._sync_keys_to_core()
+            # Miroir en base partagée des champs qui doivent traverser
+            # site<->robots (séparation TRISKELL_ROLE) : sinon le réglage
+            # fait sur le site n'atteint jamais la boîte robots (qui envoie).
+            try:
+                from ..integrations import autopilot_runner as _apr
+                from ..integrations.shared_settings_db import upsert_setting
+                sb = self._supabase()
+                cur = {}
+                if sb is not None:
+                    rows = (sb.table("shared_settings").select("value")
+                            .eq("key", _apr.PIPELINE_CFG_KEY).limit(1)
+                            .execute().data) or []
+                    cur = (rows[0].get("value") if rows else {}) or {}
+                for f in _apr._SHARED_CFG_FIELDS:
+                    if f in clean:
+                        cur[f] = clean[f]
+                upsert_setting(sb, _apr.PIPELINE_CFG_KEY, cur)
+            except Exception as exc:
+                logger.debug("mirror pipeline_config -> shared: %s", exc)
             return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": _friendly_error(exc)}

@@ -31,6 +31,13 @@ logger = logging.getLogger(__name__)
 
 SHARED_KEY = "autopilot_nightly"
 STAGE_MODES_KEY = "autopilot_stage_modes"  # poses par l'UI (etape 4 du chantier)
+# Config de l'auto-pilote qui DOIT traverser site<->robots (depuis la
+# separation TRISKELL_ROLE) : elle vit sinon dans pipeline.json local, absent
+# du volume neuf de la boite robots -> auto-pilote muet. On la relit donc en
+# base partagee et on l'applique par-dessus le pipeline.json local.
+PIPELINE_CFG_KEY = "pipeline_config"
+_SHARED_CFG_FIELDS = ("enabled", "autopilot_sender_pool", "autopilot_product",
+                      "mode")
 STAGE_MODES_DEFAULTS = {
     "search": "auto",
     "sort":   "auto",
@@ -164,6 +171,32 @@ def _write_state(data: dict) -> None:
         logger.debug("autopilot_runner write_state: %s", exc)
 
 
+def _apply_shared_pipeline_overrides(cfg) -> list:
+    """Applique la config auto-pilote de la BASE PARTAGEE par-dessus le cfg
+    local (pipeline.json). Indispensable cote boite robots (volume neuf sans
+    pipeline.json). Ne touche QUE les champs connus ; base injoignable ou clef
+    absente -> cfg local inchange. Renvoie la liste des champs surchargés."""
+    sb = _supabase_client()
+    if sb is None:
+        return []
+    try:
+        raw = sb.get_shared_setting(PIPELINE_CFG_KEY, {}) or {}
+    except Exception as exc:
+        logger.debug("autopilot_runner shared pipeline cfg: %s", exc)
+        return []
+    if not isinstance(raw, dict):
+        return []
+    applied = []
+    for f in _SHARED_CFG_FIELDS:
+        if f in raw and hasattr(cfg, f):
+            try:
+                setattr(cfg, f, raw[f])
+                applied.append(f)
+            except Exception:
+                pass
+    return applied
+
+
 def _read_stage_modes() -> dict:
     """Lit les modes UI Auto/Manuel par maillon poses par le tableau de
     commande (etape 4 du chantier). Defauts si vide ou indisponible.
@@ -250,6 +283,12 @@ def run_pipeline_with_ui_modes(cfg, progress):
     declenchements fassent exactement la meme chose.
     """
     from triskell_core.prospect.pipeline import run_full_pipeline
+
+    # Config auto-pilote de la base partagée par-dessus le local (le pool
+    # d'envoi surtout, sinon vide côté boîte robots au volume neuf).
+    _ov = _apply_shared_pipeline_overrides(cfg)
+    if _ov:
+        progress(f"Config auto-pilote lue en base partagée ({', '.join(_ov)}).")
 
     # === Auto-detection des produits ACTIFS dans le catalogue ===
     # Jordan veut que l'autopilote pioche dans les produits actifs sans
@@ -476,6 +515,9 @@ def _do_one_tick(app_state) -> None:
         _LAST_RUN_RESULT.clear()
         _LAST_RUN_RESULT["skipped_reason"] = f"config_unavailable:{exc}"
         return
+
+    # Base partagée par-dessus le local (traverse site<->robots).
+    _apply_shared_pipeline_overrides(cfg)
 
     if not getattr(cfg, "enabled", False):
         _LAST_RUN_RESULT.clear()

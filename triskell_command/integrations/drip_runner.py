@@ -446,15 +446,32 @@ def _create_drip_draft(client, app_state, sent_row: dict,
                 template = central_body
     except Exception as exc:
         logger.debug("drip central template: %s", exc)
-    signature = config.get("signature") or app_state.get(
+    # Cohérence d'expéditeur : la relance repart de la MÊME boîte (donc de la
+    # MÊME personne) que le 1er mail. La signature est posée par cette boîte
+    # (append_signature_to_body), comme pour le 1er contact multi-boîtes, au
+    # lieu d'un nom d'envoi générique. Repli sur le nom d'envoi si la boîte n'a
+    # pas de signature configurée.
+    _initial_from, _initial_account = _initial_sender(sent_row)
+    fallback_sig = config.get("signature") or app_state.get(
         "outreach", "from_name", default="") or ""
     # name / soft_hook gardes pour compat avec d'anciens textes custom
     # sauves en reglages ; les textes par defaut n'en utilisent plus.
     # Remplacement sûr (jamais de crash sur une accolade littérale) — même
     # moteur que Pixel Pros, cohérent sur tous les canaux.
     from .mail_templates_resolver import safe_format
-    body = safe_format(template, dict(name=name, signature=signature,
+    body = safe_format(template, dict(name=name, signature="",
                                       soft_hook="votre activité"))
+    try:
+        from .signatures import append_signature_to_body
+        _signed = append_signature_to_body(
+            body, account_id=(_initial_account or _initial_from or "primary"))
+        if _signed != body:
+            body = _signed
+        elif fallback_sig:
+            body = body.rstrip() + "\n\n" + fallback_sig
+    except Exception:
+        if fallback_sig:
+            body = body.rstrip() + "\n\n" + fallback_sig
     original_subject = (sent_row.get("subject") or "").strip()
     if original_subject:
         subj_tmpl = config.get("subject_template") or "Re: {original_subject}"
@@ -466,7 +483,7 @@ def _create_drip_draft(client, app_state, sent_row: dict,
     # la vue "Drafts à valider". La relance porte l'adresse d'expéditeur
     # du mail initial (cohérence du fil) — colonne de la migration 46,
     # insertion dégradée si la base ne l'a pas encore.
-    initial_from, initial_account = _initial_sender(sent_row)
+    initial_from, initial_account = _initial_from, _initial_account
     _row = {
         "prospect_id": prospect_id,
         "subject": subject[:200],
