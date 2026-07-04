@@ -1599,5 +1599,52 @@ _interne = pl.classify_for_apply(
 check("titre d'une page interne → vrai bouton vert conservé",
       _interne["can"] is True and _interne["mode"] == "code")
 
+# ===========================================================================
+# Anti-rejeu de l'optimiseur on-page : une carte jumelle DÉJÀ ouverte doit
+# couper le travail AVANT l'appel IA et l'ouverture de PR. Sans ce garde, la
+# PR partait puis l'insertion de la carte était refusée par le dédup → PR
+# orpheline invisible, rejouée à chaque tick (5 PR jumelles /animalier les
+# 23-24/06, 2 de plus le 03/07 au retour du jeton GitHub).
+print("— optimiseur on-page : pas de PR jumelle —")
+from triskell_command.integrations.phare import orchestrator as _orch
+from triskell_command.integrations.phare import repo as _repo
+from triskell_command.integrations.phare import agents as _agents
+
+_site = {"id": "sX", "domain": "exemple.fr", "repo_github": "acme/exemple"}
+_page = {"path": "/animalier", "schema_types": ["WebPage"]}  # schema présent → pas de patch auto
+_saved_optim = (_repo.get_site, _repo.list_pages, _repo.find_blocking_twin,
+                _agents.OptimiseurOnPage)
+try:
+    _repo.get_site = lambda sid: _site
+    _repo.list_pages = lambda sid, limit=500: [_page]
+
+    # a) Jumelle ouverte → on saute : pas d'IA instanciée, pas de PR.
+    _called = {"v": False}
+
+    class _AgentSpy:
+        def __init__(self, *a, **k):
+            _called["v"] = True
+
+        def run(self, **k):
+            return {}
+
+    _agents.OptimiseurOnPage = _AgentSpy
+    _repo.find_blocking_twin = lambda a: {"id": "carte-jumelle",
+                                          "github_pr_url": "https://x/pull/31"}
+    _r = _orch.run_onpage_optim("sX", page_path="/animalier", auto_open_pr=True)
+    check("carte jumelle ouverte → on saute (renvoie la jumelle)",
+          _r.get("ok") and _r.get("skipped") and _r.get("action_id") == "carte-jumelle")
+    check("carte jumelle ouverte → l'IA n'est PAS appelée", _called["v"] is False)
+
+    # b) Aucune jumelle → le garde laisse passer jusqu'à l'IA (pas de faux blocage).
+    _repo.find_blocking_twin = lambda a: None
+    _called["v"] = False
+    _r2 = _orch.run_onpage_optim("sX", page_path="/animalier", auto_open_pr=True)
+    check("aucune jumelle → le garde laisse passer jusqu'à l'IA",
+          _called["v"] is True and not _r2.get("skipped"))
+finally:
+    (_repo.get_site, _repo.list_pages, _repo.find_blocking_twin,
+     _agents.OptimiseurOnPage) = _saved_optim
+
 print(f"Bilan : {PASS} ✅ / {FAIL} ❌ sur {PASS + FAIL} contrôles")
 sys.exit(1 if FAIL else 0)
