@@ -569,6 +569,13 @@ def _append_draft(M, acc: dict, to_addr: str, subject: str, body: str,
     msg["Message-ID"] = make_msgid(domain=domain) if domain else make_msgid()
     if from_email:
         msg["Reply-To"] = from_email
+    # Désinscription en 1 clic (en-tête signé + pied cliquable), comme la
+    # prospection et les 1ers contacts créateurs. prospect_id vide (pas de
+    # fiche prospect pour les créateurs).
+    from . import unsubscribe as _unsub
+    for _k, _v in _unsub.headers_for(from_email, to_addr).items():
+        msg[_k] = _v
+    body, _ = _unsub.inject_footer(body, "", to_addr, "")
     msg.set_content(body)
     raw = msg.as_bytes()
 
@@ -741,6 +748,11 @@ def _process_email_creator(client, book, M, acc, row, now,
     cid = row.get("id")
     handle = (row.get("handle") or "").strip()
     if "@" not in handle:
+        counters["skipped"] += 1
+        return
+
+    # Créateur désinscrit (a cliqué « se désabonner ») → plus jamais relancé.
+    if book.is_unsubscribed(row):
         counters["skipped"] += 1
         return
 

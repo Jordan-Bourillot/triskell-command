@@ -29,6 +29,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import secrets as _secrets
 
 logger = logging.getLogger(__name__)
@@ -215,7 +216,13 @@ def inject_footer(body_text: str, body_html: str,
         txt = f"{txt.rstrip()}{footer_text(to, prospect_id)}"
     html = body_html or ""
     if html and "/api/unsubscribe?u=" not in html:
-        html = f"{html}{footer_html(to, prospect_id)}"
+        foot = footer_html(to, prospect_id)
+        # Si le HTML est un document complet, on insère le pied AVANT </body>
+        # (sinon il se retrouverait hors du corps — toléré par les messageries,
+        # mais on préfère un markup propre). Repli : ajout en fin.
+        m = re.search(r"</body\s*>", html, re.IGNORECASE)
+        html = (html[:m.start()] + foot + html[m.start():]) if m \
+            else f"{html}{foot}"
     return txt, html
 
 
@@ -244,7 +251,18 @@ def process_unsubscribe(token: str) -> dict:
                                  reason="clic lien de désinscription")
         n = PS.mark_unsubscribed_by_email(
             sb, email, reason="clic lien de désinscription")
-        return {"ok": True, "email": email, "count": n}
+        # Les créateurs vivent dans un carnet séparé (pas la table prospects) :
+        # on les désinscrit AUSSI, sinon un créateur désabonné pourrait être
+        # recontacté (relance J+7, nouveau brouillon). Tolérant : un échec ici
+        # ne casse jamais la désinscription du prospect.
+        n_creators = 0
+        try:
+            from . import creators_book as _cb
+            n_creators = _cb.mark_unsubscribed_by_email(email)
+        except Exception as exc:
+            logger.warning("process_unsubscribe créateurs KO: %s", exc)
+        return {"ok": True, "email": email, "count": n,
+                "creators": n_creators}
     except Exception as exc:
         logger.warning("process_unsubscribe KO: %s", exc)
         return {"ok": False, "email": email,

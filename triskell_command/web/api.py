@@ -2069,9 +2069,10 @@ class Api:
         return out
 
     def _approve_creator_draft(self, draft_id: str, body) -> dict:
-        """Valide + envoie un brouillon créateur (SMTP direct, sans les
-        gardiens prospection : ni notion de client, ni désinscrit). Mail
-        individuel de prise de contact, pas une campagne de masse."""
+        """Valide + envoie un brouillon créateur (SMTP direct, sans la notion
+        de client de la prospection). Mail individuel de prise de contact, pas
+        une campagne de masse. Porte l'en-tête de désinscription en 1 clic et
+        respecte les créateurs déjà désinscrits (comme la prospection)."""
         if not draft_id:
             return {"ok": False, "error": "id manquant"}
         client = self._supabase_client_or_none()
@@ -2091,6 +2092,13 @@ class Api:
         if not cr_res.get("ok"):
             return {"ok": False, "error": "créateur introuvable"}
         cr = cr_res["row"]
+        # REMPART désinscription : un créateur qui a cliqué « se désabonner »
+        # ne doit JAMAIS être recontacté (même famille que le garde-fou des
+        # prospects). Dégradé propre si la colonne n'existe pas encore.
+        if book.is_unsubscribed(cr):
+            return {"ok": False, "blocked": "unsubscribed",
+                    "error": (f"{cr.get('name') or 'Ce créateur'} s'est "
+                              f"désinscrit — envoi refusé.")}
         # DERNIER REMPART : ne JAMAIS envoyer à un créateur déjà contacté
         # (contacted_at posé au 1er envoi). Même si un brouillon en double
         # existe, il ne peut pas partir une 2e fois. Garde-fou 19/06 (Jordan).
@@ -2171,9 +2179,21 @@ class Api:
         body_html = self._creator_mail_html(
             cr, d.get("accent") or "", d.get("accent2") or "", angle=_ang,
             preview_url=_prev)
+        # Désinscription en 1 clic, comme la prospection : pied cliquable dans
+        # le corps + en-tête List-Unsubscribe signé. Les créateurs n'ont pas de
+        # fiche prospect → prospect_id vide (le jeton signe l'adresse seule).
+        from ..integrations import unsubscribe as _unsub
+        from triskell_core.prospect.outreach.smtp_sender import (
+            prospection_headers,
+        )
+        _send_body, _send_html = _unsub.inject_footer(
+            final_body, body_html, to, "")
         try:
-            msg_id = send_email(smtp_cfg, to=to, subject=subject,
-                                body=final_body, body_html=body_html)
+            msg_id = send_email(
+                smtp_cfg, to=to, subject=subject,
+                body=_send_body, body_html=_send_html,
+                custom_headers=prospection_headers(
+                    smtp_cfg.get("from_email", ""), to_email=to))
         except Exception as exc:
             return {"ok": False, "error": f"envoi KO : {exc}"}
 
@@ -8072,6 +8092,9 @@ class Api:
                 if r.get("contacted_at"):
                     skipped.append((r.get("name") or "?") + " (déjà contacté)")
                     continue
+                if book.is_unsubscribed(r):
+                    skipped.append((r.get("name") or "?") + " (désinscrit)")
+                    continue
                 from ..integrations import creator_mail
                 vouvoie = "tutoiement" not in (r.get("notes") or "").lower()
                 poss = "votre" if vouvoie else "ta"
@@ -8174,6 +8197,9 @@ class Api:
                 # id) — garde-fou 19/06 (Jordan), cohérent avec creators_queue_draft.
                 if r.get("contacted_at"):
                     continue
+                # Jamais pour un créateur désinscrit (a cliqué « se désabonner »).
+                if book.is_unsubscribed(r):
+                    continue
                 targets.append(r)
             if not targets:
                 return {"ok": False,
@@ -8200,7 +8226,14 @@ class Api:
                     msg["Date"] = formatdate(localtime=True)
                     msg["Message-ID"] = make_msgid(domain=from_email.split("@", 1)[1])
                     msg["Reply-To"] = from_email
-                    msg.set_content(body)
+                    # Désinscription en 1 clic : en-tête List-Unsubscribe signé
+                    # + pied cliquable dans le corps. Même si Jordan envoie ce
+                    # brouillon à la main, l'en-tête et le lien partent avec.
+                    from ..integrations import unsubscribe as _unsub
+                    for _k, _v in _unsub.headers_for(from_email, to_addr).items():
+                        msg[_k] = _v
+                    _ftext, _ = _unsub.inject_footer(body, "", to_addr, "")
+                    msg.set_content(_ftext)
                     raw = msg.as_bytes()
                     if working is not None:
                         M.append('"%s"' % working, "(\\Draft)", _time.time(), raw)

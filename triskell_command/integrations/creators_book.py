@@ -10,6 +10,7 @@ utilisateur).
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 
 from .obelisk.repo import _sb  # même client Supabase que le reste de l'app
@@ -36,7 +37,7 @@ def _clean(fields: dict) -> dict:
         out["message"] = (f.get("message") or "").strip()[:20000]
     if "notes" in f:
         out["notes"] = (f.get("notes") or "").strip()[:20000]
-    for k in ("contacted_at", "next_follow_up_at"):
+    for k in ("contacted_at", "next_follow_up_at", "unsubscribed_at"):
         if k in f:
             v = f.get(k)
             if isinstance(v, str):
@@ -44,6 +45,72 @@ def _clean(fields: dict) -> dict:
             else:
                 out[k] = v or None
     return out
+
+
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+
+def _emails_in(text: str) -> set[str]:
+    return {m.lower() for m in _EMAIL_RE.findall(text or "")}
+
+
+def is_unsubscribed(row: dict) -> bool:
+    """Vrai si ce créateur s'est désinscrit (colonne `unsubscribed_at` posée).
+    Faux si la colonne n'existe pas encore (migration 54 non appliquée)."""
+    return bool((row or {}).get("unsubscribed_at"))
+
+
+def mark_unsubscribed_by_email(email: str) -> int:
+    """Marque tout créateur du carnet dont l'adresse correspond à `email`
+    (le `handle` s'il EST l'adresse, ou une adresse citée dans les notes).
+
+    Idempotent (un déjà-désinscrit n'est pas recompté). TOLÉRANT si la colonne
+    `unsubscribed_at` n'existe pas encore (migration 54) : logge et renvoie 0
+    sans jamais casser le clic de désinscription. Renvoie le nombre de fiches
+    nouvellement marquées.
+    """
+    sb = _sb()
+    if sb is None:
+        return 0
+    addr = (email or "").strip().lower()
+    if "@" not in addr:
+        return 0
+    try:
+        by_handle = (sb.table(TABLE)
+                     .select("id,handle,notes,unsubscribed_at")
+                     .ilike("handle", addr).execute().data) or []
+        by_notes = (sb.table(TABLE)
+                    .select("id,handle,notes,unsubscribed_at")
+                    .ilike("notes", f"%{addr}%").execute().data) or []
+    except Exception as exc:
+        logger.warning("creators_book.mark_unsubscribed_by_email search: %s",
+                       exc)
+        return 0
+    seen: set = set()
+    count = 0
+    for r in (by_handle + by_notes):
+        rid = r.get("id")
+        if not rid or rid in seen:
+            continue
+        seen.add(rid)
+        # Correspondance PRÉCISE : handle == adresse, OU adresse exacte dans
+        # les notes (le %like% seul pourrait matcher une sous-chaîne d'une
+        # AUTRE adresse — ex. « jo@x.com » dans « bjo@x.com »).
+        handle_ok = (r.get("handle") or "").strip().lower() == addr
+        notes_ok = addr in _emails_in(r.get("notes") or "")
+        if not (handle_ok or notes_ok):
+            continue
+        if r.get("unsubscribed_at"):
+            continue  # déjà désinscrit
+        try:
+            sb.table(TABLE).update(
+                {"unsubscribed_at": _now_iso()}).eq("id", rid).execute()
+            count += 1
+        except Exception as exc:
+            # Colonne absente (migration 54 non appliquée) → dégradé propre.
+            logger.warning("creators_book.mark_unsubscribed update %s: %s",
+                           rid, exc)
+    return count
 
 
 def list_all(*, relance: bool = False, limit: int = 300) -> dict:

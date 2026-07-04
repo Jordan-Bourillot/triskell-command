@@ -88,6 +88,12 @@ check("pied idempotent (pas de doublon)",
       t3.count("/api/unsubscribe?u=") == 1 and ht3.count("/api/unsubscribe?u=") == 1)
 tn, htn = U.inject_footer("Corps", "", "")
 check("sans destinataire → corps inchangé", tn == "Corps" and htn == "")
+# Document HTML complet : le pied s'insère DANS le corps (avant </body>).
+_, hdoc = U.inject_footer(
+    "x", "<html><body><p>Salut</p></body></html>", "jean@exemple.fr")
+check("pied inséré avant </body> (document complet)",
+      hdoc.index("/api/unsubscribe?u=") < hdoc.index("</body>")
+      and hdoc.endswith("</body></html>"))
 
 # ---------------------------------------------------------------------------
 print("2) prospection_headers (core)…")
@@ -170,6 +176,132 @@ check("envoi groupé : garde-fou plafond (montée auto)",
 src_appr = inspect.getsource(Api._approve_prospect_draft)
 check("validation brouillon : pied de désinscription injecté",
       "inject_footer" in src_appr)
+
+# ---------------------------------------------------------------------------
+print("5) Désinscription des CRÉATEURS…")
+from triskell_command.integrations import creators_book as CB  # noqa: E402
+
+
+class _Res:
+    def __init__(self, data): self.data = data
+
+
+class _Q:
+    """Faux constructeur de requête Supabase (fluent) — table/select/ilike/
+    eq/update/execute — juste ce que creators_book utilise."""
+    def __init__(self, store, rows=None, update=None):
+        self.store = store
+        self.rows = rows if rows is not None else list(store["rows"])
+        self._update = update
+
+    def select(self, *a, **k):
+        return self
+
+    def ilike(self, col, val):
+        needle = val.strip("%").lower()
+        exact = not val.startswith("%")
+        def m(r):
+            cell = (r.get(col) or "").lower()
+            return cell == needle if exact else needle in cell
+        return _Q(self.store, [r for r in self.rows if m(r)], self._update)
+
+    def eq(self, col, val):
+        return _Q(self.store,
+                  [r for r in self.rows if str(r.get(col)) == str(val)],
+                  self._update)
+
+    def update(self, data):
+        return _Q(self.store, self.rows, data)
+
+    def execute(self):
+        if self._update is not None:
+            for r in self.rows:
+                r.update(self._update)
+            self.store["updates"] += 1
+        return _Res(list(self.rows))
+
+
+class FakeSB:
+    def __init__(self, rows):
+        self.store = {"rows": rows, "updates": 0}
+
+    def table(self, name):
+        return _Q(self.store)
+
+
+def _rows():
+    return [
+        {"id": "c1", "handle": "emilie@crochet.fr", "notes": "",
+         "unsubscribed_at": None},
+        {"id": "c2", "handle": "tiktok_kevin",
+         "notes": "écrire à kevin@tuto.fr", "unsubscribed_at": None},
+        {"id": "c3", "handle": "bemilie@crochet.fr", "notes": "",
+         "unsubscribed_at": None},   # piège : handle sur-chaîne
+        {"id": "c4", "handle": "deja@out.fr", "notes": "",
+         "unsubscribed_at": "2026-07-01T00:00:00Z"},   # déjà désinscrit
+        {"id": "c5", "handle": "tiktok_lea",
+         "notes": "contact alea@crochet.fr", "unsubscribed_at": None},  # piège notes
+    ]
+
+
+check("is_unsubscribed lit la colonne",
+      CB.is_unsubscribed({"unsubscribed_at": "2026-07-01T00:00:00Z"}) is True
+      and CB.is_unsubscribed({"unsubscribed_at": None}) is False
+      and CB.is_unsubscribed({}) is False)
+
+rows = _rows()
+CB._sb = lambda: FakeSB(rows)   # type: ignore[assignment]
+n = CB.mark_unsubscribed_by_email("emilie@crochet.fr")
+by_id = {r["id"]: r for r in rows}
+check("handle exact désinscrit (c1)", by_id["c1"]["unsubscribed_at"] and n == 1)
+check("sur-chaîne du handle NON touchée (bemilie…)",
+      by_id["c3"]["unsubscribed_at"] is None)
+
+rows = _rows()
+CB._sb = lambda: FakeSB(rows)   # type: ignore[assignment]
+n = CB.mark_unsubscribed_by_email("kevin@tuto.fr")
+by_id = {r["id"]: r for r in rows}
+check("adresse citée dans les notes désinscrite (c2)",
+      by_id["c2"]["unsubscribed_at"] and n == 1)
+
+rows = _rows()
+CB._sb = lambda: FakeSB(rows)   # type: ignore[assignment]
+n = CB.mark_unsubscribed_by_email("lea@crochet.fr")
+by_id = {r["id"]: r for r in rows}
+check("sous-chaîne d'une adresse des notes NON touchée (alea…)",
+      by_id["c5"]["unsubscribed_at"] is None and n == 0)
+
+rows = _rows()
+CB._sb = lambda: FakeSB(rows)   # type: ignore[assignment]
+n = CB.mark_unsubscribed_by_email("deja@out.fr")
+check("déjà désinscrit → non recompté (idempotent)", n == 0)
+
+# process_unsubscribe désinscrit AUSSI les créateurs (pas que les prospects).
+rows = _rows()
+CB._sb = lambda: FakeSB(rows)   # type: ignore[assignment]
+U._sb_client = lambda: object()             # truthy : passe le garde None
+PS.mark_unsubscribed_by_email = lambda sb, email, reason="": 0  # stub prospects
+res = U.process_unsubscribe(U.make_token("emilie@crochet.fr"))
+check("process_unsubscribe : le clic désinscrit le créateur",
+      res.get("ok") and res.get("creators") == 1)
+
+# Câblage des 4 chemins d'envoi créateurs (en-tête + pied + blocage désinscrit).
+src_appr_cr = inspect.getsource(Api._approve_creator_draft)
+check("envoi créateur (SMTP) : pied + en-tête + blocage désinscrit",
+      "inject_footer" in src_appr_cr and "prospection_headers" in src_appr_cr
+      and "is_unsubscribed" in src_appr_cr)
+src_make = inspect.getsource(Api.creators_make_draft)
+check("brouillon créateur (IMAP manuel) : en-tête + pied + blocage",
+      "headers_for" in src_make and "inject_footer" in src_make
+      and "is_unsubscribed" in src_make)
+src_queue = inspect.getsource(Api.creators_queue_draft)
+check("mise en file créateur : blocage désinscrit",
+      "is_unsubscribed" in src_queue)
+from triskell_command.integrations import creator_followup as CF  # noqa: E402
+src_cf = inspect.getsource(CF)
+check("relance J+7 créateur : en-tête + pied + blocage",
+      "headers_for" in src_cf and "inject_footer" in src_cf
+      and "is_unsubscribed" in src_cf)
 
 # ---------------------------------------------------------------------------
 print()
