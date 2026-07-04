@@ -56,14 +56,16 @@ from triskell_command.integrations.pixelpros_pages import (  # noqa: E402
     BASE_URL, KNOWN_SLUGS, pages_for_sector, slug_for_sector,
 )
 
-check("54 pages métier connues", len(KNOWN_SLUGS) == 54,
+check("55 pages métier connues", len(KNOWN_SLUGS) == 55,
       f"-> {len(KNOWN_SLUGS)}")
 
-# Secteurs RÉELS observés dans la base prospects (inventaire 2026-06-12)
+# Secteurs RÉELS observés dans la base prospects (inventaire 2026-06-12).
+# coiffeur/coiffeuse/barbier ont leur PAGE DÉDIÉE depuis le 17/06 (avant :
+# rangés dans « beaute ») ; les pures esthétiques restent sur « beaute ».
 cas_reconnus = {
-    "coiffeuse":            "beaute",
-    "Coiffeur":             "beaute",
-    "barbier":              "beaute",
+    "coiffeuse":            "coiffeur",
+    "Coiffeur":             "coiffeur",
+    "barbier":              "coiffeur",
     "Artisanat — esthétique": "beaute",
     "institut de beauté":   "beaute",
     "onglerie":             "beaute",
@@ -239,7 +241,7 @@ for secteur in cas_generiques:
     check(f"'{secteur}' → générique", got == "", f"-> '{got}'")
 
 # Les URLs produites sont toujours valides et complètes
-for secteur, attendu in (("coiffeuse", "beaute"), ("formation", None)):
+for secteur, attendu in (("coiffeuse", "coiffeur"), ("formation", None)):
     page, demo = pages_for_sector(secteur)
     if attendu:
         check(f"URLs '{secteur}' ciblées",
@@ -274,10 +276,10 @@ tpl = ("Bonjour {{name}}, votre page : {{page_metier}} et un exemple "
 prospect_coiffeuse = {"raison_sociale": "De mèche avec Sandy",
                       "secteur": "coiffeuse"}
 out = _apply_placeholders(tpl, prospect_coiffeuse, "Jordan")
-check("{{page_metier}} rempli (coiffeuse → /beaute)",
-      f"{BASE_URL}/beaute" in out, f"-> {out[:160]}")
-check("{{page_demo}} rempli (coiffeuse → /demo-beaute)",
-      f"{BASE_URL}/demo-beaute" in out)
+check("{{page_metier}} rempli (coiffeuse → /coiffeur)",
+      f"{BASE_URL}/coiffeur" in out, f"-> {out[:160]}")
+check("{{page_demo}} rempli (coiffeuse → /demo-coiffeur)",
+      f"{BASE_URL}/demo-coiffeur" in out)
 check("aucun placeholder pages restant",
       "page_metier" not in out and "page_demo" not in out, f"-> {out[:160]}")
 # Piège des syntaxes jumelles : {page_demo} se substituait À L'INTÉRIEUR
@@ -285,7 +287,7 @@ check("aucun placeholder pages restant",
 check("aucune accolade orpheline autour des liens",
       "{" not in out and "}" not in out, f"-> {out[:200]}")
 check('href propre en HTML (pas de href="{url}")',
-      'href="https://pixel-pros.fr/demo-beaute"' in _apply_placeholders(
+      'href="https://pixel-pros.fr/demo-coiffeur"' in _apply_placeholders(
           '<a href="{{page_demo}}">Voir</a>', prospect_coiffeuse, "Jordan"))
 
 prospect_macon = {"raison_sociale": "Maçonnerie Le Goff", "secteur": "maçon"}
