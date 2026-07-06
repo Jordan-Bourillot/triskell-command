@@ -26,6 +26,18 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+# Normalisation de la casse d'un nom (« à la mesure du bois » → « À la Mesure
+# du Bois »). Best-effort : si le module partagé venait à manquer, on renvoie
+# le nom tel quel — le rendu du mail n'est jamais bloqué pour ça.
+try:
+    from triskell_core.prospect.core.name_case import (
+        normalize_display_name as _normalize_name,
+    )
+except Exception:  # pragma: no cover - repli défensif
+    def _normalize_name(name):
+        return name or ""
+
+
 # ---------------------------------------------------------------------------
 # Champs canoniques d'un prospect Convoi
 # ---------------------------------------------------------------------------
@@ -549,6 +561,13 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         raison = _clean_bn(raison)
     except Exception:
         pass
+    # Casse : ~1 % des fiches ont un nom tout en minuscules (« à la mesure du
+    # bois »), qui apparaissait tel quel dans le mail. On remet une casse
+    # « enseigne » AU RENDU (jamais en base) et UNIQUEMENT sur les noms
+    # clairement fautifs — casse mixte / ALL CAPS voulus laissés intacts.
+    raison = _normalize_name(raison)
+    prenom = _normalize_name(prenom)
+    nom    = _normalize_name(nom)
     ville     = prospect.get("ville", "") or ""
     secteur   = prospect.get("secteur", "") or ""
     email     = prospect.get("email", "") or ""
