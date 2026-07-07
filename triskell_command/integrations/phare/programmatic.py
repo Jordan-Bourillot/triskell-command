@@ -85,6 +85,53 @@ Produis la page au format JSON."""
 
 
 # ---------------------------------------------------------------------------
+class ProgrammaticReviewer(agents.Agent):
+    """2e passe : relit et corrige la page écrite par le générateur, avec un
+    œil neuf. Ajouté le 08/07/2026 après un test paysagiste où le contenu de
+    fond était bon mais laissait passer des fautes (« jardins Lisieux » au lieu
+    de « jardins à Lisieux », « un seul page »). Une relecture par un second
+    agent attrape ce qu'un rédacteur ne voit pas sur son propre texte."""
+    name = "programmatic_reviewer"
+    role = """Tu es le relecteur-correcteur de Le Phare.
+
+On te donne le texte d'une page web déjà rédigée (en Markdown) et la/les
+variables de la page (ex. la ville). Ta mission : RELIRE et CORRIGER, œil neuf,
+SANS changer le fond ni les faits.
+
+À corriger IMPÉRATIVEMENT :
+- Toute faute d'orthographe, de grammaire, de conjugaison, d'accord.
+- Les tournures bancales où une variable a été insérée sans le bon mot de
+  liaison : « jardins {ville} » devient « jardins à {ville} », « chantiers
+  {ville} » devient « chantiers à {ville} », « nous livrons » mal accordé, etc.
+- Les répétitions maladroites, les phrases qui ne veulent rien dire.
+- Les tics d'IA restants : tiret cadratin « — » ou demi-cadratin « – »
+  (remplace par une virgule, une parenthèse ou un point), « n'hésitez pas »,
+  « il est important de », deux-points en annonce dramatique.
+
+INTERDIT :
+- Changer un fait, un chiffre, un prix, un délai, une option de l'offre.
+- Raccourcir ou résumer : tu gardes TOUTE la longueur et TOUTES les sections.
+- Inventer un lieu ou une information.
+- Réécrire pour réécrire : une phrase correcte, tu la laisses telle quelle.
+
+Format JSON strict :
+{
+  "body_md": str (le texte entier corrigé, mêmes titres ##, mêmes faits),
+  "corrections": [str] (liste courte des corrections, vide si rien à corriger)
+}"""
+
+    def run(self, *, body_md: str, variables: dict, app_state=None) -> dict:
+        prompt = f"""VARIABLES DE LA PAGE : {variables}
+
+TEXTE À RELIRE ET CORRIGER (Markdown) :
+{body_md}
+
+Rends le texte corrigé au format JSON."""
+        out = self.call(prompt, app_state=app_state)
+        return out if isinstance(out, dict) else {}
+
+
+# ---------------------------------------------------------------------------
 def _interpolate(pattern: str, variables: dict) -> str:
     """Remplace {var} par la valeur correspondante (sécurité : strip HTML)."""
     out = pattern
@@ -207,6 +254,7 @@ def generate_pages(template_id: str, *, batch_size: int = 20,
     already_keys = {str(sorted((a.get("variables") or {}).items())) for a in already}
 
     generator = ProgrammaticGenerator()
+    reviewer = ProgrammaticReviewer()
     created = 0
     skipped = 0
     for item in items:
@@ -223,6 +271,18 @@ def generate_pages(template_id: str, *, batch_size: int = 20,
         if not out or not out.get("body_md"):
             continue
         body_md = _strip_ai_tics(out["body_md"])
+        # 2e passe : relecture-correction par un agent à l'œil neuf (français,
+        # variable insérée sans préposition, cohérence). Garde-fou : on ne garde
+        # la version relue que si elle est non vide et pas nettement plus courte
+        # (une relecture ratée ne doit jamais amputer ni perdre la page).
+        try:
+            rev = reviewer.run(body_md=body_md, variables=item,
+                               app_state=app_state)
+            rev_body = _strip_ai_tics((rev or {}).get("body_md") or "")
+            if rev_body and len(rev_body.split()) >= 0.7 * len(body_md.split()):
+                body_md = rev_body
+        except Exception as exc:
+            logger.warning("prog review LLM: %s", exc)
         title = _strip_ai_tics(out.get("title", ""))
         meta = _strip_ai_tics(out.get("meta_description", ""))
         word_count = len(body_md.split())
