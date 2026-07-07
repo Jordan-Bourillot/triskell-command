@@ -177,6 +177,41 @@ def _write_state(data: dict) -> None:
         logger.debug("autopilot_runner write_state: %s", exc)
 
 
+def _maybe_restore_nightly_target(sb, raw: dict) -> dict:
+    """Rétablissement AUTO d'un ralentissement temporaire du volume d'envoi.
+
+    Si `raw` porte un `nightly_target_restore_at` (ISO) arrivé à échéance, on
+    remet `nightly_target` à `nightly_target_restore_to` (défaut 70), on efface
+    les deux marqueurs et on réécrit la config en base — une seule fois. Sert à
+    annuler TOUT SEUL un throttle posé pour écouler un backlog (07/07/2026 :
+    35 → 70 après 2 jours), sans dépendre d'une session Claude ouverte.
+    Best-effort : ne lève jamais, ne bloque jamais le robot.
+    """
+    at = raw.get("nightly_target_restore_at")
+    if not at:
+        return raw
+    try:
+        from datetime import datetime, timezone
+        due = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) < due:
+            return raw  # pas encore l'échéance
+        target = int(raw.get("nightly_target_restore_to") or 70)
+        new = dict(raw)
+        new["nightly_target"] = target
+        new.pop("nightly_target_restore_at", None)
+        new.pop("nightly_target_restore_to", None)
+        from .shared_settings_db import upsert_setting
+        upsert_setting(sb, PIPELINE_CFG_KEY, new)
+        logger.info("autopilot_runner: nightly_target rétabli à %s "
+                    "(fin du throttle temporaire).", target)
+        return new
+    except Exception as exc:
+        logger.debug("_maybe_restore_nightly_target: %s", exc)
+        return raw
+
+
 def _apply_shared_pipeline_overrides(cfg) -> list:
     """Applique la config auto-pilote de la BASE PARTAGEE par-dessus le cfg
     local (pipeline.json). Indispensable cote boite robots (volume neuf sans
@@ -192,6 +227,8 @@ def _apply_shared_pipeline_overrides(cfg) -> list:
         return []
     if not isinstance(raw, dict):
         return []
+    # Rétablissement AUTO d'un throttle temporaire (voir helper).
+    raw = _maybe_restore_nightly_target(sb, raw)
     applied = []
     for f in _SHARED_CFG_FIELDS:
         if f in raw and hasattr(cfg, f):
