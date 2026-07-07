@@ -1,6 +1,6 @@
 """Veille proactive de Claude.
 
-Toutes les heures (par défaut), interroge claude_advisor en mode "proactive".
+Toutes les 4 heures (par défaut), interroge claude_advisor en mode "proactive".
 Si la réponse a urgency=high (ou medium si activé), pousse un événement
 vers l'UI (callback set par main.py au boot) avec :
   - le headline court
@@ -12,7 +12,7 @@ L'UI décide ensuite :
 
 Configuration via shared_settings.claude_proactive ou settings.json local :
   enabled: bool       (default True)
-  interval_minutes    (default 60)
+  interval_minutes    (default 240 — soit toutes les 4h)
   notify_on_medium    (default False — ne notifie que high)
 """
 
@@ -30,7 +30,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
-    "interval_minutes": 60,
+    # 240 (4h) et non 60 : la veille appelait l'IA CHAQUE heure 24/7, soit
+    # ~24 appels/jour pour presque rien la plupart du temps. À 4h -> ~6/jour,
+    # on divise la note par 4 sans rater les vraies urgences (le chien de
+    # garde des robots alerte déjà en direct). Réglable via shared_settings.
+    "interval_minutes": 240,
     "notify_on_medium": False,
     "min_seconds_between_notifications": 60 * 60 * 3,  # 3h anti-spam
 }
