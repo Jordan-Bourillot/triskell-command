@@ -305,6 +305,12 @@ OFFRE QUE TU PROPOSES (adaptée à son secteur) :
 - Adresse : si tu as un prénom + nom → « Bonjour <Prénom> » ou
   « Bonjour Monsieur/Madame <Nom> ». Si tu n'as que la raison sociale
   → « Bonjour, » ou « Bonjour l'équipe de <raison sociale>, ».
+- NOM DE L'ENTREPRISE : emploie-le UNE seule fois maximum, et sous une
+  forme COURTE et naturelle. Ne recopie JAMAIS un nom à rallonge ou
+  administratif en entier (ex. « Artisan Boulanger, Pâtissier,
+  Sandwicherie & Petite Restauration » ou un nom TOUT EN MAJUSCULES) :
+  dis plutôt « votre boulangerie », « votre salon », « votre garage ».
+  Mieux vaut un mot générique du métier qu'un nom long répété.
 - Ton : direct, chaleureux mais pro, jamais commercial agressif.
 - Longueur : 5 à 10 lignes max.
 - Pas de « J'espère que vous allez bien » ni autre formule creuse.
@@ -389,6 +395,28 @@ def _format_templates_for_prompt(templates: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _clean_prospect_name(prospect: dict) -> dict:
+    """Renvoie une COPIE du prospect avec un nom d'entreprise court et propre.
+
+    Empêche de recopier dans le mail un nom « à rallonge » / administratif
+    (« Artisan Boulanger, Pâtissier, Sandwicherie… », « BISCUITERIE DES
+    KORRIGANS »…), qui sonne faux et fait fuir. Best-effort : si le nettoyage
+    échoue, on garde le nom d'origine.
+    """
+    p = dict(prospect or {})
+    raw = (p.get("raison_sociale") or "").strip()
+    if not raw:
+        return p
+    try:
+        from .apercu_site import clean_business_name
+        short = clean_business_name(raw)
+        if short:
+            p["raison_sociale"] = short
+    except Exception:
+        pass
+    return p
+
+
 def generate_message_from_templates(
     prospect: dict[str, str],
     *,
@@ -403,6 +431,7 @@ def generate_message_from_templates(
     """Pioche dans `templates` et renvoie {subject, body, body_html,
     template_key, offer_name}. Si la liste est vide, retombe sur le fallback
     classique (génération libre via generate_message)."""
+    prospect = _clean_prospect_name(prospect)
     if not templates:
         # Pas de templates → on ne peut rien piocher, on laisse l'appelant
         # gérer le fallback (généralement vers generate_message classique).
@@ -900,6 +929,7 @@ def generate_message(
 ) -> dict[str, str]:
     """Renvoie {'subject': '...', 'body': '...', 'body_html': '...',
     'offer_name': '...'}."""
+    prospect = _clean_prospect_name(prospect)
     offer = pick_offer_for_sector(prospect.get("secteur", ""), catalog)
     demo = pick_demo_for_sector(prospect.get("secteur", ""), catalog)
     demo_block = ""
@@ -1000,8 +1030,19 @@ def _call_ai(
     """Appelle le bon provider via Triskell Core."""
     from triskell_core.ai.providers import send_to_provider, ProviderError
     try:
-        return send_to_provider(provider, model, prompt, api_keys)
+        out = send_to_provider(provider, model, prompt, api_keys)
+        try:
+            from .ai_health import note_ai_ok
+            note_ai_ok()
+        except Exception:
+            pass
+        return out
     except ProviderError as exc:
+        try:
+            from .ai_health import record_ai_error
+            record_ai_error("écriture des mails", exc, provider=provider)
+        except Exception:
+            pass
         raise RuntimeError(f"IA indisponible : {exc}") from exc
 
 

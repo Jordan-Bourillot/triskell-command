@@ -556,6 +556,11 @@ def _apply_one(action_id: str, *, app_state=None) -> dict:
             out = ag.run(site=site, action=action, pages=pages,
                          app_state=app_state)
         except Exception as exc:
+            try:
+                from ..ai_health import record_ai_error
+                record_ai_error("Exécuteur SEO (Le Phare)", exc)
+            except Exception:
+                pass
             return _fail(action_id,
                          f"L'IA exécutrice n'a pas répondu : {str(exc)[:200]}")
 

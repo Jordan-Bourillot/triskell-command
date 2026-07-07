@@ -9247,6 +9247,19 @@ class Api:
         out = {"ok": True, "workers": [], "delivrabilité": {},
                "summary": {"healthy": 0, "warning": 0, "error": 0}}
 
+        # 0) Alerte « crédit IA épuisé » : la page Santé surveillait les robots
+        # et la base, jamais le solde de l'IA payante — un crédit vide bloquait
+        # SEO + mails + assistant EN SILENCE (07/07/2026). On le remonte ICI.
+        try:
+            from ..integrations import ai_health as _ai_health
+            _ai_credit = _ai_health.ai_credit_status(self._supabase())
+        except Exception:
+            _ai_credit = {"ok": True, "active": False}
+        out["ai_credit"] = _ai_credit
+        if _ai_credit.get("active"):
+            out["ok"] = False
+            out["summary"]["error"] += 1
+
         # 1) Statuts des workers
         worker_modules = [
             ("replies_poller",        "Lecture boîte mail (IMAP)"),

@@ -67,30 +67,37 @@ def _strip_accents(s: str) -> str:
 def clean_business_name(name: str) -> str:
     """Nettoie un nom d'entreprise pour l'afficher dans un mail / un aperçu.
 
-    Retire une parenthèse FINALE (nom du gérant, sigle, note) qui, dans une
-    prose de prospection, sonne comme une « variable mal remplie » :
-        "Institut Embellia (Deguilhem Delphine)" -> "Institut Embellia"
-        "Mr Moustache ( uniquement SANS RENDEZ - VOUS)" -> "Mr Moustache"
-    Garde le nom tel quel si le retrait le viderait (nom = juste « (...) »).
-
-    Coupe aussi les noms Google Maps « raison sociale : descriptif
-    kilométrique » (« FABBI PATRICK PEINTURE: Artisan peintre en bâtiment
-    Rénovation façade… » → « FABBI PATRICK PEINTURE ») et plafonne la
-    longueur : au-delà de ~70 caractères ce n'est plus un nom, c'est une
-    description — un objet de mail qui l'embarque tel quel fait fuir.
+    Objectif : ne JAMAIS recopier tel quel dans un mail un nom « à rallonge »
+    ou administratif — ça sonne faux et ça fait fuir. On coupe donc :
+        "Institut Embellia (Deguilhem Delphine)"      -> "Institut Embellia"
+        "FABBI PATRICK PEINTURE: Artisan peintre…"     -> "Fabbi Patrick Peinture"
+        "Karen Signour - Coiffeuse à Domicile"         -> "Karen Signour"
+        "Artisan Boulanger, Pâtissier, Sandwicherie…"  -> "Artisan Boulanger"
+        "BISCUITERIE DES KORRIGANS"                    -> "Biscuiterie des Korrigans"
+    Garde le nom tel quel si le nettoyage le viderait.
     """
     n = (name or "").strip()
+    # 1. Parenthèse FINALE (gérant, sigle, note) -> retirée.
     stripped = re.sub(r"\s*\([^()]*\)\s*$", "", n).strip()
     n = stripped or n
-    # « Nom : slogan/services » — tout ce qui suit le « : » est du descriptif
-    # (seulement si la suite est longue : « Institut : Beauté » reste intact,
-    # et jamais si le préfixe gardé est trop court ou n'est qu'une forme
-    # juridique : « SARL: Boulangerie Martin » ne doit pas devenir « SARL »).
-    m = re.match(r"^(.{2,60}?)\s*[:|]\s+.{15,}$", n)
+    # 2. « Nom : slogan » / « Nom - Coiffeuse à domicile » / « Nom | services » :
+    #    ce qui suit un séparateur (: ou |, ou un tiret ESPACÉ – — -) est du
+    #    descriptif -> on garde le vrai nom devant. Le tiret doit être espacé
+    #    des deux côtés, sinon on couperait « Jean-Pierre ». Prefix ni trop
+    #    court ni une simple forme juridique (« SARL: Boulangerie » -> pas « SARL »).
+    m = re.match(r"^(.{2,60}?)(?:\s*[:|]|\s+[–—-])\s+.{10,}$", n)
     if m:
         prefix = m.group(1).strip(" .,-—·|")
         if len(prefix) >= 6 and prefix.lower() not in _LEGAL_FORMS:
             n = prefix
+    # 3. Nom « à rallonge » = liste de métiers séparés par des virgules : on
+    #    garde le 1er segment. Seulement si c'est vraiment long, pour ne pas
+    #    amputer « Dupont, Durand & Fils ».
+    if len(n) > 40 and "," in n:
+        head = n.split(",", 1)[0].strip(" .,-—·|")
+        if len(head) >= 6 and head.lower() not in _LEGAL_FORMS:
+            n = head
+    # 4. Plafond de longueur : au-delà de ~70 c'est une description, pas un nom.
     if len(n) > 70:
         cut = n[:60]
         n = (cut[:cut.rfind(" ")] if " " in cut else cut)
@@ -99,6 +106,14 @@ def clean_business_name(name: str) -> str:
         while words and words[-1].lower().strip("'’") in _TRAILING_STOPWORDS:
             words.pop()
         n = (" ".join(words) or cut).strip(" .,-—·|:;")
+    # 5. TOUT EN CAPITALES (multi-mots) -> casse naturelle : un mail qui crie
+    #    « BISCUITERIE DES KORRIGANS » sonne spam. On épargne les sigles courts
+    #    (un seul mot) et les noms déjà en casse mixte (« NLC coiffure »).
+    letters = [c for c in n if c.isalpha()]
+    if letters and " " in n and all(c.isupper() for c in letters):
+        n = _titlecase_fr(n)
+    # 6. Ponctuation de fin parasite (« …Restauration. »).
+    n = n.strip(" .,;:—-·|")
     return n or (name or "").strip()
 
 
@@ -113,6 +128,29 @@ _TRAILING_STOPWORDS = frozenset({
     "de", "la", "le", "les", "du", "des", "et", "à", "a", "en",
     "d", "l", "au", "aux", "pour", "sur", "chez",
 })
+
+# Petits mots gardés en minuscule quand on remet un nom en casse naturelle.
+_FR_SMALL_WORDS = frozenset({
+    "de", "des", "du", "la", "le", "les", "et", "à", "a", "au", "aux",
+    "en", "d", "l", "sur", "sous", "chez", "the", "of", "and",
+})
+
+
+def _titlecase_fr(s: str) -> str:
+    """Remet un nom écrit TOUT EN CAPITALES en casse naturelle (français) :
+    « BISCUITERIE DES KORRIGANS » -> « Biscuiterie des Korrigans »."""
+    words = s.split()
+    out = []
+    for i, w in enumerate(words):
+        low = w.lower()
+        core = low.strip("'’")
+        if i > 0 and core in _FR_SMALL_WORDS:
+            out.append(low)
+        elif low:
+            out.append(low[:1].upper() + low[1:])
+        else:
+            out.append(w)
+    return " ".join(out)
 
 
 # ===========================================================================
