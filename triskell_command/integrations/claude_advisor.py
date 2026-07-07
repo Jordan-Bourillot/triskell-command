@@ -845,10 +845,12 @@ def _extract_action(raw: str):
 _ALLOWED_NAV_VIEWS = {
     "abtest", "argus", "autopilot", "brain", "catalogue", "chasseur",
     "chasseur_createurs", "clients", "clients_master", "config", "convoy",
-    "delivery", "drafts", "eclaireur", "eliks", "funnel", "geo", "health",
-    "lagriffe", "mail_templates", "mails", "morning", "obelisk", "phare",
-    "pixelpros", "pixelpros-affiliates", "prospecteur_google", "prospection",
-    "prospects_crm", "rankus", "replies", "revenue", "tutorial", "wow",
+    "creators", "delivery", "drafts", "eclaireur", "eliks", "flux_studio",
+    "funnel", "geo", "health", "lagriffe", "mail_templates", "mails",
+    "morning", "obelisk", "oeil_tri", "phare", "pixelpros",
+    "pixelpros-affiliates", "prospecteur_google", "prospection",
+    "prospects_crm", "rankus", "replies", "revenue", "sites_a_refaire",
+    "tutorial", "wow",
 }
 
 
