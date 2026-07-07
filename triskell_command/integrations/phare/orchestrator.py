@@ -63,6 +63,15 @@ def run_audit(site_id: str, *, app_state=None) -> dict:
         logger.warning("Auditeur LLM: %s", exc)
         analysis = {}
 
+    # L'IA n'a rien rendu (crédit épuisé, clé morte, dict vide sans quick win
+    # ni summary_md ni issue) : dire la vérité, EXACTEMENT comme run_analyst et
+    # run_strategy. Un audit vide marqué « vert » = la panne invisible du
+    # 26/06→03/07. On garde le crawl/PSI déjà en base (pages persistées plus
+    # haut), mais on NE persiste PAS un audit « réussi » sans analyse IA.
+    if agents.is_empty_ai_result(analysis):
+        return {"ok": False, "error": "L'IA auditeur n'a pas répondu "
+                "(crédit ou clé à vérifier)", "crawled_pages": len(pages)}
+
     # Persistance
     audit_row = {
         "site_id": site_id,
@@ -151,6 +160,12 @@ def run_keywords(site_id: str, *, app_state=None) -> dict:
         logger.warning("Veilleur LLM: %s", exc)
         plan = {}
 
+    # Rendu IA vide (crédit épuisé, clé morte, aucun mot-clé) → ok:False, jamais
+    # un succès muet : sans le plan du Veilleur il n'y a RIEN à persister.
+    if agents.is_empty_ai_result(plan):
+        return {"ok": False, "error": "L'IA veilleur mots-clés n'a pas répondu "
+                "(crédit ou clé à vérifier)"}
+
     primary = plan.get("primary_keywords") or []
     long_tail = plan.get("long_tail") or []
     kws_to_check = [k.get("keyword") for k in primary + long_tail if k.get("keyword")]
@@ -211,10 +226,27 @@ def run_keywords(site_id: str, *, app_state=None) -> dict:
         best = prev_best.get(kwl)
         if cur_pos is not None:
             best = cur_pos if best is None else min(best, cur_pos)
+        # Vérité mesurée vs estimation de l'IA : quand DataForSEO (service
+        # payant, non souscrit à ce jour) ne donne pas la valeur, on retombe
+        # sur l'estimation de l'agent — mais on le DIT (drapeau) au lieu de la
+        # ranger comme une mesure. « v » n'existe QUE si DataForSEO a répondu ;
+        # `difficulty` idem. Le drapeau permet de distinguer « mesuré » de
+        # « deviné » (une estimation IA n'a jamais la valeur d'une mesure).
+        #
+        # REPLI ASSUMÉ (documenté) : la table phare_keywords n'a pas encore de
+        # colonnes volume_estimated/difficulty_estimated, et repo.upsert_keywords
+        # ne recopie que sa liste blanche de champs — les deux drapeaux vivent
+        # donc dans l'objet rendu en mémoire (lu par l'UI/MCP et les tests), pas
+        # encore en base. Pour les persister durablement : ajouter les 2 colonnes
+        # booléennes au schéma ET à la liste blanche de repo.upsert_keywords.
+        volume_measured = "volume" in v
+        difficulty_measured = kwl in difficulty
         persisted.append({
             "keyword": kw,
             "volume": v.get("volume", k.get("estimated_volume", 0)),
+            "volume_estimated": not volume_measured,
             "difficulty": difficulty.get(kwl, k.get("estimated_difficulty", 0) or 0),
+            "difficulty_estimated": not difficulty_measured,
             "intent": k.get("intent") or "informational",
             "target_url": k.get("target_url_hint") or "",
             "current_position": cur_pos,
@@ -435,6 +467,11 @@ def run_tisseur(site_id: str, *, app_state=None) -> dict:
         logger.warning("Tisseur LLM: %s", exc)
         out = {}
 
+    # Rendu IA vide (crédit épuisé, clé morte) → ok:False, jamais un succès muet.
+    if agents.is_empty_ai_result(out):
+        return {"ok": False, "error": "L'IA tisseur n'a pas répondu "
+                "(crédit ou clé à vérifier)"}
+
     intra = out.get("intra_site_links") or []
     inter = out.get("inter_site_links") or []
     if intra or inter:
@@ -476,6 +513,11 @@ def run_backlinks(site_id: str, *, competitor_domains: Optional[list[str]] = Non
     except Exception as exc:
         logger.warning("ChasseurBacklinks LLM: %s", exc)
         out = {}
+
+    # Rendu IA vide (crédit épuisé, clé morte) → ok:False, jamais un succès muet.
+    if agents.is_empty_ai_result(out):
+        return {"ok": False, "error": "L'IA chasseur de backlinks n'a pas "
+                "répondu (crédit ou clé à vérifier)", "summary": summary}
 
     opps = out.get("opportunities") or []
     if opps:
@@ -657,19 +699,36 @@ def run_full_cycle(site_id: str, *, app_state=None) -> dict:
 # ---------------------------------------------------------------------------
 # Vue agrégée — Tableau de bord écosystème
 # ---------------------------------------------------------------------------
+# Cartes périodiques purement informatives : bulletins, plan du mois, contrôles
+# GEO. Elles n'appellent AUCUNE action de Jordan (juste à lire) → les compter
+# dans « à traiter » gonflait faussement le chiffre (94 affichés pour ~55 vrais
+# actionnables). On les recense à part (infos_count) sans jamais les supprimer.
+def _is_periodic_info_card(action: dict) -> bool:
+    """La carte est-elle une info périodique sans action à faire ?"""
+    agent = (action.get("agent") or "").lower()
+    if agent in {"analyste", "chef_orchestre"}:      # Bulletin…, Plan du mois…
+        return True
+    title = (action.get("title") or "").lstrip()
+    return title.startswith(("Bulletin", "Plan du mois", "GEO check", "GEO :"))
+
+
 def ecosystem_overview() -> dict:
     """Snapshot agrégé pour la vue UI."""
     sites = repo.list_sites()
     out_sites: list[dict] = []
     totals = {"organic_clicks_30d": 0, "impressions_30d": 0,
-              "actions_pending": 0, "audits_count": 0}
+              "actions_pending": 0, "infos_count": 0, "audits_count": 0}
     for s in sites:
         latest = repo.latest_audit(s["id"])
         metrics = repo.metrics_window(s["id"], days=30)
         clicks = sum(m.get("organic_clicks", 0) or 0 for m in metrics)
         imps = sum(m.get("impressions", 0) or 0 for m in metrics)
-        actions_pending = len([a for a in repo.list_actions(site_id=s["id"], limit=200)
-                               if a.get("status") in ("draft", "preview")])
+        # « À traiter » = cartes en attente MOINS les infos périodiques (elles
+        # se lisent, elles ne se traitent pas) ; infos_count les compte à part.
+        open_cards = [a for a in repo.list_actions(site_id=s["id"], limit=200)
+                      if a.get("status") in ("draft", "preview")]
+        infos_count = len([a for a in open_cards if _is_periodic_info_card(a)])
+        actions_pending = len(open_cards) - infos_count
         out_sites.append({
             "id": s["id"], "name": s["name"], "domain": s["domain"],
             "priority": s.get("priority", 50),
@@ -680,11 +739,13 @@ def ecosystem_overview() -> dict:
             "organic_clicks_30d": clicks,
             "impressions_30d": imps,
             "actions_pending": actions_pending,
+            "infos_count": infos_count,
             "last_audit_at": (latest or {}).get("ran_at"),
         })
         totals["organic_clicks_30d"] += clicks
         totals["impressions_30d"] += imps
         totals["actions_pending"] += actions_pending
+        totals["infos_count"] += infos_count
         if latest:
             totals["audits_count"] += 1
     # "ok" est obligatoire : les consommateurs (MCP sites_overview, front)

@@ -3889,6 +3889,11 @@ body.nav-simple #sidebar nav > div:not(:has(.nav-item[data-nav-core])) { display
 .geo-site-questions { font-size: 12px; color: hsl(var(--text-secondary)); }
 .geo-site-sub { font-size: 12px; color: hsl(var(--text-muted)); margin-top: 8px; }
 
+/* Petite ligne de contexte rassurante sous un score bas (0 % = normal
+   pour un site récent). Discrète : gris clair, sans fond. */
+.geo-site-context { font-size: 11.5px; color: hsl(var(--text-muted)); margin-top: 6px; line-height: 1.45; opacity: 0.9; }
+.geo-score-context { font-size: 12px; color: hsl(var(--text-muted)); margin-top: 6px; line-height: 1.5; }
+
 /* Badge « ✏️ améliorations en attente » sur les cartes de sites GEO */
 .geo-site-fixes {
   margin-top: 10px;
@@ -4469,6 +4474,12 @@ select.geo-input:focus {
 .geo-aifinding-applied {
   font-size: 12.5px; font-weight: 700;
   color: hsl(var(--success-text));
+}
+/* Conseil texte (plus de bouton qui publie une page) : à appliquer à la
+   main sur la page concernée du site. */
+.geo-aifinding-hint {
+  font-size: 12px; color: hsl(var(--text-muted));
+  line-height: 1.45; align-self: center;
 }
 
 /* Modale d'aperçu : plus large pour mieux voir le bloc rendu */

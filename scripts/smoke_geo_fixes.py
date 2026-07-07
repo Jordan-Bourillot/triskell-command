@@ -89,23 +89,28 @@ check("geo_state ok", bool(st.get("ok")))
 check("s1.pending_fixes = 2", sites.get("s1", {}).get("pending_fixes") == 2)
 check("s2.pending_fixes = 0", sites.get("s2", {}).get("pending_fixes") == 0)
 
-print("3) Publication d'une suggestion → marquée appliquée…")
-api.geo_publish_content = lambda p: {"ok": True, "url": "https://un.fr/geo/x"}
+print("3) Une correction d'audit ne se publie PLUS comme une page (07/07/2026)…")
+# 🚨 Audit du 07/07 : publier un finding créait une page orpheline dont le
+# titre était une consigne de robot. geo_publish_finding REFUSE désormais,
+# ne crée aucune page (aucun item generated) et ne marque rien « appliqué ».
+def _boom(_p):
+    raise AssertionError("geo_publish_content ne doit plus être appelé")
+api.geo_publish_content = _boom
 r = api.geo_publish_finding({"audit_id": "a2", "finding_id": "f1"})
 f1 = next(f for f in fake_root["ai_audits"][0]["findings"] if f["id"] == "f1")
-check("publication ok", bool(r.get("ok")))
-check("f1 marquée appliquée (applied_at posé)", bool(f1.get("applied_at")))
-check("le compteur tombe à 1",
-      api._geo_pending_fixes_by_site(fake_root).get("s1") == 1)
+check("refus propre (ok=False)", r.get("ok") is False)
+check("message d'explication clair", "pages autonomes" in (r.get("error") or ""))
+check("aucune page créée (rien dans generated)", fake_root["generated"] == [])
+check("f1 N'EST PAS marquée appliquée", not f1.get("applied_at"))
+check("le compteur reste à 2 (rien appliqué)",
+      api._geo_pending_fixes_by_site(fake_root).get("s1") == 2)
 
-api.geo_publish_content = lambda p: {"ok": False, "error": "panne simulée"}
-r2 = api.geo_publish_finding({"audit_id": "a2", "finding_id": "f2"})
-f2 = next(f for f in fake_root["ai_audits"][0]["findings"] if f["id"] == "f2")
-check("publication ratée → refus transmis", r2.get("ok") is False)
-check("…et la suggestion N'EST PAS marquée appliquée",
-      not f2.get("applied_at"))
-check("…le compteur reste à 1",
-      api._geo_pending_fixes_by_site(fake_root).get("s1") == 1)
+# Validation d'entrée conservée : audit/finding inexistants → refus net.
+check("audit_id manquant → refus", api.geo_publish_finding(
+    {"finding_id": "f1"}).get("ok") is False)
+check("finding inexistant → refus",
+      api.geo_publish_finding({"audit_id": "a2", "finding_id": "zzz"})
+      .get("error") == "Suggestion introuvable")
 
 print("4) guide_snapshot expose le total…")
 api._supabase = lambda: None  # aucun accès base pendant le test
@@ -113,7 +118,8 @@ Api._GUIDE_CACHE["data"] = None
 Api._GUIDE_CACHE["at"] = 0
 snap = api.guide_snapshot({})
 check("guide_snapshot ok", bool(snap.get("ok")))
-check("geo_pending_fixes = 1 (s1 seul)", snap.get("geo_pending_fixes") == 1)
+check("geo_pending_fixes = 2 (s1 seul, rien appliqué)",
+      snap.get("geo_pending_fixes") == 2)
 
 print("5) L'écran et Perceval branchés…")
 ui = HERE / "triskell_command" / "web" / "ui"

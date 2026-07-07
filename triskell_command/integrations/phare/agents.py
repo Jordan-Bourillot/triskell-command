@@ -88,6 +88,47 @@ def call_llm(prompt: str, *, model: str = DEFAULT_MODEL,
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
 
+# Champs qui prouvent qu'un agent a VRAIMENT produit quelque chose d'exploitable.
+# Un rendu IA qui n'a AUCUN de ces champs (dict vide, clé morte, crédit épuisé)
+# ne doit JAMAIS être compté comme un succès : c'est la panne invisible du
+# 26/06→03/07 (7 jours de ticks « verts » alors que l'IA ne répondait plus).
+_MEANINGFUL_KEYS = (
+    "summary_md", "trend_summary_md", "vision_summary_md",
+    "quick_wins", "critical_issues", "primary_keywords", "long_tail",
+    "patches", "intra_site_links", "inter_site_links", "opportunities",
+    "priority_sites", "cluster_pivot", "next_week_recommendation",
+)
+
+
+def is_empty_ai_result(x: Any) -> bool:
+    """Un rendu d'agent est-il vide / inexploitable ?
+
+    Sert de garde-fou UNIFORME à toutes les missions de l'orchestrateur :
+    plutôt que chaque mission recolmate le piège dans son coin, elle appelle
+    ce helper pour décider « rendu IA vide → ok:False » de façon identique.
+
+    Renvoie True si `x` n'est pas un dict non vide OU s'il ne contient AUCUN
+    champ réellement porteur de contenu (voir `_MEANINGFUL_KEYS`) — même quand
+    l'IA a renvoyé un objet, mais dont toutes les clés utiles sont absentes,
+    vides, à zéro ou blanches.
+    """
+    if not isinstance(x, dict) or not x:
+        return True
+    for key in _MEANINGFUL_KEYS:
+        if key not in x:
+            continue
+        val = x[key]
+        if isinstance(val, str):
+            if val.strip():
+                return False
+        elif isinstance(val, (list, tuple, set, dict)):
+            if len(val) > 0:
+                return False
+        elif val:                       # nombre non nul, etc.
+            return False
+    return True
+
+
 def _parse_json(raw: str) -> dict | list:
     """Parse JSON tolérant fenced blocks."""
     if not raw:

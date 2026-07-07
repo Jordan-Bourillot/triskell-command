@@ -391,6 +391,7 @@ const GEO = {
             <div class="geo-score-text">
               <div class="geo-score-verdict">${verdict}</div>
               <div class="geo-score-meta">Concrètement : ton site est ressorti <b>${surv.cited} fois sur ${surv.total} tests</b> (questions posées à ${(n => `${n} IA différente${n > 1 ? 's' : ''}`)(new Set((surv.results || []).map(x => x.provider).filter(Boolean)).size)}) · <a href="#" data-show-details>voir le détail</a></div>
+              ${surv.score < 30 ? `<div class="geo-score-context">${this._esc(surv.context || 'Normal pour un site récent : les IA ne citent que des sites déjà connus. Ce chiffre montera avec le référencement.')}</div>` : ''}
               ${surv.note ? `<div class="geo-score-meta">⚠️ ${this._esc(surv.note)}</div>` : ''}
             </div>
           </div>
@@ -433,8 +434,8 @@ const GEO = {
                   <div class="geo-aifinding-actions">
                     ${f.applied_at
                       ? `<span class="geo-aifinding-applied">✓ Appliquée le ${this._fmtDate(f.applied_at)}</span>`
-                      : `<button class="btn btn-secondary geo-btn-mini" data-preview-finding="${f.id}">👁 Aperçu</button>
-                         <button class="btn btn-primary geo-btn-mini" data-publish-finding="${f.id}">📤 Appliquer sur le site</button>`}
+                      : `<button class="btn btn-secondary geo-btn-mini" data-preview-finding="${f.id}">👁 Voir le conseil</button>
+                         <span class="geo-aifinding-hint">💡 Conseil à appliquer directement sur la page concernée de ton site</span>`}
                   </div>
                 </div>
               </div>
@@ -468,21 +469,15 @@ const GEO = {
       panel.hidden = !panel.hidden;
       det.textContent = panel.hidden ? 'voir le détail' : 'masquer le détail';
     };
-    // Boutons Aperçu / Appliquer sur chaque finding
+    // Bouton "Voir le conseil" sur chaque finding (lecture seule : plus de
+    // publication de page orpheline — le conseil s'applique à la main sur
+    // la page concernée du site).
     if (audit) {
-      const pubBtns = Array.from(out.querySelectorAll('[data-publish-finding]'));
       out.querySelectorAll('[data-preview-finding]').forEach(b => {
         b.onclick = () => {
           const f = audit.findings.find(x => x.id === b.dataset.previewFinding);
           if (!f) return;
-          const cardBtn = pubBtns.find(x => x.dataset.publishFinding === f.id) || null;
-          this._openFindingPreview({ ...audit, site_id: site.id }, f, cardBtn);
-        };
-      });
-      pubBtns.forEach(b => {
-        b.onclick = () => {
-          const f = audit.findings.find(x => x.id === b.dataset.publishFinding);
-          if (f) this._publishFinding({ ...audit, site_id: site.id }, f, b);
+          this._openFindingPreview({ ...audit, site_id: site.id }, f);
         };
       });
     }
@@ -770,8 +765,8 @@ const GEO = {
             <div class="geo-aifinding-fix">
               <div class="geo-aifinding-fixtitle">💡 ${this._esc(f.fix_title)}</div>
               <div class="geo-aifinding-actions">
-                <button class="btn btn-secondary geo-btn-mini" data-preview-finding="${f.id}">👁 Aperçu</button>
-                <button class="btn btn-primary geo-btn-mini" data-publish-finding="${f.id}">📤 Publier sur le site</button>
+                <button class="btn btn-secondary geo-btn-mini" data-preview-finding="${f.id}">👁 Voir le conseil</button>
+                <span class="geo-aifinding-hint">💡 Conseil à appliquer directement sur la page concernée de ton site</span>
               </div>
             </div>
           </div>
@@ -781,30 +776,24 @@ const GEO = {
   },
 
   _wireAuditAi(out, audit) {
-    const pubBtns = Array.from(out.querySelectorAll('[data-publish-finding]'));
+    // Lecture seule : "Voir le conseil" ouvre l'aperçu, plus rien ne publie
+    // une page (le conseil s'applique à la main sur la page concernée).
     out.querySelectorAll('[data-preview-finding]').forEach(b => {
       b.onclick = () => {
         const f = audit.findings.find(x => x.id === b.dataset.previewFinding);
         if (!f) return;
-        const cardBtn = pubBtns.find(x => x.dataset.publishFinding === f.id) || null;
-        this._openFindingPreview(audit, f, cardBtn);
-      };
-    });
-    pubBtns.forEach(b => {
-      b.onclick = () => {
-        const f = audit.findings.find(x => x.id === b.dataset.publishFinding);
-        if (f) this._publishFinding(audit, f, b);
+        this._openFindingPreview(audit, f);
       };
     });
   },
 
-  _openFindingPreview(audit, finding, cardBtn) {
+  _openFindingPreview(audit, finding) {
     const overlay = document.createElement('div');
     overlay.className = 'geo-modal-overlay';
     // Le bloc proposé par l'IA est affiché dans une iframe isolée
     // (sandbox vide : ni scripts, ni accès à la page) : son HTML ne touche
-    // jamais le reste de l'app. Les couleurs fixes ci-dessous simulent la
-    // future page publique (toujours claire), comme .geo-preview-card.
+    // jamais le reste de l'app. Les couleurs fixes ci-dessous simulent le
+    // rendu du contenu conseillé (fond clair), comme .geo-preview-card.
     const pageDoc = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><style>
       body { font-family: -apple-system, system-ui, sans-serif; margin: 24px 28px;
              background: #fff; color: #1e293b; line-height: 1.65; }
@@ -819,11 +808,11 @@ const GEO = {
     </style></head><body><h1>${this._esc(finding.fix_title)}</h1>${finding.fix_html || ''}</body></html>`;
     overlay.innerHTML = `
       <div class="geo-modal geo-modal--xl">
-        <h3 class="geo-modal-title">Aperçu du bloc à publier</h3>
-        <p class="geo-modal-sub">Voilà à quoi va ressembler ce contenu une fois publié sur ton site.</p>
+        <h3 class="geo-modal-title">Le conseil de l’IA</h3>
+        <p class="geo-modal-sub">À appliquer directement sur la page concernée de ton site. Voilà le contenu suggéré.</p>
         <div class="geo-preview-card">
-          <div class="geo-preview-label">PAGE QUI VA ÊTRE CRÉÉE</div>
-          <iframe sandbox="" title="Aperçu de la page proposée"
+          <div class="geo-preview-label">CONTENU SUGGÉRÉ</div>
+          <iframe sandbox="" title="Aperçu du contenu suggéré"
                   style="display:block;width:100%;height:50vh;border:0"
                   srcdoc="${this._esc(pageDoc)}"></iframe>
         </div>
@@ -831,10 +820,8 @@ const GEO = {
           <summary class="geo-details-sum">Voir le code HTML brut</summary>
           <pre class="geo-gen-raw">${this._esc(finding.fix_html)}</pre>
         </details>
-        <div id="geo-preview-msg" class="geo-msg"></div>
         <div class="geo-modal-actions">
-          <button class="btn btn-secondary" id="geo-preview-close">Fermer</button>
-          <button class="btn btn-primary" id="geo-preview-publish">📤 Publier maintenant</button>
+          <button class="btn btn-primary" id="geo-preview-close">Fermer</button>
         </div>
       </div>
     `;
@@ -842,145 +829,12 @@ const GEO = {
     const close = () => { document.removeEventListener('keydown', onKey); overlay.remove(); };
     const onKey = (e) => {
       // Échap ne ferme l'aperçu que s'il est la fenêtre du dessus
-      // (pas pendant une publication, ni sous la fenêtre de choix du site)
       const all = document.querySelectorAll('.geo-modal-overlay');
-      if (e.key === 'Escape' && all[all.length - 1] === overlay
-          && !this._pubBusy && !document.getElementById('tc-dialog-overlay')) close();
+      if (e.key === 'Escape' && all[all.length - 1] === overlay) close();
     };
     document.addEventListener('keydown', onKey);
-    // Pendant une publication, l'aperçu reste ouvert (indicateur visible)
-    overlay.onclick = (e) => { if (e.target === overlay && !this._pubBusy) close(); };
-    const closeBtn = document.getElementById('geo-preview-close');
-    const pubBtn   = document.getElementById('geo-preview-publish');
-    closeBtn.onclick = () => { if (!this._pubBusy) close(); };
-    pubBtn.onclick = async () => {
-      if (this._pubBusy) return;
-      const msg = document.getElementById('geo-preview-msg');
-      pubBtn.disabled = true;
-      closeBtn.disabled = true;
-      pubBtn.textContent = '⏳ Publication en cours…';
-      msg.textContent = 'Publication en cours — on prépare la page et on l’envoie sur ton site…';
-      msg.className = 'geo-msg';
-      const ok = await this._publishFinding(audit, finding, cardBtn || null,
-                                            { skipConfirm: true });
-      closeBtn.disabled = false;
-      if (ok) { close(); }
-      else {
-        msg.textContent = '';
-        pubBtn.disabled = false;
-        pubBtn.textContent = '📤 Publier maintenant';
-      }
-    };
-  },
-
-  // Publie un bloc proposé par l'IA. Verrou _pubBusy : une seule
-  // publication à la fois, impossible de re-cliquer pendant l'envoi.
-  // Renvoie true si la publication a réussi.
-  // opts.skipConfirm : true quand on arrive de l'aperçu (la modif vient
-  // d'être vue) — sinon on confirme TOUJOURS avant de toucher au site.
-  async _publishFinding(audit, finding, btn, opts = {}) {
-    if (this._pubBusy) return false;
-    const prevLabel = btn ? btn.textContent : '';
-    if (btn) btn.disabled = true;
-    if (!audit.site_id) {
-      // Pas de site lié à l'audit → fenêtre de choix (plus de « tape le numéro »)
-      const sid = await this._pickPublishSite();
-      if (!sid) {
-        if (btn) { btn.disabled = false; btn.textContent = prevLabel; }
-        return false;
-      }
-      audit.site_id = sid;
-    }
-    // Garde-fou : un clic sur la carte publie pour de vrai sur le site.
-    if (!opts.skipConfirm) {
-      const okGo = await Dialog.confirm(
-        'Ce bloc écrit par l’IA va être publié pour de vrai sur ton site '
-        + '(visible en ligne d’ici 1 à 3 minutes).\n\n'
-        + 'Astuce : le bouton « 👁 Aperçu » montre exactement ce qui change, '
-        + 'avant d’envoyer.',
-        { title: 'Publier sur le site ?', danger: true,
-          okLabel: 'Publier', cancelLabel: 'Annuler' });
-      if (!okGo) {
-        if (btn) { btn.disabled = false; btn.textContent = prevLabel; }
-        return false;
-      }
-    }
-    if (this._pubBusy) { // une autre publication a démarré entre-temps
-      if (btn) { btn.disabled = false; btn.textContent = prevLabel; }
-      return false;
-    }
-    this._pubBusy = true;
-    if (btn) btn.textContent = '⏳ Publication en cours…';
-    try {
-      const r = await App.api.geo_publish_finding({
-        audit_id: audit.id, finding_id: finding.id, site_id: audit.site_id,
-      });
-      if (!r || !r.ok) {
-        Toast.error((r && r.error) || 'La publication a échoué.');
-        if (btn) { btn.disabled = false; btn.textContent = prevLabel; }
-        return false;
-      }
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = '✓ Publié';
-        btn.classList.remove('btn-primary');
-        btn.classList.add('btn-secondary');
-      }
-      // Reflète tout de suite l'état serveur (compteur ✏️, fiche) sans
-      // attendre un rechargement : la suggestion est appliquée.
-      finding.applied_at = new Date().toISOString();
-      Toast.success(`Le site se met à jour dans 1 à 3 minutes : ${r.url}`, 'Publié !');
-      return true;
-    } catch (e) {
-      Toast.friendlyError(e, 'La publication a échoué. Réessaie dans un instant.');
-      if (btn) { btn.disabled = false; btn.textContent = prevLabel; }
-      return false;
-    } finally {
-      this._pubBusy = false;
-    }
-  },
-
-  // Fenêtre de choix du site de publication (même présentation que la
-  // fenêtre « Publier sur un site » du générateur). Résout l'id du site
-  // choisi, ou null si on annule.
-  async _pickPublishSite() {
-    let sites = [];
-    try {
-      const r = await App.api.geo_sites({});
-      if (r && r.ok) sites = (r.sites || []).filter(s => s.repo);
-    } catch (e) { /* tolère */ }
-    if (sites.length === 0) {
-      Toast.warn('Aucun de tes sites n’est branché à la mise en ligne automatique. Ouvre ton site (ou ajoute-le), bouton ✎ Modifier → remplis la section « Publication automatique ».');
-      return null;
-    }
-    return new Promise((resolve) => {
-      const overlay = document.createElement('div');
-      overlay.className = 'geo-modal-overlay';
-      overlay.innerHTML = `
-        <div class="geo-modal">
-          <h3 class="geo-modal-title">Sur quel site publier ?</h3>
-          <p class="geo-modal-sub">La page sera créée sur le site choisi, qui se mettra à jour tout seul.</p>
-          <div class="geo-form-col">
-            <label class="geo-label">Site cible</label>
-            <select id="geo-pick-site" class="geo-input">
-              ${sites.map(s => `<option value="${this._esc(s.id)}">${this._esc(s.name)} — ${this._esc(s.repo)}</option>`).join('')}
-            </select>
-          </div>
-          <div class="geo-modal-actions">
-            <button class="btn btn-secondary" id="geo-pick-cancel">Annuler</button>
-            <button class="btn btn-primary" id="geo-pick-ok">Choisir ce site</button>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(overlay);
-      const done = (val) => { document.removeEventListener('keydown', onKey); overlay.remove(); resolve(val); };
-      const onKey = (e) => { if (e.key === 'Escape') done(null); };
-      document.addEventListener('keydown', onKey);
-      overlay.onclick = (e) => { if (e.target === overlay) done(null); };
-      document.getElementById('geo-pick-cancel').onclick = () => done(null);
-      document.getElementById('geo-pick-ok').onclick = () =>
-        done(document.getElementById('geo-pick-site').value || null);
-    });
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+    document.getElementById('geo-preview-close').onclick = () => close();
   },
 
   async _runAudit(url) {
@@ -1263,6 +1117,13 @@ const GEO = {
     const subText = !hasRun
       ? 'Pas encore de surveillance lancée'
       : `Citée par ${score}% des IA · ${this._fmtDate(s.last_run_ts)}`;
+    // Contexte rassurant sous un score bas : un 0% est normal pour un site
+    // récent, il ne faut pas que ça fasse peur.
+    const lowScore = hasRun && score < 30;
+    const contextTxt = lowScore
+      ? (s.last_run_context
+         || 'Normal pour un site récent : les IA ne citent que des sites déjà connus. Ce chiffre montera avec le référencement.')
+      : '';
     const fixes = s.pending_fixes || 0;
     return `
       <div class="geo-site-card" data-site-id="${s.id}" role="button" tabindex="0"
@@ -1277,6 +1138,7 @@ const GEO = {
           <span class="geo-site-questions">${s.questions_count} question${s.questions_count > 1 ? 's' : ''}</span>
         </div>
         <div class="geo-site-sub">${subText}</div>
+        ${contextTxt ? `<div class="geo-site-context">${this._esc(contextTxt)}</div>` : ''}
         ${fixes > 0 ? `<div class="geo-site-fixes" title="Des corrections proposées par l’audit IA attendent ton OK sur la fiche du site">✏️ ${fixes} amélioration${fixes > 1 ? 's' : ''} en attente</div>` : ''}
       </div>
     `;

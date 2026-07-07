@@ -1,18 +1,28 @@
-"""Scheduler Le Phare — worker thread daemon qui orchestre les missions.
+"""Scheduler Le Phare — orchestre les missions SEO.
 
-Pattern aligné sur drip_runner.py et reply_responder.py existants : un thread
-daemon, un cycle d'1h, lecture de la config dans shared_settings.phare_config
-pour décider quelles missions lancer.
+⚠️ RYTHME RÉEL EN PROD = 3 PASSAGES/JOUR, PAS toutes les heures.
+En production, `_tick` est appelé par un cron GitHub Actions à 8h/14h/18h
+UTC (`scripts/phare_tick.py`, workflow `phare_scheduler.yml`) — donc trois
+fois par jour, un nouveau process Python à chaque fois. Le worker thread
+daemon ci-dessous (cycle d'1h) ne sert QU'au mode desktop (Triskell Command
+installé sur le PC, process qui reste allumé) ; sur le serveur web il ne
+tourne pas (le rôle « web » ne lance pas les robots). Le dédoublonnage vit
+donc en base (phare_actions + scheduler_log), pas en mémoire, pour survivre
+à ce redémarrage à chaque passage.
 
-Cron logique simplifié (vu qu'on tourne toutes les heures) :
-- Audit hebdo : 1 site par heure le lundi 6h-22h, sinon en arrière-plan
-  (max 1/jour/site)
-- Veille mots-clés : lundi+jeudi 7h
-- Maillage : lundi 9h
-- Bulletin Analyste : tous les jours 8h
-- Plan stratégique Opus : 1er du mois 9h
-- Bulletin PDF interne : 1er du mois 10h
-- Envoi rapports clients SEO : 1er du mois 11h
+Les fenêtres horaires ci-dessous utilisent `hour >= X` (et non `== X`) : un
+passage à 14h rattrape ce qu'un passage de 8h aurait fait à partir de X,
+sans re-jouer ce qui a déjà tourné (garde-fou de dédup en base).
+
+Cron logique des missions (fenêtre = première heure d'éligibilité dans la
+journée ; la mission part au 1er passage qui tombe après, max 1/jour/site) :
+- Audit hebdo : lundi 6h-22h, 1 site par passage (rotation par ancienneté)
+- Veille mots-clés : lundi+jeudi à partir de 7h
+- Maillage : lundi à partir de 9h
+- Bulletin Analyste : tous les jours à partir de 8h (voir garde-fou trafic)
+- Plan stratégique Opus : 1er du mois à partir de 9h
+- Bulletin PDF interne : 1er du mois à partir de 10h
+- Envoi rapports clients SEO : 1er du mois à partir de 11h
 
 Ne tourne PAS quand l'utilisateur n'est pas authentifié à Supabase
 (sinon rien à persister). Auto-restart si plante.
@@ -23,7 +33,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from . import orchestrator, repo
@@ -31,7 +41,10 @@ from . import orchestrator, repo
 logger = logging.getLogger(__name__)
 
 
-CYCLE_INTERVAL_SECONDS = 60 * 60        # 1 h
+# Rythme du worker thread interne : 1 h. ⚠️ N'A D'EFFET QU'EN MODE DESKTOP
+# (process resté allumé). En prod web, c'est GitHub Actions qui appelle _tick
+# 3×/jour (8h/14h/18h UTC) — ce timer ne tourne pas.
+CYCLE_INTERVAL_SECONDS = 60 * 60        # 1 h (desktop uniquement)
 INITIAL_DELAY_SECONDS = 120              # 2 min après boot
 
 _WORKER_THREAD: Optional[threading.Thread] = None
@@ -144,12 +157,15 @@ def _mark_ran(mission_key: str) -> None:
 def _tick(app_state) -> dict:
     """Un cycle : lit la config, décide quoi lancer, persiste.
 
-    Stratégie post-fix : on utilise `hour >= X` (au lieu de `hour == X`)
+    Appelé 3×/jour en prod (8h/14h/18h UTC via GitHub Actions), ou toutes
+    les heures en mode desktop. On utilise `hour >= X` (au lieu de `== X`)
     pour les fenêtres de déclenchement, et on dédoublonne via la base
     (phare_actions pour les missions par site, shared_settings.phare_config
     .scheduler_log pour les missions globales). Ça permet :
-      1. de résister aux retards de GitHub Actions (cron pas garanti à l'heure)
-      2. d'empêcher les doublons même quand le process redémarre
+      1. qu'un passage plus tardif rattrape une fenêtre ouverte plus tôt
+         (les 3 passages du jour ne tombent pas sur X pile)
+      2. d'empêcher les doublons même quand le process redémarre (chaque
+         passage GitHub Actions = nouveau process Python)
     """
     cfg = repo.get_config()
     if not cfg:
@@ -218,12 +234,20 @@ def _tick(app_state) -> dict:
             actions_done.append({"mission": "tisseur", "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"tisseur:{target['id']}"] = today.isoformat()
 
-    # Bulletin Analyste : tous les jours à partir de 8h, top 3 sites
+    # Bulletin Analyste : tous les jours à partir de 8h, top 3 sites.
+    # Économie IA (agent Sonnet payant) : sur un site à ~0 trafic depuis des
+    # semaines, un bulletin quotidien ne dit jamais rien de neuf → gaspillage.
+    # On ne lance donc l'analyste QUE si le site a du trafic récent
+    # (>= 50 clics sur 30 j) OU s'il n'a pas eu de bulletin depuis 7 j.
+    # Résultat : sites actifs = bulletin quotidien comme avant ; sites
+    # endormis = bulletin au plus une fois par semaine.
     if hour >= 8:
         for s in sites[:3]:
             if _ran_today_in_db("analyst", s["id"]):
                 continue
             if _LAST_RUNS_BY_MISSION.get(f"analyst:{s['id']}") == today.isoformat():
+                continue
+            if not _analyst_should_run(s["id"]):
                 continue
             r = orchestrator.run_analyst(s["id"], app_state=app_state)
             actions_done.append({"mission": "analyst", "site": s["domain"], **r})
@@ -363,6 +387,16 @@ def _tick(app_state) -> dict:
                                   "site": s["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"sitemap:{s['id']}"] = today.isoformat()
 
+    # Purge des vieilles cartes : tous les jours à partir de 5h (global, 1×/jour).
+    # Archive les cartes-conseils en brouillon de plus de 30 jours que personne
+    # n'a traitées : elles ne seront jamais appliquées et polluent « À toi de
+    # jouer » (une carte encore utile réémergera au prochain audit). Ne touche
+    # ni aux PRs/preview ni aux bulletins/plans (déjà gérés ailleurs).
+    if hour >= 5 and not _global_ran_today("purge_stale:"):
+        r = run_now("purge_stale", None, app_state=app_state)
+        actions_done.append({"mission": "purge_stale", **r})
+        _mark_ran("purge_stale:")
+
     # ---- Missions pro v0.6 ----
     # Veille algo Google : tous les jours à partir de 6h (global, 1 fois/jour)
     if hour >= 6 and not _global_ran_today("algo_watch:"):
@@ -385,8 +419,17 @@ def _tick(app_state) -> dict:
                                   "site": target["domain"], **r})
             _LAST_RUNS_BY_MISSION[f"brand_scan:{target['id']}"] = today.isoformat()
 
-    # Outreach drafts : mercredi à partir de 9h
-    if weekday == 2 and hour >= 9:
+    # Outreach (démarchage backlinks) : GELÉ par défaut. Ces missions
+    # produisent des cartes « 5 mails de démarchage à valider » que personne
+    # n'exploite aujourd'hui → autant d'appels IA dépensés pour rien. On les
+    # garde donc derrière un interrupteur de config (défaut False), comme la
+    # mission « competitors » attend ses identifiants DataForSEO. Réversible :
+    # Jordan rallume via phare_config.outreach_enabled quand il exploitera la
+    # sortie. Le dispatch reste dans run_now (lancement manuel possible).
+    outreach_enabled = cfg.get("outreach_enabled", False)
+
+    # Outreach drafts : mercredi à partir de 9h (si outreach allumé)
+    if outreach_enabled and weekday == 2 and hour >= 9:
         target = _pick_next_for_mission("outreach_drafts", sites)
         if target:
             r = run_now("outreach_drafts", target["id"], app_state=app_state)
@@ -395,7 +438,7 @@ def _tick(app_state) -> dict:
             _LAST_RUNS_BY_MISSION[f"outreach_drafts:{target['id']}"] = today.isoformat()
 
     # Outreach follow-ups : tous les jours à partir de 10h (global, 1 fois/jour)
-    if hour >= 10 and not _global_ran_today("outreach_followups:"):
+    if outreach_enabled and hour >= 10 and not _global_ran_today("outreach_followups:"):
         r = run_now("outreach_followups", None, app_state=app_state)
         actions_done.append({"mission": "outreach_followups", **r})
         _mark_ran("outreach_followups:")
@@ -472,7 +515,8 @@ def _tick(app_state) -> dict:
 # Mission → nom d'agent stocké dans phare_actions.agent.
 # Sert au dédoublonnage "mission déjà passée aujourd'hui sur ce site" via DB,
 # pour résister aux redémarrages du worker (GitHub Actions = nouveau process
-# à chaque tick, donc _LAST_RUNS_BY_MISSION en mémoire est inutile).
+# à chaque passage — 3×/jour —, donc _LAST_RUNS_BY_MISSION en mémoire ne
+# survit pas d'un passage à l'autre).
 _MISSION_TO_AGENT: dict[str, str] = {
     "audit":              "auditeur",
     "keywords":           "veilleur",
@@ -523,6 +567,45 @@ def _ran_today_in_db(mission: str, site_id: str) -> bool:
     except Exception as exc:
         logger.debug("_ran_today_in_db(%s, %s): %s", mission, site_id, exc)
         return False
+
+
+def _analyst_should_run(site_id: str) -> bool:
+    """Faut-il produire le bulletin Analyste sur ce site aujourd'hui ?
+
+    Vrai si l'UNE des conditions tient :
+      - trafic récent : >= 50 clics organiques sur 30 j (même somme que
+        orchestrator.ecosystem_overview, colonne `organic_clicks`) ;
+      - OU aucun bulletin analyste (agent=analyste dans phare_actions) depuis
+        7 jours → on garde au moins un rendez-vous hebdo, même à 0 trafic.
+    Sur défaut (base indispo…) on renvoie True : on ne prive jamais un site
+    de son bulletin à cause d'un pépin de lecture."""
+    # 1) Trafic récent ?
+    try:
+        metrics = repo.metrics_window(site_id, days=30)
+        clicks_30d = sum(m.get("organic_clicks", 0) or 0 for m in metrics)
+        if clicks_30d >= 50:
+            return True
+    except Exception as exc:
+        logger.debug("_analyst_should_run trafic(%s): %s", site_id, exc)
+        return True
+    # 2) Dernier bulletin analyste il y a plus de 7 jours (ou jamais) ?
+    try:
+        sb = repo._sb()
+        if sb is None:
+            return True
+        cutoff = (datetime.now() - timedelta(days=7)).isoformat()
+        r = (sb.table("phare_actions")
+             .select("id", count="exact")
+             .eq("site_id", site_id)
+             .eq("agent", "analyste")
+             .gte("created_at", cutoff)
+             .limit(1).execute())
+        recent = (r.count or 0) > 0
+        # Un bulletin récent existe ET pas de trafic → on saute (au plus 1/sem).
+        return not recent
+    except Exception as exc:
+        logger.debug("_analyst_should_run bulletin(%s): %s", site_id, exc)
+        return True
 
 
 def _pick_next_for_audit(sites: list[dict]) -> Optional[dict]:
@@ -663,6 +746,10 @@ def run_now(mission: str, site_id: Optional[str] = None,
         from . import snippet_hunter
         return snippet_hunter.hunt_snippets(site_id, app_state=app_state)
     if mission == "geo_check":
+        # geo_surveillant est un STUB retiré (03/07) : aucun appel IA, renvoie
+        # {"ok": False, "error": "Module retiré…"}. On garde le mapping pour ne
+        # rien casser (lancement manuel/tests), mais AUCUN passage automatique
+        # ne dispatche plus cette mission (retirée de _tick le 03/07).
         from . import geo_surveillant
         return geo_surveillant.run_geo_check(site_id, app_state=app_state)
     if mission == "cannibalization":
@@ -690,6 +777,10 @@ def run_now(mission: str, site_id: Optional[str] = None,
         return rollback_watch.check_due_watches()
     if mission == "auto_merge":
         return orchestrator.auto_merge_verified()
+    if mission == "purge_stale":
+        # Archive les cartes-conseils en brouillon jamais traitées (> 30 j).
+        n = repo.expire_stale_actions(days=30)
+        return {"ok": True, "expired": n}
     # ---- Missions pro (v0.6) ----
     if mission == "outreach_drafts":
         from . import outreach

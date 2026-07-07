@@ -14619,12 +14619,19 @@ class Api:
         return ""
 
     def geo_publish_finding(self, payload: dict) -> dict:
-        """Publie un finding d'audit IA comme nouvelle page sur le site.
+        """Refuse désormais de publier un finding d'audit IA comme page.
 
-        payload.fix_html (optionnel) : version corrigée à publier à la place
-        du bloc d'origine (correction des faits inventés).
-        payload.force (optionnel)    : passe outre le garde-fou anti-invention
-        (à n'utiliser que si le fait signalé est en réalité exact).
+        🚨 Audit du 07/07/2026 : cette fonction transformait une SUGGESTION
+        d'audit (dont le titre est une CONSIGNE, ex. « Ajouter une définition
+        explicite en tête ») en une PAGE autonome via geo_publish_content.
+        Résultat : des pages orphelines, ultra-minces, dont le titre était
+        une consigne de robot — publiées sur 4 sites, nuisibles au SEO.
+
+        On garde la signature et la validation audit_id/finding_id (pour ne
+        pas casser l'endpoint et son écran), mais on ne crée PLUS de page et
+        on ne marque PLUS le finding « appliqué » : une correction d'audit se
+        pose à la main sur la vraie page concernée, elle ne devient jamais une
+        page à part. (Le flow générateur GEO normal, lui, reste inchangé.)
         """
         p = payload or {}
         audit_id   = (p.get("audit_id") or "").strip()
@@ -14641,57 +14648,12 @@ class Api:
                         if f.get("id") == finding_id), None)
         if not finding:
             return {"ok": False, "error": "Suggestion introuvable"}
-        # Contenu à publier : correction fournie, sinon bloc d'origine.
-        override = (p.get("fix_html") or "").strip()
-        fix_html = override or finding.get("fix_html", "")
-        # 🚨 Garde-fou anti-invention : on refuse de mettre en ligne un bloc
-        # qui cite un montant/pourcentage/loi/lien/contact absent de la vraie
-        # page (l'IA fabrique des faits — vécu le 04/07 : faux prix Lagriffe,
-        # faux article de loi sur un site client). Contournable via force=True
-        # uniquement si le fait signalé est réellement exact.
-        if not p.get("force"):
-            bad = self._geo_unsupported_facts(
-                fix_html, self._geo_source_text_for(audit))
-            if bad:
-                return {"ok": False, "unsupported_facts": bad,
-                        "error": "Ce bloc contient des informations absentes "
-                        "de ta page (peut-être inventées par l'IA) : "
-                        + " ; ".join(f"{b['kind']} « {b['value']} »"
-                                     for b in bad[:6])
-                        + ". Corrige-les (ou publie avec force si elles sont "
-                        "exactes)."}
-        # Crée un item "generated" temporaire et publie via le flow existant
-        topic = finding.get("fix_title") or finding.get("title") or "amelioration"
-        # Convertit le bloc HTML en pseudo-markdown pour que la machinerie
-        # de publi le retraite proprement (titre + intro + contenu)
-        item = {
-            "id":      self._geo_uid(),
-            "topic":   topic,
-            "kind":    "ai_audit_fix",
-            "ts":      self._geo_now(),
-            "provider": audit.get("provider", ""),
-            "content": "## " + topic + "\n\n" + fix_html,
-            "auto_source": {
-                "audit_id": audit_id,
-                "finding_id": finding_id,
-                "from_audit": True,
-            },
-        }
-        root.setdefault("generated", []).insert(0, item)
-        root["generated"] = root["generated"][:200]
-        self._geo_save()
-        # Publie via le flow standard
-        res = self.geo_publish_content({
-            "content_id": item["id"],
-            "site_id":    audit.get("site_id") or (p.get("site_id") or "").strip(),
-        })
-        # Publication réussie → la suggestion est marquée appliquée :
-        # elle sort du compteur « ✏️ en attente » (cartes + Guide) et la
-        # fiche du site l'affiche cochée au lieu de la re-proposer.
-        if isinstance(res, dict) and res.get("ok"):
-            finding["applied_at"] = self._geo_now()
-            self._geo_save()
-        return res
+        # Refus propre : on ne publie plus, on ne marque rien comme appliqué.
+        return {"ok": False, "error":
+                "Les corrections d'audit ne se publient plus comme des pages "
+                "autonomes (ça créait des pages orphelines dont le titre était "
+                "une consigne). Applique la correction directement sur la page "
+                "concernée de ton site."}
 
     # -- Questions surveillées -----------------------------------------
     def geo_questions(self, payload: dict) -> dict:
@@ -14854,16 +14816,25 @@ class Api:
             return {"ok": False, "error":
                     "Aucune IA configurée. Va dans Réglages pour ajouter au moins une clé "
                     "(Anthropic, OpenAI, Google…)."}
+        # 🚨 Mesure honnête (audit du 07/07/2026) : seules les IA branchées au
+        # web peuvent VRAIMENT tester le GEO. Les autres (Claude Haiku,
+        # Mistral, Llama/Groq, DeepSeek) répondent DE MÉMOIRE, sans aller sur
+        # le web : elles ne citeront jamais un site créé il y a 6 semaines →
+        # elles produisent un 0 % mécanique qui pollue la mesure. On les
+        # interroge et on les affiche quand même, mais HORS du score.
+        WEB_PROVIDERS = {"google", "perplexity", "openai"}
         domain = (site.get("domain") or "").lower()
         brand = (site.get("brand") or "").lower()
         results: list[dict] = []
-        cited_count = 0
+        cited_count = 0          # cités PARMI les IA web ayant répondu
         asked = 0
-        answered = 0
+        answered = 0             # réponses non vides (web + mémoire)
+        answered_web = 0         # réponses non vides des IA web (dénominateur du score)
         prov_stats: dict[str, dict] = {}
         for q in questions:
             for prov in providers:
                 asked += 1
+                is_web = prov["id"] in WEB_PROVIDERS
                 answer = self._geo_ask_provider(prov, q["text"])
                 st = prov_stats.setdefault(
                     prov["id"], {"label": prov["label"], "asked": 0, "empty": 0})
@@ -14880,17 +14851,24 @@ class Api:
                         "provider_label": prov["label"],
                         "cited":     False,
                         "empty":     True,
+                        "web":       is_web,
+                        # Hors score : IA de mémoire (jamais comptée) OU
+                        # réponse vide (rien à compter de toute façon).
+                        "hors_score": (not is_web),
                         "snippet":   "",
                         "answer_preview": "",
                     })
                     continue
                 answered += 1
+                if is_web:
+                    answered_web += 1
                 answer_lower = answer.lower()
                 cited = (
                     (domain and domain in answer_lower) or
                     (brand and len(brand) >= 3 and brand in answer_lower)
                 )
-                if cited:
+                # Le compteur de citations ne retient QUE les IA web.
+                if cited and is_web:
                     cited_count += 1
                 # Extrait un snippet autour de la mention
                 snippet = ""
@@ -14912,29 +14890,48 @@ class Api:
                     "provider_label": prov["label"],
                     "cited":     cited,
                     "empty":     False,
+                    "web":       is_web,
+                    # Une IA de mémoire est montrée mais jamais comptée.
+                    "hors_score": (not is_web),
                     "snippet":   snippet,
                     "answer_preview": answer[:400],
                 })
-        # Le score ne compte que les IA qui ont VRAIMENT répondu.
-        score = int(round((cited_count / answered) * 100)) if answered else 0
+        # Le score ne compte que les IA WEB qui ont VRAIMENT répondu.
+        has_web = any(p["id"] in WEB_PROVIDERS for p in providers)
+        if not has_web:
+            # Aucune IA connectée au web → pas de vraie mesure possible. On ne
+            # renvoie PAS un faux 0 % (qui ferait croire à un échec) : score à
+            # None et message clair.
+            score = None
+        else:
+            score = int(round((cited_count / answered_web) * 100)) if answered_web else 0
         mutes = sorted(st["label"] for st in prov_stats.values()
                        if st["asked"] and st["empty"] == st["asked"])
         note = ""
-        if mutes:
+        if not has_web:
+            note = ("Mesure GEO impossible : aucune IA connectée au web n'est "
+                    "configurée (ajoute Gemini ou Perplexity dans Réglages).")
+        elif mutes:
             note = (f"{len(mutes)} IA muette{'s' if len(mutes) > 1 else ''} "
                     f"sur {len(providers)} ({', '.join(mutes)}) — clé ou quota "
                     "à vérifier dans Réglages. Le score ne compte que les IA "
-                    "qui ont répondu.")
+                    "connectées au web qui ont répondu.")
+        # Contexte affiché à l'écran pour ne pas paniquer devant un score bas.
+        context = ("Un score bas est NORMAL pour un site récent et peu connu : "
+                   "les IA ne citent que des sites déjà établis. Ce chiffre "
+                   "montera avec le référencement.")
         run = {
             "id":      self._geo_uid(),
             "site_id": sid,
             "ts":      self._geo_now(),
             "score":   score,
             "cited":   cited_count,
-            "total":   answered,
+            "total":   answered_web,
             "asked":   asked,
+            "answered": answered,
             "mutes":   mutes,
             "note":    note,
+            "context": context,
             "results": results,
         }
         root["surveillance_runs"].insert(0, run)
@@ -15405,6 +15402,89 @@ class Api:
             lines.append(f"- [Site officiel de {brand or domain}]({home}/)")
         return "\n".join(lines).strip() + "\n"
 
+    def _geo_site_publications(self, site: dict, root: dict,
+                               extra: list | None = None) -> list:
+        """Liste toutes les pages GEO publiées pour un site : (titre, url).
+
+        Sert au maillage interne (hub + sitemap). `extra` = pages à ajouter
+        en plus de celles déjà connues (typiquement celle qu'on vient
+        d'écrire). Dédoublonnée par URL, ordre conservé (la 1re vue gagne).
+        """
+        sid = site.get("id")
+        entries = list(extra or [])
+        for g in root.get("generated", []):
+            for pub in g.get("publications", []):
+                if pub.get("site_id") == sid and pub.get("url"):
+                    entries.append((g.get("topic", "Page"), pub.get("url")))
+        seen, uniq = set(), []
+        for title, url in entries:
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            uniq.append((title or "Page", url))
+        return uniq
+
+    def _geo_build_hub_page(self, site: dict, css_href: str,
+                            publications: list) -> str:
+        """Fabrique la page-index (« hub ») du dossier GEO : elle liste, avec
+        un vrai titre lisible et un lien <a> vers chacune, toutes les pages
+        GEO du site. Ce hub crée le maillage interne qui manquait — sans lui
+        les pages GEO étaient orphelines (aucun lien ne pointait dessus, donc
+        invisibles pour Google). Ajouté à l'audit du 07/07/2026.
+        """
+        e = self._geo_esc_attr
+        items = "\n".join(
+            f'    <li><a href="{e(url)}">{e(title)}</a></li>'
+            for title, url in publications
+        ) or "    <li>Aucune page pour le moment.</li>"
+        content_html = (
+            "<p>Retrouve ici toutes nos pages de référence, rédigées pour "
+            "répondre clairement aux questions les plus fréquentes.</p>\n"
+            f"  <ul class=\"geo-hub-list\">\n{items}\n  </ul>"
+        )
+        return self._geo_build_html_page(
+            title="Questions fréquentes",
+            content_html=content_html,
+            css_href=css_href,
+            site_name=site.get("name", site.get("brand", "")),
+            meta_description=("Toutes les pages de référence de "
+                              f"{site.get('brand') or site.get('name') or ''}."),
+            canonical="",
+            jsonld_html="",
+        )
+
+    @staticmethod
+    def _geo_sitemap_upsert(existing_xml: str, urls: list) -> str:
+        """Ajoute des URLs à un sitemap.xml SANS jamais réécrire l'existant.
+
+        - Si un sitemap existe : on insère les <url><loc>…</loc></url>
+          manquants juste avant </urlset>, sans toucher au reste (pas de
+          réordonnancement, aucune URL existante écrasée).
+        - S'il n'existe pas (ou est illisible) : on crée un sitemap minimal
+          valide contenant au moins ces URLs.
+        Ne bloque jamais la publication (l'appelant enveloppe dans try/except).
+        """
+        def _esc(u: str) -> str:
+            return (str(u or "").replace("&", "&amp;").replace("<", "&lt;")
+                    .replace(">", "&gt;"))
+        xml = (existing_xml or "").strip()
+        # Sitemap existant et exploitable : insertion ciblée avant </urlset>.
+        if xml and "</urlset>" in xml:
+            block = ""
+            for u in urls:
+                if not u or _esc(u) in xml:
+                    continue  # URL déjà présente → on n'y touche pas
+                block += f"  <url><loc>{_esc(u)}</loc></url>\n"
+            if not block:
+                return existing_xml  # rien à ajouter, on ne change rien
+            return xml.replace("</urlset>", block + "</urlset>", 1) + "\n"
+        # Pas de sitemap valide : on en crée un minimal.
+        body = "".join(f"  <url><loc>{_esc(u)}</loc></url>\n"
+                       for u in urls if u)
+        return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+                f'{body}</urlset>\n')
+
     def _geo_build_html_page(self, *, title: str, content_html: str,
                              css_href: str, site_name: str,
                              meta_description: str, canonical: str,
@@ -15600,6 +15680,10 @@ class Api:
                           if pub.get("site_id") == sid and pub.get("ts")), None)
         published_at = (prior_pub or {}).get("ts") or modified_at
         # Contenu HTML brut (audit IA) vs markdown (générateur normal)
+        # ⚠️ Chemin "ai_audit_fix" conservé par sécurité, plus alimenté depuis
+        # le 07/07/2026 : geo_publish_finding ne crée plus d'item de ce type
+        # (fini les pages orphelines issues d'un audit). D'anciens items
+        # peuvent rester en base, donc on garde le traitement ci-dessous.
         if item.get("kind") == "ai_audit_fix":
             # On garde tel quel, juste un fallback <h1> si pas déjà présent
             content_html = item.get("content", "")
@@ -15673,10 +15757,51 @@ class Api:
                     fh.write(llms)
             except Exception as exc:
                 logger.debug("geo llms.txt build: %s", exc)
-            # Commit
+            # Maillage interne (audit du 07/07/2026) : sans lien pointant
+            # dessus ni entrée sitemap, les pages GEO restaient orphelines,
+            # donc invisibles pour Google. On ajoute, de façon ADDITIVE et
+            # sûre (jamais réécrire un sitemap en entier, jamais bloquer la
+            # publication si ça échoue — comme le bloc llms.txt ci-dessus) :
+            #   a) un hub <folder>/index.html qui liste et relie toutes les
+            #      pages GEO du site (la nouvelle comprise) ;
+            #   b) les URLs de la page ET du hub dans le sitemap.xml racine.
+            hub_url = ""
+            try:
+                # URL publique du hub = le dossier GEO lui-même (index.html).
+                hub_url = (site.get("url", "").rstrip("/")) + "/" + folder
+                pubs = self._geo_site_publications(
+                    site, root,
+                    extra=[(item.get("topic", "Page"), canonical)],
+                )
+                hub_html = self._geo_build_hub_page(site, css_path, pubs)
+                with open(_os.path.join(target_dir, "index.html"), "w",
+                          encoding="utf-8") as fh:
+                    fh.write(hub_html)
+            except Exception as exc:
+                logger.debug("geo hub build: %s", exc)
+            try:
+                # Sitemap à la racine web du dépôt (même logique web_root que
+                # llms.txt). On n'écrase JAMAIS des URLs existantes.
+                web_root = (site.get("web_root") or "").strip().strip("/")
+                sm_dir = _os.path.join(workdir, web_root) if web_root else workdir
+                _os.makedirs(sm_dir, exist_ok=True)
+                sm_path = _os.path.join(sm_dir, "sitemap.xml")
+                current = ""
+                if _os.path.exists(sm_path):
+                    with open(sm_path, "r", encoding="utf-8") as fh:
+                        current = fh.read()
+                new_urls = [canonical] + ([hub_url] if hub_url else [])
+                merged = self._geo_sitemap_upsert(current, new_urls)
+                with open(sm_path, "w", encoding="utf-8") as fh:
+                    fh.write(merged)
+            except Exception as exc:
+                logger.debug("geo sitemap build: %s", exc)
+            # Commit (commit_all fait « git add -A » → il ramasse la page, le
+            # hub index.html, le sitemap.xml et llms.txt en un seul commit).
             ok_commit = gitp.commit_all(
                 workdir,
-                f"GEO: nouvelle page « {item.get('topic', '')[:60]} » + llms.txt",
+                f"GEO: nouvelle page « {item.get('topic', '')[:60]} » "
+                "+ index + sitemap + llms.txt",
             )
             if not ok_commit:
                 return {"ok": False, "error":

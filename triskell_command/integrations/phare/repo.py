@@ -439,6 +439,55 @@ def expire_open_actions(site_id: str, *, agent: str, title_prefix: str,
         return 0
 
 
+def expire_stale_actions(days: int = 30,
+                         reason: str = "Expirée automatiquement (jamais traitée en 30 j)") -> int:
+    """Archive les vieilles cartes « recommandation » en brouillon jamais traitées.
+
+    Une carte-conseil restée en `status="draft"` plus de `days` jours ne sera
+    jamais appliquée (Jordan ne l'a ni acceptée ni refusée) : elle encombre le
+    tableau « À toi de jouer ». On la passe en `status="expired"` avec une
+    raison. Si elle reste utile, le prochain audit la ré-émettra.
+
+    Garde-fous (on ne touche QUE ce qui doit disparaître) :
+      - uniquement `kind="recommandation"` (jamais les PRs/preview ni les
+        bulletins/plans, déjà périmés par expire_open_actions) ;
+      - uniquement `status="draft"` ;
+      - jamais une carte déjà engagée dans le pipeline « OK, fais-le »
+        (apply_state renseigné → en cours / faite / échouée) ;
+      - plus vieille que `days` jours (created_at).
+    Renvoie le nombre de cartes archivées. Panne de lecture → 0 (jamais
+    d'exception qui remonte)."""
+    sb = _sb()
+    if sb is None:
+        return 0
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        # select("*") pour rester robuste si la migration 48 (apply_state)
+        # n'est pas appliquée — on lit alors la colonne via .get() (absente = None).
+        rows = (sb.table("phare_actions").select("*")
+                .eq("kind", "recommandation")
+                .eq("status", "draft")
+                .lt("created_at", cutoff)
+                .limit(500).execute().data) or []
+        expired = 0
+        for r in rows:
+            # Carte déjà prise en charge par le robot « OK, fais-le » → on laisse.
+            if r.get("apply_state"):
+                continue
+            try:
+                sb.table("phare_actions").update({
+                    "status": "expired",
+                    "rejected_reason": reason,
+                }).eq("id", r["id"]).execute()
+                expired += 1
+            except Exception as exc:
+                logger.debug("expire_stale_actions update %s: %s", r.get("id"), exc)
+        return expired
+    except Exception as exc:
+        logger.warning("phare.expire_stale_actions: %s", exc)
+        return 0
+
+
 def update_action(action_id: str, patch: dict) -> bool:
     sb = _sb()
     if sb is None:

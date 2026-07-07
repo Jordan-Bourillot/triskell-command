@@ -11,6 +11,7 @@ Usage : appel via orchestrator, ou bouton manuel dans la vue.
 from __future__ import annotations
 
 import logging
+import re
 import xml.sax.saxutils as saxutils
 from datetime import datetime, timezone
 from typing import Optional
@@ -90,6 +91,40 @@ def submit_indexnow(site: dict, urls: list[str], *,
             "response_body": r.text[:300]}
 
 
+def _sitemap_unchanged(site_id: str, xml: str, url_count: int) -> bool:
+    """Le sitemap est-il identique à la dernière carte sitemap de ce site ?
+
+    Compare le nombre d'URLs ET le fragment XML tel qu'il serait ré-inséré
+    (mêmes bornes que insert_action : `xml[:1500]`). Vrai seulement si les
+    deux collent → on saute la création d'une carte jumelle. Pas de carte
+    précédente, ou lecture impossible → False (on insère : on ne rate jamais
+    une vraie mise à jour à cause d'un doute)."""
+    sb = repo._sb()
+    if sb is None:
+        return False
+    try:
+        rows = (sb.table("phare_actions").select("title,detail_md")
+                .eq("site_id", site_id)
+                .eq("agent", "sitemap_builder")
+                .eq("kind", "recommandation")
+                .order("created_at", desc=True)
+                .limit(1).execute().data) or []
+    except Exception as exc:
+        logger.debug("_sitemap_unchanged lecture: %s", exc)
+        return False
+    if not rows:
+        return False
+    last = rows[0]
+    # Nombre d'URLs de la dernière carte (dans le titre « … (N URLs) »).
+    title = last.get("title") or ""
+    m = re.search(r"\((\d+)\s*URLs?\)", title)
+    if not m or int(m.group(1)) != url_count:
+        return False
+    # Même contenu XML (fragment stocké dans la carte).
+    detail = last.get("detail_md") or ""
+    return ("```xml\n" + xml[:1500] + "\n…\n```") in detail
+
+
 def run_sitemap(site_id: str, *, ping: bool = True,
                 ping_targets: Optional[list[str]] = None,
                 app_state=None) -> dict:
@@ -101,6 +136,15 @@ def run_sitemap(site_id: str, *, ping: bool = True,
         return {"ok": False, "error": "aucune page indexée"}
 
     xml = generate_sitemap_xml(site, pages)
+
+    # Anti-bruit hebdomadaire : si le sitemap est IDENTIQUE à celui de la
+    # dernière carte (même nombre d'URLs + même contenu XML), on ne recrée pas
+    # de carte chaque lundi pour rien. Une carte ne réapparaît que quand le
+    # sitemap change vraiment (page ajoutée/retirée). En cas de doute (lecture
+    # impossible), on insère quand même — on ne perd jamais une vraie mise à jour.
+    if _sitemap_unchanged(site_id, xml, len(pages)):
+        return {"ok": True, "skipped": "sitemap inchangé",
+                "urls": len(pages), "xml_size": len(xml)}
 
     # On ne pousse PAS le sitemap.xml directement sur le site (ça touche au
     # CSS/HTML public via Git → on délègue au git_pipeline). Pour l'instant,
