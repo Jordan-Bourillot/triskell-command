@@ -69,6 +69,17 @@ const Eclaireur = {
   async render(container) {
     container.innerHTML = `
       <section class="animate-slide-up max-w-4xl">
+        <div class="mb-6 rounded-2xl border border-warning/30 bg-warning/10 p-4 text-sm leading-relaxed">
+          <strong>⏸️ Cet outil est au repos (08/07/2026).</strong>
+          Ses deux missions n’ont plus de terrain : la base n’accepte plus de
+          fiche sans adresse mail (règle du 11/06), donc il n’y a plus de fiche
+          « muette » à compléter — et un test réel sur 40 fiches a montré que
+          les artisans ne publient pas d’adresse personnelle sur leur site
+          (0 trouvée sur 40). Les chasseurs (<strong>Le Chasseur</strong>,
+          <strong>Prospecteur Google</strong>, <strong>Obélisk</strong>)
+          récoltent déjà les mails pendant la chasse. Cet écran reste ouvert
+          pour des essais ponctuels, mais n’en attends pas de récolte.
+        </div>
         <div class="mb-6 sm:mb-8">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
