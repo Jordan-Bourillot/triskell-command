@@ -31,7 +31,7 @@ PRODUIT = {
     "name": "Porte-Voix",
     "tagline": "Être dans la réponse quand vos clients demandent à ChatGPT",
     "description": ("Service mensuel : mesure de la part de voix dans les "
-                    "réponses des IA (ChatGPT, Perplexity, Gemini), "
+                    "réponses des IA (ChatGPT, Gemini), "
                     "publications qui la construisent, rapport lisible en "
                     "deux minutes. Sans engagement."),
     "category": "services",
@@ -67,7 +67,7 @@ def _corps(question: str, metier: str) -> str:
         f"Quand un particulier demande à ChatGPT « {question} {{ville}} », "
         f"la réponse cite des noms de {metier}. Nous avons posé la question "
         f"plusieurs dizaines de fois, sous plusieurs formulations, sur "
-        f"ChatGPT et Perplexity. {{raison_sociale}} n'y apparaît pas, ou "
+        f"ChatGPT et Gemini. {{raison_sociale}} n'y apparaît pas, ou "
         f"trop rarement pour compter.\n\n" + _CORPS_COMMUN
     )
 

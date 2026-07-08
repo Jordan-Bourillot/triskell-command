@@ -13766,6 +13766,16 @@ class Api:
         # recherche web — l'IA la plus "fraîche" pour le GEO.
         if provider["id"] == "perplexity":
             return self._geo_ask_perplexity(provider, prompt)
+        # OpenAI : appel direct AVEC recherche web (modèle *search-preview*),
+        # comme ChatGPT grand public. Le passage standard par
+        # send_to_provider interroge le modèle SANS web : il ne peut pas
+        # citer nos sites récents, la mesure serait faussée (08/07/2026).
+        if provider["id"] == "openai":
+            txt = self._geo_ask_openai_search(provider, prompt)
+            if txt:
+                return txt
+            # Repli : si le modèle de recherche est indisponible, on tente
+            # l'appel classique ci-dessous (mesure « mémoire », mieux que rien)
         # Gemini : appel direct AVEC la recherche Google activée pour les
         # surveillances (le "send_to_provider" standard n'expose pas l'option).
         if provider["id"] == "google":
@@ -13896,6 +13906,40 @@ class Api:
             return text or ""
         except Exception as exc:
             logger.info("gemini search exception: %s", exc)
+            return ""
+
+    def _geo_ask_openai_search(self, provider: dict, prompt: str) -> str:
+        """Appel direct OpenAI avec le modèle de recherche web
+        (gpt-4o-mini-search-preview) : ChatGPT consulte le web avant de
+        répondre, comme dans l'interface grand public. Renvoie "" si
+        indisponible, l'appelant retombe sur l'appel classique."""
+        try:
+            import requests
+            model = provider.get("model") or ""
+            if "search" not in model:
+                model = "gpt-4o-mini-search-preview"
+            r = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {provider['key']}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 1200,
+                },
+                timeout=60,
+            )
+            if r.status_code >= 400:
+                logger.info("openai search HTTP %s: %s",
+                            r.status_code, r.text[:200])
+                return ""
+            data = r.json()
+            return (data.get("choices", [{}])[0]
+                       .get("message", {}).get("content", "")) or ""
+        except Exception as exc:
+            logger.info("openai search exception: %s", exc)
             return ""
 
     def _geo_ask_perplexity(self, provider: dict, prompt: str) -> str:

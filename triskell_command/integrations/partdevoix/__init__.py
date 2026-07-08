@@ -1,7 +1,7 @@
 """La Part de Voix — moteur de la 2e offre Triskell Studio.
 
 Mesure la présence d'entreprises dans les réponses des IA grand public
-(ChatGPT, Perplexity, Gemini en mode recherche web), génère les audits
+(ChatGPT, Gemini, plus Perplexity si configurée, en mode recherche web), génère les audits
 personnalisés envoyés aux prospects, et fait tourner le pilote interne.
 
 Modules :

@@ -108,6 +108,14 @@ def generer_audit(entreprise: str, metier: str, ville: str,
     concurrents = [g for g in agregat
                    if not moteur.correspond(entreprise, g["nom"])][:3]
     extraits = _choisir_extraits(mesure, entreprise, concurrents)
+    # Les IA réellement interrogées avec succès : la page n'affiche que
+    # ce qui a vraiment été mesuré (règle d'honnêteté).
+    etiquettes = {"openai": "ChatGPT", "perplexity": "Perplexity",
+                  "google": "Gemini"}
+    presents = {r.get("provider") for r in (mesure.get("runs") or [])
+                if r.get("ok")}
+    ias = [etiquettes[p] for p in ("openai", "perplexity", "google")
+           if p in presents]
     return {
         "entreprise": entreprise,
         "metier": metier,
@@ -119,7 +127,8 @@ def generer_audit(entreprise: str, metier: str, ville: str,
         "part_prospect": part_prospect,
         "concurrents": concurrents,
         "issue": issue,
-    "extraits": extraits,
+        "extraits": extraits,
+        "ias": ias,
     }
 
 
@@ -214,6 +223,9 @@ def rendre_html(audit: dict) -> str:
         )
     questions_html = "".join(
         f"<li>« {e(q)} »</li>" for q in audit.get("questions") or [])
+    ias = audit.get("ias") or ["ChatGPT", "Gemini"]
+    ias_txt = (ias[0] if len(ias) == 1
+               else ", ".join(ias[:-1]) + " et " + ias[-1])
     titre = _TITRES.get(audit.get("issue"), _TITRES["concurrents"])
     lecture = _LECTURES.get(audit.get("issue"), _LECTURES["concurrents"])
     return f"""<!DOCTYPE html>
@@ -287,7 +299,7 @@ def rendre_html(audit: dict) -> str:
     <p style="font-size:16px">Questions posées :</p>
     <ul>{questions_html}</ul>
     <p class="methode" style="margin-top:14px">{audit.get("nb_reponses", 0)}
-    réponses recueillies sur ChatGPT, Perplexity et Gemini (modes recherche
+    réponses recueillies sur {e(ias_txt)} (modes recherche
     web), en {audit.get("nb_passes", 0)} passages par question, le {e(date_txt)}.
     Les réponses des IA varient d'une conversation à l'autre, vos propres
     essais peuvent différer de nos mesures. C'est précisément pour cela que
