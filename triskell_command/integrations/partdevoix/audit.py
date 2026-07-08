@@ -1,4 +1,4 @@
-"""Audit personnalisé La Part de Voix.
+"""Audit personnalisé Porte-Voix.
 
 Pour un prospect (entreprise, métier, ville) : pose les questions
 d'intention d'achat aux IA web, mesure qui est cité, classe le résultat
@@ -262,7 +262,7 @@ def rendre_html(audit: dict) -> str:
 <body>
 <div class="page">
   <div class="haut">
-    <a class="marque" href="https://partdevoix.triskell-studio.fr">La Part de Voix<span>.</span></a>
+    <a class="marque" href="https://portevoix.triskell-studio.fr">Porte-Voix<span>.</span></a>
     <span class="etiquette">Audit établi le {e(date_txt)}</span>
   </div>
   <p class="etiquette">{entreprise}, {ville}</p>
@@ -299,7 +299,7 @@ def rendre_html(audit: dict) -> str:
     Chaque mois, nous faisons le travail qui construit cette part de voix,
     nous la mesurons, et vous recevez ce relevé mis à jour. Sans engagement,
     premier mois remboursé s'il ne vous convainc pas.
-    <br><a class="bouton" href="https://partdevoix.triskell-studio.fr">Découvrir La Part de Voix</a>
+    <br><a class="bouton" href="https://portevoix.triskell-studio.fr">Découvrir Porte-Voix</a>
   </div>
 </div>
 </body>

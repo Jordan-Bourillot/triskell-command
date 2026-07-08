@@ -1,4 +1,4 @@
-"""Moteur de mesure La Part de Voix.
+"""Moteur de mesure Porte-Voix.
 
 Pose des questions d'intention d'achat aux IA branchées au web
 (ChatGPT via l'API de recherche OpenAI, Perplexity, Gemini avec
@@ -57,6 +57,15 @@ def recuperer_cles(client=None, app_state=None) -> dict:
     """Renvoie {provider: cle} en réutilisant la chaîne shared_secrets,
     complétée par les providers hors coeur (Perplexity, Groq, DeepSeek)
     lus dans l'environnement, comme le fait l'écran GEO."""
+    if client is None:
+        # Sans client, get_ai_keys ne lit que l'env et le miroir local :
+        # on tente la base partagée (c'est là que vivent les clés posées
+        # depuis les Réglages). Best-effort, hors-ligne accepté.
+        try:
+            from triskell_core.db import get_client
+            client = get_client()
+        except Exception:
+            client = None
     try:
         from ..shared_secrets import get_ai_keys
         cles = dict(get_ai_keys(client=client, app_state=app_state) or {})

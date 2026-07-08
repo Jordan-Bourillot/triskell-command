@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Installe l'offre « La Part de Voix » dans Triskell Command.
+"""Installe l'offre « Porte-Voix » dans Triskell Command.
 
 Crée le produit au catalogue central et pose ses 8 modèles de mails de
 prospection en base (2 objets par segment : courtier, expert-comptable,
@@ -28,7 +28,7 @@ PRODUIT_ID = "la-part-de-voix"
 
 PRODUIT = {
     "id": PRODUIT_ID,
-    "name": "La Part de Voix",
+    "name": "Porte-Voix",
     "tagline": "Être dans la réponse quand vos clients demandent à ChatGPT",
     "description": ("Service mensuel : mesure de la part de voix dans les "
                     "réponses des IA (ChatGPT, Perplexity, Gemini), "
@@ -38,12 +38,12 @@ PRODUIT = {
     "kind": "service",
     "price": 149,
     "price_note": "HT/mois (lancement, verrouillé à vie ; grille 179/290/449)",
-    "buy_url": "https://partdevoix.triskell-studio.fr",
+    "buy_url": "https://portevoix.triskell-studio.fr",
     "color": "#1c2b3a",
     "initial": "V",
 }
 
-_SIGNATURE = "{sender_name}\nLa Part de Voix, un service de Triskell Studio"
+_SIGNATURE = "{sender_name}\nPorte-Voix, un service de Triskell Studio"
 
 _CORPS_COMMUN = (
     "Le relevé complet, captures d'écran comprises, se consulte en deux "
@@ -52,12 +52,12 @@ _CORPS_COMMUN = (
     "tendance, pas une vérité absolue. Elle est nette. Et ChatGPT compte "
     "plus de 18 millions d'utilisateurs par mois en France (mesure "
     "Médiamétrie).\n\n"
-    "La Part de Voix fait le travail pour que votre nom apparaisse dans ces "
+    "Porte-Voix fait le travail pour que votre nom apparaisse dans ces "
     "réponses, mesure le résultat chaque mois, et vous l'envoie dans un "
     "rapport lisible en deux minutes. 149 euros par mois au tarif de "
     "lancement, sans engagement, premier mois remboursé s'il ne vous "
     "convainc pas.\n\n"
-    "Le détail : https://partdevoix.triskell-studio.fr\n\n" + _SIGNATURE
+    "Le détail : https://portevoix.triskell-studio.fr\n\n" + _SIGNATURE
 )
 
 
@@ -75,49 +75,49 @@ def _corps(question: str, metier: str) -> str:
 TEMPLATES = [
     {
         "key": "lpv_cabinet_courtier_a",
-        "label": "Part de Voix — courtier, objet A",
+        "label": "Porte-Voix — courtier, objet A",
         "subject": "Ce que ChatGPT répond à « quel courtier à {ville} »",
         "body_text": _corps("vers quel courtier se tourner à", "cabinets"),
     },
     {
         "key": "lpv_cabinet_courtier_b",
-        "label": "Part de Voix — courtier, objet B",
+        "label": "Porte-Voix — courtier, objet B",
         "subject": "Vos concurrents sont dans les réponses de ChatGPT. Pas {raison_sociale}.",
         "body_text": _corps("vers quel courtier se tourner à", "cabinets"),
     },
     {
         "key": "lpv_cabinet_comptable_a",
-        "label": "Part de Voix — expert-comptable, objet A",
+        "label": "Porte-Voix — expert-comptable, objet A",
         "subject": "Ce que ChatGPT répond à « quel expert-comptable à {ville} »",
         "body_text": _corps("quel expert-comptable choisir pour une petite entreprise à", "cabinets"),
     },
     {
         "key": "lpv_cabinet_comptable_b",
-        "label": "Part de Voix — expert-comptable, objet B",
+        "label": "Porte-Voix — expert-comptable, objet B",
         "subject": "Vos confrères sont dans les réponses de ChatGPT. Pas {raison_sociale}.",
         "body_text": _corps("quel expert-comptable choisir pour une petite entreprise à", "cabinets"),
     },
     {
         "key": "lpv_cabinet_avocat_a",
-        "label": "Part de Voix — avocat, objet A",
+        "label": "Porte-Voix — avocat, objet A",
         "subject": "Ce que ChatGPT répond à « quel avocat à {ville} »",
         "body_text": _corps("quel avocat consulter à", "cabinets"),
     },
     {
         "key": "lpv_cabinet_avocat_b",
-        "label": "Part de Voix — avocat, objet B",
+        "label": "Porte-Voix — avocat, objet B",
         "subject": "Vos confrères sont dans les réponses de ChatGPT. Pas {raison_sociale}.",
         "body_text": _corps("quel avocat consulter à", "cabinets"),
     },
     {
         "key": "lpv_commerce_immo_a",
-        "label": "Part de Voix — agence immobilière, objet A",
+        "label": "Porte-Voix — agence immobilière, objet A",
         "subject": "Ce que ChatGPT répond à « quelle agence pour vendre à {ville} »",
         "body_text": _corps("quelle agence immobilière pour vendre un bien à", "agences"),
     },
     {
         "key": "lpv_commerce_immo_b",
-        "label": "Part de Voix — agence immobilière, objet B",
+        "label": "Porte-Voix — agence immobilière, objet B",
         "subject": "Vos concurrents sont dans les réponses de ChatGPT. Pas {raison_sociale}.",
         "body_text": _corps("quelle agence immobilière pour vendre un bien à", "agences"),
     },
@@ -150,7 +150,7 @@ def installer(sb) -> None:
             "body_text": t["body_text"],
             "from_address": "",
             "placeholders": PLACEHOLDERS,
-            "description": ("Mail initial La Part de Voix (issue « concurrents "
+            "description": ("Mail initial Porte-Voix (issue « concurrents "
                             "cités »). Ne s'envoie qu'à un prospect dont "
                             "l'audit est en issue A."),
         }
@@ -176,7 +176,7 @@ def armer(sb, actif: bool) -> None:
      .eq("product", PRODUIT_ID).eq("category", "prospection").execute())
     print(f"Produit et modèles {'ARMÉS' if actif else 'désarmés'}.")
     if actif:
-        print("⚠️ À partir de maintenant, les métiers Part de Voix avec site "
+        print("⚠️ À partir de maintenant, les métiers Porte-Voix avec site "
               "reçoivent SES mails (jamais ceux de Pixel Pro), et "
               "réciproquement. Vérifier qu'un lot d'audits est généré "
               "(scripts/pdv_audit.py) avant tout passage de l'Auto-pilote.")
@@ -209,7 +209,7 @@ def etat(sb) -> None:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Installer La Part de Voix")
+    p = argparse.ArgumentParser(description="Installer Porte-Voix")
     p.add_argument("--etat", action="store_true")
     p.add_argument("--armer", action="store_true")
     p.add_argument("--desarmer", action="store_true")

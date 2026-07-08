@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Génère un audit La Part de Voix pour un prospect.
+"""Génère un audit Porte-Voix pour un prospect.
 
 Usage :
   python scripts/pdv_audit.py "Cabinet Durand" "courtier" "Rennes"
   python scripts/pdv_audit.py "Cabinet Durand" "courtier" "Rennes" --passes 4
 
-Écrit la page HTML + les données dans lapartdevoix/site/audits/ (adresse
+Écrit la page HTML + les données dans portevoix/site/audits/ (adresse
 non devinable) et affiche le verdict.
 """
 import argparse
@@ -17,11 +17,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from triskell_command.integrations.partdevoix import audit as pdv_audit  # noqa: E402
 
 DOSSIER_DEFAUT = (Path(__file__).resolve().parents[2]
-                  / "lapartdevoix" / "site" / "audits")
+                  / "portevoix" / "site" / "audits")
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Audit La Part de Voix")
+    p = argparse.ArgumentParser(description="Audit Porte-Voix")
     p.add_argument("entreprise")
     p.add_argument("metier")
     p.add_argument("ville")

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Lance un relevé du pilote La Part de Voix (panel cibles + témoins).
+"""Lance un relevé du pilote Porte-Voix (panel cibles + témoins).
 
 Usage :
   python scripts/pdv_pilote.py            # relevé complet (2 passages)
@@ -20,7 +20,7 @@ from triskell_command.integrations.partdevoix import pilote  # noqa: E402
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Pilote La Part de Voix")
+    p = argparse.ArgumentParser(description="Pilote Porte-Voix")
     p.add_argument("--passes", type=int, default=2)
     p.add_argument("--resume", action="store_true",
                    help="afficher l'historique sans lancer de mesure")

@@ -1,4 +1,4 @@
-"""Index des audits La Part de Voix générés par prospect.
+"""Index des audits Porte-Voix générés par prospect.
 
 Le générateur d'audits enregistre ici « cette fiche → cette page d'audit »,
 et le moteur de mails vient y chercher {lien_audit} au moment de l'envoi.
@@ -17,7 +17,7 @@ from . import moteur
 logger = logging.getLogger(__name__)
 
 FICHIER = Path.home() / ".triskell-command" / "partdevoix_liens.json"
-BASE_URL = "https://partdevoix.triskell-studio.fr"
+BASE_URL = "https://portevoix.triskell-studio.fr"
 
 
 def _charger() -> list:

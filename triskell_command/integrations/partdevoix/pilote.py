@@ -1,4 +1,4 @@
-"""Pilote interne La Part de Voix.
+"""Pilote interne Porte-Voix.
 
 Tourne en parallèle de la construction commerciale, ne bloque rien :
 c'est le tableau de bord d'honnêteté. On mesure régulièrement un panel
