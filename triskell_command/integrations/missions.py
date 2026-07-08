@@ -373,7 +373,22 @@ def hunt_state_for(source: str, hunt_ref: str) -> dict:
                 status = "error"
             found = int(stats.get("found") or stats.get("created")
                         or stats.get("total") or 0)
-            return {"status": status, "progress": int(job.get("progress") or 0),
+            # ⚠️ Chez Obélisk, `progress` est une LISTE de lignes de journal,
+            # pas un pourcentage. int(liste) levait TypeError → attrapée par
+            # le except global → statut « unknown » → la mission restait
+            # « en chasse » POUR TOUJOURS, même chasse finie (vécu 08/07 :
+            # job done en 28 s, mission figée 40 min sans erreur visible).
+            prog_raw = job.get("progress")
+            if isinstance(prog_raw, (int, float)):
+                prog = int(prog_raw)
+            elif status == "done":
+                prog = 100
+            elif isinstance(prog_raw, list):
+                # Heuristique douce : le journal grossit avec l'avancement.
+                prog = min(95, 5 * len(prog_raw))
+            else:
+                prog = 0
+            return {"status": status, "progress": prog,
                     "found": found,
                     "with_email": int(stats.get("with_email") or 0),
                     "error": job.get("error") or ""}
