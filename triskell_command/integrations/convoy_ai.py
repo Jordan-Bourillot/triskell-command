@@ -615,6 +615,19 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         page_metier_url = "https://pixel-pros.fr"
         page_demo_url = "https://pixel-pros.fr/demo"
 
+    # {lien_audit} : page d'audit La Part de Voix generee pour CE prospect
+    # (index local rempli par le generateur d'audits). Best-effort : fiche
+    # inconnue ou module absent -> accueil lapartdevoix.fr, jamais un trou.
+    lien_audit_url = "https://lapartdevoix.fr"
+    if "{lien_audit}" in text or "{{lien_audit}}" in text:
+        try:
+            from .partdevoix.liens import audit_url_for
+            lien_audit_url = (audit_url_for(email=email, entreprise=raison,
+                                            ville=ville)
+                              or "https://lapartdevoix.fr")
+        except Exception:
+            lien_audit_url = "https://lapartdevoix.fr"
+
     # {{apercu_site}} : maquette personnalisée du futur site (image hébergée).
     # Générée UNIQUEMENT si le modèle l'utilise → zéro coût/risque sinon.
     # Best-effort : échec → vide, le mail part quand même.
@@ -638,6 +651,7 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         "{page_metier}":    page_metier_url,
         "{page_demo}":      page_demo_url,
         "{apercu_site}":    apercu_html,
+        "{lien_audit}":     lien_audit_url,
         # === Syntaxe EN a 2 accolades (templates Pixel Pros) ===
         "{{first_name}}":    prenom,
         "{{last_name}}":     nom,
@@ -656,6 +670,7 @@ def _apply_placeholders(text: str, prospect: dict, sender_name: str) -> str:
         "{{page_metier}}":   page_metier_url,
         "{{page_demo}}":     page_demo_url,
         "{{apercu_site}}":   apercu_html,
+        "{{lien_audit}}":    lien_audit_url,
         # Placeholders contextuels qu'on ne peut pas auto-remplir : on les
         # vide pour eviter d'envoyer "{{price}}" en clair au prospect.
         # IMPORTANT : tous les placeholders presents dans les templates Pixel
