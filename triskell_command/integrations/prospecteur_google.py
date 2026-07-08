@@ -168,18 +168,34 @@ class ProspectHunt:
             json.dumps(asdict(self), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        # Copie de secours cloud quand la chasse atteint un état final
-        if self.status in ("done", "error"):
-            try:
-                from .hunt_cloud_backup import mirror_hunt
-                mirror_hunt("prospecteur_google", asdict(self))
-            except Exception:
-                pass
+        # Copie cloud EN CONTINU (throttlée par mirror_hunt ; immédiate en
+        # état final) : indispensable depuis la séparation site/robots pour
+        # que le chef de gare (conteneur robots) voie une chasse lancée côté
+        # site — sinon « chasse introuvable » (vécu 08/07 sur 2 missions).
+        try:
+            from .hunt_cloud_backup import mirror_hunt
+            mirror_hunt("prospecteur_google", asdict(self))
+        except Exception:
+            pass
 
     @classmethod
     def load(cls, hunt_id: str) -> "ProspectHunt | None":
         p = HUNTS_DIR / f"{hunt_id}.json"
         if not p.exists():
+            # Repli cloud : la chasse tourne (ou a tourné) dans l'AUTRE
+            # conteneur — on lit sa copie partagée. Pas de réconciliation
+            # zombie ici : on ne peut pas juger un process qu'on ne voit pas,
+            # et le filet missions (rescue) couvre déjà les vraies morts.
+            try:
+                from .hunt_cloud_backup import load_hunt
+                data = load_hunt("prospecteur_google", hunt_id)
+                if data:
+                    fields = {k: v for k, v in data.items()
+                              if k in cls.__dataclass_fields__}
+                    return cls(**fields)
+            except Exception as exc:
+                logger.debug("prospect hunt cloud fallback %s: %s",
+                             hunt_id, exc)
             return None
         try:
             from .hunt_zombies import reconcile_hunt_file

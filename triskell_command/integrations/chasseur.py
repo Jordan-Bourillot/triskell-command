@@ -121,19 +121,32 @@ class Hunt:
             json.dumps(asdict(self), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        # Copie de secours cloud quand la chasse atteint un état final
-        # (best-effort : ne casse jamais la fin de chasse).
-        if self.status in ("done", "error"):
-            try:
-                from .hunt_cloud_backup import mirror_hunt
-                mirror_hunt("chasseur", asdict(self))
-            except Exception:
-                pass
+        # Copie cloud EN CONTINU (throttlée par mirror_hunt ; immédiate en
+        # état final) : depuis la séparation site/robots, le chef de gare
+        # (conteneur robots) suit les chasses via cette copie — une chasse
+        # longue lancée côté site serait sinon « introuvable » pour lui.
+        try:
+            from .hunt_cloud_backup import mirror_hunt
+            mirror_hunt("chasseur", asdict(self))
+        except Exception:
+            pass
 
     @classmethod
     def load(cls, hunt_id: str) -> "Hunt | None":
         p = HUNTS_DIR / f"{hunt_id}.json"
         if not p.exists():
+            # Repli cloud : chasse de l'AUTRE conteneur (cf. save ci-dessus).
+            # Pas de réconciliation zombie sur une copie distante ; le filet
+            # missions (rescue/relance) couvre les vraies interruptions.
+            try:
+                from .hunt_cloud_backup import load_hunt
+                data = load_hunt("chasseur", hunt_id)
+                if data:
+                    fields = {k: v for k, v in data.items()
+                              if k in cls.__dataclass_fields__}
+                    return cls(**fields)
+            except Exception as exc:
+                logger.debug("hunt cloud fallback %s: %s", hunt_id, exc)
             return None
         try:
             from .hunt_zombies import reconcile_hunt_file
