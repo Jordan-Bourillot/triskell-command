@@ -248,13 +248,13 @@ def rendre_html(audit: dict) -> str:
     background:
       radial-gradient(1100px 560px at 85% -8%, rgba(74,222,128,0.09), transparent 60%),
       radial-gradient(900px 520px at 0% 6%, rgba(76,110,245,0.12), transparent 55%),
-      #0b1020;
+      #131c39;
     color:#e9edf9;
     font-family:system-ui,-apple-system,'Segoe UI','Helvetica Neue',Arial,sans-serif;
     font-size:17px; line-height:1.65; min-height:100vh;
   }}
   .page {{ max-width:760px; margin:0 auto; padding:26px 20px 60px; }}
-  .haut {{ border-bottom:1px solid rgba(255,255,255,0.09); padding-bottom:14px; margin-bottom:30px;
+  .haut {{ border-bottom:1px solid rgba(255,255,255,0.13); padding-bottom:14px; margin-bottom:30px;
           display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; }}
   .marque {{ font-size:21px; font-weight:800; letter-spacing:-0.02em; text-decoration:none; color:#e9edf9; }}
   .marque span {{ color:#4ade80; }}
@@ -264,7 +264,7 @@ def rendre_html(audit: dict) -> str:
        line-height:1.15; text-wrap:balance; margin:10px 0 16px; }}
   p {{ text-wrap:pretty; }}
   .lecture {{ font-size:18px; color:#9aa7c7; max-width:58ch; }}
-  .bloc {{ border:1px solid rgba(255,255,255,0.09); background:rgba(255,255,255,0.035);
+  .bloc {{ border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.055);
           border-radius:18px; padding:24px; margin:30px 0; }}
   .bloc h2 {{ font-size:20px; letter-spacing:-0.01em; margin-bottom:16px; }}
   .barre {{ margin:14px 0; }}
@@ -277,7 +277,7 @@ def rendre_html(audit: dict) -> str:
                   box-shadow:0 0 16px rgba(74,222,128,0.5); }}
   .barre.vous .plein {{ background:#fb923c; box-shadow:0 0 14px rgba(251,146,60,0.55); min-width:4px; }}
   .barre.vous .ligne span {{ color:#fb923c; font-weight:700; }}
-  .extrait {{ margin:18px 0; background:#0f1731; border:1px solid rgba(255,255,255,0.1);
+  .extrait {{ margin:18px 0; background:#1a2547; border:1px solid rgba(255,255,255,0.1);
              border-radius:4px 16px 16px 16px; padding:14px 17px;
              box-shadow:0 12px 34px rgba(0,0,0,0.35); }}
   .extrait .qui {{ font-size:13.5px; font-weight:700; color:#4ade80; margin-bottom:8px; }}
@@ -285,7 +285,7 @@ def rendre_html(audit: dict) -> str:
                font-size:13.5px; line-height:1.6; color:#cdd6ee; margin:0; }}
   ul {{ margin:8px 0 0 20px; }}
   li {{ font-size:15.5px; color:#9aa7c7; }}
-  .methode {{ font-size:14px; color:#9aa7c7; border-top:1px solid rgba(255,255,255,0.09); padding-top:14px; }}
+  .methode {{ font-size:14px; color:#9aa7c7; border-top:1px solid rgba(255,255,255,0.13); padding-top:14px; }}
   .suite {{ background:linear-gradient(180deg, rgba(74,222,128,0.12), rgba(74,222,128,0.03));
            border:1px solid rgba(74,222,128,0.5); border-radius:18px;
            padding:24px; margin:34px 0 0; box-shadow:0 0 46px rgba(74,222,128,0.1); }}
@@ -299,7 +299,9 @@ def rendre_html(audit: dict) -> str:
 <body>
 <div class="page">
   <div class="haut">
-    <a class="marque" href="https://portevoix.triskell-studio.fr">Porte-Voix<span>.</span></a>
+    <a class="marque" href="https://portevoix.triskell-studio.fr"><img
+      src="../logo-rond-96.png" alt="" width="30" height="30"
+      style="vertical-align:middle;margin-right:9px">Porte-Voix<span>.</span></a>
     <span class="etiquette">Audit établi le {e(date_txt)}</span>
   </div>
   <p class="etiquette">{entreprise}, {ville}</p>
