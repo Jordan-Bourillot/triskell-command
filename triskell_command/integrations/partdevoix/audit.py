@@ -216,6 +216,12 @@ def rendre_html(audit: dict) -> str:
     )
     extraits_html = ""
     for x in audit.get("extraits") or []:
+        # Nettoyage d'affichage : les IA répondent en mise en forme brute
+        # (gras **, liens [texte](url)) qui ferait sale dans une citation.
+        brut = x.get("texte") or ""
+        brut = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", brut)
+        brut = brut.replace("**", "").replace("__", "").replace("##", "")
+        x = dict(x, texte=re.sub(r"\s+", " ", brut).strip())
         extraits_html += (
             f'<div class="extrait"><div class="qui">{e(x["ia"])}, à la '
             f'question « {e(x["question"])} »</div>'
@@ -236,39 +242,58 @@ def rendre_html(audit: dict) -> str:
 <meta name="robots" content="noindex">
 <title>Audit de part de voix. {entreprise}, {ville}.</title>
 <style>
-  * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ background:#f6f1e6; color:#1c2b3a; font-family:Georgia,'Times New Roman',serif;
-         font-size:18px; line-height:1.6; }}
+  *, *::before, *::after {{ margin:0; padding:0; box-sizing:border-box; }}
+  html, body {{ overflow-x:hidden; }}
+  body {{
+    background:
+      radial-gradient(1100px 560px at 85% -8%, rgba(74,222,128,0.09), transparent 60%),
+      radial-gradient(900px 520px at 0% 6%, rgba(76,110,245,0.12), transparent 55%),
+      #0b1020;
+    color:#e9edf9;
+    font-family:system-ui,-apple-system,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    font-size:17px; line-height:1.65; min-height:100vh;
+  }}
   .page {{ max-width:760px; margin:0 auto; padding:26px 20px 60px; }}
-  .haut {{ border-bottom:3px double #1c2b3a; padding-bottom:12px; margin-bottom:30px;
+  .haut {{ border-bottom:1px solid rgba(255,255,255,0.09); padding-bottom:14px; margin-bottom:30px;
           display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; }}
-  .marque {{ font-size:22px; font-weight:bold; text-decoration:none; color:#1c2b3a; }}
-  .marque span {{ color:#b23a22; }}
-  .etiquette {{ font-family:'Trebuchet MS',Verdana,sans-serif; font-size:12px;
-               letter-spacing:.2em; text-transform:uppercase; color:#55636f; }}
-  h1 {{ font-size:clamp(28px,5vw,40px); line-height:1.15; text-wrap:balance; margin:10px 0 16px; }}
+  .marque {{ font-size:21px; font-weight:800; letter-spacing:-0.02em; text-decoration:none; color:#e9edf9; }}
+  .marque span {{ color:#4ade80; }}
+  .etiquette {{ font-size:12px; font-weight:600; letter-spacing:.16em;
+               text-transform:uppercase; color:#9aa7c7; }}
+  h1 {{ font-size:clamp(28px,5vw,40px); font-weight:800; letter-spacing:-0.02em;
+       line-height:1.15; text-wrap:balance; margin:10px 0 16px; }}
   p {{ text-wrap:pretty; }}
-  .lecture {{ font-size:19px; color:#55636f; max-width:58ch; }}
-  .bloc {{ border:1px solid #1c2b3a; background:#fffdf6; padding:24px; margin:30px 0; }}
-  .bloc h2 {{ font-size:20px; margin-bottom:16px; }}
-  .barre {{ margin:13px 0; }}
-  .barre .ligne {{ display:flex; justify-content:space-between;
-                  font-family:'Trebuchet MS',Verdana,sans-serif; font-size:15px; margin-bottom:4px; }}
-  .barre .fond {{ background:#efe7d6; height:15px; border:1px solid #cfc4ac; }}
-  .barre .plein {{ height:100%; background:#1c2b3a; }}
-  .barre.vous .plein {{ background:#b23a22; }}
-  .barre.vous .ligne {{ color:#b23a22; font-weight:bold; }}
-  .extrait {{ margin:18px 0; }}
-  .extrait .qui {{ font-family:'Trebuchet MS',Verdana,sans-serif; font-size:14px; color:#55636f; }}
-  blockquote {{ border-left:4px solid #cfc4ac; padding:6px 0 6px 14px; margin-top:6px;
-               font-size:16px; color:#333f4c; }}
+  .lecture {{ font-size:18px; color:#9aa7c7; max-width:58ch; }}
+  .bloc {{ border:1px solid rgba(255,255,255,0.09); background:rgba(255,255,255,0.035);
+          border-radius:18px; padding:24px; margin:30px 0; }}
+  .bloc h2 {{ font-size:20px; letter-spacing:-0.01em; margin-bottom:16px; }}
+  .barre {{ margin:14px 0; }}
+  .barre .ligne {{ display:flex; justify-content:space-between; gap:12px;
+                  font-size:15px; font-weight:600; color:#9aa7c7; margin-bottom:6px; }}
+  .barre .ligne span:last-child {{ font-variant-numeric:tabular-nums; color:#e9edf9; }}
+  .barre .fond {{ background:rgba(255,255,255,0.06); height:14px; border-radius:999px; overflow:hidden; }}
+  .barre .plein {{ height:100%; border-radius:999px;
+                  background:linear-gradient(90deg,#2dd4bf,#4ade80);
+                  box-shadow:0 0 16px rgba(74,222,128,0.5); }}
+  .barre.vous .plein {{ background:#fb923c; box-shadow:0 0 14px rgba(251,146,60,0.55); min-width:4px; }}
+  .barre.vous .ligne span {{ color:#fb923c; font-weight:700; }}
+  .extrait {{ margin:18px 0; background:#0f1731; border:1px solid rgba(255,255,255,0.1);
+             border-radius:4px 16px 16px 16px; padding:14px 17px;
+             box-shadow:0 12px 34px rgba(0,0,0,0.35); }}
+  .extrait .qui {{ font-size:13.5px; font-weight:700; color:#4ade80; margin-bottom:8px; }}
+  blockquote {{ font-family:ui-monospace,'Cascadia Code','SF Mono',Consolas,'Liberation Mono',monospace;
+               font-size:13.5px; line-height:1.6; color:#cdd6ee; margin:0; }}
   ul {{ margin:8px 0 0 20px; }}
-  li {{ font-size:16px; color:#55636f; }}
-  .methode {{ font-size:14px; color:#55636f; border-top:1px solid #cfc4ac; padding-top:14px; }}
-  .suite {{ background:#f3d97a; border:2px solid #1c2b3a; padding:20px 22px; margin:34px 0 0; }}
-  .suite a.bouton {{ display:inline-block; margin-top:12px; padding:13px 24px; background:#1c2b3a;
-             color:#f6f1e6; text-decoration:none; font-family:'Trebuchet MS',Verdana,sans-serif;
-             font-size:16px; }}
+  li {{ font-size:15.5px; color:#9aa7c7; }}
+  .methode {{ font-size:14px; color:#9aa7c7; border-top:1px solid rgba(255,255,255,0.09); padding-top:14px; }}
+  .suite {{ background:linear-gradient(180deg, rgba(74,222,128,0.12), rgba(74,222,128,0.03));
+           border:1px solid rgba(74,222,128,0.5); border-radius:18px;
+           padding:24px; margin:34px 0 0; box-shadow:0 0 46px rgba(74,222,128,0.1); }}
+  .suite strong {{ color:#4ade80; font-size:18px; letter-spacing:-0.01em; }}
+  .suite a.bouton {{ display:inline-block; margin-top:14px; padding:13px 24px;
+             background:linear-gradient(180deg,#5fe796,#3ecf70); color:#04240f;
+             text-decoration:none; font-weight:700; font-size:15.5px; border-radius:12px;
+             box-shadow:0 10px 30px rgba(74,222,128,0.28); }}
 </style>
 </head>
 <body>
