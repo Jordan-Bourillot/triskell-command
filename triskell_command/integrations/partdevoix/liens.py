@@ -17,7 +17,7 @@ from . import moteur
 logger = logging.getLogger(__name__)
 
 FICHIER = Path.home() / ".triskell-command" / "partdevoix_liens.json"
-BASE_URL = "https://lapartdevoix.fr"
+BASE_URL = "https://partdevoix.triskell-studio.fr"
 
 
 def _charger() -> list:

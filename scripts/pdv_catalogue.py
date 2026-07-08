@@ -13,7 +13,7 @@ Usage :
   python scripts/pdv_catalogue.py --etat     # montre l'état actuel
   python scripts/pdv_catalogue.py --armer    # active produit + modèles (GO Jordan)
   python scripts/pdv_catalogue.py --desarmer # coupe tout
-  python scripts/pdv_catalogue.py --adresse contact@lapartdevoix.fr
+  python scripts/pdv_catalogue.py --adresse contact@triskell-studio.fr
       # fixe l'adresse d'expéditeur exigée sur tous les modèles (après
       # création et chauffe des boîtes dédiées ; vide au lancement =
       # tirage dans le pool d'adresses existant)
@@ -38,7 +38,7 @@ PRODUIT = {
     "kind": "service",
     "price": 149,
     "price_note": "HT/mois (lancement, verrouillé à vie ; grille 179/290/449)",
-    "buy_url": "https://lapartdevoix.fr",
+    "buy_url": "https://partdevoix.triskell-studio.fr",
     "color": "#1c2b3a",
     "initial": "V",
 }
@@ -57,7 +57,7 @@ _CORPS_COMMUN = (
     "rapport lisible en deux minutes. 149 euros par mois au tarif de "
     "lancement, sans engagement, premier mois remboursé s'il ne vous "
     "convainc pas.\n\n"
-    "Le détail : https://lapartdevoix.fr\n\n" + _SIGNATURE
+    "Le détail : https://partdevoix.triskell-studio.fr\n\n" + _SIGNATURE
 )
 
 
