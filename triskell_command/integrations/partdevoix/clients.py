@@ -30,7 +30,7 @@ MAX_CONCURRENTS = 3
 # figé : l'historique des relevés est accroché à l'id.
 _CHAMPS_MODIFIABLES = {"entreprise", "metier", "villes", "concurrents",
                        "questions", "palier", "entree_le", "actif",
-                       "fait", "avenir"}
+                       "fait", "avenir", "email"}
 
 
 def _charger() -> list:
@@ -56,6 +56,16 @@ def _en_liste(valeur) -> list[str]:
     if isinstance(valeur, str):
         valeur = [valeur]
     return [str(v).strip() for v in (valeur or []) if str(v).strip()]
+
+
+def _email_propre(texte: str) -> str:
+    """L'adresse mail du client (sert à l'envoi du rapport). Vide accepté
+    (renseignable plus tard), mais jamais une adresse manifestement fausse."""
+    texte = (texte or "").strip().lower()
+    if texte and ("@" not in texte or " " in texte or "." not in
+                  texte.split("@")[-1]):
+        raise ValueError(f"adresse mail invalide : « {texte} »")
+    return texte
 
 
 def _date_entree(texte: str) -> str:
@@ -108,7 +118,7 @@ def _trouver_dans(entrees: list, ident: str) -> dict | None:
 
 def ajouter_client(entreprise: str, metier: str, villes,
                    concurrents=None, questions=None, palier: str = "",
-                   entree_le: str = "") -> dict:
+                   entree_le: str = "", email: str = "") -> dict:
     """Crée la fiche d'un client suivi et la renvoie.
 
     Refuse les doublons parmi les clients ACTIFS (même entreprise au sens
@@ -127,6 +137,7 @@ def ajouter_client(entreprise: str, metier: str, villes,
         raise ValueError(f"{MAX_CONCURRENTS} concurrents désignés au maximum")
     _verifier_concurrents(entreprise, concurrents)
     entree_le = _date_entree(entree_le)
+    email = _email_propre(email)
     with stockage.VERROU:
         entrees = _charger()
         for e in entrees:
@@ -148,6 +159,7 @@ def ajouter_client(entreprise: str, metier: str, villes,
             "concurrents": concurrents,
             "questions": _en_liste(questions),
             "palier": (palier or "").strip(),
+            "email": email,
             "entree_le": entree_le,
             "actif": True,
             # Rubriques libres du prochain rapport, posées au fil du mois.
@@ -199,6 +211,8 @@ def modifier_client(ident: str, **champs) -> dict:
                 valeur = bool(valeur)
             elif nom == "entree_le":
                 valeur = _date_entree(str(valeur or ""))
+            elif nom == "email":
+                valeur = _email_propre(str(valeur or ""))
             else:
                 valeur = str(valeur or "").strip()
                 if nom in {"entreprise", "metier"} and not valeur:
@@ -232,6 +246,26 @@ def modifier_client(ident: str, **champs) -> dict:
 def desactiver_client(ident: str) -> dict:
     """Sort un client des listes de travail (historique conservé)."""
     return modifier_client(ident, actif=False)
+
+
+def noter_fait(ident: str, texte: str) -> dict:
+    """Ajoute une ligne au journal « ce qui a été fait » de la fiche.
+
+    C'est la porte d'entrée des outils (connecteur WordPress, Phare…) :
+    le travail fait pour un client s'inscrit TOUT SEUL dans son prochain
+    rapport, sans saisie de Jordan. Idempotent : une ligne identique
+    n'est jamais doublée."""
+    texte = (texte or "").strip()
+    if not texte:
+        raise ValueError("rien à noter")
+    client = trouver_client(ident)
+    if client is None:
+        raise ValueError(f"client introuvable : {ident}")
+    fait = list(client.get("fait") or [])
+    if texte in fait:
+        return client
+    fait.append(texte)
+    return modifier_client(client["id"], fait=fait)
 
 
 def questions_du_client(client: dict) -> list[str]:

@@ -175,6 +175,9 @@ const PorteVoix = {
       c.metier ? `<span class="pv-badge">${this.esc(c.metier)}</span>` : "",
       (c.villes || []).length ? `<span class="pv-badge">📍 ${this.esc(c.villes.join(", "))}</span>` : "",
       c.palier ? `<span class="pv-badge">💶 ${this.esc(c.palier)}</span>` : "",
+      c.email
+        ? `<span class="pv-badge">✉️ ${this.esc(c.email)}</span>`
+        : `<span class="pv-badge" style="color:hsl(var(--warning-text))">✉️ adresse mail à renseigner (pour l’envoi du rapport)</span>`,
       c.entree_le ? `<span class="pv-badge">entré le ${this.esc(this.dateFr(c.entree_le))}</span>` : "",
     ].filter(Boolean).join(" ");
 
@@ -216,10 +219,12 @@ const PorteVoix = {
            style="border-top:1px solid hsl(var(--border))">
         <span class="text-sm">📄 ${this.esc(r.mois || (r.archive_ts || "").slice(0, 7))}
           — ${this.fmt(r.part)}&nbsp;%
-          ${r.alertes ? `<span style="color:hsl(var(--warning-text))">⚠ à compléter</span>` : ""}</span>
+          ${r.alertes ? `<span style="color:hsl(var(--warning-text))">⚠ à compléter</span>` : ""}
+          ${r.envoye_le ? `<span style="color:hsl(var(--success-text))">✓ envoyé le ${this.esc(this.dateFr(r.envoye_le))}</span>` : ""}</span>
         <span>
           <button data-act="voir" data-id="${this.esc(r.id)}" class="btn btn-secondary btn-xs">Voir</button>
           <button data-act="telecharger" data-id="${this.esc(r.id)}" class="btn btn-secondary btn-xs">Télécharger</button>
+          ${r.envoye_le ? "" : `<button data-act="envoyer" data-id="${this.esc(r.id)}" data-client="${this.esc(c.id)}" class="btn btn-primary btn-xs">✉️ Envoyer au client</button>`}
         </span>
       </div>`).join("");
 
@@ -268,6 +273,7 @@ const PorteVoix = {
     if (act === "auto") return this.toggleAuto();
     if (act === "voir") return this.ouvrirRapport(id, false);
     if (act === "telecharger") return this.ouvrirRapport(id, true);
+    if (act === "envoyer") return this.envoyerRapport(id, b.dataset.client || "");
     if (act === "rapport") return this.lancerRapport(id);
     if (act === "rubriques") return this.sauverRubriques(id);
     if (act === "modifier") {
@@ -318,6 +324,22 @@ const PorteVoix = {
       a.remove();
     } else {
       window.open(url, "_blank", "noopener");
+    }
+  },
+
+  async envoyerRapport(id, clientId) {
+    const c = this.state.clients.find((x) => x.id === clientId) || {};
+    if (!c.email) {
+      this.msg("Pas d’adresse mail sur la fiche : clique sur « Modifier » pour la renseigner.", true);
+      return;
+    }
+    if (!window.confirm(`Envoyer ce rapport à ${c.email} ? Le mail part tout de suite, avec le rapport en pièce jointe.`)) return;
+    const r = await App.api.pdv_rapport_envoyer({ id });
+    if (r && r.ok) {
+      this.msg(`Rapport envoyé à ${r.envoye_a}.`);
+      await this.refresh(true);
+    } else {
+      this.msg((r && r.error) || "Envoi impossible.", true);
     }
   },
 
@@ -387,6 +409,11 @@ const PorteVoix = {
             <input id="pvf-palier" class="pv-in" value="${this.esc(c.palier || "")}" placeholder="ex. 179 €/mois">
           </div>
           <div class="sm:col-span-2">
+            <label class="text-sm font-semibold">Adresse mail du client</label>
+            <input id="pvf-email" class="pv-in" value="${this.esc(c.email || "")}"
+                   placeholder="contact@cabinet.fr — sert à lui envoyer son rapport en un clic">
+          </div>
+          <div class="sm:col-span-2">
             <label class="text-sm font-semibold">Concurrents à suivre (3 au maximum)</label>
             <input id="pvf-concurrents" class="pv-in" value="${this.esc((c.concurrents || []).join(", "))}"
                    placeholder="Le Goff Assurances, Cabinet Petit (séparés par des virgules)">
@@ -425,12 +452,15 @@ const PorteVoix = {
       concurrents: this._virgules(v("pvf-concurrents")),
       questions: this._lignes(v("pvf-questions")),
       palier: v("pvf-palier").trim(),
+      email: v("pvf-email").trim(),
     };
     if (this.state.edite) payload.id = this.state.edite;
     const r = await App.api.pdv_client_save(payload);
     if (r && r.ok) {
       this.fermerForm();
-      this.msg(payload.id ? "Fiche mise à jour." : `${payload.entreprise} est suivi. Lance sa première mesure quand tu veux.`);
+      this.msg(payload.id
+        ? "Fiche mise à jour."
+        : `${payload.entreprise} est suivi — sa première mesure est déjà partie toute seule (point de référence).`);
       await this.refresh(true);
     } else {
       this.msg((r && r.error) || "Enregistrement impossible.", true);

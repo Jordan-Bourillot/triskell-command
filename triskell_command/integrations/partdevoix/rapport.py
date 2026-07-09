@@ -599,3 +599,20 @@ def rapport_par_id(rapport_id: str) -> dict | None:
         if r.get("id") == rapport_id:
             return r
     return None
+
+
+def marquer_envoye(rapport_id: str, email: str) -> dict | None:
+    """Marque un rapport archivé comme envoyé au client (date + adresse) :
+    l'écran affiche « ✓ envoyé », et un deuxième envoi demande
+    confirmation en connaissance de cause."""
+    with stockage.VERROU:
+        archives = rapports_archives()
+        for r in archives:
+            if r.get("id") == rapport_id:
+                r["envoye_le"] = datetime.now(timezone.utc).isoformat()
+                r["envoye_a"] = (email or "").strip().lower()
+                if not stockage.ecrire("rapports", archives):
+                    raise ValueError("marquage impossible : base partagée "
+                                     "injoignable — réessaie dans un moment")
+                return r
+    return None

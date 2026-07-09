@@ -43,6 +43,8 @@ def main() -> int:
                     help="répétable : questions personnalisées (sinon "
                          "celles du métier)")
     aj.add_argument("--palier", default="")
+    aj.add_argument("--email", default="",
+                    help="adresse mail du client (sert à l'envoi du rapport)")
     aj.add_argument("--entree", default="",
                     help="date d'entrée AAAA-MM-JJ (défaut : aujourd'hui)")
 
@@ -57,6 +59,7 @@ def main() -> int:
     mo.add_argument("--concurrent", action="append")
     mo.add_argument("--question", action="append")
     mo.add_argument("--palier")
+    mo.add_argument("--email")
     mo.add_argument("--fait", action="append",
                     help="répétable : ce qui a été fait ce mois-ci "
                          "(repris par le prochain rapport)")
@@ -72,7 +75,8 @@ def main() -> int:
             c = clients.ajouter_client(
                 args.entreprise, args.metier, args.ville,
                 concurrents=args.concurrent, questions=args.question,
-                palier=args.palier, entree_le=args.entree)
+                palier=args.palier, entree_le=args.entree,
+                email=args.email)
             print(f"Client ajouté (id {c['id']}).")
             print(_ligne(c))
         elif args.action == "lister":
@@ -88,6 +92,7 @@ def main() -> int:
                                 ("concurrents", args.concurrent),
                                 ("questions", args.question),
                                 ("palier", args.palier),
+                                ("email", args.email),
                                 ("fait", args.fait),
                                 ("avenir", args.avenir)):
                 if valeur is not None:

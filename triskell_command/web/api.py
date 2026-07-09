@@ -12816,6 +12816,7 @@ class Api:
                     {"id": r.get("id"), "mois": r.get("mois"),
                      "archive_ts": r.get("archive_ts"),
                      "part": r.get("part_client"),
+                     "envoye_le": r.get("envoye_le") or "",
                      "alertes": len(r.get("alertes") or [])}
                     for r in siens[-12:]]
                 # Règle de rétention : des rubriques vides, ou restées
@@ -12847,19 +12848,24 @@ class Api:
                 champs = {k: p[k] for k in
                           ("entreprise", "metier", "villes", "concurrents",
                            "questions", "palier", "fait", "avenir",
-                           "actif", "entree_le") if k in p}
+                           "actif", "entree_le", "email") if k in p}
                 if not champs:
                     return {"ok": False, "error": "rien à modifier"}
                 fiche = pdv_clients.modifier_client(ident, **champs)
-            else:
-                fiche = pdv_clients.ajouter_client(
-                    p.get("entreprise") or "", p.get("metier") or "",
-                    p.get("villes") or [],
-                    concurrents=p.get("concurrents"),
-                    questions=p.get("questions"),
-                    palier=p.get("palier") or "",
-                    entree_le=p.get("entree_le") or "")
-            return {"ok": True, "client": fiche}
+                return {"ok": True, "client": fiche}
+            fiche = pdv_clients.ajouter_client(
+                p.get("entreprise") or "", p.get("metier") or "",
+                p.get("villes") or [],
+                concurrents=p.get("concurrents"),
+                questions=p.get("questions"),
+                palier=p.get("palier") or "",
+                entree_le=p.get("entree_le") or "",
+                email=p.get("email") or "")
+            # Le point de référence n'attend aucun clic : la première
+            # mesure part toute seule dès l'ajout.
+            lancement = self._pdv_lancer_mesure(fiche)
+            return {"ok": True, "client": fiche,
+                    "mesure_lancee": bool(lancement.get("ok"))}
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
         except Exception as exc:
@@ -12898,6 +12904,11 @@ class Api:
             return {"ok": False, "error":
                     f"{fiche.get('entreprise')} est sorti du suivi — le "
                     f"réactiver avant de mesurer."}
+        return self._pdv_lancer_mesure(fiche)
+
+    def _pdv_lancer_mesure(self, fiche: dict) -> dict:
+        """Démarre la mesure + le rapport d'un client en arrière-plan
+        (une seule à la fois par client)."""
         etat = self._pdv_mesures.get(fiche["id"]) or {}
         if etat.get("etat") == "mesure":
             return {"ok": False, "error":
@@ -12951,6 +12962,93 @@ class Api:
                    f"{(donnees.get('ts') or '')[:7] or 'mois'}.html")
             return {"ok": True, "filename": nom,
                     "html": pdv_rapport.rendre_html(donnees)}
+        except Exception as exc:
+            return {"ok": False, "error": _friendly_error(exc)}
+
+    def pdv_rapport_envoyer(self, payload: dict) -> dict:
+        """Envoie un rapport archivé au client (pièce jointe HTML) depuis
+        les comptes mail configurés. C'est LE clic de validation : rien
+        ne part sans lui. Après l'envoi, le rapport est marqué « envoyé »
+        et la rubrique « fait » de la fiche est vidée (consommée) —
+        « ce qui vient » reste : c'est le plan du mois qui commence."""
+        rid = ((payload or {}).get("id") or "").strip()
+        if not rid:
+            return {"ok": False, "error": "id du rapport requis"}
+        try:
+            from ..integrations.partdevoix import clients as pdv_clients
+            from ..integrations.partdevoix import rapport as pdv_rapport
+            donnees = pdv_rapport.rapport_par_id(rid)
+            if donnees is None:
+                return {"ok": False, "error": "rapport introuvable"}
+            if donnees.get("envoye_le") and not (payload or {}).get("force"):
+                return {"ok": False, "error":
+                        "ce rapport a déjà été envoyé le "
+                        f"{(donnees.get('envoye_le') or '')[:10]} à "
+                        f"{donnees.get('envoye_a') or '?'}"}
+            fiche = pdv_clients.trouver_client(
+                donnees.get("client_id") or "")
+            if fiche is None:
+                return {"ok": False, "error": "client introuvable"}
+            email = (fiche.get("email") or "").strip()
+            if not email:
+                return {"ok": False, "error":
+                        "pas d'adresse mail sur la fiche — la renseigner "
+                        "(bouton Modifier) avant d'envoyer"}
+            import base64
+            html_rapport = pdv_rapport.rendre_html(donnees)
+            mois = donnees.get("mois") or "ce mois-ci"
+            corps = (
+                "Bonjour,\n\n"
+                f"Votre rapport mensuel de part de voix ({mois}) est en "
+                "pièce jointe.\n\n"
+                "Il montre votre position dans les réponses des IA, celle "
+                "de vos concurrents suivis, le travail réalisé ce mois-ci "
+                "et ce qui vient le mois prochain.\n\n"
+                "Pour toute question, répondre à ce mail suffit.\n\n"
+                "Porte-Voix, un service de Triskell Studio")
+            res = self.mail_send({
+                "account_id": "primary",
+                "to": email,
+                "subject": f"Votre rapport de part de voix — {mois}",
+                "body": corps,
+                "attachments": [{
+                    "filename": (f"rapport-part-de-voix-"
+                                 f"{(donnees.get('ts') or '')[:7] or 'mois'}"
+                                 f".html"),
+                    "content_b64": base64.b64encode(
+                        html_rapport.encode("utf-8")).decode("ascii"),
+                    "content_type": "text/html",
+                }],
+                "force": True,  # le destinataire EST un client connu
+            })
+            if not res.get("ok"):
+                return res
+            pdv_rapport.marquer_envoye(rid, email)
+            # Rubrique « fait » consommée par ce rapport : on repart à
+            # blanc pour le mois suivant.
+            try:
+                pdv_clients.modifier_client(fiche["id"], fait=[])
+            except Exception as exc:
+                logger.debug("pdv envoi, purge rubrique fait : %s", exc)
+            return {"ok": True, "envoye_a": email}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            logger.debug("pdv_rapport_envoyer: %s", exc)
+            return {"ok": False, "error": _friendly_error(exc)}
+
+    def pdv_noter(self, payload: dict) -> dict:
+        """Ajoute une ligne au journal « ce qui a été fait » d'un client
+        (la porte des outils : le travail fait s'inscrit tout seul dans
+        le prochain rapport). payload = {id, texte}."""
+        p = payload or {}
+        try:
+            from ..integrations.partdevoix import clients as pdv_clients
+            fiche = pdv_clients.noter_fait((p.get("id") or "").strip(),
+                                           p.get("texte") or "")
+            return {"ok": True, "client": fiche}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
         except Exception as exc:
             return {"ok": False, "error": _friendly_error(exc)}
 

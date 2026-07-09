@@ -109,6 +109,13 @@ try:
     check("date d'entrée AAAA-MM-JJ acceptée telle quelle",
           c_date["entree_le"] == "2026-06-15")
     clients.desactiver_client(c_date["id"])
+    check("adresse mail invalide refusée",
+          leve(lambda: clients.ajouter_client(
+              "Mail Douteux", "courtier", "Brest", email="pas-un-mail")))
+    check("adresse mail normalisée en minuscules",
+          clients.modifier_client(
+              c1["id"], email="Contact@Durand.FR")["email"]
+          == "contact@durand.fr")
 
     print("— registre : modification")
     c1 = clients.modifier_client(c1["id"], palier="serenite")
@@ -354,6 +361,27 @@ try:
     rapport.alerte_rubriques_perimees(c4, rap_frais)
     check("rubriques fraîchement mises à jour : pas d'alerte de recyclage",
           not any("inchangées" in a for a in rap_frais["alertes"]))
+    envoye = rapport.marquer_envoye(entree["id"], "Client@Riou.fr")
+    check("rapport marqué envoyé (date + adresse en minuscules)",
+          envoye and len(envoye.get("envoye_le") or "") >= 10
+          and envoye.get("envoye_a") == "client@riou.fr")
+    check("marquage visible en relisant l'archive",
+          (rapport.rapport_par_id(entree["id"]) or {}).get("envoye_a")
+          == "client@riou.fr")
+    check("marquage d'un rapport inconnu = None",
+          rapport.marquer_envoye("inconnu-xyz", "x@y.fr") is None)
+
+    print("— journal automatique du travail fait")
+    c4 = clients.noter_fait(c4["id"], "Page publiée par le connecteur")
+    check("noter_fait ajoute une ligne au journal",
+          "Page publiée par le connecteur" in c4["fait"])
+    c4 = clients.noter_fait(c4["id"], "Page publiée par le connecteur")
+    check("noter_fait ne double jamais une ligne identique",
+          c4["fait"].count("Page publiée par le connecteur") == 1)
+    check("noter_fait refuse un client inconnu",
+          leve(lambda: clients.noter_fait("fantome-inconnu", "x")))
+    check("noter_fait refuse une note vide",
+          leve(lambda: clients.noter_fait(c4["id"], "   ")))
 
     print("— robot mensuel : qui est dû ? (logique pure)")
     from datetime import datetime, timezone  # noqa: E402
