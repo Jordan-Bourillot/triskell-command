@@ -160,15 +160,20 @@ def _erreur_connexion(reponse: dict) -> str:
         return ("Le site ne répond pas. Vérifier l'adresse, et que le site "
                 "est bien en ligne.")
     if statut == 401:
-        # WordPress distingue « identifiants faux » et « identifiants
-        # jamais reçus » (certains hébergeurs les bloquent en route) :
-        # deux diagnostics, deux remèdes très différents.
+        # Ce signal-là (« personne ne s'est présenté ») a deux causes
+        # possibles, vérifiées sur site réel le 09/07/2026 : un mot de
+        # passe d'application révoqué (WordPress répond ainsi quand il
+        # n'en reste aucun), ou un hébergeur qui bloque les identifiants
+        # en route. On donne les deux pistes, la révocation d'abord.
         if code == "rest_not_logged_in":
-            return ("Les identifiants n'arrivent pas jusqu'à WordPress : "
-                    "l'hébergeur du site les bloque en route (réglage "
-                    "connu chez certains hébergeurs). Demander au client "
-                    "de signaler le point au support de son hébergeur, ou "
-                    "passer en mode contenu livré.")
+            return ("Le site n'a pas reconnu notre accès. Cause la plus "
+                    "probable : le mot de passe d'application a été "
+                    "révoqué (c'est le geste prévu pour nous couper "
+                    "l'accès ; le client peut en recréer un en deux "
+                    "minutes, voir le guide). Si le client n'a rien "
+                    "révoqué : son hébergeur bloque les identifiants en "
+                    "route, passer en mode contenu livré et le lui "
+                    "signaler.")
         return ("Le site a refusé l'identifiant ou le mot de passe "
                 "d'application. Il a peut-être été révoqué : le client peut "
                 "en recréer un en deux minutes (voir le guide d'accès). "
@@ -381,9 +386,15 @@ def lister_nos_pages(url: str, identifiant: str,
                    params={"author": moi,
                            "status": "draft,pending,publish",
                            "context": "edit", "per_page": 100})
-        if r["status"] == 403:
-            # Rayon hors des droits du compte (le rôle « Auteur » ne
-            # voit pas les pages) : rien de nous ne peut s'y trouver.
+        code = (r["json"].get("code", "") if isinstance(r.get("json"), dict)
+                else "")
+        if r["status"] == 403 or (r["status"] == 400
+                                  and code == "rest_invalid_param"):
+            # Rayon hors des droits du compte : le vrai WordPress refuse
+            # la question elle-même (400, « demander des brouillons de
+            # pages » est un paramètre invalide pour un Auteur), certains
+            # réglages renvoient un 403. Dans les deux cas, rien de nous
+            # ne peut s'y trouver. Vérifié sur site réel le 09/07/2026.
             continue
         if r["status"] != 200 or not isinstance(r["json"], list):
             # Tout autre échec est une vraie panne : dire « rien de

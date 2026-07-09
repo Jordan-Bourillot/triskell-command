@@ -145,8 +145,11 @@ class FauxWordPress:
                 return {"status": 500, "texte": "",
                         "json": {"code": "internal_server_error"}}
             if not self._droits().get(droit):
-                return {"status": 403, "texte": "",
-                        "json": {"code": "rest_forbidden_status"}}
+                # Comme le vrai WordPress (vérifié sur site réel le
+                # 09/07/2026) : demander des brouillons d'un rayon hors
+                # droits = paramètre invalide, réponse 400.
+                return {"status": 400, "texte": "",
+                        "json": {"code": "rest_invalid_param"}}
             voulu = str(params.get("author", ""))
             statuts = set((params.get("status") or "publish").split(","))
             items = [self._item(c) for c in self.contenus.values()
@@ -228,12 +231,17 @@ check("WordPress trop vieux = message version 5.6",
 check("... qui nomme aussi la piste du réglage de sécurité (Wordfence)",
       "sécurité" in r["erreur"])
 
+# Le signal « personne ne s'est présenté » (vérifié sur site réel le
+# 09/07/2026) : il arrive après une révocation totale COMME quand un
+# hébergeur bloque les identifiants. Le message doit donner les deux
+# pistes, révocation en tête.
 brancher(FauxWordPress(perd_auth=True))
 r = garder_erreur(wordpress.tester_connexion("https://client-hebergeur.fr",
                                              IDENT, MDP))
-check("identifiants bloqués par l'hébergeur = message hébergeur, pas « révoqué »",
-      not r["ok"] and "hébergeur" in r["erreur"]
-      and "révoqué" not in r["erreur"])
+check("accès non reconnu = les deux pistes données (révoqué, hébergeur)",
+      not r["ok"] and "révoqué" in r["erreur"] and "hébergeur" in r["erreur"])
+check("... et la révocation est citée en premier",
+      not r["ok"] and r["erreur"].find("révoqué") < r["erreur"].find("hébergeur"))
 
 brancher(FauxWordPress())
 r = garder_erreur(wordpress.tester_connexion("https://client-mdp.fr", IDENT,
