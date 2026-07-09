@@ -173,6 +173,14 @@ check("segment comptable", _partdevoix_segment("cabinet d'expertise comptable") 
 check("segment avocat", _partdevoix_segment("Avocat droit des affaires") == "avocat")
 check("segment immo", _partdevoix_segment("Agence immobilière") == "immo")
 check("plombier hors offre", _partdevoix_segment("plombier chauffagiste") == "")
+check("diagnostiqueur immobilier hors offre (faux ami)",
+      _partdevoix_segment("diagnostic immobilier") == "")
+check("diagnostiqueur DPE hors offre",
+      _partdevoix_segment("diagnostiqueur DPE") == "")
+check("courtier en travaux hors offre (faux ami)",
+      _partdevoix_segment("courtier en travaux") == "")
+check("courtier en énergie hors offre",
+      _partdevoix_segment("courtier en énergie") == "")
 check("courtier AVEC site -> Part de Voix",
       _offer_product_for(_Fiche("courtier", "https://x.fr")) == PARTDEVOIX_PRODUCT)
 check("courtier SANS site -> offres sites",
