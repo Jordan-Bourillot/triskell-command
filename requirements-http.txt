@@ -19,6 +19,7 @@ dnspython>=2.4                  # Vérif MX : ne garder que les mails dont le do
 supabase>=2.4
 anthropic>=0.40
 claude-agent-sdk>=0.1.0
+stripe>=11.0                    # Souscription payante Porte-Voix + abonnements SaaS (checkout server-side)
 chevron>=0.14   # Mustache renderer pour le builder Pixel Pros
 google-api-python-client>=2.0   # Chasseur Créateur — recherche YouTube
 langdetect>=1.0.9               # Filtre langue française (Chasseur Créateur)
