@@ -61,14 +61,61 @@ _CORPS_COMMUN = (
 )
 
 
-def _corps(question: str, metier: str) -> str:
+_PIED_OFFRE = (
+    "149 euros par mois au tarif de lancement, sans engagement, premier "
+    "mois remboursé s'il ne vous convainc pas.\n\n"
+    "Le détail : https://portevoix.triskell-studio.fr\n\n" + _SIGNATURE
+)
+
+
+def _corps(question: str, noms_de: str) -> str:
+    """Mail « concurrents cités » : ses rivaux sortent, pas lui."""
     return (
         f"Bonjour,\n\n"
         f"Quand un particulier demande à ChatGPT « {question} {{ville}} », "
-        f"la réponse cite des noms de {metier}. Nous avons posé la question "
+        f"la réponse cite des noms {noms_de}. Nous avons posé la question "
         f"plusieurs dizaines de fois, sous plusieurs formulations, sur "
         f"ChatGPT et Gemini. {{raison_sociale}} n'y apparaît pas, ou "
         f"trop rarement pour compter.\n\n" + _CORPS_COMMUN
+    )
+
+
+def _corps_deja(question: str) -> str:
+    """Mail « déjà cité » : sa place existe, elle se surveille et se défend.
+    JAMAIS envoyé à un absent (l'aiguillage par issue s'en charge)."""
+    return (
+        f"Bonjour,\n\n"
+        f"Bonne nouvelle. Quand un particulier demande à ChatGPT "
+        f"« {question} {{ville}} », {{raison_sociale}} apparaît dans une "
+        f"partie des réponses. Nous avons mesuré à quelle fréquence, et "
+        f"face à qui :\n\n"
+        f"Le relevé complet, captures d'écran comprises : {{lien_audit}}\n\n"
+        f"Cette position n'est pas acquise. Les réponses des IA bougent au "
+        f"fil de ce qu'elles trouvent en ligne, et vos concurrents finiront "
+        f"par s'intéresser à la place que vous occupez. Porte-Voix surveille "
+        f"votre part de voix chaque mois, entretient ce qui la soutient, et "
+        f"vous envoie le relevé dans un rapport lisible en deux minutes.\n\n"
+        + _PIED_OFFRE
+    )
+
+
+def _corps_vide(question: str, metier_nom: str) -> str:
+    """Mail « place vide » : personne n'est cité, premier arrivé premier
+    cité. Pour les villes moyennes et les métiers encore muets."""
+    return (
+        f"Bonjour,\n\n"
+        f"Quand un particulier demande à ChatGPT « {question} {{ville}} », "
+        f"la réponse ne cite aujourd'hui aucun professionnel local. Nous "
+        f"avons vérifié, plusieurs dizaines de fois, sous plusieurs "
+        f"formulations :\n\n"
+        f"Le relevé complet : {{lien_audit}}\n\n"
+        f"Cette place vide ne le restera pas. Les IA citent les "
+        f"professionnels dont elles trouvent des traces solides en ligne, "
+        f"et le premier {metier_nom} de {{ville}} qui s'en occupe "
+        f"sérieusement prendra la place, avant que les autres ne s'y "
+        f"mettent. Porte-Voix fait ce travail, mesure le résultat chaque "
+        f"mois, et vous l'envoie dans un rapport lisible en deux minutes.\n\n"
+        + _PIED_OFFRE
     )
 
 
@@ -77,49 +124,101 @@ TEMPLATES = [
         "key": "lpv_cabinet_courtier_a",
         "label": "Porte-Voix — courtier, objet A",
         "subject": "Ce que ChatGPT répond à « quel courtier à {ville} »",
-        "body_text": _corps("vers quel courtier se tourner à", "cabinets"),
+        "body_text": _corps("vers quel courtier se tourner à", "de cabinets"),
     },
     {
         "key": "lpv_cabinet_courtier_b",
         "label": "Porte-Voix — courtier, objet B",
         "subject": "Vos concurrents sont dans les réponses de ChatGPT. Pas {raison_sociale}.",
-        "body_text": _corps("vers quel courtier se tourner à", "cabinets"),
+        "body_text": _corps("vers quel courtier se tourner à", "de cabinets"),
     },
     {
         "key": "lpv_cabinet_comptable_a",
         "label": "Porte-Voix — expert-comptable, objet A",
         "subject": "Ce que ChatGPT répond à « quel expert-comptable à {ville} »",
-        "body_text": _corps("quel expert-comptable choisir pour une petite entreprise à", "cabinets"),
+        "body_text": _corps("quel expert-comptable choisir pour une petite entreprise à", "de cabinets"),
     },
     {
         "key": "lpv_cabinet_comptable_b",
         "label": "Porte-Voix — expert-comptable, objet B",
         "subject": "Vos confrères sont dans les réponses de ChatGPT. Pas {raison_sociale}.",
-        "body_text": _corps("quel expert-comptable choisir pour une petite entreprise à", "cabinets"),
+        "body_text": _corps("quel expert-comptable choisir pour une petite entreprise à", "de cabinets"),
     },
     {
         "key": "lpv_cabinet_avocat_a",
         "label": "Porte-Voix — avocat, objet A",
         "subject": "Ce que ChatGPT répond à « quel avocat à {ville} »",
-        "body_text": _corps("quel avocat consulter à", "cabinets"),
+        "body_text": _corps("quel avocat consulter à", "de cabinets"),
     },
     {
         "key": "lpv_cabinet_avocat_b",
         "label": "Porte-Voix — avocat, objet B",
         "subject": "Vos confrères sont dans les réponses de ChatGPT. Pas {raison_sociale}.",
-        "body_text": _corps("quel avocat consulter à", "cabinets"),
+        "body_text": _corps("quel avocat consulter à", "de cabinets"),
     },
     {
         "key": "lpv_commerce_immo_a",
         "label": "Porte-Voix — agence immobilière, objet A",
         "subject": "Ce que ChatGPT répond à « quelle agence pour vendre à {ville} »",
-        "body_text": _corps("quelle agence immobilière pour vendre un bien à", "agences"),
+        "body_text": _corps("quelle agence immobilière pour vendre un bien à", "d'agences"),
     },
     {
         "key": "lpv_commerce_immo_b",
         "label": "Porte-Voix — agence immobilière, objet B",
         "subject": "Vos concurrents sont dans les réponses de ChatGPT. Pas {raison_sociale}.",
-        "body_text": _corps("quelle agence immobilière pour vendre un bien à", "agences"),
+        "body_text": _corps("quelle agence immobilière pour vendre un bien à", "d'agences"),
+    },
+    # --- Issue « déjà cité » (le prospect apparaît : on défend sa place,
+    #     jamais le mail « vous n'y apparaissez pas ») ---
+    {
+        "key": "lpv_cabinet_courtier_deja",
+        "label": "Porte-Voix — courtier, déjà cité",
+        "subject": "{raison_sociale} est cité par ChatGPT. Voici où.",
+        "body_text": _corps_deja("vers quel courtier se tourner à"),
+    },
+    {
+        "key": "lpv_cabinet_comptable_deja",
+        "label": "Porte-Voix — expert-comptable, déjà cité",
+        "subject": "{raison_sociale} est cité par ChatGPT. Voici où.",
+        "body_text": _corps_deja("quel expert-comptable choisir pour une petite entreprise à"),
+    },
+    {
+        "key": "lpv_cabinet_avocat_deja",
+        "label": "Porte-Voix — avocat, déjà cité",
+        "subject": "{raison_sociale} est cité par ChatGPT. Voici où.",
+        "body_text": _corps_deja("quel avocat consulter à"),
+    },
+    {
+        "key": "lpv_commerce_immo_deja",
+        "label": "Porte-Voix — agence immobilière, déjà citée",
+        "subject": "{raison_sociale} est citée par ChatGPT. Voici où.",
+        "body_text": _corps_deja("quelle agence immobilière pour vendre un bien à"),
+    },
+    # --- Issue « place vide » (personne n'est cité : premier arrivé,
+    #     premier cité — villes moyennes et métiers encore muets) ---
+    {
+        "key": "lpv_cabinet_courtier_vide",
+        "label": "Porte-Voix — courtier, place vide",
+        "subject": "Personne n'est encore la réponse de ChatGPT à {ville}",
+        "body_text": _corps_vide("vers quel courtier se tourner à", "courtier"),
+    },
+    {
+        "key": "lpv_cabinet_comptable_vide",
+        "label": "Porte-Voix — expert-comptable, place vide",
+        "subject": "Personne n'est encore la réponse de ChatGPT à {ville}",
+        "body_text": _corps_vide("quel expert-comptable choisir pour une petite entreprise à", "cabinet"),
+    },
+    {
+        "key": "lpv_cabinet_avocat_vide",
+        "label": "Porte-Voix — avocat, place vide",
+        "subject": "Personne n'est encore la réponse de ChatGPT à {ville}",
+        "body_text": _corps_vide("quel avocat consulter à", "cabinet"),
+    },
+    {
+        "key": "lpv_commerce_immo_vide",
+        "label": "Porte-Voix — agence immobilière, place vide",
+        "subject": "Personne n'est encore la réponse de ChatGPT à {ville}",
+        "body_text": _corps_vide("quelle agence immobilière pour vendre un bien à", "professionnel"),
     },
 ]
 
@@ -150,9 +249,10 @@ def installer(sb) -> None:
             "body_text": t["body_text"],
             "from_address": "",
             "placeholders": PLACEHOLDERS,
-            "description": ("Mail initial Porte-Voix (issue « concurrents "
-                            "cités »). Ne s'envoie qu'à un prospect dont "
-                            "l'audit est en issue A."),
+            "description": ("Mail initial Porte-Voix. L'aiguillage par issue "
+                            "d'audit choisit automatiquement le bon modèle "
+                            "(concurrents cités / déjà cité / place vide) et "
+                            "saute tout prospect sans audit généré."),
         }
         existant = (sb.table("triskell_email_templates")
                     .select("key")

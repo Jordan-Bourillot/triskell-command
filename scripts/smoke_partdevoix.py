@@ -212,8 +212,29 @@ try:
                                 "https://lapartdevoix.fr/audits/y.html", "vide")
         check("nouvel audit écrase l'ancien",
               _liens.audit_url_for(email="a@b.fr").endswith("y.html"))
+        check("issue retrouvée par mail",
+              _liens.issue_for(email="a@b.fr") == "vide")
+        check("issue d'une fiche sans audit = vide (=> saut du prospect)",
+              _liens.issue_for(email="inconnu@x.fr") == "")
 finally:
     _liens.FICHIER = _vrai_fichier
+
+print("— aiguillage par issue d'audit")
+from triskell_core.prospect.pipeline import _filtrer_par_issue  # noqa: E402
+
+_modeles = [{"key": "lpv_commerce_immo_a"}, {"key": "lpv_commerce_immo_b"},
+            {"key": "lpv_commerce_immo_deja"}, {"key": "lpv_commerce_immo_vide"}]
+check("issue concurrents -> les modèles sans marqueur (objets A et B)",
+      [t["key"] for t in _filtrer_par_issue(_modeles, "concurrents")]
+      == ["lpv_commerce_immo_a", "lpv_commerce_immo_b"])
+check("issue déjà cité -> uniquement le modèle _deja",
+      [t["key"] for t in _filtrer_par_issue(_modeles, "deja_cite")]
+      == ["lpv_commerce_immo_deja"])
+check("issue place vide -> uniquement le modèle _vide",
+      [t["key"] for t in _filtrer_par_issue(_modeles, "vide")]
+      == ["lpv_commerce_immo_vide"])
+check("issue déjà cité sans modèle _deja -> liste vide (=> saut, jamais le mauvais mail)",
+      _filtrer_par_issue([{"key": "lpv_commerce_immo_a"}], "deja_cite") == [])
 
 print()
 print(f"{OK} ok, {KO} KO")

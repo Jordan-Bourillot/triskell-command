@@ -52,6 +52,25 @@ def enregistrer_lien(email: str, entreprise: str, ville: str,
                        encoding="utf-8")
 
 
+def issue_for(email: str = "", entreprise: str = "", ville: str = "") -> str:
+    """L'issue de l'audit d'une fiche ('concurrents', 'deja_cite', 'vide')
+    ou "" si aucun audit n'a été généré. Sert à l'aiguillage des modèles :
+    on n'écrit jamais « vous n'apparaissez pas » à quelqu'un qui apparaît."""
+    entrees = _charger()
+    cle_mail = (email or "").strip().lower()
+    if cle_mail:
+        for e in reversed(entrees):
+            if (e.get("email") or "").lower() == cle_mail:
+                return e.get("issue") or ""
+    if (entreprise or "").strip():
+        for e in reversed(entrees):
+            if (moteur.correspond(e.get("entreprise") or "", entreprise)
+                    and (not ville or moteur.normaliser(e.get("ville") or "")
+                         == moteur.normaliser(ville))):
+                return e.get("issue") or ""
+    return ""
+
+
 def audit_url_for(email: str = "", entreprise: str = "",
                   ville: str = "") -> str:
     """L'adresse de l'audit d'une fiche. Priorité au mail (identifiant le
