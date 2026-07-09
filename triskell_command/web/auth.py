@@ -76,6 +76,7 @@ PUBLIC_API_PATHS = {
     "/api/pixelpros/affiliate-login-request",  # Demande de magic link affilié (public, rate-limité)
     "/api/pixelpros/contact",  # Formulaire de contact des sites clients (public, rate-limité)
     "/api/pixelpros/contact_studio",  # Formulaire de contact de pixel-pros.fr (public, rate-limité)
+    "/api/pdv_souscrire",  # Formulaire de souscription Porte-Voix (la fiche n'est créée qu'au paiement)
     "/api/unsubscribe",  # Désinscription en 1 clic (lien signé dans les mails de prospection)
     "/api/relay_send",  # Relais d'envoi pour un service externe (protégé par jeton RELAY_MAIL_TOKEN)
 }

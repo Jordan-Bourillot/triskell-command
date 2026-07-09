@@ -13037,6 +13037,20 @@ class Api:
             logger.debug("pdv_rapport_envoyer: %s", exc)
             return {"ok": False, "error": _friendly_error(exc)}
 
+    def pdv_souscrire(self, payload: dict) -> dict:
+        """PUBLIC (formulaire du site portevoix.triskell-studio.fr) :
+        contrôle les réponses et renvoie l'adresse de paiement Stripe
+        (abonnement mensuel). La fiche n'est créée QU'AU paiement, par
+        le webhook Stripe : un formulaire abandonné ne laisse rien."""
+        try:
+            from ..integrations.partdevoix import souscriptions
+            return souscriptions.creer_session(payload or {})
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            logger.warning("pdv_souscrire: %s", exc)
+            return {"ok": False, "error": _friendly_error(exc)}
+
     def pdv_noter(self, payload: dict) -> dict:
         """Ajoute une ligne au journal « ce qui a été fait » d'un client
         (la porte des outils : le travail fait s'inscrit tout seul dans

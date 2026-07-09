@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from triskell_command.integrations.partdevoix import (  # noqa: E402
-    clients, rapport, rapporteur, stockage)
+    clients, rapport, rapporteur, souscriptions, stockage)
 
 OK = 0
 KO = 0
@@ -275,6 +275,11 @@ try:
           page.count("<div") == page.count("</div>"))
     check("couleurs dans des variables CSS en tête",
           ":root" in page and "--encre" in page and "--papier" in page)
+    check("charte Porte-Voix appliquée, ancienne identité bannie",
+          "#ff5a36" in page and "Bricolage" in page
+          and "#131c39" not in page and "#4ade80" not in page)
+    check("charte : plus aucun tiret cadratin visible",
+          "—" not in visible)
     check("nombres en écriture française (virgule)",
           "33,3" in rapport.rendre_html(dict(rap5, part_client=33.3))
           and rapport.texte_evolution({"sens": "baisse", "delta": -5.5,
@@ -382,6 +387,62 @@ try:
           leve(lambda: clients.noter_fait("fantome-inconnu", "x")))
     check("noter_fait refuse une note vide",
           leve(lambda: clients.noter_fait(c4["id"], "   ")))
+
+    print("— souscription : du formulaire payé à la fiche")
+    check("formulaire incomplet refusé avant tout appel Stripe",
+          leve(lambda: souscriptions.valider({"offre": "presence"})))
+    check("offre inconnue refusée",
+          leve(lambda: souscriptions.valider(
+              {"offre": "gold", "entreprise": "X", "metier": "y",
+               "ville": "Z", "email": "a@b.fr"})))
+    check("formulaire propre validé (mail en minuscules)",
+          souscriptions.valider(
+              {"offre": "presence", "entreprise": "Cabinet Souscrit",
+               "metier": "courtier", "ville": "Vannes",
+               "email": "Contact@Souscrit.FR"})["email"]
+          == "contact@souscrit.fr")
+    _mesures_lancees = []
+    _vraie_mesure_sous = souscriptions._premiere_mesure
+    _vrai_prevenir = souscriptions._prevenir
+    souscriptions._premiere_mesure = (
+        lambda fiche: _mesures_lancees.append(fiche["id"]))
+    souscriptions._prevenir = lambda meta, palier, cree, souci: None
+    try:
+        evenement = {"type": "checkout.session.completed",
+                     "data": {"object": {"metadata": {
+                         "portevoix": "1", "offre": "presence",
+                         "entreprise": "Cabinet Souscrit",
+                         "metier": "courtier", "ville": "Vannes",
+                         "email": "contact@souscrit.fr"}}}}
+        res = souscriptions.traiter_event(evenement)
+        fiche_sous = clients.trouver_client("Cabinet Souscrit")
+        check("paiement confirmé : fiche créée toute seule",
+              res["processed"] and res["cree"] and fiche_sous is not None)
+        check("palier posé depuis l'offre payée",
+              (fiche_sous or {}).get("palier") == "Présence · 149 €/mois")
+        check("adresse mail posée sur la fiche",
+              (fiche_sous or {}).get("email") == "contact@souscrit.fr")
+        check("première mesure lancée toute seule",
+              _mesures_lancees == [(fiche_sous or {}).get("id")])
+        res2 = souscriptions.traiter_event(evenement)
+        check("rejeu du paiement (Stripe) : aucun doublon",
+              res2["processed"] and not res2["cree"]
+              and len([c for c in clients.lister_clients()
+                       if c["entreprise"] == "Cabinet Souscrit"]) == 1)
+        check("rejeu : pas de deuxième mesure lancée",
+              len(_mesures_lancees) == 1)
+        check("évènement étranger ignoré",
+              souscriptions.traiter_event(
+                  {"type": "invoice.paid", "data": {"object": {}}})
+              == {"processed": False})
+        check("session sans marque portevoix ignorée",
+              souscriptions.traiter_event(
+                  {"type": "checkout.session.completed",
+                   "data": {"object": {"metadata": {}}}})
+              == {"processed": False})
+    finally:
+        souscriptions._premiere_mesure = _vraie_mesure_sous
+        souscriptions._prevenir = _vrai_prevenir
 
     print("— robot mensuel : qui est dû ? (logique pure)")
     from datetime import datetime, timezone  # noqa: E402

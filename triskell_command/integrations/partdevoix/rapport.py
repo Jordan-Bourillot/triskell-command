@@ -167,7 +167,7 @@ def texte_evolution(ev: dict, pour_concurrent: bool = False) -> str:
     date_prec = _date_francaise(ev.get("precedent_ts") or "")
     if ev.get("sens") == "premier":
         return ("Première mesure pour ce concurrent" if pour_concurrent
-                else "Premier relevé — votre point de référence")
+                else "Premier relevé : votre point de référence")
     if ev.get("sens") == "stable":
         return f"Stable par rapport au relevé du {date_prec}"
     delta = abs(float(ev.get("delta") or 0.0))
@@ -288,14 +288,15 @@ def _evo_html(ev: dict, pour_concurrent: bool = False) -> str:
 
 
 def rendre_html(rapport: dict) -> str:
-    """La page du rapport mensuel, autonome (styles inclus). Squelette
-    volontairement neutre : en attendant le choix de l'identité
-    visuelle, tout se repeint dans les variables CSS de l'en-tête."""
+    """La page du rapport mensuel, autonome (styles inclus), à la charte
+    Porte-Voix validée le 09/07/2026 (portevoix/CHARTE.md) : clair,
+    encre #101826, accent corail, coins coupés, échelle graduée. Textes,
+    structure et honnêteté du pied de page inchangés."""
     e = html.escape
     entreprise = e(rapport.get("entreprise") or "")
     mois = e(rapport.get("mois") or "")
     date_txt = e(_date_francaise(rapport.get("ts") or ""))
-    sous_titre = " — ".join(x for x in [
+    sous_titre = " · ".join(x for x in [
         rapport.get("metier") or "",
         ", ".join(rapport.get("villes") or [])] if x)
     part = float(rapport.get("part_client") or 0.0)
@@ -378,11 +379,13 @@ def rendre_html(rapport: dict) -> str:
     fait_items = "".join(f"<li>{e(x)}</li>" for x in rapport.get("fait") or [])
     avenir_items = "".join(f"<li>{e(x)}</li>"
                            for x in rapport.get("avenir") or [])
-    bloc_fait = (f'<div class="bloc"><h2>Ce qui a été fait ce mois-ci</h2>'
-                 f'<ul class="liste">{fait_items}</ul></div>'
+    bloc_fait = (f'<div class="cadre"><div class="cadre-in">'
+                 f'<h2>Ce qui a été fait ce mois-ci</h2>'
+                 f'<ul class="liste">{fait_items}</ul></div></div>'
                  if fait_items else "")
-    bloc_avenir = (f'<div class="bloc"><h2>Ce qui vient le mois prochain'
-                   f'</h2><ul class="liste">{avenir_items}</ul></div>'
+    bloc_avenir = (f'<div class="cadre"><div class="cadre-in">'
+                   f'<h2>Ce qui vient le mois prochain</h2>'
+                   f'<ul class="liste">{avenir_items}</ul></div></div>'
                    if avenir_items else "")
 
     questions_html = "".join(f"<li>« {e(q)} »</li>"
@@ -407,58 +410,93 @@ def rendre_html(rapport: dict) -> str:
 <meta name="robots" content="noindex">
 <title>Rapport mensuel. {entreprise}, {mois}.</title>
 <style>
-  /* Identité visuelle en cours de choix : la page est volontairement
-     neutre (noir, blanc, gris) et tout se repeint dans ces variables. */
+  @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@700;800&family=Inter:wght@400;600;700&display=swap');
+  /* Charte Porte-Voix (portevoix/CHARTE.md, validée le 09/07/2026) :
+     toutes les couleurs se règlent ici. */
   :root {{
-    --papier:#ffffff;        /* fond de page */
-    --encre:#1a1a1a;         /* texte principal */
-    --sourdine:#5a5a5a;      /* texte secondaire */
-    --trait:#dddddd;         /* bordures */
-    --fond-doux:#f6f6f6;     /* fond des blocs */
-    --barre-vous:#2f2f2f;    /* la barre du client */
-    --barre-autre:#c7c7c7;   /* les barres des concurrents */
-    --tige:#8f8f8f;          /* les colonnes du graphique */
+    --papier:#eef1f4;               /* fond de page */
+    --carte:#ffffff;                /* fond des cartes */
+    --encre:#101826;                /* texte principal */
+    --sourdine:#4a566d;             /* texte secondaire */
+    --corail:#ff5a36;               /* accent (vous) */
+    --corail-encre:#c2330f;         /* corail foncé lisible */
+    --sable:#e8dcc8;                /* soutien discret (les autres) */
+    --trait:rgba(16,24,38,0.14);    /* filets */
+    --trait-fort:rgba(16,24,38,0.30);
+    --grille:rgba(16,24,38,0.032);  /* grille de fond 44px */
   }}
   *, *::before, *::after {{ margin:0; padding:0; box-sizing:border-box; }}
   html, body {{ overflow-x:hidden; }}
-  body {{ background:var(--papier); color:var(--encre);
-    font-family:system-ui,-apple-system,'Segoe UI','Helvetica Neue',Arial,sans-serif;
-    font-size:17px; line-height:1.65; min-height:100vh; }}
-  .page {{ max-width:760px; margin:0 auto; padding:26px 20px 60px; }}
-  .haut {{ border-bottom:1px solid var(--trait); padding-bottom:14px; margin-bottom:22px;
-          display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; }}
-  .etiquette {{ font-size:12px; font-weight:600; letter-spacing:.16em;
+  body {{
+    background:
+      linear-gradient(var(--grille) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grille) 1px, transparent 1px),
+      var(--papier);
+    background-size:44px 44px;
+    color:var(--encre);
+    font-family:'Inter',system-ui,-apple-system,'Segoe UI',Arial,sans-serif;
+    font-size:16.5px; line-height:1.65; min-height:100vh;
+  }}
+  .page {{ max-width:780px; margin:0 auto; padding:26px 20px 60px; }}
+  .haut {{ border-bottom:1px solid var(--trait-fort); padding-bottom:14px; margin-bottom:22px;
+          display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }}
+  .marque {{ display:flex; align-items:center; gap:9px; font-weight:800; font-size:20px;
+            font-family:'Bricolage Grotesque',system-ui,sans-serif; letter-spacing:-0.02em; }}
+  .marque svg {{ display:block; }}
+  .marque .pt {{ color:var(--corail); }}
+  .etiquette {{ font-size:11.5px; font-weight:700; letter-spacing:.13em;
                text-transform:uppercase; color:var(--sourdine); }}
-  h1 {{ font-size:clamp(26px,5vw,36px); font-weight:800; letter-spacing:-0.02em;
-       line-height:1.15; text-wrap:balance; margin:4px 0 2px; }}
+  .etiquette .pastille {{ display:inline-block; width:8px; height:8px; background:var(--corail);
+    border-radius:50%; margin-right:7px; vertical-align:1px; animation:pvPulse 2.2s infinite; }}
+  @keyframes pvPulse {{ 0%,100% {{ opacity:1 }} 50% {{ opacity:.35 }} }}
+  h1 {{ font-family:'Bricolage Grotesque',system-ui,sans-serif; font-size:clamp(27px,5vw,38px);
+       font-weight:800; letter-spacing:-0.02em; line-height:1.12; text-wrap:balance; margin:8px 0 2px; }}
+  h2 {{ font-family:'Bricolage Grotesque',system-ui,sans-serif; font-size:19px;
+       letter-spacing:-0.01em; margin-bottom:12px; }}
   .sous {{ color:var(--sourdine); }}
   p {{ text-wrap:pretty; }}
-  .bloc {{ border:1px solid var(--trait); background:var(--fond-doux);
-          border-radius:14px; padding:22px; margin:22px 0; }}
-  .bloc h2 {{ font-size:19px; letter-spacing:-0.01em; margin-bottom:12px; }}
-  .chiffre {{ font-size:clamp(38px,8vw,54px); font-weight:800; letter-spacing:-0.02em;
-             font-variant-numeric:tabular-nums; line-height:1.1; }}
+  /* Coins coupés signés (jamais de border-radius sur les cartes). */
+  .cadre {{ --ch:16px; background:var(--trait); padding:1px; margin:22px 0;
+    clip-path:polygon(var(--ch) 0, 100% 0, 100% calc(100% - var(--ch)),
+                      calc(100% - var(--ch)) 100%, 0 100%, 0 var(--ch)); }}
+  .cadre-in {{ --chi:calc(var(--ch) - 0.8px); background:var(--carte); padding:22px;
+    clip-path:polygon(var(--chi) 0, 100% 0, 100% calc(100% - var(--chi)),
+                      calc(100% - var(--chi)) 100%, 0 100%, 0 var(--chi)); }}
+  .chiffre {{ font-family:'Bricolage Grotesque',system-ui,sans-serif;
+             font-size:clamp(40px,8vw,56px); font-weight:800; letter-spacing:-0.02em;
+             font-variant-numeric:tabular-nums; line-height:1.05; }}
   .evo-principale {{ font-weight:600; margin:6px 0 4px; }}
   .note {{ font-size:14.5px; color:var(--sourdine); margin-top:10px; }}
   .graphe {{ display:flex; align-items:flex-end; gap:14px; padding:8px 2px 0;
             min-height:150px; overflow-x:auto; }}
   .colonne {{ display:flex; flex-direction:column; align-items:center; gap:5px; }}
-  .colonne .tige {{ width:34px; background:var(--tige); border-radius:4px 4px 0 0; }}
-  .col-part {{ font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; }}
-  .col-mois {{ font-size:12.5px; color:var(--sourdine); }}
+  .colonne .tige {{ width:34px; background:var(--sable); }}
+  .colonne:last-child .tige {{ background:var(--corail); }}
+  .col-part {{ font-size:13px; font-weight:700;
+              font-family:ui-monospace,Consolas,'Cascadia Mono',monospace; }}
+  .col-mois {{ font-size:12px; color:var(--sourdine);
+              font-family:ui-monospace,Consolas,'Cascadia Mono',monospace; }}
+  .echelle {{ display:flex; justify-content:space-between; font-size:11px;
+             color:var(--sourdine); letter-spacing:.06em;
+             font-family:ui-monospace,Consolas,'Cascadia Mono',monospace;
+             border-bottom:1px solid var(--trait); padding-bottom:4px; margin-bottom:12px; }}
   .barre {{ margin:16px 0; }}
   .barre .ligne {{ display:flex; justify-content:space-between; gap:12px;
                   font-size:15px; font-weight:600; color:var(--sourdine); margin-bottom:6px; }}
-  .barre .ligne span:last-child {{ font-variant-numeric:tabular-nums; color:var(--encre); }}
-  .barre .fond {{ background:var(--trait); height:13px; border-radius:999px; overflow:hidden; }}
-  .barre .plein {{ height:100%; border-radius:999px; background:var(--barre-autre); }}
-  .barre.vous .plein {{ background:var(--barre-vous); }}
+  .barre .ligne span:last-child {{ color:var(--encre);
+    font-family:ui-monospace,Consolas,'Cascadia Mono',monospace; }}
+  .barre .fond {{ background:rgba(16,24,38,0.06); height:14px; }}
+  .barre .plein {{ height:100%; background:var(--sable);
+    border-right:2px solid var(--trait-fort); }}
+  .barre.vous .plein {{ background:var(--corail); border-right:2px solid var(--corail-encre); }}
   .barre.vous .ligne span {{ color:var(--encre); font-weight:700; }}
   .barre .evo {{ font-size:13.5px; color:var(--sourdine); margin-top:4px; }}
   ul.liste {{ margin:4px 0 0 20px; }}
   ul.liste li {{ margin:6px 0; }}
+  ul.liste li::marker {{ color:var(--corail); }}
   ul.questions {{ margin:8px 0 0 20px; }}
-  ul.questions li {{ font-size:15px; color:var(--sourdine); }}
+  ul.questions li {{ font-size:14px; color:var(--sourdine);
+    font-family:ui-monospace,Consolas,'Cascadia Mono',monospace; }}
   .methode {{ font-size:14px; color:var(--sourdine); border-top:1px solid var(--trait);
              padding-top:14px; margin-top:14px; }}
 </style>
@@ -466,13 +504,23 @@ def rendre_html(rapport: dict) -> str:
 <body>
 <div class="page">
   <div class="haut">
-    <span class="etiquette">Rapport mensuel de part de voix</span>
+    <span class="marque">
+      <svg viewBox="0 0 40 32" width="30" height="24" aria-hidden="true" focusable="false">
+        <path d="M3 12 L19 4 V28 L3 20 Z" fill="#101826"/>
+        <rect x="1" y="11" width="2.5" height="10" fill="#101826"/>
+        <path d="M23 11 a7 7 0 0 1 0 10" fill="none" stroke="#ff5a36" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M27 7 a13 13 0 0 1 0 18" fill="none" stroke="#ff5a36" stroke-width="2.2" stroke-linecap="round"/>
+        <circle cx="34.5" cy="16" r="2.2" fill="#ff5a36"/>
+      </svg>
+      Porte-Voix<span class="pt">.</span>
+    </span>
     <span class="etiquette">Établi le {date_txt}</span>
   </div>
+  <p class="etiquette"><span class="pastille"></span>Rapport mensuel · part de voix</p>
   <h1>{entreprise}</h1>
   <p class="sous">{e(sous_titre)}</p>
 
-  <div class="bloc">
+  <div class="cadre"><div class="cadre-in">
     <h2>Votre part de voix en {mois}</h2>
     <p class="chiffre">{_nombre(part)}&nbsp;%</p>
     <p class="evo-principale">{_evo_html(rapport.get("evolution") or {})}.</p>
@@ -480,23 +528,24 @@ def rendre_html(rapport: dict) -> str:
     <p class="note">La part de voix, c'est la fréquence à laquelle un nom
     apparaît dans les réponses des IA aux questions listées en pied de
     page, sur l'ensemble de nos passages.</p>
-  </div>
+  </div></div>
 
-  <div class="bloc">
+  <div class="cadre"><div class="cadre-in">
     <h2>L'évolution, mois par mois</h2>
     <div class="graphe">{"".join(colonnes)}</div>
     {notes_graphe}
-  </div>
+  </div></div>
 
-  <div class="bloc">
+  <div class="cadre"><div class="cadre-in">
     <h2>{titre_detail}</h2>
+    <div class="echelle"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
     {"".join(barres)}
-  </div>
+  </div></div>
 
   {bloc_fait}
   {bloc_avenir}
 
-  <div class="bloc">
+  <div class="cadre"><div class="cadre-in">
     <h2>La méthode, en clair</h2>
     <p style="font-size:16px">Questions posées :</p>
     <ul class="questions">{questions_html}</ul>
@@ -507,7 +556,7 @@ def rendre_html(rapport: dict) -> str:
     passages, jamais un essai isolé. La part de voix se construit dans la
     durée ; aucune citation ponctuelle ne peut être promise, et nous ne le
     faisons jamais.</p>
-  </div>
+  </div></div>
 </div>
 </body>
 </html>

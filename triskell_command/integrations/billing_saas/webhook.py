@@ -74,6 +74,16 @@ def handle_event(event: dict[str, Any]) -> dict[str, Any]:
         logger.exception("billing_clients dispatch a planté")
         clients_result = {"processed": False, "error": f"clients: {exc}"}
 
+    # 2bis. Branche PORTE-VOIX (souscriptions du site portevoix.*) —
+    # filtre par metadata.portevoix, ne touche à rien d'autre.
+    portevoix_result: dict[str, Any] = {"processed": False}
+    try:
+        from ..partdevoix import souscriptions as pdv_souscriptions
+        portevoix_result = pdv_souscriptions.traiter_event(event) or {}
+    except Exception as exc:
+        logger.exception("branche Porte-Voix a planté")
+        portevoix_result = {"processed": False, "error": f"portevoix: {exc}"}
+
     # 3. Branche SaaS workspaces (gestion par défaut historique)
     handler = _HANDLERS.get(et)
     saas_processed = False
@@ -89,16 +99,19 @@ def handle_event(event: dict[str, Any]) -> dict[str, Any]:
                     "error": str(exc),
                     "clients_result": clients_result}
 
-    # 4. Si aucun des deux n'a traité, on log et on renvoie no-op
-    if not saas_processed and not clients_result.get("processed"):
+    # 4. Si aucune branche n'a traité, on log et on renvoie no-op
+    if (not saas_processed and not clients_result.get("processed")
+            and not portevoix_result.get("processed")):
         logger.info("Stripe event '%s' reçu (aucune branche n'a matché).", et)
         return {"ok": True, "processed": False, "type": et,
-                "clients_result": clients_result}
+                "clients_result": clients_result,
+                "portevoix_result": portevoix_result}
 
     _mark_processed(event.get("id"))
     return {"ok": True, "processed": True, "type": et,
             "saas": saas_payload,
-            "clients_result": clients_result}
+            "clients_result": clients_result,
+            "portevoix_result": portevoix_result}
 
 
 # ---------------------------------------------------------------------------
