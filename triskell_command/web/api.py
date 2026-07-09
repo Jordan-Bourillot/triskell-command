@@ -9278,6 +9278,7 @@ class Api:
             ("pixelpros.auto_builder", "Construction auto des sites payés"),
             ("pixelpros.content_chaser", "Relances des sites payés à compléter"),
             ("site_vision_worker",    "L'œil — repère les sites à refaire"),
+            ("partdevoix.rapporteur", "Rapports mensuels Porte-Voix"),
             ("disk_janitor",          "Concierge disque + filet GEO"),
         ]
         # Séparation site/robots : la page Santé est servie par le conteneur
@@ -9529,6 +9530,7 @@ class Api:
             "autopilot_runner":       ("autopilot_runner",       "start_worker", True),
             "pixelpros.auto_builder": ("pixelpros.auto_builder", "start_worker", True),
             "pixelpros.content_chaser": ("pixelpros.content_chaser", "start_worker", True),
+            "partdevoix.rapporteur":  ("partdevoix.rapporteur",  "start_worker", True),
         }
         entry = restartable.get(name)
         if entry is None:
@@ -11025,6 +11027,7 @@ class Api:
             ("pixelpros.auto_builder", "start_worker", "pixelpros_auto_builder"),
             ("pixelpros.content_chaser", "start_worker", "pixelpros_content_chaser"),
             ("site_vision_worker",      "start_worker", "oeil_visuel"),
+            ("partdevoix.rapporteur",   "start_worker", "partdevoix_rapporteur"),
         ]:
             if not _start_shared_workers:
                 worker_status[label] = False
@@ -12772,6 +12775,206 @@ class Api:
                 period=p.get("period") or "90d")
         except Exception as exc:
             logger.debug("prospection_response_insights: %s", exc)
+            return {"ok": False, "error": _friendly_error(exc)}
+
+    # ------------------------------------------------------------------
+    # Porte-Voix — clients suivis + rapports mensuels (écran portevoix)
+    # ------------------------------------------------------------------
+
+    # Mesures en cours (client_id → état) : la mesure prend plusieurs
+    # minutes, l'écran suit l'avancement via pdv_etat.
+    _pdv_mesures: dict = {}
+
+    def pdv_etat(self, payload: dict | None = None) -> dict:
+        """Tout ce que l'écran Porte-Voix affiche d'un coup : les clients
+        suivis (avec leur dernière mesure, leurs rapports archivés et
+        l'état de leurs rubriques), l'interrupteur du rapport mensuel
+        automatique et les mesures en cours."""
+        out = {"ok": True, "clients": [], "auto": False,
+               "mesures_en_cours": {}}
+        try:
+            from ..integrations.partdevoix import clients as pdv_clients
+            from ..integrations.partdevoix import rapport as pdv_rapport
+            from ..integrations.partdevoix import rapporteur
+            archives = pdv_rapport.rapports_archives()
+            for c in pdv_clients.lister_clients(actifs=False):
+                fiche = dict(c)
+                hist = pdv_rapport.historique_client(c.get("id") or "")
+                if hist:
+                    dernier = hist[-1]
+                    mesure = {"ts": dernier.get("ts") or "",
+                              "part": dernier.get("part_client"),
+                              "nb_releves": len(hist)}
+                    if len(hist) > 1:
+                        mesure["delta"] = round(
+                            float(dernier.get("part_client") or 0.0)
+                            - float(hist[-2].get("part_client") or 0.0), 1)
+                    fiche["derniere_mesure"] = mesure
+                siens = [r for r in archives
+                         if r.get("client_id") == c.get("id")]
+                fiche["rapports"] = [
+                    {"id": r.get("id"), "mois": r.get("mois"),
+                     "archive_ts": r.get("archive_ts"),
+                     "part": r.get("part_client"),
+                     "alertes": len(r.get("alertes") or [])}
+                    for r in siens[-12:]]
+                # Règle de rétention : des rubriques vides, ou restées
+                # telles quelles depuis le dernier rapport, sont à
+                # rafraîchir avant le prochain.
+                dernier_archive = (siens[-1].get("archive_ts") or "") \
+                    if siens else ""
+                fiche["rubriques_a_jour"] = bool(
+                    (c.get("fait") or c.get("avenir"))
+                    and ((c.get("rubriques_maj") or "") > dernier_archive))
+                out["clients"].append(fiche)
+            out["auto"] = rapporteur.is_enabled()
+            out["mesures_en_cours"] = dict(self._pdv_mesures)
+        except Exception as exc:
+            logger.debug("pdv_etat: %s", exc)
+            return {"ok": False, "error": _friendly_error(exc)}
+        return out
+
+    def pdv_client_save(self, payload: dict) -> dict:
+        """Crée ou modifie un client suivi Porte-Voix. payload = {id?,
+        entreprise, metier, villes, concurrents, questions?, palier?,
+        fait?, avenir?, actif?}. Les garde-fous du registre répondent en
+        français (doublon, concurrent qui se confond avec le client…)."""
+        p = payload or {}
+        try:
+            from ..integrations.partdevoix import clients as pdv_clients
+            ident = (p.get("id") or "").strip()
+            if ident:
+                champs = {k: p[k] for k in
+                          ("entreprise", "metier", "villes", "concurrents",
+                           "questions", "palier", "fait", "avenir",
+                           "actif", "entree_le") if k in p}
+                if not champs:
+                    return {"ok": False, "error": "rien à modifier"}
+                fiche = pdv_clients.modifier_client(ident, **champs)
+            else:
+                fiche = pdv_clients.ajouter_client(
+                    p.get("entreprise") or "", p.get("metier") or "",
+                    p.get("villes") or [],
+                    concurrents=p.get("concurrents"),
+                    questions=p.get("questions"),
+                    palier=p.get("palier") or "",
+                    entree_le=p.get("entree_le") or "")
+            return {"ok": True, "client": fiche}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            logger.debug("pdv_client_save: %s", exc)
+            return {"ok": False, "error": _friendly_error(exc)}
+
+    def pdv_client_desactiver(self, payload: dict) -> dict:
+        """Sort un client du suivi (fiche et historique conservés)."""
+        ident = ((payload or {}).get("id") or "").strip()
+        if not ident:
+            return {"ok": False, "error": "id du client requis"}
+        try:
+            from ..integrations.partdevoix import clients as pdv_clients
+            fiche = pdv_clients.desactiver_client(ident)
+            return {"ok": True, "client": fiche}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            return {"ok": False, "error": _friendly_error(exc)}
+
+    def pdv_rapport_lancer(self, payload: dict) -> dict:
+        """Mesure la part de voix d'un client et prépare son rapport, en
+        arrière-plan (quelques minutes d'appels aux IA). L'écran suit
+        l'avancement via pdv_etat. Rien n'est envoyé au client."""
+        ident = ((payload or {}).get("id") or "").strip()
+        if not ident:
+            return {"ok": False, "error": "id du client requis"}
+        try:
+            from ..integrations.partdevoix import clients as pdv_clients
+            fiche = pdv_clients.trouver_client(ident)
+        except Exception as exc:
+            return {"ok": False, "error": _friendly_error(exc)}
+        if fiche is None:
+            return {"ok": False, "error": "client introuvable"}
+        if not fiche.get("actif", True):
+            return {"ok": False, "error":
+                    f"{fiche.get('entreprise')} est sorti du suivi — le "
+                    f"réactiver avant de mesurer."}
+        etat = self._pdv_mesures.get(fiche["id"]) or {}
+        if etat.get("etat") == "mesure":
+            return {"ok": False, "error":
+                    "Une mesure est déjà en cours pour ce client, "
+                    "patiente quelques minutes."}
+        threading.Thread(target=self._pdv_mesurer_safe, args=(fiche,),
+                         name=f"pdv-rapport-{fiche['id']}",
+                         daemon=True).start()
+        return {"ok": True, "started": True}
+
+    def _pdv_mesurer_safe(self, fiche: dict) -> None:
+        """Le travail long : mesure + rapport + archive, sans jamais
+        laisser un état « en cours » orphelin."""
+        from datetime import datetime
+        from ..integrations.partdevoix import rapport as pdv_rapport
+        ident = fiche["id"]
+        self._pdv_mesures[ident] = {
+            "etat": "mesure",
+            "depuis": datetime.now().isoformat(timespec="seconds")}
+        try:
+            pdv_rapport.mesurer_client(fiche, passes=3)
+            # Fiche relue après la mesure (plusieurs minutes) : des
+            # rubriques posées entre-temps entrent dans le rapport.
+            from ..integrations.partdevoix import clients as pdv_clients
+            fraiche = pdv_clients.trouver_client(ident) or fiche
+            donnees = pdv_rapport.generer_rapport(fraiche)
+            pdv_rapport.alerte_rubriques_perimees(fraiche, donnees)
+            entree = pdv_rapport.archiver_rapport(donnees)
+            self._pdv_mesures[ident] = {
+                "etat": "fini", "rapport_id": entree.get("id"),
+                "depuis": datetime.now().isoformat(timespec="seconds")}
+        except Exception as exc:
+            logger.warning("pdv rapport %s: %s", ident, exc)
+            self._pdv_mesures[ident] = {
+                "etat": "erreur", "message": str(exc),
+                "depuis": datetime.now().isoformat(timespec="seconds")}
+
+    def pdv_rapport_html(self, payload: dict) -> dict:
+        """Renvoie la page HTML d'un rapport archivé (l'écran l'ouvre
+        dans un onglet ou la télécharge — l'envoi au client reste une
+        décision humaine)."""
+        rid = ((payload or {}).get("id") or "").strip()
+        if not rid:
+            return {"ok": False, "error": "id du rapport requis"}
+        try:
+            from ..integrations.partdevoix import rapport as pdv_rapport
+            donnees = pdv_rapport.rapport_par_id(rid)
+            if donnees is None:
+                return {"ok": False, "error": "rapport introuvable"}
+            nom = (f"rapport-{donnees.get('client_id') or 'portevoix'}-"
+                   f"{(donnees.get('ts') or '')[:7] or 'mois'}.html")
+            return {"ok": True, "filename": nom,
+                    "html": pdv_rapport.rendre_html(donnees)}
+        except Exception as exc:
+            return {"ok": False, "error": _friendly_error(exc)}
+
+    def pdv_auto_get(self) -> dict:
+        """Lit l'interrupteur du rapport mensuel automatique."""
+        try:
+            from ..integrations.partdevoix import rapporteur
+            return {"ok": True, "enabled": rapporteur.is_enabled()}
+        except Exception as exc:
+            return {"ok": False, "error": _friendly_error(exc)}
+
+    def pdv_auto_set(self, payload: dict) -> dict:
+        """Allume/coupe le rapport mensuel automatique. Le robot PRÉPARE
+        les rapports et prévient par notification ; il n'envoie jamais
+        rien au client (règle absolue)."""
+        enabled = bool((payload or {}).get("enabled"))
+        try:
+            from ..integrations.partdevoix import rapporteur
+            ok, msg = rapporteur.set_enabled(enabled)
+            if not ok:
+                return {"ok": False, "error": msg}
+            return {"ok": True, "enabled": rapporteur.is_enabled(),
+                    "message": msg}
+        except Exception as exc:
             return {"ok": False, "error": _friendly_error(exc)}
 
     def apercu_preview(self, payload: dict | None = None) -> dict:

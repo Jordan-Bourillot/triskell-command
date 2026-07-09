@@ -26,19 +26,20 @@ import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import clients, moteur
+from . import clients, moteur, stockage
 
 logger = logging.getLogger(__name__)
-
-FICHIER_RELEVES = Path.home() / ".triskell-command" / "partdevoix_releves.json"
 
 # En dessous de ce mouvement (en points de part de voix), on affiche
 # « stable » : les réponses des IA varient naturellement d'un passage à
 # l'autre, annoncer une hausse de 0,8 point serait de la fausse précision.
 SEUIL_STABLE = 2.0
 
-# Relevés conservés par client (dix ans de rythme mensuel : large).
+# Relevés conservés par client (dix ans de rythme mensuel : large) et
+# rapports archivés au total (l'archive garde ce qui a été produit tel
+# quel : un rapport regénéré plus tard n'aurait pas les mêmes rubriques).
 MAX_RELEVES = 120
+MAX_RAPPORTS_ARCHIVES = 120
 
 _ETIQUETTES_IA = {"openai": "ChatGPT", "perplexity": "Perplexity",
                   "google": "Gemini"}
@@ -50,17 +51,14 @@ _MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
 # --------------------------------------------------------- historique
 
 def _charger_releves() -> dict:
-    try:
-        donnees = json.loads(FICHIER_RELEVES.read_text(encoding="utf-8"))
-        return donnees if isinstance(donnees, dict) else {}
-    except Exception:
-        return {}
+    donnees = stockage.lire("releves", {})
+    return donnees if isinstance(donnees, dict) else {}
 
 
 def _sauver_releves(donnees: dict) -> None:
-    FICHIER_RELEVES.parent.mkdir(parents=True, exist_ok=True)
-    FICHIER_RELEVES.write_text(
-        json.dumps(donnees, ensure_ascii=False, indent=1), encoding="utf-8")
+    if not stockage.ecrire("releves", donnees):
+        raise ValueError("relevé non archivé : base partagée injoignable "
+                         "— réessaie dans un moment")
 
 
 def historique_client(client_id: str) -> list[dict]:
@@ -84,6 +82,13 @@ def mesurer_client(client: dict, passes: int = 3, cles: dict | None = None,
                          "questions personnalisées, ni métier + ville)")
     if mesure is None:
         cles = cles if cles is not None else moteur.recuperer_cles()
+        if not cles.get("anthropic"):
+            # Sans clé Anthropic, l'extraction des noms rendrait [] sur
+            # chaque réponse : le relevé raconterait une fausse chute à
+            # 0 %. On refuse AVANT de dépenser les appels aux IA web.
+            raise ValueError("clé Anthropic manquante : impossible "
+                             "d'extraire les noms cités — mesure annulée, "
+                             "rien d'archivé")
         mesure = moteur.mesurer(questions, passes=passes, cles=cles)
     # La vérité vient des runs, jamais d'un compteur déclaré : une mesure
     # sans aucune réponse valide n'est pas archivée.
@@ -92,6 +97,17 @@ def mesurer_client(client: dict, passes: int = 3, cles: dict | None = None,
         raise ValueError("aucune réponse d'IA recueillie : relevé non "
                          "archivé (clés OpenAI / Perplexity / Gemini ?)")
     agregat = moteur.agreger(mesure)
+    if not agregat and any(
+            (r.get("part_client") or 0) > 0
+            or any((cc.get("part") or 0) > 0
+                   for cc in r.get("concurrents") or [])
+            for r in historique_client(client.get("id") or "")):
+        # Zéro nom extrait sur TOUTES les réponses alors que l'historique
+        # en avait : c'est l'extraction qui est morte (crédit IA vide,
+        # panne déjà vécue le 07/07/2026), pas le marché qui s'est tu.
+        raise ValueError("aucun nom extrait d'aucune réponse alors que les "
+                         "relevés précédents en avaient : panne d'extraction "
+                         "probable (crédit IA ?) — relevé non archivé")
     presents = {r.get("provider") for r in reponses_ok}
     releve = {
         "ts": mesure.get("ts") or datetime.now(timezone.utc).isoformat(),
@@ -110,11 +126,12 @@ def mesurer_client(client: dict, passes: int = 3, cles: dict | None = None,
             {"nom": nom, "part": moteur.part_de(nom, agregat)}
             for nom in client.get("concurrents") or []],
     }
-    donnees = _charger_releves()
-    liste = donnees.setdefault(client["id"], [])
-    liste.append(releve)
-    del liste[:-MAX_RELEVES]
-    _sauver_releves(donnees)
+    with stockage.VERROU:
+        donnees = _charger_releves()
+        liste = donnees.setdefault(client["id"], [])
+        liste.append(releve)
+        del liste[:-MAX_RELEVES]
+        _sauver_releves(donnees)
     logger.info("partdevoix relevé %s : client %s%%, %s réponses",
                 client["id"], releve["part_client"], releve["nb_reponses"])
     return releve
@@ -523,3 +540,62 @@ def enregistrer(rapport: dict, dossier: str | Path) -> dict:
         json.dumps(rapport, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"nom": nom, "html": str(chemin_html),
             "url_relative": f"rapports/{nom}.html"}
+
+
+# --------------------------------------------------------------- archive
+
+def archiver_rapport(rapport: dict) -> dict:
+    """Fige un rapport produit dans l'archive partagée (c'est ce que le
+    client a reçu : un rapport regénéré plus tard n'aurait pas forcément
+    les mêmes rubriques). Renvoie l'entrée archivée, avec son id non
+    devinable."""
+    entree = dict(rapport)
+    entree["id"] = secrets.token_urlsafe(9)
+    entree["archive_ts"] = datetime.now(timezone.utc).isoformat()
+    with stockage.VERROU:
+        archives = rapports_archives()
+        archives.append(entree)
+        archives.sort(key=lambda r: r.get("archive_ts") or "")
+        del archives[:-MAX_RAPPORTS_ARCHIVES]
+        if not stockage.ecrire("rapports", archives):
+            raise ValueError("rapport non archivé : base partagée "
+                             "injoignable — réessaie dans un moment")
+    return entree
+
+
+def rapports_archives(client_id: str = "") -> list[dict]:
+    """Les rapports archivés, du plus ancien au plus récent (tous les
+    clients, ou un seul si client_id est fourni)."""
+    archives = stockage.lire("rapports", [])
+    if not isinstance(archives, list):
+        archives = []
+    if client_id:
+        archives = [r for r in archives if r.get("client_id") == client_id]
+    return archives
+
+
+def alerte_rubriques_perimees(client: dict, rapport: dict) -> None:
+    """Règle de rétention, versant « recyclage » : des rubriques restées
+    telles quelles depuis le dernier rapport archivé referaient dire au
+    nouveau rapport le MÊME « ce qui a été fait ». On pose l'alerte sur
+    le rapport (badge à l'écran + notification) avant son archivage."""
+    if not (rapport.get("fait") or rapport.get("avenir")):
+        return  # déjà couvert par l'alerte « rubriques vides »
+    derniers = rapports_archives(client.get("id") or "")
+    if not derniers:
+        return
+    if ((client.get("rubriques_maj") or "")
+            <= (derniers[-1].get("archive_ts") or "")):
+        rapport.setdefault("alertes", []).append(
+            "règle de rétention : rubriques inchangées depuis le rapport "
+            "précédent — à rafraîchir avant l'envoi")
+
+
+def rapport_par_id(rapport_id: str) -> dict | None:
+    """Retrouve un rapport archivé par son id ("" ou inconnu = None)."""
+    if not (rapport_id or "").strip():
+        return None
+    for r in rapports_archives():
+        if r.get("id") == rapport_id:
+            return r
+    return None

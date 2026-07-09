@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from triskell_command.integrations.partdevoix import (  # noqa: E402
-    clients, rapport)
+    clients, rapport, rapporteur, stockage)
 
 OK = 0
 KO = 0
@@ -54,13 +54,14 @@ def mesure_ou(citations, total=6, ts="2026-07-01T10:00:00+00:00"):
     return {"runs": runs, "ts": ts, "nb_reponses": total}
 
 
-# Tout le smoke travaille sur des fichiers temporaires : jamais le vrai
-# registre ni le vrai historique.
-_vrai_clients = clients.FICHIER
-_vrai_releves = rapport.FICHIER_RELEVES
+# Tout le smoke travaille en mode fichier seul, sur un dossier
+# temporaire : jamais la base partagée, jamais les vrais fichiers.
 _tmp = tempfile.TemporaryDirectory()
-clients.FICHIER = Path(_tmp.name) / "clients.json"
-rapport.FICHIER_RELEVES = Path(_tmp.name) / "releves.json"
+_vrais_fichiers = dict(stockage.FICHIERS)
+_vrai_mode = stockage.MODE_FICHIER_SEUL
+stockage.MODE_FICHIER_SEUL = True
+stockage.FICHIERS = {nom: Path(_tmp.name) / f"{nom}.json"
+                     for nom in _vrais_fichiers}
 
 try:
     print("— registre : ajout")
@@ -99,6 +100,15 @@ try:
     check("concurrent = client refusé aussi à la modification",
           leve(lambda: clients.modifier_client(
               c1["id"], concurrents=["Durand Assurances"])))
+    check("date d'entrée au format libre refusée",
+          leve(lambda: clients.ajouter_client(
+              "Date Douteuse", "courtier", "Brest",
+              entree_le="28/07/2026")))
+    c_date = clients.ajouter_client("Date Propre", "courtier", "Lannion",
+                                    entree_le="2026-06-15")
+    check("date d'entrée AAAA-MM-JJ acceptée telle quelle",
+          c_date["entree_le"] == "2026-06-15")
+    clients.desactiver_client(c_date["id"])
 
     print("— registre : modification")
     c1 = clients.modifier_client(c1["id"], palier="serenite")
@@ -131,7 +141,8 @@ try:
     check("désactivé : sorti de la liste des actifs",
           [x["id"] for x in clients.lister_clients()] == [c1["id"]])
     check("désactivé : toujours dans la liste complète",
-          len(clients.lister_clients(actifs=False)) == 2)
+          any(x["id"] == c2["id"]
+              for x in clients.lister_clients(actifs=False)))
     c2b = clients.ajouter_client("Boulangerie Madec", "boulangerie", "Brest")
     check("ré-ajout après désactivation, id distinct",
           c2b["id"] != c2["id"])
@@ -197,6 +208,11 @@ try:
           and rap4["evolution"]["delta"] == -50.0)
     check("date du relevé précédent portée par l'évolution",
           rap4["evolution"]["precedent_ts"][:10] == "2026-09-01")
+    check("extraction morte (zéro nom partout après un historique non "
+          "nul) : relevé refusé",
+          leve(lambda: rapport.mesurer_client(
+              c1, passes=2,
+              mesure=mesure_ou({}, ts="2026-11-01T10:00:00+00:00"))))
 
     print("— client sans concurrent")
     rapport.mesurer_client(c2b, passes=2,
@@ -316,6 +332,80 @@ try:
           "point de départ : 0&nbsp;% le 1er juillet 2026"
           in rapport.rendre_html(rap_c4).lower())
 
+    print("— archive des rapports")
+    entree = rapport.archiver_rapport(rap_c4)
+    check("rapport archivé avec un id non devinable",
+          len(entree.get("id") or "") >= 9)
+    check("archive retrouvée par client",
+          [r["id"] for r in rapport.rapports_archives(c4["id"])]
+          == [entree["id"]])
+    check("rapport retrouvé par id",
+          (rapport.rapport_par_id(entree["id"]) or {}).get("entreprise")
+          == "Menuiserie Riou")
+    check("id d'archive inconnu = None",
+          rapport.rapport_par_id("inconnu-xyz") is None)
+    rap_recycle = rapport.generer_rapport(c4, fait=["x"], avenir=["y"])
+    rapport.alerte_rubriques_perimees(c4, rap_recycle)
+    check("rubriques inchangées depuis le dernier rapport : alerte de "
+          "recyclage posée",
+          any("inchangées" in a for a in rap_recycle["alertes"]))
+    c4 = clients.modifier_client(c4["id"], fait=["Nouvelle action du mois"])
+    rap_frais = rapport.generer_rapport(c4)
+    rapport.alerte_rubriques_perimees(c4, rap_frais)
+    check("rubriques fraîchement mises à jour : pas d'alerte de recyclage",
+          not any("inchangées" in a for a in rap_frais["alertes"]))
+
+    print("— robot mensuel : qui est dû ? (logique pure)")
+    from datetime import datetime, timezone  # noqa: E402
+
+    tous = clients.lister_clients()
+    avant_le_2 = datetime(2026, 8, 1, 10, 0, tzinfo=timezone.utc)
+    check("avant le 2 du mois : personne n'est dû",
+          rapporteur.clients_dus(tous, [], avant_le_2) == [])
+    le_2 = datetime(2026, 8, 2, 10, 0, tzinfo=timezone.utc)
+    dus = {c["id"] for c in rapporteur.clients_dus(tous, [], le_2)}
+    check("le 2 du mois : les clients actifs du mois passé sont dus",
+          c1["id"] in dus and c4["id"] in dus)
+    check("client désactivé jamais dû",
+          c2["id"] not in dus)
+    deja = [{"client_id": c1["id"],
+             "archive_ts": "2026-08-01T09:00:00+00:00"}]
+    check("rapport déjà archivé ce mois-ci : plus dû (idempotent)",
+          c1["id"] not in {c["id"] for c in
+                           rapporteur.clients_dus(tous, deja, le_2)})
+    nouveau = {"id": "tout-neuf", "actif": True, "entree_le": "2026-08-01"}
+    check("client entré ce mois-ci : premier rapport le mois suivant",
+          rapporteur.clients_dus([nouveau], [], le_2) == [])
+    check("le mois suivant, le nouveau client devient dû",
+          rapporteur.clients_dus(
+              [nouveau], [],
+              datetime(2026, 9, 2, 10, 0, tzinfo=timezone.utc))
+          == [nouveau])
+
+    print("— stockage : une panne de base ne ment jamais")
+
+    class _BaseCassee:
+        def table(self, *_a, **_k):
+            raise RuntimeError("base cassée (simulation)")
+
+    _vrai_client_base = stockage._client_base
+    stockage.MODE_FICHIER_SEUL = False
+    stockage._client_base = lambda: _BaseCassee()
+    try:
+        check("lecture en panne de base : refus propre (jamais une vue "
+              "tronquée qui écraserait tout à l'écriture suivante)",
+              leve(lambda: clients.lister_clients(actifs=False)))
+        check("écriture en panne de base : refus propre (rien de perdu "
+              "en silence)",
+              leve(lambda: clients.modifier_client(c1["id"],
+                                                   palier="panne-test")))
+    finally:
+        stockage._client_base = _vrai_client_base
+        stockage.MODE_FICHIER_SEUL = True
+    check("après la panne : le palier n'a pas bougé",
+          (clients.trouver_client(c1["id"]) or {}).get("palier")
+          == "serenite")
+
     print("— enregistrement")
     with tempfile.TemporaryDirectory() as tmp2:
         fichiers = rapport.enregistrer(rap5, tmp2)
@@ -330,8 +420,8 @@ try:
                              .read_text(encoding="utf-8"))
         check("JSON relisible", donnees["entreprise"] == "Cabinet Durand")
 finally:
-    clients.FICHIER = _vrai_clients
-    rapport.FICHIER_RELEVES = _vrai_releves
+    stockage.FICHIERS = _vrais_fichiers
+    stockage.MODE_FICHIER_SEUL = _vrai_mode
     _tmp.cleanup()
 
 print()

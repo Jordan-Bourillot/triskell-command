@@ -37,6 +37,7 @@ const VIEW_COLOR_MAP = {
   revenue: 'violet',
   funnel: 'violet',
   'pixelpros-affiliates': 'violet',
+  portevoix: 'violet',
   // SITES & SEO — amber
   pixelpros: 'amber',
   wow: 'amber',
@@ -65,6 +66,7 @@ const KNOWN_VIEWS = [
   'autopilot', 'convoy', 'prospection', 'chasseur', 'chasseur_createurs',
   'prospecteur_google', 'argus', 'eclaireur', 'delivery', 'health',
   'abtest', 'prospect_timeline', 'creators', 'sites_a_refaire', 'oeil_tri',
+  'portevoix',
 ];
 
 const App = {
@@ -677,6 +679,7 @@ const App = {
       case 'clients':   return Clients.render(target);
       case 'eliks':     return this._renderEliksStudio(target);
       case 'clients_master': return ClientsMaster.render(target);
+      case 'portevoix': return PorteVoix.render(target);
       case 'phare':     return Phare.render(target);
       case 'geo':       return GEO.render(target);
       case 'wow':       return Wow.render(target);
