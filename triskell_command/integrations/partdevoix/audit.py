@@ -241,87 +241,104 @@ def rendre_html(audit: dict) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex">
 <title>Audit de part de voix. {entreprise}, {ville}.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after {{ margin:0; padding:0; box-sizing:border-box; }}
   html, body {{ overflow-x:hidden; }}
   body {{
     background:
-      radial-gradient(1100px 560px at 85% -8%, rgba(74,222,128,0.09), transparent 60%),
-      radial-gradient(900px 520px at 0% 6%, rgba(76,110,245,0.12), transparent 55%),
-      #131c39;
-    color:#e9edf9;
-    font-family:system-ui,-apple-system,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+      linear-gradient(rgba(16,24,38,0.032) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(16,24,38,0.032) 1px, transparent 1px),
+      #eef1f4;
+    background-size:44px 44px, 44px 44px, auto;
+    color:#101826;
+    font-family:'Inter',system-ui,-apple-system,'Segoe UI','Helvetica Neue',Arial,sans-serif;
     font-size:17px; line-height:1.65; min-height:100vh;
   }}
   .page {{ max-width:760px; margin:0 auto; padding:26px 20px 60px; }}
-  .haut {{ border-bottom:1px solid rgba(255,255,255,0.13); padding-bottom:14px; margin-bottom:30px;
-          display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; }}
-  .marque {{ font-size:21px; font-weight:800; letter-spacing:-0.02em; text-decoration:none; color:#e9edf9; }}
-  .marque span {{ color:#4ade80; }}
-  .etiquette {{ font-size:12px; font-weight:600; letter-spacing:.16em;
-               text-transform:uppercase; color:#9aa7c7; }}
-  h1 {{ font-size:clamp(28px,5vw,40px); font-weight:800; letter-spacing:-0.02em;
-       line-height:1.15; text-wrap:balance; margin:10px 0 16px; }}
+  .haut {{ border-bottom:1px solid rgba(16,24,38,0.30); padding-bottom:14px; margin-bottom:30px;
+          display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }}
+  .marque {{ display:inline-flex; align-items:center; gap:10px;
+            font-family:'Bricolage Grotesque','Inter',system-ui,sans-serif;
+            font-size:21px; font-weight:800; letter-spacing:-0.02em; text-decoration:none; color:#101826; }}
+  .marque svg {{ display:block; }}
+  .marque span {{ color:#c2330f; }}
+  .etiquette {{ font-size:11.5px; font-weight:700; letter-spacing:.13em;
+               text-transform:uppercase; color:#35415a; }}
+  h1 {{ font-family:'Bricolage Grotesque','Inter',system-ui,sans-serif;
+       font-size:clamp(28px,5vw,40px); font-weight:800; letter-spacing:-0.02em;
+       line-height:1.12; text-wrap:balance; margin:10px 0 16px; }}
   p {{ text-wrap:pretty; }}
-  .lecture {{ font-size:18px; color:#9aa7c7; max-width:58ch; }}
-  .bloc {{ border:1px solid rgba(255,255,255,0.13); background:rgba(255,255,255,0.055);
-          border-radius:18px; padding:24px; margin:30px 0; }}
-  .bloc h2 {{ font-size:20px; letter-spacing:-0.01em; margin-bottom:16px; }}
+  .lecture {{ font-size:18px; color:#4a566d; max-width:58ch; }}
+  .bloc {{ background:rgba(16,24,38,0.30); padding:1px; margin:30px 0;
+          clip-path:polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px)); }}
+  .bloc-in {{ background:#ffffff; padding:24px;
+             clip-path:polygon(0 0, calc(100% - 14.6px) 0, 100% 14.6px, 100% 100%, 14.6px 100%, 0 calc(100% - 14.6px)); }}
+  .bloc h2 {{ font-family:'Bricolage Grotesque','Inter',system-ui,sans-serif;
+             font-size:20px; letter-spacing:-0.01em; margin-bottom:16px; }}
   .barre {{ margin:14px 0; }}
   .barre .ligne {{ display:flex; justify-content:space-between; gap:12px;
-                  font-size:15px; font-weight:600; color:#9aa7c7; margin-bottom:6px; }}
-  .barre .ligne span:last-child {{ font-variant-numeric:tabular-nums; color:#e9edf9; }}
-  .barre .fond {{ background:rgba(255,255,255,0.06); height:14px; border-radius:999px; overflow:hidden; }}
-  .barre .plein {{ height:100%; border-radius:999px;
-                  background:linear-gradient(90deg,#2dd4bf,#4ade80);
-                  box-shadow:0 0 16px rgba(74,222,128,0.5); }}
-  .barre.vous .plein {{ background:#fb923c; box-shadow:0 0 14px rgba(251,146,60,0.55); min-width:4px; }}
-  .barre.vous .ligne span {{ color:#fb923c; font-weight:700; }}
-  .extrait {{ margin:18px 0; background:#1a2547; border:1px solid rgba(255,255,255,0.1);
-             border-radius:4px 16px 16px 16px; padding:14px 17px;
-             box-shadow:0 12px 34px rgba(0,0,0,0.35); }}
-  .extrait .qui {{ font-size:13.5px; font-weight:700; color:#4ade80; margin-bottom:8px; }}
+                  font-size:15px; font-weight:600; color:#4a566d; margin-bottom:6px; }}
+  .barre .ligne span:last-child {{ font-variant-numeric:tabular-nums; color:#101826; }}
+  .barre .fond {{ background:rgba(16,24,38,0.08); height:12px; border:1px solid rgba(16,24,38,0.14); }}
+  .barre .plein {{ height:100%; background:#101826; }}
+  .barre.vous .plein {{ background:#ff5a36; min-width:4px; }}
+  .barre.vous .ligne span {{ color:#c2330f; font-weight:700; }}
+  .extrait {{ margin:18px 0; background:rgba(16,24,38,0.03); border:1px solid rgba(16,24,38,0.14);
+             padding:14px 17px; }}
+  .extrait .qui {{ font-size:13.5px; font-weight:700; color:#c2330f; margin-bottom:8px; }}
   blockquote {{ font-family:ui-monospace,'Cascadia Code','SF Mono',Consolas,'Liberation Mono',monospace;
-               font-size:13.5px; line-height:1.6; color:#cdd6ee; margin:0; }}
+               font-size:13.5px; line-height:1.6; color:#35415a; margin:0; }}
   ul {{ margin:8px 0 0 20px; }}
-  li {{ font-size:15.5px; color:#9aa7c7; }}
-  .methode {{ font-size:14px; color:#9aa7c7; border-top:1px solid rgba(255,255,255,0.13); padding-top:14px; }}
-  .suite {{ background:linear-gradient(180deg, rgba(74,222,128,0.12), rgba(74,222,128,0.03));
-           border:1px solid rgba(74,222,128,0.5); border-radius:18px;
-           padding:24px; margin:34px 0 0; box-shadow:0 0 46px rgba(74,222,128,0.1); }}
-  .suite strong {{ color:#4ade80; font-size:18px; letter-spacing:-0.01em; }}
+  li {{ font-size:15.5px; color:#4a566d; }}
+  .methode {{ font-size:14px; color:#4a566d; border-top:1px solid rgba(16,24,38,0.14); padding-top:14px; }}
+  .suite {{ background:#ff5a36; padding:1px; margin:34px 0 0;
+           clip-path:polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px)); }}
+  .suite-in {{ background:#fff7f2; padding:24px;
+              clip-path:polygon(0 0, calc(100% - 14.6px) 0, 100% 14.6px, 100% 100%, 14.6px 100%, 0 calc(100% - 14.6px)); }}
+  .suite strong {{ font-family:'Bricolage Grotesque','Inter',system-ui,sans-serif;
+                  color:#c2330f; font-size:18px; letter-spacing:-0.01em; }}
   .suite a.bouton {{ display:inline-block; margin-top:14px; padding:13px 24px;
-             background:linear-gradient(180deg,#5fe796,#3ecf70); color:#04240f;
-             text-decoration:none; font-weight:700; font-size:15.5px; border-radius:12px;
-             box-shadow:0 10px 30px rgba(74,222,128,0.28); }}
+             background:#ff5a36; color:#101826;
+             text-decoration:none; font-weight:700; font-size:15.5px;
+             clip-path:polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px)); }}
+  .suite a.bouton:hover {{ background:#ff6f4d; }}
 </style>
 </head>
 <body>
 <div class="page">
   <div class="haut">
-    <a class="marque" href="https://portevoix.triskell-studio.fr"><img
-      src="../logo-rond-96.png" alt="" width="30" height="30"
-      style="vertical-align:middle;margin-right:9px">Porte-Voix<span>.</span></a>
+    <a class="marque" href="https://portevoix.triskell-studio.fr">
+      <svg viewBox="0 0 40 32" width="30" height="24" aria-hidden="true" focusable="false">
+        <path d="M3 12 L19 4 V28 L3 20 Z" fill="#101826"/>
+        <rect x="1" y="11" width="2.5" height="10" fill="#101826"/>
+        <path d="M23 11 a7 7 0 0 1 0 10" fill="none" stroke="#ff5a36" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M27 7 a13 13 0 0 1 0 18" fill="none" stroke="#ff5a36" stroke-width="2.2" stroke-linecap="round"/>
+        <circle cx="34.5" cy="16" r="2.2" fill="#ff5a36"/>
+      </svg>
+      Porte-Voix<span>.</span></a>
     <span class="etiquette">Audit établi le {e(date_txt)}</span>
   </div>
   <p class="etiquette">{entreprise}, {ville}</p>
   <h1>{e(titre)}</h1>
   <p class="lecture">{e(lecture)}</p>
 
-  <div class="bloc">
+  <div class="bloc"><div class="bloc-in">
     <h2>La part de voix mesurée</h2>
     {"".join(barres)}
     <p class="methode" style="border:none;padding-top:8px">La part de voix,
     c'est la fréquence à laquelle un nom apparaît dans les réponses des IA
     aux questions ci-dessous, sur l'ensemble de nos passages.</p>
-  </div>
+  </div></div>
 
-  <div class="bloc">
+  <div class="bloc"><div class="bloc-in">
     <h2>Ce que les IA répondent, mot pour mot</h2>
     {extraits_html or "<p class='lecture'>Les réponses complètes sont conservées et consultables sur demande.</p>"}
-  </div>
+  </div></div>
 
-  <div class="bloc">
+  <div class="bloc"><div class="bloc-in">
     <h2>La méthode, en clair</h2>
     <p style="font-size:16px">Questions posées :</p>
     <ul>{questions_html}</ul>
@@ -331,15 +348,15 @@ def rendre_html(audit: dict) -> str:
     Les réponses des IA varient d'une conversation à l'autre, vos propres
     essais peuvent différer de nos mesures. C'est précisément pour cela que
     nous mesurons une tendance sur plusieurs passages, jamais un essai isolé.</p>
-  </div>
+  </div></div>
 
-  <div class="suite">
+  <div class="suite"><div class="suite-in">
     <strong>La suite, si le sujet vous parle.</strong><br>
     Chaque mois, nous faisons le travail qui construit cette part de voix,
     nous la mesurons, et vous recevez ce relevé mis à jour. Sans engagement,
     premier mois remboursé s'il ne vous convainc pas.
     <br><a class="bouton" href="https://portevoix.triskell-studio.fr">Découvrir Porte-Voix</a>
-  </div>
+  </div></div>
 </div>
 </body>
 </html>
