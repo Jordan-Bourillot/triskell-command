@@ -470,7 +470,7 @@ def rendre_html(rapport: dict) -> str:
   .graphe {{ display:flex; align-items:flex-end; gap:14px; padding:8px 2px 0;
             min-height:150px; overflow-x:auto; }}
   .colonne {{ display:flex; flex-direction:column; align-items:center; gap:5px; }}
-  .colonne .tige {{ width:34px; background:var(--sable); }}
+  .colonne .tige {{ width:34px; background:var(--encre); }}
   .colonne:last-child .tige {{ background:var(--corail); }}
   .col-part {{ font-size:13px; font-weight:700;
               font-family:ui-monospace,Consolas,'Cascadia Mono',monospace; }}
@@ -485,11 +485,11 @@ def rendre_html(rapport: dict) -> str:
                   font-size:15px; font-weight:600; color:var(--sourdine); margin-bottom:6px; }}
   .barre .ligne span:last-child {{ color:var(--encre);
     font-family:ui-monospace,Consolas,'Cascadia Mono',monospace; }}
-  .barre .fond {{ background:rgba(16,24,38,0.06); height:14px; }}
-  .barre .plein {{ height:100%; background:var(--sable);
-    border-right:2px solid var(--trait-fort); }}
-  .barre.vous .plein {{ background:var(--corail); border-right:2px solid var(--corail-encre); }}
-  .barre.vous .ligne span {{ color:var(--encre); font-weight:700; }}
+  .barre .fond {{ background:rgba(16,24,38,0.08); height:12px;
+    border:1px solid var(--trait); }}
+  .barre .plein {{ height:100%; background:var(--encre); }}
+  .barre.vous .plein {{ background:var(--corail); min-width:4px; }}
+  .barre.vous .ligne span {{ color:var(--corail-encre); font-weight:700; }}
   .barre .evo {{ font-size:13.5px; color:var(--sourdine); margin-top:4px; }}
   ul.liste {{ margin:4px 0 0 20px; }}
   ul.liste li {{ margin:6px 0; }}
